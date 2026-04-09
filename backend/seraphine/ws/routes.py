@@ -222,14 +222,14 @@ async def conversation_ws(ws: WebSocket) -> None:
                                     speak_queue.put_nowait(_SENTENCE_EOS)
                             await ws.send_json(event.model_dump())
 
-                    turn_task = _asyncio.create_task(_drive_turn())
-                    recv_task: _asyncio.Task[Any] | None = None
+                    turn_task = asyncio.create_task(_drive_turn())
+                    recv_task: asyncio.Task[Any] | None = None
                     while not turn_task.done():
                         if recv_task is None:
-                            recv_task = _asyncio.create_task(ws.receive())
-                        done, _pending = await _asyncio.wait(
+                            recv_task = asyncio.create_task(ws.receive())
+                        done, _pending = await asyncio.wait(
                             {turn_task, recv_task},
-                            return_when=_asyncio.FIRST_COMPLETED,
+                            return_when=asyncio.FIRST_COMPLETED,
                         )
                         if recv_task in done:
                             inner = recv_task.result()
