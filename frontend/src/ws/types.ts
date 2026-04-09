@@ -1,5 +1,4 @@
 // Mirrors backend message envelopes from specs/schemas/ws-messages.schema.json.
-// Keep narrow for Phase 0 — extend in later phases.
 
 export interface PingMessage {
   type: 'ping';
@@ -21,5 +20,30 @@ export interface ErrorMessage {
   message: string;
 }
 
-export type ClientMessage = PingMessage | { type: string; [k: string]: unknown };
-export type ServerMessage = PongMessage | EchoMessage | ErrorMessage;
+// Phase 1 — conversation loop
+export interface UserMessage {
+  type: 'user_message';
+  conversation_id?: string;
+  content: string;
+}
+
+export interface TokenMessage {
+  type: 'token';
+  conversation_id: string;
+  turn_id: string;
+  text: string;
+}
+
+export interface TurnEndMessage {
+  type: 'turn_end';
+  conversation_id: string;
+  turn_id: string;
+}
+
+export type ClientMessage = PingMessage | UserMessage | { type: string; [k: string]: unknown };
+export type ServerMessage =
+  | PongMessage
+  | EchoMessage
+  | ErrorMessage
+  | TokenMessage
+  | TurnEndMessage;
