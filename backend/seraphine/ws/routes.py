@@ -40,6 +40,38 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _speak_text(ws: WebSocket, text: str, turn_id: str) -> None:
+    """Synthesize `text` via app.state.tts and stream PCM frames over the WS.
+
+    Used by the user_message path when the client requests `speak: true`,
+    so a typed text exchange still produces audio output.
+    """
+    tts = getattr(ws.app.state, "tts", None)
+    if tts is None:
+        await ws.send_json(
+            {
+                "type": "error",
+                "code": "tts_unavailable",
+                "message": "tts adapter not configured",
+            }
+        )
+        return
+    await ws.send_json(
+        {"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000}
+    )
+    try:
+        async for chunk in tts.synthesize_stream(text):
+            if chunk:
+                await ws.send_bytes(chunk)
+    except Exception as e:
+        logger.warning("speak failed: %s", e)
+        await ws.send_json(
+            {"type": "error", "code": "tts_unavailable", "message": str(e)}
+        )
+        return
+    await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+
+
 @router.websocket("/ws/conversation")
 async def conversation_ws(ws: WebSocket) -> None:
     await ws.accept()
@@ -88,14 +120,28 @@ async def conversation_ws(ws: WebSocket) -> None:
                 engine: ConversationEngine = ws.app.state.engine
                 conv_id = payload.get("conversation_id")
                 content = payload.get("content", "")
+                speak = bool(payload.get("speak", False))
+                accumulated_text: list[str] = []
+                final_turn_id: str | None = None
                 if engine.tools is None:
                     async for event in engine.handle_user_message(conv_id, content):
+                        etype = getattr(event, "type", None)
+                        if etype == "token":
+                            accumulated_text.append(getattr(event, "text", ""))
+                        elif etype == "turn_end":
+                            final_turn_id = getattr(event, "turn_id", None)
                         await ws.send_json(event.model_dump())
                 else:
                     import asyncio as _asyncio
 
                     async def _drive_turn() -> None:
                         async for event in engine.handle_user_message(conv_id, content):
+                            etype = getattr(event, "type", None)
+                            if etype == "token":
+                                accumulated_text.append(getattr(event, "text", ""))
+                            elif etype == "turn_end":
+                                nonlocal final_turn_id
+                                final_turn_id = getattr(event, "turn_id", None)
                             await ws.send_json(event.model_dump())
 
                     turn_task = _asyncio.create_task(_drive_turn())
@@ -149,6 +195,10 @@ async def conversation_ws(ws: WebSocket) -> None:
                         except BaseException:
                             pass
                     await turn_task
+                if speak and final_turn_id is not None:
+                    full_text = "".join(accumulated_text).strip()
+                    if full_text:
+                        await _speak_text(ws, full_text, final_turn_id)
             elif mtype == "audio_start":
                 audio_buf = bytearray()
             elif mtype == "audio_end":

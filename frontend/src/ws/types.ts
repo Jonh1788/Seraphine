@@ -25,6 +25,9 @@ export interface UserMessage {
   type: 'user_message';
   conversation_id?: string;
   content: string;
+  /** When true, the backend follows turn_end with TTS frames so the
+   *  assistant reply is also spoken aloud (typed input + voice output). */
+  speak?: boolean;
 }
 
 export interface TokenMessage {

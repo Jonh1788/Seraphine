@@ -7,21 +7,36 @@ import { ApprovalPanel } from './tools';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
+  const [speak, setSpeak] = useState<boolean>(true);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
   const chunkOffRef = useRef<(() => void) | null>(null);
-  const msgOffRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const ws = new SeraphineWS();
     wsRef.current = ws;
-    const off = ws.onStatus((s) => setStatus(s));
+    const offStatus = ws.onStatus((s) => setStatus(s));
+
+    // Global PCM router: any binary frame coming in over the WS is fed to
+    // a single long-lived PCMPlayback. Both the push-to-talk path AND the
+    // text-with-speak path produce binary frames; they share this player.
+    const offMsg = ws.onMessage((msg) => {
+      if (msg instanceof ArrayBuffer) {
+        if (!playbackRef.current) playbackRef.current = new PCMPlayback();
+        playbackRef.current.pushChunk(msg);
+        return;
+      }
+      if ((msg as { type?: string }).type === 'tts_end') {
+        void playbackRef.current?.flush();
+      }
+    });
+
     ws.connect();
     return () => {
-      off();
+      offStatus();
+      offMsg();
       chunkOffRef.current?.();
-      msgOffRef.current?.();
       micRef.current?.stop();
       playbackRef.current?.dispose();
       ws.close();
@@ -32,20 +47,7 @@ export function App(): JSX.Element {
   const handleTalkStart = async (): Promise<void> => {
     const ws = wsRef.current;
     if (!ws || status !== 'connected') return;
-    if (!playbackRef.current) playbackRef.current = new PCMPlayback();
     if (!micRef.current) micRef.current = new MicCapture();
-
-    msgOffRef.current?.();
-    msgOffRef.current = ws.onMessage((msg) => {
-      if (msg instanceof ArrayBuffer) {
-        playbackRef.current?.pushChunk(msg);
-        return;
-      }
-      if ((msg as { type?: string }).type === 'tts_end') {
-        void playbackRef.current?.flush();
-      }
-    });
-
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     await micRef.current.start();
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
@@ -101,9 +103,20 @@ export function App(): JSX.Element {
         >
           Falar (segure)
         </button>
+        <label style={{ display: 'block', marginTop: '0.75rem', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={speak}
+            onChange={(e) => setSpeak(e.target.checked)}
+            style={{ marginRight: '0.5rem' }}
+          />
+          Responder com áudio
+        </label>
         <ApprovalPanel ws={wsRef.current} />
       </aside>
-      <section>{wsRef.current && <ChatView ws={wsRef.current} status={status} />}</section>
+      <section>
+        {wsRef.current && <ChatView ws={wsRef.current} status={status} speak={speak} />}
+      </section>
     </main>
   );
 }

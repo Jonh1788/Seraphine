@@ -12,9 +12,12 @@ interface Turn {
 interface ChatViewProps {
   ws: SeraphineWS;
   status: 'connected' | 'disconnected';
+  /** If true, every user_message is sent with speak=true so the backend
+   *  also synthesizes the assistant reply via the TTS adapter. */
+  speak?: boolean;
 }
 
-export function ChatView({ ws, status }: ChatViewProps): JSX.Element {
+export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const conversationIdRef = useRef<string | undefined>(undefined);
@@ -72,6 +75,7 @@ export function ChatView({ ws, status }: ChatViewProps): JSX.Element {
       type: 'user_message',
       conversation_id: conversationIdRef.current,
       content,
+      speak,
     });
     setDraft('');
   };
