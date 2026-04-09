@@ -40,10 +40,40 @@ export interface TurnEndMessage {
   turn_id: string;
 }
 
-export type ClientMessage = PingMessage | UserMessage | { type: string; [k: string]: unknown };
+// Phase 2 — voice I/O
+export interface AudioStartMessage {
+  type: 'audio_start';
+  conversation_id?: string;
+  sample_rate: number;
+}
+
+export interface AudioEndMessage {
+  type: 'audio_end';
+  conversation_id?: string;
+}
+
+export interface TtsStartMessage {
+  type: 'tts_start';
+  turn_id: string;
+  sample_rate: number;
+}
+
+export interface TtsEndMessage {
+  type: 'tts_end';
+  turn_id: string;
+}
+
+export type ClientMessage =
+  | PingMessage
+  | UserMessage
+  | AudioStartMessage
+  | AudioEndMessage
+  | { type: string; [k: string]: unknown };
 export type ServerMessage =
   | PongMessage
   | EchoMessage
   | ErrorMessage
   | TokenMessage
-  | TurnEndMessage;
+  | TurnEndMessage
+  | TtsStartMessage
+  | TtsEndMessage;

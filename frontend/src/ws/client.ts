@@ -1,7 +1,7 @@
 import type { ClientMessage, ServerMessage } from './types';
 
 type StatusListener = (status: 'connected' | 'disconnected') => void;
-type MessageListener = (msg: ServerMessage) => void;
+type MessageListener = (msg: ServerMessage | ArrayBuffer) => void;
 
 const DEFAULT_URL = 'ws://localhost:8000/ws/conversation';
 const BACKOFF_MS = [1000, 2000, 5000];
@@ -28,6 +28,12 @@ export class SeraphineWS {
   send(msg: ClientMessage): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg));
+    }
+  }
+
+  sendBinary(data: ArrayBuffer): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(data);
     }
   }
 
@@ -59,9 +65,21 @@ export class SeraphineWS {
       this.retry = 0;
       this.statusListeners.forEach((cb) => cb('connected'));
     };
+    sock.binaryType = 'arraybuffer';
     sock.onmessage = (event) => {
+      const data: unknown = event.data;
+      if (data instanceof ArrayBuffer) {
+        this.messageListeners.forEach((cb) => cb(data));
+        return;
+      }
+      if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        void data.arrayBuffer().then((buf) => {
+          this.messageListeners.forEach((cb) => cb(buf));
+        });
+        return;
+      }
       try {
-        const parsed = JSON.parse(event.data as string) as ServerMessage;
+        const parsed = JSON.parse(data as string) as ServerMessage;
         this.messageListeners.forEach((cb) => cb(parsed));
       } catch {
         // ignore non-JSON frames for now
