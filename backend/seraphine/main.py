@@ -29,11 +29,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
     embeddings = OllamaEmbeddings(settings.ollama_base_url, settings.embedding_model)
-    memory = MemoryManager(store, embeddings, settings.chroma_path)
+    memory = MemoryManager(store, embeddings, settings.chroma_path, llm=llm)
     try:
         await memory.start()
     except Exception as e:
-        logger.warning("MemoryManager.start() failed (chromadb missing or unreachable): %s", e)
+        logger.warning("MemoryManager.start() failed: %s", e)
 
     tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)

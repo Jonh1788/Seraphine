@@ -93,11 +93,17 @@ class AudioEngine:
             ChatMessage(role="system", content=self.system_prompt)
         ]
         for t in prior:
-            if t.role in ("user", "assistant"):
+            # Skip placeholder audio turns from previous voice exchanges (they
+            # carry no usable text). Until real STT lands, voice user-turns
+            # are intentionally NOT persisted, so this filter is defensive.
+            if t.role in ("user", "assistant") and t.content != "[audio]":
                 messages.append(ChatMessage(role=t.role, content=t.content))  # type: ignore[arg-type]
         messages.append(ChatMessage(role="user", content="[audio]"))
 
-        await self.store.add_turn(conversation_id, "user", "[audio]")
+        # NOTE(phase 2): the user audio turn is NOT persisted on purpose.
+        # Persisting "[audio]" pollutes both prior context and Phase 5 episodic
+        # memory. When real transcription is wired in, replace this with the
+        # transcribed text and call add_turn(role="user", content=transcript).
 
         turn_id = str(uuid.uuid4())
         accumulated: list[str] = []

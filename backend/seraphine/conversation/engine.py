@@ -161,6 +161,9 @@ class ConversationEngine:
 
         turn_id = str(uuid.uuid4())
         accumulated: list[str] = []
+        # Track every request_id created within this turn so we can clean up
+        # pending_approvals on exception/cancellation paths.
+        turn_requests: list[str] = []
 
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
@@ -188,6 +191,7 @@ class ConversationEngine:
                 for tc in pending_tool_calls:
                     tool_name, tool_args = _parse_tool_call(tc)
                     request_id = str(uuid.uuid4())
+                    turn_requests.append(request_id)
                     tool = self.tools.get(tool_name)
 
                     if tool is None:
@@ -281,8 +285,21 @@ class ConversationEngine:
                         )
                     )
         except LLMUnavailableError as e:
+            for rid in turn_requests:
+                self.pending_approvals.pop(rid, None)
             yield ErrorEvent(code="llm_unavailable", message=str(e))
             return
+        except Exception as e:
+            for rid in turn_requests:
+                self.pending_approvals.pop(rid, None)
+            logger.exception("engine error during turn %s", turn_id)
+            yield ErrorEvent(code="engine_error", message=str(e))
+            return
+        finally:
+            # Defensive: cancellation (e.g. WS disconnect mid-approval) won't
+            # hit our except clauses but DOES run finally on async generators.
+            for rid in turn_requests:
+                self.pending_approvals.pop(rid, None)
 
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)

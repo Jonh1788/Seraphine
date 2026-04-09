@@ -78,11 +78,12 @@ async def test_audio_engine_full_sequence(tmp_path: Path) -> None:
 
     conv_id = token_events[0].conversation_id
     turns = await store.get_turns(conv_id)
-    assert len(turns) == 2
-    assert turns[0].role == "user"
-    assert turns[0].content == "[audio]"
-    assert turns[1].role == "assistant"
-    assert turns[1].content == "hello"
+    # Audio user turns are intentionally NOT persisted (placeholder pollutes
+    # both prior context and Phase 5 episodic memory). Only the assistant's
+    # text reply lands in storage until real STT is wired in.
+    assert len(turns) == 1
+    assert turns[0].role == "assistant"
+    assert turns[0].content == "hello"
 
 
 @pytest.mark.asyncio

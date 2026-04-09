@@ -146,6 +146,34 @@ class MemoryStore:
         await asyncio.to_thread(_work)
         return turn
 
+    async def get_recent_turns(self, *, limit: int = 100) -> list[Turn]:
+        """Most recent turns across ALL conversations, oldest first."""
+
+        def _work() -> list[Turn]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, conversation_id, role, content, created_at, token_count"
+                    " FROM turns ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return list(
+                reversed(
+                    [
+                        Turn(
+                            id=r[0],
+                            conversation_id=r[1],
+                            role=r[2],
+                            content=r[3],
+                            created_at=r[4],
+                            token_count=r[5],
+                        )
+                        for r in rows
+                    ]
+                )
+            )
+
+        return await asyncio.to_thread(_work)
+
     async def get_turns(self, conversation_id: str) -> list[Turn]:
         def _work() -> list[Turn]:
             with self._connect() as conn:
