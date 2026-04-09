@@ -3,7 +3,7 @@
 ## Context
 
 Phase 1 of Projeto Seraphine. Establish the minimal end-to-end conversation loop:
-the user types a message in the webapp, the backend forwards it to Gemma 3n via
+the user types a message in the webapp, the backend forwards it to Gemma 4 via
 Ollama, tokens stream back over WebSocket and are persisted as conversation
 turns in SQLite.
 
@@ -34,7 +34,7 @@ class Token(BaseModel):
 ```
 
 Initial implementation: `OllamaClient` calling `POST /api/chat` with
-`stream=true` against `gemma3n:e4b`.
+`stream=true` against `gemma4:e4b`.
 
 ### WebSocket protocol — `/ws/conversation`
 

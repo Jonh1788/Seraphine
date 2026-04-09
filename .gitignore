@@ -33,3 +33,6 @@ voice-samples/
 
 # Claude scratch
 .claude/
+
+# MOSS-TTS clone (upstream is CUDA-only; not part of this repo)
+services/moss-tts/

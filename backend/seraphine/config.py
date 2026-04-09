@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "gemma3n:e4b"
+    llm_model: str = "gemma4:e4b"
     embedding_model: str = "nomic-embed-text"
 
     sqlite_path: Path = Path("../data/seraphine.sqlite")

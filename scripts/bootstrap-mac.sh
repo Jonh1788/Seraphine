@@ -103,7 +103,7 @@ pull_model() {
     ok "Pulled $model"
   fi
 }
-pull_model "gemma3n:e4b"
+pull_model "gemma4:e4b"
 pull_model "nomic-embed-text"
 
 # ---------- 8. Runtime directories ----------

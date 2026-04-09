@@ -32,7 +32,8 @@ class OllamaClient:
     ) -> AsyncIterator[Token]:
         dumped: list[dict[str, Any]] = [m.model_dump() for m in messages]
         if audio is not None and dumped:
-            # TODO(phase 2): verify Ollama field name once gemma3n multimodal lands.
+            # TODO(phase 2): verify Ollama field name for gemma4 audio input
+            # (capabilities advertise 'audio' but exact payload key may differ).
             b64 = base64.b64encode(audio).decode("ascii")
             for i in range(len(dumped) - 1, -1, -1):
                 if dumped[i].get("role") == "user":

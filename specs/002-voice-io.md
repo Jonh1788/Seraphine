@@ -5,8 +5,8 @@
 Phase 2. Adds full-duplex voice to the conversation loop from spec 001:
 
 - Browser captures mic audio and streams it over WS to the backend.
-- Backend forwards the audio buffer to Gemma 3n's multimodal input
-  (Gemma 3n E4B accepts audio natively, so no separate STT is required).
+- Backend forwards the audio buffer to Gemma 4's multimodal input
+  (Gemma 4 E4B accepts audio natively, so no separate STT is required).
 - The text reply is streamed into a `TTSAdapter` (initial impl: MOSS-TTS),
   which yields PCM chunks back over WS to the browser.
 - The browser plays the audio progressively.
@@ -17,7 +17,7 @@ The `TTSAdapter` interface keeps MOSS-TTS swappable.
 
 ### Audio format
 
-- Sample rate: **16 kHz** (matches Gemma 3n's expected input)
+- Sample rate: **16 kHz** (matches Gemma 4's expected input)
 - Channels: **mono**
 - Encoding: **PCM s16le** (signed 16-bit little-endian)
 - Frame size: 20 ms (320 samples / 640 bytes) for low-latency streaming
@@ -109,6 +109,6 @@ Feature: Voice round-trip
 - Voice activity detection on the client vs server: start with client-side
   push-to-talk; VAD comes later.
 - Barge-in (interrupting the assistant): out of scope for Phase 2.
-- Fallback STT (whisper.cpp) wiring if Gemma 3n audio quality is poor:
+- Fallback STT (whisper.cpp) wiring if Gemma 4 audio quality is poor:
   keep the seam open via an `STTAdapter` interface but implement only the
   Gemma path now.

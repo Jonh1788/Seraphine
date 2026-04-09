@@ -2,7 +2,7 @@
 
 Assistente pessoal **100% local** rodando em Mac (Apple Silicon), com:
 
-- 🧠 **LLM multimodal local** — Gemma 3n E4B via Ollama (texto + áudio + imagem)
+- 🧠 **LLM multimodal local** — Gemma 4 E4B via Ollama (texto + áudio + imagem)
 - 🎙️ **STT** — usando o próprio Gemma 3n (sem pipeline separado)
 - 🗣️ **TTS realtime** — MOSS-TTS com voice cloning
 - 🧍 **Avatar VTuber** — VRM 3D no navegador (three-vrm), com lip-sync
@@ -13,7 +13,7 @@ Assistente pessoal **100% local** rodando em Mac (Apple Silicon), com:
 
 | Camada | Escolha |
 |---|---|
-| LLM runtime | Ollama (`gemma3n:e4b`) |
+| LLM runtime | Ollama (`gemma4:e4b`) |
 | TTS | MOSS-TTS (serviço Python) |
 | Backend | Python 3.11 + FastAPI + WebSocket |
 | Frontend | React + Vite + TypeScript + Three.js |
