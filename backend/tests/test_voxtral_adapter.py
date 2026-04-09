@@ -49,6 +49,27 @@ async def test_voxtral_streams_pcm_chunks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_voxtral_accepts_typeless_delta_frames() -> None:
+    """The voxtral_tts_rs server v0.1.1 emits delta frames without `type`,
+    only `{"delta": "<b64>"}`. The adapter must still decode them."""
+    chunks_pcm = [b"\xaa\xbb", b"\xcc\xdd"]
+    body = b"".join(
+        _sse({"delta": base64.b64encode(c).decode()}) for c in chunks_pcm
+    ) + _sse({"type": "speech.audio.done"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    adapter = VoxtralTTSAdapter("http://x")
+    adapter._client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    try:
+        out = [c async for c in adapter.synthesize_stream("oi")]
+    finally:
+        await adapter.aclose()
+    assert out == chunks_pcm
+
+
+@pytest.mark.asyncio
 async def test_voxtral_voice_override() -> None:
     body = _sse({"type": "speech.audio.delta", "delta": base64.b64encode(b"\x00").decode()}) + _sse(
         {"type": "speech.audio.done"}

@@ -90,22 +90,25 @@ class VoxtralTTSAdapter(TTSAdapter):
                         event = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    # The voxtral_tts_rs server emits delta frames as
+                    # `{"delta": "<b64>"}` (no type field) and the terminal
+                    # frame as `{"type": "speech.audio.done"}`. Be tolerant
+                    # of both styles per README spec.
                     etype = event.get("type")
-                    if etype == "speech.audio.delta":
-                        b64 = event.get("delta")
-                        if not isinstance(b64, str):
-                            continue
-                        try:
-                            chunk = base64.b64decode(b64)
-                        except (ValueError, base64.binascii.Error):
-                            continue
-                        if chunk:
-                            yield chunk
-                    elif etype == "speech.audio.done":
+                    if etype == "speech.audio.done":
                         return
-                    elif etype == "error":
+                    if etype == "error":
                         raise TTSUnavailableError(
                             event.get("message", "voxtral server error")
                         )
+                    b64 = event.get("delta")
+                    if not isinstance(b64, str):
+                        continue
+                    try:
+                        chunk = base64.b64decode(b64)
+                    except (ValueError, base64.binascii.Error):
+                        continue
+                    if chunk:
+                        yield chunk
         except httpx.HTTPError as e:
             raise TTSUnavailableError(str(e)) from e
