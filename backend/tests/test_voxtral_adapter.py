@@ -131,6 +131,57 @@ async def test_voxtral_raw_audio_pcm_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_voxtral_attaches_ref_audio_when_configured(tmp_path) -> None:
+    """When ref_audio_path is set on the adapter, every request should
+    include `ref_audio` as a data:audio/wav;base64 URL alongside the preset
+    `voice` slot. The Voxtral checkpoint requires a preset voice as the
+    audio token slot; ref_audio is the speaker conditioning override."""
+    ref_path = tmp_path / "ref.wav"
+    ref_bytes = b"FAKEWAVEPAYLOAD"
+    ref_path.write_bytes(ref_bytes)
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=b"\x00\x01", headers={"content-type": "audio/pcm"})
+
+    adapter = VoxtralTTSAdapter("http://x", ref_audio_path=ref_path)
+    adapter._client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    try:
+        async for _ in adapter.synthesize_stream("oi"):
+            pass
+    finally:
+        await adapter.aclose()
+
+    body = captured["body"]
+    assert body["voice"] == "pt_female"  # preset slot
+    assert "ref_audio" in body
+    expected_b64 = base64.b64encode(ref_bytes).decode()
+    assert body["ref_audio"] == f"data:audio/wav;base64,{expected_b64}"
+
+
+@pytest.mark.asyncio
+async def test_voxtral_no_ref_audio_when_unset() -> None:
+    """Without ref_audio_path, the body must NOT include `ref_audio` (so
+    older / non-cloning servers stay happy)."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=b"\x00\x01", headers={"content-type": "audio/pcm"})
+
+    adapter = VoxtralTTSAdapter("http://x")
+    adapter._client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    try:
+        async for _ in adapter.synthesize_stream("oi"):
+            pass
+    finally:
+        await adapter.aclose()
+    assert "ref_audio" not in captured["body"]
+
+
+@pytest.mark.asyncio
 async def test_voxtral_handles_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="upstream down")

@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 
@@ -35,6 +36,16 @@ class TTSUnavailableError(Exception):
     pass
 
 
+def _load_ref_audio_data_url(path: Path) -> str:
+    """Read a WAV file from disk and pre-encode it as a data URL once at
+    startup. The vllm-omni Voxtral path expects ref_audio in the form
+    `data:audio/wav;base64,<b64>`. We do the work eagerly so each TTS
+    request only pays the constant string copy cost."""
+    raw = path.read_bytes()
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:audio/wav;base64,{b64}"
+
+
 class VoxtralTTSAdapter(TTSAdapter):
     def __init__(
         self,
@@ -43,12 +54,27 @@ class VoxtralTTSAdapter(TTSAdapter):
         default_voice_id: str = "pt_female",
         model: str = "voxtral-4b-tts",
         timeout: float = 120.0,
+        ref_audio_path: Path | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.default_voice_id = default_voice_id
         self.model = model
         self.timeout = timeout
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
+        # Voice cloning. The Voxtral checkpoint hardcodes 20 preset voice
+        # slots in audio_config; the `voice` field MUST be one of those.
+        # `ref_audio` is an additional speaker conditioning override that
+        # the audio encoder layers on top of the slot. So cloning = pick a
+        # close-enough preset slot AND attach the user's reference audio.
+        self._ref_audio: str | None = None
+        if ref_audio_path is not None:
+            try:
+                self._ref_audio = _load_ref_audio_data_url(Path(ref_audio_path))
+            except OSError:
+                # Missing/unreadable file is non-fatal: fall back to the
+                # bare preset voice. We do not log here to avoid noisy
+                # imports — the lifespan can log on its own check.
+                self._ref_audio = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -67,13 +93,15 @@ class VoxtralTTSAdapter(TTSAdapter):
                 parts.append(chunk)
             full_text = "".join(parts)
 
-        body = {
+        body: dict = {
             "model": self.model,
             "input": full_text,
             "voice": voice_id if voice_id is not None else self.default_voice_id,
             "response_format": "pcm",
             "stream": True,
         }
+        if self._ref_audio is not None:
+            body["ref_audio"] = self._ref_audio
 
         try:
             async with self._client.stream(

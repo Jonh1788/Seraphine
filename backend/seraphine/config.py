@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     tts_base_url: str = "http://192.168.15.6:8000"
     tts_voice: str = "pt_female"
     tts_model: str = "mistralai/Voxtral-4B-TTS-2603"
+    # Optional voice cloning reference. WAV file (any sample rate, will be
+    # passed through verbatim as base64 data URL). Set to None to use the
+    # bare preset voice from `tts_voice`.
+    tts_ref_audio_path: Path | None = Path("../data/voice-samples/seraphine_ref.wav")
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

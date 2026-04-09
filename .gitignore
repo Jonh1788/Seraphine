@@ -21,6 +21,10 @@ data/
 chroma/
 voice-samples/
 
+# User-supplied raw voice references kept at the repo root
+DubGrav.m4a
+*.m4a
+
 # OS / editor
 .DS_Store
 .idea/

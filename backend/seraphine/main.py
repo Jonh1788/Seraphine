@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -37,11 +38,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
+    ref_audio_path = settings.tts_ref_audio_path
+    if ref_audio_path is not None and not Path(ref_audio_path).exists():
+        logger.warning(
+            "tts_ref_audio_path %s does not exist; falling back to bare preset voice",
+            ref_audio_path,
+        )
+        ref_audio_path = None
     tts = VoxtralTTSAdapter(
         settings.tts_base_url,
         default_voice_id=settings.tts_voice,
         model=settings.tts_model,
+        ref_audio_path=ref_audio_path,
     )
+    if ref_audio_path is not None:
+        logger.info("Voxtral voice cloning ENABLED via %s", ref_audio_path)
     audio_engine = AudioEngine(llm, tts, store)
 
     app.state.store = store
