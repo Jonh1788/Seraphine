@@ -75,6 +75,10 @@ brew_install pnpm pnpm
 step "Ollama"
 brew_install_cask ollama
 
+info "Persisting OLLAMA_FLASH_ATTENTION=1 for the GUI app via launchctl ..."
+launchctl setenv OLLAMA_FLASH_ATTENTION 1
+ok "Flash Attention enabled (5x faster prompt eval on Apple Silicon, no quality loss)"
+
 if ! pgrep -x ollama >/dev/null 2>&1; then
   info "Starting Ollama ..."
   open -a Ollama || warn "Could not open Ollama via 'open -a'. Start it manually if needed."
