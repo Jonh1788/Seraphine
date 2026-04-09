@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -16,7 +15,7 @@ from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
 from seraphine.tools.registry import build_default_registry
-from seraphine.tts.voxtral import VoxtralTTSAdapter
+from seraphine.tts.qwen3 import Qwen3TtsAdapter
 from seraphine.ws.routes import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -38,21 +37,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
-    ref_audio_path = settings.tts_ref_audio_path
-    if ref_audio_path is not None and not Path(ref_audio_path).exists():
-        logger.warning(
-            "tts_ref_audio_path %s does not exist; falling back to bare preset voice",
-            ref_audio_path,
-        )
-        ref_audio_path = None
-    tts = VoxtralTTSAdapter(
+    tts = Qwen3TtsAdapter(
         settings.tts_base_url,
-        default_voice_id=settings.tts_voice,
-        model=settings.tts_model,
-        ref_audio_path=ref_audio_path,
+        default_voice=settings.tts_voice,
+        language=settings.tts_language,
+        x_vector_only_mode=settings.tts_x_vector_only_mode,
     )
-    if ref_audio_path is not None:
-        logger.info("Voxtral voice cloning ENABLED via %s", ref_audio_path)
+    logger.info(
+        "Qwen3-TTS adapter wired (base_url=%s voice=%s)",
+        settings.tts_base_url,
+        settings.tts_voice,
+    )
     audio_engine = AudioEngine(llm, tts, store)
 
     app.state.store = store

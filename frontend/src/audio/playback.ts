@@ -1,20 +1,24 @@
 /**
- * Streaming PCM player with a small leading pre-buffer.
+ * Streaming PCM player with a leading pre-buffer.
  *
- * The TTS upstream (Voxtral 4B MLX) generates audio at RTF ~1.3 — slightly
- * slower than realtime — so chunks arrive in bursts with gaps between them.
- * If we schedule each chunk back-to-back the player catches up to the
- * buffer head and stalls, producing audible pauses.
+ * The current TTS upstream (Qwen3-TTS-12Hz) generates audio at RTF ~2.5
+ * (warm) — significantly slower than realtime. With sentence-level
+ * streaming on the WS layer, each sentence arrives as one shot but the
+ * NEXT sentence's wall-clock latency is ~2.5x the previous sentence's
+ * audio duration, so back-to-back scheduling produces audible gaps
+ * between sentences.
  *
  * Fix: hold playback until we have at least PREBUFFER_SECONDS of audio
- * accumulated. After that initial cushion, each new chunk lands ahead of
- * the play head by roughly that cushion, absorbing the upstream jitter.
+ * accumulated. After that initial cushion, each new chunk lands ahead
+ * of the play head by roughly that cushion, absorbing upstream jitter.
+ * The cushion is tuned for Qwen3-TTS RTF ~2.5; if you swap back to
+ * Voxtral or anything with RTF < 1, you can drop it back to ~0.6.
  *
- * If the upstream falls behind by more than the cushion the player will
- * eventually starve again — there is no way around an upstream RTF > 1
- * without increasing the cushion or speeding up the producer.
+ * Trade-off: cushion adds latency to time-to-first-audio. 2.5 s feels
+ * like the sweet spot for natural-sounding multi-sentence replies on
+ * the current upstream.
  */
-const PREBUFFER_SECONDS = 0.6;
+const PREBUFFER_SECONDS = 2.5;
 
 export class PCMPlayback {
   private ctx: AudioContext;

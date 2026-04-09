@@ -20,22 +20,14 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("../data/seraphine.sqlite")
     chroma_path: Path = Path("../data/chroma")
 
-    # TTS server (OpenAI-compatible /v1/audio/speech). The same adapter
-    # talks to either:
-    #   - vllm-omni serving mistralai/Voxtral-4B-TTS-2603 (CUDA box, raw
-    #     audio/pcm chunked body) — current default, fastest path.
-    #   - second-state/voxtral_tts_rs Rust server (Apple Silicon MLX, SSE
-    #     base64) — set tts_base_url=http://localhost:7860 and
-    #     tts_model=voxtral-4b-tts.
-    #   - mlx-omni-server, Mistral hosted API, or any other OpenAI-compat
-    #     TTS — only the URL/model/voice change.
-    tts_base_url: str = "http://192.168.15.6:8000"
-    tts_voice: str = "pt_female"
-    tts_model: str = "mistralai/Voxtral-4B-TTS-2603"
-    # Optional voice cloning reference. WAV file (any sample rate, will be
-    # passed through verbatim as base64 data URL). Set to None to use the
-    # bare preset voice from `tts_voice`.
-    tts_ref_audio_path: Path | None = Path("../data/voice-samples/seraphine_ref.wav")
+    # TTS server. Currently the custom Qwen3-TTS-12Hz-1.7B-Base wrapper
+    # at the RTX box, which exposes its own /v1/audio/voice-clone shape
+    # with pre-registered voice aliases (the speaker x-vector is
+    # pre-computed server-side from the mounted reference audio).
+    tts_base_url: str = "http://192.168.15.6:8010"
+    tts_voice: str = "dubgrav"
+    tts_language: str = "Portuguese"
+    tts_x_vector_only_mode: bool = True
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
