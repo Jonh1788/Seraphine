@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seraphine.local/schemas/ws-messages.schema.json",
+  "title": "Seraphine WebSocket Messages",
+  "description": "Union of every JSON message exchanged on /ws/conversation. Binary frames (raw PCM) carry no JSON envelope and are framed by audio_start/audio_end (client) or tts_start/tts_end (server).",
+  "oneOf": [
+    { "$ref": "#/$defs/UserMessage" },
+    { "$ref": "#/$defs/AudioStart" },
+    { "$ref": "#/$defs/AudioEnd" },
+    { "$ref": "#/$defs/ToolApproval" },
+    { "$ref": "#/$defs/Token" },
+    { "$ref": "#/$defs/TurnEnd" },
+    { "$ref": "#/$defs/TtsStart" },
+    { "$ref": "#/$defs/TtsEnd" },
+    { "$ref": "#/$defs/ToolRequest" },
+    { "$ref": "#/$defs/ToolResult" },
+    { "$ref": "#/$defs/Error" }
+  ],
+  "$defs": {
+    "UserMessage": {
+      "type": "object",
+      "required": ["type", "content"],
+      "properties": {
+        "type": { "const": "user_message" },
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "content": { "type": "string" }
+      }
+    },
+    "AudioStart": {
+      "type": "object",
+      "required": ["type", "sample_rate"],
+      "properties": {
+        "type": { "const": "audio_start" },
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "sample_rate": { "type": "integer", "enum": [16000] }
+      }
+    },
+    "AudioEnd": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "audio_end" },
+        "conversation_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "ToolApproval": {
+      "type": "object",
+      "required": ["type", "request_id", "approved"],
+      "properties": {
+        "type": { "const": "tool_approval" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "approved": { "type": "boolean" }
+      }
+    },
+    "Token": {
+      "type": "object",
+      "required": ["type", "turn_id", "text"],
+      "properties": {
+        "type": { "const": "token" },
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "turn_id": { "type": "string", "format": "uuid" },
+        "text": { "type": "string" }
+      }
+    },
+    "TurnEnd": {
+      "type": "object",
+      "required": ["type", "turn_id"],
+      "properties": {
+        "type": { "const": "turn_end" },
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "turn_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "TtsStart": {
+      "type": "object",
+      "required": ["type", "turn_id", "sample_rate"],
+      "properties": {
+        "type": { "const": "tts_start" },
+        "turn_id": { "type": "string", "format": "uuid" },
+        "sample_rate": { "type": "integer", "enum": [24000] }
+      }
+    },
+    "TtsEnd": {
+      "type": "object",
+      "required": ["type", "turn_id"],
+      "properties": {
+        "type": { "const": "tts_end" },
+        "turn_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "ToolRequest": {
+      "type": "object",
+      "required": ["type", "request_id", "tool", "args", "requires_confirmation"],
+      "properties": {
+        "type": { "const": "tool_request" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "tool": { "type": "string" },
+        "args": { "type": "object" },
+        "requires_confirmation": { "type": "boolean" }
+      }
+    },
+    "ToolResult": {
+      "type": "object",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "ok": { "type": "boolean" },
+        "output": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": ["type", "code", "message"],
+      "properties": {
+        "type": { "const": "error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}
