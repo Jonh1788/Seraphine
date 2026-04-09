@@ -8,6 +8,7 @@ import { ApprovalPanel } from './tools';
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
   const [speak, setSpeak] = useState<boolean>(true);
+  const [talking, setTalking] = useState<boolean>(false);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
@@ -17,10 +18,6 @@ export function App(): JSX.Element {
     const ws = new SeraphineWS();
     wsRef.current = ws;
     const offStatus = ws.onStatus((s) => setStatus(s));
-
-    // Global PCM router: any binary frame coming in over the WS is fed to
-    // a single long-lived PCMPlayback. Both the push-to-talk path AND the
-    // text-with-speak path produce binary frames; they share this player.
     const offMsg = ws.onMessage((msg) => {
       if (msg instanceof ArrayBuffer) {
         if (!playbackRef.current) playbackRef.current = new PCMPlayback();
@@ -31,7 +28,6 @@ export function App(): JSX.Element {
         void playbackRef.current?.flush();
       }
     });
-
     ws.connect();
     return () => {
       offStatus();
@@ -48,6 +44,7 @@ export function App(): JSX.Element {
     const ws = wsRef.current;
     if (!ws || status !== 'connected') return;
     if (!micRef.current) micRef.current = new MicCapture();
+    setTalking(true);
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     await micRef.current.start();
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
@@ -61,62 +58,67 @@ export function App(): JSX.Element {
     chunkOffRef.current?.();
     chunkOffRef.current = null;
     micRef.current?.stop();
+    setTalking(false);
     if (ws && status === 'connected') {
       ws.send({ type: 'audio_end' });
     }
   };
 
+  const connected = status === 'connected';
+
   return (
-    <main
-      style={{
-        fontFamily: 'system-ui, sans-serif',
-        padding: '2rem',
-        display: 'grid',
-        gridTemplateColumns: '420px 1fr',
-        gap: '2rem',
-        maxWidth: 1200,
-        margin: '0 auto',
-      }}
-    >
-      <aside>
-        <h1 style={{ marginTop: 0 }}>Seraphine</h1>
-        <p>
-          Status:{' '}
-          <strong style={{ color: status === 'connected' ? 'green' : 'crimson' }}>
-            {status}
-          </strong>
-        </p>
-        <VrmAvatar avatarUrl="/avatars/seraphine.vrm" />
-        <button
-          type="button"
-          disabled={status !== 'connected'}
-          onMouseDown={() => {
-            void handleTalkStart();
-          }}
-          onMouseUp={handleTalkEnd}
-          onMouseLeave={handleTalkEnd}
-          onTouchStart={() => {
-            void handleTalkStart();
-          }}
-          onTouchEnd={handleTalkEnd}
-          style={{ marginTop: '1rem', padding: '0.75rem 1.25rem' }}
-        >
-          Falar (segure)
-        </button>
-        <label style={{ display: 'block', marginTop: '0.75rem', userSelect: 'none' }}>
-          <input
-            type="checkbox"
-            checked={speak}
-            onChange={(e) => setSpeak(e.target.checked)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Responder com áudio
-        </label>
-        <ApprovalPanel ws={wsRef.current} />
-      </aside>
-      <section>
-        {wsRef.current && <ChatView ws={wsRef.current} status={status} speak={speak} />}
-      </section>
-    </main>
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar__brand">Seraphine</div>
+        <div className={`status ${connected ? 'status--connected' : ''}`}>
+          <span className="status__dot" />
+          {connected ? 'online' : 'reconectando…'}
+        </div>
+      </header>
+
+      <div className="layout">
+        <aside className="sidebar">
+          <div className="avatar-stage">
+            <VrmAvatar avatarUrl="/avatars/seraphine.vrm" />
+          </div>
+
+          <div className="controls">
+            <button
+              type="button"
+              className="btn btn-talk"
+              disabled={!connected}
+              onMouseDown={() => {
+                void handleTalkStart();
+              }}
+              onMouseUp={handleTalkEnd}
+              onMouseLeave={() => {
+                if (talking) handleTalkEnd();
+              }}
+              onTouchStart={() => {
+                void handleTalkStart();
+              }}
+              onTouchEnd={handleTalkEnd}
+            >
+              {talking ? 'Ouvindo… (solte)' : 'Falar (segure)'}
+            </button>
+
+            <label className="toggle">
+              <span>Responder com áudio</span>
+              <input
+                type="checkbox"
+                checked={speak}
+                onChange={(e) => setSpeak(e.target.checked)}
+              />
+            </label>
+          </div>
+
+          <ApprovalPanel ws={wsRef.current} />
+        </aside>
+
+        <section className="chat">
+          {wsRef.current && <ChatView ws={wsRef.current} status={status} speak={speak} />}
+        </section>
+      </div>
+    </div>
   );
 }

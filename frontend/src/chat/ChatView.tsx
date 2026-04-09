@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 
 interface Turn {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'error';
   content: string;
   streaming?: boolean;
 }
@@ -12,23 +12,23 @@ interface Turn {
 interface ChatViewProps {
   ws: SeraphineWS;
   status: 'connected' | 'disconnected';
-  /** If true, every user_message is sent with speak=true so the backend
-   *  also synthesizes the assistant reply via the TTS adapter. */
   speak?: boolean;
 }
 
 export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
+  const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | undefined>(undefined);
-  const streamingTurnIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    return ws.onMessage((msg: ServerMessage) => {
+    return ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
+      if (msg instanceof ArrayBuffer) return;
       if (msg.type === 'token') {
         if (!conversationIdRef.current) conversationIdRef.current = msg.conversation_id;
         const turnId = msg.turn_id;
-        streamingTurnIdRef.current = turnId;
+        setStreamingTurnId(turnId);
         setTurns((prev) => {
           const idx = prev.findIndex((t) => t.id === turnId);
           if (idx === -1) {
@@ -46,22 +46,29 @@ export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Elem
         setTurns((prev) =>
           prev.map((t) => (t.id === turnId ? { ...t, streaming: false } : t)),
         );
-        streamingTurnIdRef.current = null;
+        setStreamingTurnId(null);
       } else if (msg.type === 'error') {
         setTurns((prev) => [
           ...prev.filter((t) => !t.streaming),
           {
             id: `err-${Date.now()}`,
-            role: 'assistant',
-            content: `[error: ${msg.code}] ${msg.message}`,
+            role: 'error',
+            content: `${msg.code}: ${msg.message}`,
           },
         ]);
-        streamingTurnIdRef.current = null;
+        setStreamingTurnId(null);
       }
     });
   }, [ws]);
 
-  const isStreaming = streamingTurnIdRef.current !== null;
+  // Auto-scroll to bottom whenever turns change.
+  useLayoutEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [turns]);
+
+  const isStreaming = streamingTurnId !== null;
   const canSend = status === 'connected' && !isStreaming && draft.trim().length > 0;
 
   const send = (): void => {
@@ -81,43 +88,54 @@ export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Elem
   };
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      <div
-        style={{
-          minHeight: 240,
-          maxHeight: 480,
-          overflowY: 'auto',
-          background: '#fafafa',
-          border: '1px solid #ddd',
-          padding: '0.75rem',
-          borderRadius: 6,
-        }}
-      >
-        {turns.length === 0 && <em style={{ color: '#888' }}>Comece a conversa…</em>}
+    <>
+      <div ref={messagesRef} className="chat__messages">
+        {turns.length === 0 && (
+          <div className="chat__empty">
+            <strong>Comece a conversa</strong>
+            Digite uma mensagem ou segure o botão pra falar.
+          </div>
+        )}
         {turns.map((t) => (
-          <div key={t.id} style={{ marginBottom: '0.5rem' }}>
-            <strong>{t.role === 'user' ? 'Você' : 'Seraphine'}:</strong>{' '}
-            <span>{t.content}</span>
-            {t.streaming && <span style={{ color: '#888' }}> ▍</span>}
+          <div key={t.id} className={`bubble bubble--${t.role}`}>
+            <div className="bubble__avatar">
+              {t.role === 'user' ? 'V' : t.role === 'assistant' ? 'S' : '!'}
+            </div>
+            <div className="bubble__body">
+              <div className="bubble__name">
+                {t.role === 'user' ? 'Você' : t.role === 'assistant' ? 'Seraphine' : 'Erro'}
+              </div>
+              <div className="bubble__content">
+                {t.content}
+                {t.streaming && <span className="cursor" />}
+              </div>
+            </div>
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
+
+      <div className="chat__composer">
         <input
           type="text"
+          className="chat__input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') send();
           }}
-          placeholder={status === 'connected' ? 'Digite e Enter…' : 'Desconectado'}
-          disabled={status !== 'connected'}
-          style={{ flex: 1, padding: '0.5rem' }}
+          placeholder={
+            status === 'connected'
+              ? isStreaming
+                ? 'Aguarde a resposta…'
+                : 'Digite e Enter…'
+              : 'Desconectado'
+          }
+          disabled={status !== 'connected' || isStreaming}
         />
-        <button onClick={send} disabled={!canSend}>
+        <button type="button" className="btn btn-primary" onClick={send} disabled={!canSend}>
           Enviar
         </button>
       </div>
-    </section>
+    </>
   );
 }

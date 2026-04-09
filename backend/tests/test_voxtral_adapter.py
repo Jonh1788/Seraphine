@@ -108,6 +108,29 @@ async def test_voxtral_handles_error_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_voxtral_raw_audio_pcm_path() -> None:
+    """vllm-omni serves raw PCM with content-type audio/pcm and chunked
+    transfer encoding — no SSE envelope. The adapter must auto-detect and
+    forward bytes directly via aiter_bytes."""
+    raw_pcm = b"\x10\x20\x30\x40\x50\x60\x70\x80"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=raw_pcm,
+            headers={"content-type": "audio/pcm"},
+        )
+
+    adapter = VoxtralTTSAdapter("http://x")
+    adapter._client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    try:
+        out = b"".join([c async for c in adapter.synthesize_stream("oi")])
+    finally:
+        await adapter.aclose()
+    assert out == raw_pcm
+
+
+@pytest.mark.asyncio
 async def test_voxtral_handles_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="upstream down")

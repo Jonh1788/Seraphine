@@ -1,20 +1,23 @@
-"""TTSAdapter for Voxtral 4B TTS via the second-state/voxtral_tts_rs server.
+"""TTSAdapter for Voxtral 4B TTS via any OpenAI-compatible /v1/audio/speech
+server. Two streaming wire formats are supported and auto-detected from
+the response Content-Type header:
 
-The server exposes an OpenAI-compatible /v1/audio/speech endpoint with two
-output modes:
+1) **SSE base64 PCM** (e.g. second-state/voxtral_tts_rs Rust server)
+       content-type: text/event-stream
+       data: {"type":"speech.audio.delta","delta":"<b64 s16le PCM>"}
+       data: {"type":"speech.audio.done"}
+   The voxtral_tts_rs v0.1.1 server emits delta frames without the
+   `type` field, so the parser tolerates `{"delta":"..."}` too.
 
-  - Non-streaming: returns a binary body in the requested format (wav, pcm,
-    mp3, flac, ogg, opus).
-  - Streaming SSE (`stream: true`): emits frames of the form
-        data: {"type":"speech.audio.delta","delta":"<base64 16-bit LE PCM>"}
-        data: {"type":"speech.audio.done"}
+2) **Raw PCM chunked** (e.g. vllm-omni serving mistralai/Voxtral-4B-TTS-2603)
+       content-type: audio/pcm  +  transfer-encoding: chunked
+   The body is the raw 16-bit LE 24 kHz mono PCM stream itself, no
+   envelope. We forward the bytes directly via aiter_bytes().
 
-We always request streaming PCM and decode the base64 chunks back to raw
-bytes so the rest of the pipeline (spec 002) sees PCM s16le @ 24 kHz mono.
-
-The same adapter works against any OpenAI-compatible TTS server (e.g. the
-Mistral hosted API or mlx-omni-server) — only the base URL and voice id
-change. That preserves the seam from the original plan.
+In both cases the rest of the pipeline (spec 002) sees PCM s16le @ 24 kHz
+mono on the TTSAdapter.synthesize_stream() async iterator. Switching
+between a local Apple Silicon server and a remote CUDA box only requires
+changing tts_base_url — no code changes.
 """
 
 from __future__ import annotations
@@ -77,38 +80,49 @@ class VoxtralTTSAdapter(TTSAdapter):
                 "POST",
                 "/v1/audio/speech",
                 json=body,
-                headers={"Accept": "text/event-stream"},
+                headers={"Accept": "text/event-stream, audio/pcm"},
             ) as resp:
                 resp.raise_for_status()
-                async for raw_line in resp.aiter_lines():
-                    if not raw_line or not raw_line.startswith("data:"):
-                        continue
-                    payload = raw_line[5:].strip()
-                    if not payload or payload == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    # The voxtral_tts_rs server emits delta frames as
-                    # `{"delta": "<b64>"}` (no type field) and the terminal
-                    # frame as `{"type": "speech.audio.done"}`. Be tolerant
-                    # of both styles per README spec.
-                    etype = event.get("type")
-                    if etype == "speech.audio.done":
-                        return
-                    if etype == "error":
-                        raise TTSUnavailableError(
-                            event.get("message", "voxtral server error")
-                        )
-                    b64 = event.get("delta")
-                    if not isinstance(b64, str):
-                        continue
-                    try:
-                        chunk = base64.b64decode(b64)
-                    except (ValueError, base64.binascii.Error):
-                        continue
-                    if chunk:
+                ctype = (resp.headers.get("content-type") or "").lower()
+                if "event-stream" in ctype:
+                    async for chunk in self._iter_sse_pcm(resp):
                         yield chunk
+                else:
+                    # Raw chunked audio body (vllm-omni / mlx-omni-server).
+                    # Bytes ARE PCM s16le @ 24 kHz mono — forward directly.
+                    async for chunk in resp.aiter_bytes():
+                        if chunk:
+                            yield chunk
         except httpx.HTTPError as e:
             raise TTSUnavailableError(str(e)) from e
+
+    async def _iter_sse_pcm(self, resp: httpx.Response) -> AsyncIterator[bytes]:
+        """Parse the voxtral_tts_rs SSE wire format and yield raw PCM."""
+        async for raw_line in resp.aiter_lines():
+            if not raw_line or not raw_line.startswith("data:"):
+                continue
+            payload = raw_line[5:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            # voxtral_tts_rs v0.1.1 emits delta frames without `type`, so
+            # be tolerant of plain `{"delta": "<b64>"}` as well.
+            etype = event.get("type")
+            if etype == "speech.audio.done":
+                return
+            if etype == "error":
+                raise TTSUnavailableError(
+                    event.get("message", "voxtral server error")
+                )
+            b64 = event.get("delta")
+            if not isinstance(b64, str):
+                continue
+            try:
+                chunk = base64.b64decode(b64)
+            except (ValueError, base64.binascii.Error):
+                continue
+            if chunk:
+                yield chunk
