@@ -14,6 +14,7 @@ from seraphine.llm.client import OllamaClient
 from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
+from seraphine.tools.registry import build_default_registry
 from seraphine.tts.moss import MossTTSAdapter
 from seraphine.ws.routes import router as ws_router
 
@@ -34,7 +35,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("MemoryManager.start() failed (chromadb missing or unreachable): %s", e)
 
-    engine = ConversationEngine(llm, store, memory=memory)
+    tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
+    engine = ConversationEngine(llm, store, memory=memory, tools=tools)
     tts = MossTTSAdapter(settings.moss_tts_url)
     audio_engine = AudioEngine(llm, tts, store)
 
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.tts = tts
     app.state.audio_engine = audio_engine
+    app.state.tools = tools
 
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:

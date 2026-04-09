@@ -24,5 +24,7 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    allowed_tool_roots: list[Path] = [Path.home()]
+
 
 settings = Settings()

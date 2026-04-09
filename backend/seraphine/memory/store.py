@@ -19,6 +19,18 @@ class Turn(BaseModel):
     token_count: int | None = None
 
 
+class ToolAudit(BaseModel):
+    id: str
+    request_id: str
+    tool: str
+    args_json: str
+    approved: int | None
+    ok: int | None
+    output_excerpt: str | None
+    error: str | None
+    created_at: str
+
+
 class Fact(BaseModel):
     id: str
     text: str
@@ -71,6 +83,17 @@ class MemoryStore:
                     );
                     CREATE INDEX IF NOT EXISTS idx_facts_created
                       ON facts(created_at DESC);
+                    CREATE TABLE IF NOT EXISTS tool_audit (
+                      id             TEXT PRIMARY KEY,
+                      request_id     TEXT NOT NULL,
+                      tool           TEXT NOT NULL,
+                      args_json      TEXT NOT NULL,
+                      approved       INTEGER,
+                      ok             INTEGER,
+                      output_excerpt TEXT,
+                      error          TEXT,
+                      created_at     TEXT NOT NULL
+                    );
                     """
                 )
 
@@ -208,6 +231,78 @@ class MemoryStore:
                 )
 
         await asyncio.to_thread(_work)
+
+    # ---------- tool audit ----------
+
+    async def add_tool_audit(
+        self,
+        *,
+        request_id: str,
+        tool: str,
+        args_json: str,
+        approved: int | None,
+        ok: int | None,
+        output_excerpt: str | None,
+        error: str | None,
+    ) -> ToolAudit:
+        audit = ToolAudit(
+            id=str(uuid.uuid4()),
+            request_id=request_id,
+            tool=tool,
+            args_json=args_json,
+            approved=approved,
+            ok=ok,
+            output_excerpt=output_excerpt,
+            error=error,
+            created_at=_now(),
+        )
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO tool_audit(id, request_id, tool, args_json, approved,"
+                    " ok, output_excerpt, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        audit.id,
+                        audit.request_id,
+                        audit.tool,
+                        audit.args_json,
+                        audit.approved,
+                        audit.ok,
+                        audit.output_excerpt,
+                        audit.error,
+                        audit.created_at,
+                    ),
+                )
+
+        await asyncio.to_thread(_work)
+        return audit
+
+    async def list_tool_audit(self, limit: int = 50) -> list[ToolAudit]:
+        def _work() -> list[ToolAudit]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, request_id, tool, args_json, approved, ok,"
+                    " output_excerpt, error, created_at FROM tool_audit"
+                    " ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                ToolAudit(
+                    id=r[0],
+                    request_id=r[1],
+                    tool=r[2],
+                    args_json=r[3],
+                    approved=r[4],
+                    ok=r[5],
+                    output_excerpt=r[6],
+                    error=r[7],
+                    created_at=r[8],
+                )
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
 
     async def get_fact(self, fact_id: str) -> Fact | None:
         def _work() -> Fact | None:

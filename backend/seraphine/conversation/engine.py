@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
-from typing import AsyncIterator, Literal, Protocol, Union
+from typing import Any, AsyncIterator, Literal, Protocol, Union
 
 from pydantic import BaseModel
 
 from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
+from seraphine.tools.base import ToolResult
+from seraphine.tools.registry import ToolRegistry
 
 logger = logging.getLogger("seraphine.engine")
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are Seraphine, a concise local-first assistant. Reply in the user's language."
 )
+
+APPROVAL_TIMEOUT_SECONDS = 300
+MAX_TOOL_ITERATIONS = 5
+AUDIT_OUTPUT_EXCERPT = 4 * 1024
 
 
 class _LLMLike(Protocol):
@@ -46,7 +54,39 @@ class ErrorEvent(BaseModel):
     message: str
 
 
-StreamEvent = Union[TokenEvent, TurnEndEvent, ErrorEvent]
+class ToolRequestEvent(BaseModel):
+    type: Literal["tool_request"] = "tool_request"
+    request_id: str
+    tool: str
+    args: dict[str, Any]
+    requires_confirmation: bool
+
+
+class ToolResultEvent(BaseModel):
+    type: Literal["tool_result"] = "tool_result"
+    request_id: str
+    ok: bool
+    output: str | None = None
+    error: str | None = None
+
+
+StreamEvent = Union[
+    TokenEvent, TurnEndEvent, ErrorEvent, ToolRequestEvent, ToolResultEvent
+]
+
+
+def _parse_tool_call(tc: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    fn = tc.get("function") or {}
+    name = str(fn.get("name") or tc.get("name") or "")
+    args = fn.get("arguments") if "arguments" in fn else tc.get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+    return name, args
 
 
 class ConversationEngine:
@@ -56,11 +96,21 @@ class ConversationEngine:
         store: MemoryStore,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         memory: MemoryManager | None = None,
+        tools: ToolRegistry | None = None,
     ) -> None:
         self.llm = llm
         self.store = store
         self.system_prompt = system_prompt
         self.memory = memory
+        self.tools = tools
+        self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
+
+    async def submit_approval(self, request_id: str, approved: bool) -> bool:
+        q = self.pending_approvals.get(request_id)
+        if q is None:
+            return False
+        await q.put(approved)
+        return True
 
     async def _build_recall_block(self, content: str) -> str | None:
         if self.memory is None:
@@ -113,11 +163,122 @@ class ConversationEngine:
         accumulated: list[str] = []
 
         try:
-            async for tok in self.llm.chat(messages):
-                if tok.text:
-                    accumulated.append(tok.text)
-                    yield TokenEvent(
-                        conversation_id=conversation_id, turn_id=turn_id, text=tok.text
+            for _iteration in range(MAX_TOOL_ITERATIONS):
+                if self.tools is not None:
+                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools())  # type: ignore[call-arg]
+                else:
+                    stream = self.llm.chat(messages)
+
+                pending_tool_calls: list[dict[str, Any]] | None = None
+                async for tok in stream:
+                    if tok.tool_calls:
+                        pending_tool_calls = tok.tool_calls
+                        break
+                    if tok.text:
+                        accumulated.append(tok.text)
+                        yield TokenEvent(
+                            conversation_id=conversation_id,
+                            turn_id=turn_id,
+                            text=tok.text,
+                        )
+
+                if pending_tool_calls is None or self.tools is None:
+                    break
+
+                for tc in pending_tool_calls:
+                    tool_name, tool_args = _parse_tool_call(tc)
+                    request_id = str(uuid.uuid4())
+                    tool = self.tools.get(tool_name)
+
+                    if tool is None:
+                        result = ToolResult(ok=False, error=f"unknown tool: {tool_name}")
+                        approved_int: int | None = None
+                        await self.store.add_tool_audit(
+                            request_id=request_id,
+                            tool=tool_name,
+                            args_json=json.dumps(tool_args),
+                            approved=approved_int,
+                            ok=0,
+                            output_excerpt=None,
+                            error=result.error,
+                        )
+                        yield ToolResultEvent(
+                            request_id=request_id,
+                            ok=False,
+                            output=None,
+                            error=result.error,
+                        )
+                        messages.append(
+                            ChatMessage(
+                                role="tool",
+                                content=json.dumps(
+                                    {"tool": tool_name, "ok": False, "error": result.error}
+                                ),
+                            )
+                        )
+                        continue
+
+                    if tool.requires_confirmation:
+                        queue: asyncio.Queue[bool] = asyncio.Queue()
+                        self.pending_approvals[request_id] = queue
+                        yield ToolRequestEvent(
+                            request_id=request_id,
+                            tool=tool_name,
+                            args=tool_args,
+                            requires_confirmation=True,
+                        )
+                        try:
+                            approved = await asyncio.wait_for(
+                                queue.get(), timeout=APPROVAL_TIMEOUT_SECONDS
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning("tool approval timeout: %s", request_id)
+                            approved = False
+                        finally:
+                            self.pending_approvals.pop(request_id, None)
+                        approved_int = 1 if approved else 0
+                    else:
+                        approved = True
+                        approved_int = None
+
+                    if approved:
+                        try:
+                            result = await tool.execute(tool_args)
+                        except Exception as e:
+                            result = ToolResult(ok=False, error=str(e))
+                    else:
+                        result = ToolResult(ok=False, error="rejected by user")
+
+                    output_excerpt = (
+                        result.output[:AUDIT_OUTPUT_EXCERPT] if result.output else None
+                    )
+                    await self.store.add_tool_audit(
+                        request_id=request_id,
+                        tool=tool_name,
+                        args_json=json.dumps(tool_args),
+                        approved=approved_int,
+                        ok=1 if result.ok else 0,
+                        output_excerpt=output_excerpt,
+                        error=result.error,
+                    )
+                    yield ToolResultEvent(
+                        request_id=request_id,
+                        ok=result.ok,
+                        output=result.output,
+                        error=result.error,
+                    )
+                    messages.append(
+                        ChatMessage(
+                            role="tool",
+                            content=json.dumps(
+                                {
+                                    "tool": tool_name,
+                                    "ok": result.ok,
+                                    "output": result.output,
+                                    "error": result.error,
+                                }
+                            ),
+                        )
                     )
         except LLMUnavailableError as e:
             yield ErrorEvent(code="llm_unavailable", message=str(e))
