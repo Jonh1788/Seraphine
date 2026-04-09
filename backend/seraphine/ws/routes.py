@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from seraphine.conversation.audio_engine import (
     TurnEndEvent as AudioTurnEndEvent,
 )
 from seraphine.conversation.engine import ConversationEngine
+from seraphine.conversation.sentences import flush_remainder, split_sentences
 
 logger = logging.getLogger("seraphine.ws")
 
@@ -40,12 +42,20 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _speak_text(ws: WebSocket, text: str, turn_id: str) -> None:
-    """Synthesize `text` via app.state.tts and stream PCM frames over the WS.
+# Sentinel pushed onto the sentence queue to tell the worker no more
+# sentences are coming and it should drain + emit tts_end.
+_SENTENCE_EOS: object = object()
 
-    Used by the user_message path when the client requests `speak: true`,
-    so a typed text exchange still produces audio output.
-    """
+
+async def _speak_worker(
+    ws: WebSocket,
+    queue: "asyncio.Queue[str | object]",
+    turn_id: str,
+) -> None:
+    """Background task that pulls complete sentences off `queue` and
+    synthesizes each one via app.state.tts, streaming PCM frames over the
+    WS as they arrive. Sends tts_start before the first sentence and
+    tts_end after the EOS sentinel."""
     tts = getattr(ws.app.state, "tts", None)
     if tts is None:
         await ws.send_json(
@@ -55,21 +65,44 @@ async def _speak_text(ws: WebSocket, text: str, turn_id: str) -> None:
                 "message": "tts adapter not configured",
             }
         )
-        return
-    await ws.send_json(
-        {"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000}
-    )
-    try:
-        async for chunk in tts.synthesize_stream(text):
-            if chunk:
-                await ws.send_bytes(chunk)
-    except Exception as e:
-        logger.warning("speak failed: %s", e)
-        await ws.send_json(
-            {"type": "error", "code": "tts_unavailable", "message": str(e)}
-        )
-        return
-    await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+        # Drain the queue so producers don't block.
+        while True:
+            item = await queue.get()
+            if item is _SENTENCE_EOS:
+                return
+
+    started = False
+    while True:
+        item = await queue.get()
+        if item is _SENTENCE_EOS:
+            if started:
+                await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+            return
+        sentence = item if isinstance(item, str) else ""
+        if not sentence:
+            continue
+        if not started:
+            await ws.send_json(
+                {"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000}
+            )
+            started = True
+        try:
+            async for chunk in tts.synthesize_stream(sentence):
+                if chunk:
+                    await ws.send_bytes(chunk)
+        except Exception as e:
+            logger.warning("speak worker tts failure on sentence: %s", e)
+            await ws.send_json(
+                {"type": "error", "code": "tts_unavailable", "message": str(e)}
+            )
+            # Drain remaining sentences without synthesizing — the worker
+            # still needs to emit tts_end so the client closes its player.
+            while True:
+                item = await queue.get()
+                if item is _SENTENCE_EOS:
+                    if started:
+                        await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+                    return
 
 
 @router.websocket("/ws/conversation")
@@ -121,27 +154,72 @@ async def conversation_ws(ws: WebSocket) -> None:
                 conv_id = payload.get("conversation_id")
                 content = payload.get("content", "")
                 speak = bool(payload.get("speak", False))
-                accumulated_text: list[str] = []
+
+                # Sentence-level streaming TTS state. We start the worker
+                # eagerly when speak=true so the first complete sentence is
+                # synthesized while the LLM is still generating the rest.
+                sentence_buf = ""
                 final_turn_id: str | None = None
+                speak_queue: "asyncio.Queue[str | object]" | None = None
+                speak_task: asyncio.Task[None] | None = None
+
+                def _maybe_push_sentences() -> None:
+                    nonlocal sentence_buf
+                    if speak_queue is None:
+                        return
+                    sents, sentence_buf = split_sentences(sentence_buf)
+                    for s in sents:
+                        speak_queue.put_nowait(s)
+
                 if engine.tools is None:
                     async for event in engine.handle_user_message(conv_id, content):
                         etype = getattr(event, "type", None)
                         if etype == "token":
-                            accumulated_text.append(getattr(event, "text", ""))
+                            sentence_buf += getattr(event, "text", "")
+                            if speak:
+                                if speak_queue is None:
+                                    final_turn_id = getattr(event, "turn_id", None)
+                                    speak_queue = asyncio.Queue()
+                                    speak_task = asyncio.create_task(
+                                        _speak_worker(ws, speak_queue, final_turn_id or "")
+                                    )
+                                _maybe_push_sentences()
                         elif etype == "turn_end":
                             final_turn_id = getattr(event, "turn_id", None)
+                            if speak and speak_queue is not None:
+                                # Drain final partial sentence as the last unit.
+                                tail = flush_remainder(sentence_buf)
+                                if tail:
+                                    speak_queue.put_nowait(tail)
+                                    sentence_buf = ""
+                                speak_queue.put_nowait(_SENTENCE_EOS)
                         await ws.send_json(event.model_dump())
                 else:
-                    import asyncio as _asyncio
 
                     async def _drive_turn() -> None:
+                        nonlocal sentence_buf, final_turn_id, speak_queue, speak_task
                         async for event in engine.handle_user_message(conv_id, content):
                             etype = getattr(event, "type", None)
                             if etype == "token":
-                                accumulated_text.append(getattr(event, "text", ""))
+                                sentence_buf += getattr(event, "text", "")
+                                if speak:
+                                    if speak_queue is None:
+                                        final_turn_id = getattr(event, "turn_id", None)
+                                        speak_queue = asyncio.Queue()
+                                        speak_task = asyncio.create_task(
+                                            _speak_worker(
+                                                ws, speak_queue, final_turn_id or ""
+                                            )
+                                        )
+                                    _maybe_push_sentences()
                             elif etype == "turn_end":
-                                nonlocal final_turn_id
                                 final_turn_id = getattr(event, "turn_id", None)
+                                if speak and speak_queue is not None:
+                                    tail = flush_remainder(sentence_buf)
+                                    if tail:
+                                        speak_queue.put_nowait(tail)
+                                        sentence_buf = ""
+                                    speak_queue.put_nowait(_SENTENCE_EOS)
                             await ws.send_json(event.model_dump())
 
                     turn_task = _asyncio.create_task(_drive_turn())
@@ -195,10 +273,16 @@ async def conversation_ws(ws: WebSocket) -> None:
                         except BaseException:
                             pass
                     await turn_task
-                if speak and final_turn_id is not None:
-                    full_text = "".join(accumulated_text).strip()
-                    if full_text:
-                        await _speak_text(ws, full_text, final_turn_id)
+                if speak:
+                    if speak_queue is None and final_turn_id is not None:
+                        # Edge case: the engine produced no token events
+                        # (e.g. immediate error). Nothing to speak.
+                        pass
+                    if speak_task is not None:
+                        try:
+                            await speak_task
+                        except Exception as e:  # pragma: no cover
+                            logger.warning("speak_task failed: %s", e)
             elif mtype == "audio_start":
                 audio_buf = bytearray()
             elif mtype == "audio_end":
