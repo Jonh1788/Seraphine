@@ -23,6 +23,11 @@ export class PCMPlayback {
   private pendingFloats: Float32Array[] = [];
   private pendingDuration = 0;
   private started = false;
+  // The vllm-omni raw PCM path delivers HTTP chunks at arbitrary byte
+  // boundaries — sometimes odd-sized — so a single 16-bit sample can be
+  // split across two pushChunk() calls. We buffer a single trailing byte
+  // here and prepend it to the next chunk to keep alignment.
+  private carry: Uint8Array | null = null;
 
   constructor() {
     const AC: typeof AudioContext =
@@ -32,7 +37,30 @@ export class PCMPlayback {
   }
 
   pushChunk(buf: ArrayBuffer): void {
-    const view = new Int16Array(buf);
+    let bytes = new Uint8Array(buf);
+    if (bytes.byteLength === 0) return;
+
+    if (this.carry) {
+      const merged = new Uint8Array(this.carry.byteLength + bytes.byteLength);
+      merged.set(this.carry, 0);
+      merged.set(bytes, this.carry.byteLength);
+      bytes = merged;
+      this.carry = null;
+    }
+
+    const evenLen = bytes.byteLength - (bytes.byteLength % 2);
+    if (evenLen < bytes.byteLength) {
+      // Stash the trailing odd byte for the next chunk.
+      this.carry = bytes.slice(evenLen);
+    }
+    if (evenLen === 0) return;
+
+    // Copy the aligned bytes into a fresh ArrayBuffer so the Int16Array
+    // view is guaranteed 2-byte aligned regardless of the source buffer
+    // (slice() / Uint8Array views can be byteOffset-misaligned).
+    const aligned = new ArrayBuffer(evenLen);
+    new Uint8Array(aligned).set(bytes.subarray(0, evenLen));
+    const view = new Int16Array(aligned);
     if (view.length === 0) return;
     const float = new Float32Array(view.length);
     for (let i = 0; i < view.length; i += 1) {
@@ -100,6 +128,7 @@ export class PCMPlayback {
     // Reset for the next utterance so the cushion logic re-engages.
     this.started = false;
     this.nextStartTime = 0;
+    this.carry = null;
   }
 
   dispose(): void {
@@ -114,6 +143,7 @@ export class PCMPlayback {
     this.pendingFloats = [];
     this.pendingDuration = 0;
     this.started = false;
+    this.carry = null;
     void this.ctx.close();
   }
 }
