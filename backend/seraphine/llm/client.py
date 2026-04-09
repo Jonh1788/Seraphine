@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -26,10 +27,19 @@ class OllamaClient:
         *,
         model: str | None = None,
         temperature: float = 0.7,
+        audio: bytes | None = None,
     ) -> AsyncIterator[Token]:
+        dumped: list[dict[str, Any]] = [m.model_dump() for m in messages]
+        if audio is not None and dumped:
+            # TODO(phase 2): verify Ollama field name once gemma3n multimodal lands.
+            b64 = base64.b64encode(audio).decode("ascii")
+            for i in range(len(dumped) - 1, -1, -1):
+                if dumped[i].get("role") == "user":
+                    dumped[i]["audio"] = [b64]
+                    break
         body = {
             "model": model or self.model,
-            "messages": [m.model_dump() for m in messages],
+            "messages": dumped,
             "stream": True,
             "options": {"temperature": temperature},
         }
