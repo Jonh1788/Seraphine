@@ -15,7 +15,7 @@ from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
 from seraphine.tools.registry import build_default_registry
-from seraphine.tts.moss import MossTTSAdapter
+from seraphine.tts.voxtral import VoxtralTTSAdapter
 from seraphine.ws.routes import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,7 +37,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
-    tts = MossTTSAdapter(settings.moss_tts_url)
+    tts = VoxtralTTSAdapter(
+        settings.tts_base_url,
+        default_voice_id=settings.tts_voice,
+        model=settings.tts_model,
+    )
     audio_engine = AudioEngine(llm, tts, store)
 
     app.state.store = store

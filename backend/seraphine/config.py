@@ -20,7 +20,13 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("../data/seraphine.sqlite")
     chroma_path: Path = Path("../data/chroma")
 
-    moss_tts_url: str = "http://localhost:7860"
+    # TTS server (OpenAI-compatible /v1/audio/speech). Default is the local
+    # voxtral_tts_rs server (second-state/voxtral_tts_rs) which serves Voxtral
+    # 4B TTS via MLX on Apple Silicon. Same adapter works against the Mistral
+    # hosted API or any OpenAI-compatible TTS endpoint — only the URL changes.
+    tts_base_url: str = "http://localhost:7860"
+    tts_voice: str = "pt_female"
+    tts_model: str = "voxtral-4b-tts"
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

@@ -36,3 +36,7 @@ voice-samples/
 
 # MOSS-TTS clone (upstream is CUDA-only; not part of this repo)
 services/moss-tts/
+services/moss-tts-openai/
+
+# Voxtral TTS Rust port — binary release + 8GB model weights, fetched at setup
+services/voxtral-tts/
