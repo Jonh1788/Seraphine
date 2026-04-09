@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seraphine.local/schemas/tool.schema.json",
+  "title": "Tool declaration",
+  "description": "Schema describing how a Tool is declared to the LLM and to the approval UI.",
+  "type": "object",
+  "required": ["name", "description", "json_schema", "requires_confirmation"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "description": { "type": "string" },
+    "json_schema": {
+      "description": "JSON Schema for the tool's argument object.",
+      "type": "object"
+    },
+    "requires_confirmation": { "type": "boolean" },
+    "category": {
+      "type": "string",
+      "enum": ["filesystem", "shell", "network", "memory", "other"]
+    }
+  }
+}

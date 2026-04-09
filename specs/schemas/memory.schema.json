@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seraphine.local/schemas/memory.schema.json",
+  "title": "Seraphine memory items",
+  "oneOf": [
+    { "$ref": "#/$defs/Episode" },
+    { "$ref": "#/$defs/Fact" }
+  ],
+  "$defs": {
+    "Episode": {
+      "type": "object",
+      "required": ["id", "kind", "text", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "const": "episode" },
+        "text": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "score": { "type": ["number", "null"] },
+        "metadata": { "type": "object" }
+      }
+    },
+    "Fact": {
+      "type": "object",
+      "required": ["id", "text", "source", "confidence", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "source": {
+          "type": "string",
+          "enum": ["explicit", "reflection", "user_taught"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "superseded_by": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
