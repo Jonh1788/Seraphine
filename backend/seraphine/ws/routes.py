@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -75,8 +76,60 @@ async def conversation_ws(ws: WebSocket) -> None:
                 engine: ConversationEngine = ws.app.state.engine
                 conv_id = payload.get("conversation_id")
                 content = payload.get("content", "")
-                async for event in engine.handle_user_message(conv_id, content):
-                    await ws.send_json(event.model_dump())
+                if engine.tools is None:
+                    async for event in engine.handle_user_message(conv_id, content):
+                        await ws.send_json(event.model_dump())
+                else:
+                    import asyncio as _asyncio
+
+                    async def _drive_turn() -> None:
+                        async for event in engine.handle_user_message(conv_id, content):
+                            await ws.send_json(event.model_dump())
+
+                    turn_task = _asyncio.create_task(_drive_turn())
+                    recv_task: _asyncio.Task[Any] | None = None
+                    while not turn_task.done():
+                        if recv_task is None:
+                            recv_task = _asyncio.create_task(ws.receive())
+                        done, _pending = await _asyncio.wait(
+                            {turn_task, recv_task},
+                            return_when=_asyncio.FIRST_COMPLETED,
+                        )
+                        if recv_task in done:
+                            inner = recv_task.result()
+                            recv_task = None
+                            if inner.get("type") == "websocket.disconnect":
+                                turn_task.cancel()
+                                raise WebSocketDisconnect()
+                            inner_text = inner.get("text")
+                            if inner_text is None:
+                                continue
+                            try:
+                                inner_payload = json.loads(inner_text)
+                            except json.JSONDecodeError:
+                                continue
+                            if (
+                                isinstance(inner_payload, dict)
+                                and inner_payload.get("type") == "tool_approval"
+                            ):
+                                rid = str(inner_payload.get("request_id", ""))
+                                approved = bool(inner_payload.get("approved", False))
+                                ok = await engine.submit_approval(rid, approved)
+                                if not ok:
+                                    await ws.send_json(
+                                        {
+                                            "type": "error",
+                                            "code": "unknown_request_id",
+                                            "message": rid,
+                                        }
+                                    )
+                    if recv_task is not None and not recv_task.done():
+                        recv_task.cancel()
+                        try:
+                            await recv_task
+                        except BaseException:
+                            pass
+                    await turn_task
             elif mtype == "audio_start":
                 audio_buf = bytearray()
             elif mtype == "audio_end":

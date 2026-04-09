@@ -3,6 +3,7 @@ import { SeraphineWS } from './ws/client';
 import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
 import { MicCapture, PCMPlayback } from './audio';
+import { ApprovalPanel } from './tools';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -100,6 +101,7 @@ export function App(): JSX.Element {
         >
           Falar (segure)
         </button>
+        <ApprovalPanel ws={wsRef.current} />
       </aside>
       <section>{wsRef.current && <ChatView ws={wsRef.current} status={status} />}</section>
     </main>

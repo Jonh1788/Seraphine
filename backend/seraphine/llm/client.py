@@ -28,6 +28,7 @@ class OllamaClient:
         model: str | None = None,
         temperature: float = 0.7,
         audio: bytes | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[Token]:
         dumped: list[dict[str, Any]] = [m.model_dump() for m in messages]
         if audio is not None and dumped:
@@ -43,6 +44,8 @@ class OllamaClient:
             "stream": True,
             "options": {"temperature": temperature},
         }
+        if tools is not None:
+            body["tools"] = tools
         done_seen = False
         try:
             async with self._client.stream("POST", "/api/chat", json=body) as resp:
@@ -55,10 +58,18 @@ class OllamaClient:
                     except json.JSONDecodeError:
                         continue
                     text = ""
+                    tool_calls: list[dict[str, Any]] | None = None
                     msg = chunk.get("message")
                     if isinstance(msg, dict):
                         text = msg.get("content", "") or ""
+                        tc = msg.get("tool_calls")
+                        if isinstance(tc, list) and tc:
+                            tool_calls = tc
                     done = bool(chunk.get("done", False))
+                    if tool_calls is not None:
+                        done_seen = True
+                        yield Token(text="", done=True, tool_calls=tool_calls)
+                        break
                     if done:
                         done_seen = True
                     yield Token(text=text, done=done)

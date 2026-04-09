@@ -63,11 +63,35 @@ export interface TtsEndMessage {
   turn_id: string;
 }
 
+// Phase 4 — tool use with approval gate
+export interface ToolRequestMessage {
+  type: 'tool_request';
+  request_id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  requires_confirmation: boolean;
+}
+
+export interface ToolResultMessage {
+  type: 'tool_result';
+  request_id: string;
+  ok: boolean;
+  output: string | null;
+  error: string | null;
+}
+
+export interface ToolApprovalMessage {
+  type: 'tool_approval';
+  request_id: string;
+  approved: boolean;
+}
+
 export type ClientMessage =
   | PingMessage
   | UserMessage
   | AudioStartMessage
   | AudioEndMessage
+  | ToolApprovalMessage
   | { type: string; [k: string]: unknown };
 export type ServerMessage =
   | PongMessage
@@ -76,4 +100,6 @@ export type ServerMessage =
   | TokenMessage
   | TurnEndMessage
   | TtsStartMessage
-  | TtsEndMessage;
+  | TtsEndMessage
+  | ToolRequestMessage
+  | ToolResultMessage;
