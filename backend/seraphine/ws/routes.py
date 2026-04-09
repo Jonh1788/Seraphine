@@ -23,6 +23,8 @@ logger = logging.getLogger("seraphine.ws")
 
 router = APIRouter()
 
+MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB safety cap per utterance
+
 
 class PongMessage(BaseModel):
     type: str = "pong"
@@ -51,6 +53,16 @@ async def conversation_ws(ws: WebSocket) -> None:
                 break
 
             if "bytes" in message and message["bytes"] is not None:
+                if len(audio_buf) + len(message["bytes"]) > MAX_AUDIO_BYTES:
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "audio_too_large",
+                            "message": f"audio buffer exceeds {MAX_AUDIO_BYTES} bytes",
+                        }
+                    )
+                    audio_buf = bytearray()
+                    continue
                 audio_buf.extend(message["bytes"])
                 continue
 
@@ -99,7 +111,14 @@ async def conversation_ws(ws: WebSocket) -> None:
                             inner = recv_task.result()
                             recv_task = None
                             if inner.get("type") == "websocket.disconnect":
+                                # Cancel the turn task AND await it so the
+                                # async generator's finally clause runs and
+                                # cleans up pending_approvals entries.
                                 turn_task.cancel()
+                                try:
+                                    await turn_task
+                                except BaseException:
+                                    pass
                                 raise WebSocketDisconnect()
                             inner_text = inner.get("text")
                             if inner_text is None:

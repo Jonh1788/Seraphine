@@ -107,7 +107,7 @@ export async function playAudioWithLipSync(
   let rafId = 0;
   let stopped = false;
 
-  const setViseme = (name: "aa" | "ih" | "ou" | "neutral", value: number): void => {
+  const setViseme = (name: "aa" | "ih" | "ou", value: number): void => {
     vrm?.expressionManager?.setValue(name, value);
   };
 

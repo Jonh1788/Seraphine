@@ -1,16 +1,52 @@
 from __future__ import annotations
 
+import json
 import logging
+import math
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal, Protocol
 
 from pydantic import BaseModel
 
+from seraphine.llm.types import ChatMessage, Token
 from seraphine.memory.embeddings import EmbeddingsClient
 from seraphine.memory.store import Fact, MemoryStore, Turn
 
 logger = logging.getLogger("seraphine.memory")
+
+REFLECTION_SIM_THRESHOLD = 0.92
+REFLECTION_MIN_TURNS = 5
+REFLECTION_TURN_WINDOW = 100
+
+
+class _LLMLike(Protocol):
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = ...,
+        temperature: float = ...,
+    ) -> AsyncIterator[Token]: ...
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a)) or 1.0
+    nb = math.sqrt(sum(x * x for x in b)) or 1.0
+    return dot / (na * nb)
+
+
+_FACTS_PROMPT = (
+    "You are extracting durable facts about the user from recent conversation"
+    " excerpts. Return STRICT JSON of the form {\"facts\": [\"<fact 1>\", ...]}."
+    " A durable fact is something likely to remain true across sessions"
+    " (preferences, identity, habits, ongoing projects). Skip transient"
+    " content. If nothing qualifies, return {\"facts\": []}."
+)
 
 
 class Memory(BaseModel):
@@ -28,10 +64,12 @@ class MemoryManager:
         store: MemoryStore,
         embeddings: EmbeddingsClient,
         chroma_path: Path,
+        llm: _LLMLike | None = None,
     ) -> None:
         self.store = store
         self.embeddings = embeddings
         self.chroma_path = Path(chroma_path)
+        self.llm = llm
         self._collection: Any = None
 
     async def start(self) -> None:
@@ -125,5 +163,96 @@ class MemoryManager:
             self._collection.delete(ids=[memory_id])
 
     async def reflect(self) -> int:
-        # TODO(phase 5): real reflection job using LLM extraction.
-        return 0
+        """Pull recent turns, ask the LLM to extract durable facts, dedup
+        against existing facts via embedding cosine similarity, and persist
+        the survivors. Returns the number of new facts inserted.
+        Returns 0 (no-op) if no llm is wired or there is too little signal.
+        """
+        if self.llm is None:
+            return 0
+        try:
+            recent = await self.store.get_recent_turns(limit=REFLECTION_TURN_WINDOW)
+        except Exception as e:
+            logger.warning("reflect: get_recent_turns failed: %s", e)
+            return 0
+        if len(recent) < REFLECTION_MIN_TURNS:
+            return 0
+
+        excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in recent)
+        messages = [
+            ChatMessage(role="system", content=_FACTS_PROMPT),
+            ChatMessage(role="user", content=excerpts),
+        ]
+        accumulated: list[str] = []
+        try:
+            async for tok in self.llm.chat(messages, temperature=0.2):
+                if tok.text:
+                    accumulated.append(tok.text)
+        except Exception as e:
+            logger.warning("reflect: llm chat failed: %s", e)
+            return 0
+
+        raw = "".join(accumulated).strip()
+        candidates = _parse_facts_json(raw)
+        if not candidates:
+            return 0
+
+        # Dedup against existing non-superseded facts.
+        existing = await self.store.list_facts(limit=200)
+        existing_texts = [f.text for f in existing]
+        existing_vecs: list[list[float]] = []
+        if existing_texts:
+            try:
+                existing_vecs = await self.embeddings.embed(existing_texts)
+            except Exception as e:
+                logger.warning("reflect: embed existing facts failed: %s", e)
+                existing_vecs = []
+
+        try:
+            cand_vecs = await self.embeddings.embed(candidates)
+        except Exception as e:
+            logger.warning("reflect: embed candidates failed: %s", e)
+            return 0
+
+        inserted = 0
+        for text, vec in zip(candidates, cand_vecs):
+            duplicate = False
+            for ev in existing_vecs:
+                if _cosine(vec, ev) >= REFLECTION_SIM_THRESHOLD:
+                    duplicate = True
+                    break
+            if duplicate:
+                continue
+            await self.store.add_fact(
+                text=text, source="reflection", confidence=0.7
+            )
+            existing_vecs.append(vec)
+            inserted += 1
+        return inserted
+
+
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _parse_facts_json(raw: str) -> list[str]:
+    """Tolerant extractor: pulls the first JSON object from the text and
+    returns its `facts` array as a list of stripped non-empty strings."""
+    if not raw:
+        return []
+    match = _JSON_OBJ_RE.search(raw)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return []
+    facts = data.get("facts") if isinstance(data, dict) else None
+    if not isinstance(facts, list):
+        return []
+    out: list[str] = []
+    for f in facts:
+        if isinstance(f, str):
+            s = f.strip()
+            if s:
+                out.append(s)
+    return out
