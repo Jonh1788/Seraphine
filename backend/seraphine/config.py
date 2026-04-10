@@ -33,5 +33,10 @@ class Settings(BaseSettings):
 
     allowed_tool_roots: list[Path] = [Path.home()]
 
+    # Directory where the LLM logs skill gap requests (via the
+    # request_skill meta-tool). One markdown file per skill, keyed by
+    # slug. Tracked in git so the backlog is reviewable.
+    skills_dir: Path = Path("../skills")
+
 
 settings = Settings()

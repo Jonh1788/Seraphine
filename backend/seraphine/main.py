@@ -44,7 +44,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("MemoryManager.start() failed: %s", e)
 
-    tools = build_default_registry(allowed_roots=list(settings.allowed_tool_roots))
+    tools = build_default_registry(
+        allowed_roots=list(settings.allowed_tool_roots),
+        skills_dir=settings.skills_dir,
+    )
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
     tts = Qwen3TtsAdapter(
         settings.tts_base_url,

@@ -17,7 +17,18 @@ from seraphine.tools.registry import ToolRegistry
 logger = logging.getLogger("seraphine.engine")
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Seraphine, a concise local-first assistant. Reply in the user's language."
+    "You are Seraphine, a concise local-first personal assistant. "
+    "Reply in the user's language. "
+    "You have a set of tools for reading and listing files, running shell "
+    "commands (gated behind human approval), and — crucially — logging "
+    "skill gaps via the `request_skill` tool. "
+    "When the user asks you to do something you CANNOT do with your "
+    "existing tools (e.g. access the internet, send email, query a "
+    "calendar, control hardware, read a PDF), DO NOT refuse and DO NOT "
+    "invent capabilities. Call `request_skill` with a clear name, the "
+    "capability description, and the exact user intent that triggered "
+    "the gap, then briefly tell the user that you've logged a skill "
+    "request and the feature will be available once implemented."
 )
 
 APPROVAL_TIMEOUT_SECONDS = 300

@@ -5,6 +5,7 @@ from typing import Any, Iterator
 
 from seraphine.tools.base import Tool
 from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
+from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.shell import RunShellTool
 
 
@@ -43,10 +44,16 @@ class ToolRegistry:
         return iter(self._tools.values())
 
 
-def build_default_registry(allowed_roots: list[Path]) -> ToolRegistry:
+def build_default_registry(
+    allowed_roots: list[Path],
+    *,
+    skills_dir: Path | None = None,
+) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
     reg.register(ListDirTool(allowed_roots))
     reg.register(WriteFileTool(allowed_roots))
     reg.register(RunShellTool())
+    if skills_dir is not None:
+        reg.register(RequestSkillTool(skills_dir))
     return reg
