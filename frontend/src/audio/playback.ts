@@ -39,6 +39,7 @@ const PLAYBACK_RATE = 1.05;
 
 export class PCMPlayback {
   private ctx: AudioContext;
+  private analyser: AnalyserNode;
   private nextStartTime = 0;
   private scheduled: AudioBufferSourceNode[] = [];
   private pendingFloats: Float32Array[] = [];
@@ -55,6 +56,21 @@ export class PCMPlayback {
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC({ sampleRate: 24000 });
+    // Insert an analyser between source nodes and the destination so
+    // external consumers (e.g. VrmAvatarController for lipsync) can
+    // read running time-domain samples without duplicating the audio
+    // path. fftSize 512 = ~21 ms windows at 24 kHz, good enough for
+    // viseme envelope tracking.
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.analyser.smoothingTimeConstant = 0;
+    this.analyser.connect(this.ctx.destination);
+  }
+
+  /** AnalyserNode fed by every source this player schedules. Hand
+   *  this to VrmAvatarController.attachAudioAnalyser(). */
+  getAnalyser(): AnalyserNode {
+    return this.analyser;
   }
 
   pushChunk(buf: ArrayBuffer): void {
@@ -126,7 +142,9 @@ export class PCMPlayback {
     const src = this.ctx.createBufferSource();
     src.buffer = audioBuf;
     src.playbackRate.value = PLAYBACK_RATE;
-    src.connect(this.ctx.destination);
+    // Route through the analyser so external consumers (lipsync) see
+    // the actual energy envelope.
+    src.connect(this.analyser);
     const now = this.ctx.currentTime;
     const start = Math.max(now, this.nextStartTime);
     src.start(start);

@@ -2,7 +2,9 @@ import {
   AmbientLight,
   Clock,
   DirectionalLight,
+  Euler,
   PerspectiveCamera,
+  Quaternion,
   Scene,
   WebGLRenderer,
   type Object3D,
@@ -10,7 +12,7 @@ import {
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
-import { playAudioWithLipSync } from "./lipsync";
+import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
 
@@ -29,6 +31,12 @@ export class VrmAvatarController implements AvatarAdapter {
   private elapsed = 0;
   private nextBlinkAt: number;
   private blinkingUntil = 0;
+  // Lipsync: optional external AnalyserNode owned by PCMPlayback.
+  // When set, the RAF loop samples it, computes RMS, EMA-smooths,
+  // and drives the VRM's aa/ih/ou viseme blendshapes.
+  private audioAnalyser: AnalyserNode | null = null;
+  private audioTimeData: Float32Array | null = null;
+  private smoothedRms = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -66,6 +74,7 @@ export class VrmAvatarController implements AvatarAdapter {
       const delta = this.clock.getDelta();
       this.elapsed += delta;
       this.updateIdle();
+      this.updateLipsync();
       this.vrm?.update(delta);
       this.renderer.render(this.scene, this.camera);
     };
@@ -96,6 +105,71 @@ export class VrmAvatarController implements AvatarAdapter {
     }
   }
 
+  /** Read samples from the attached analyser, compute RMS, EMA-smooth,
+   *  map to visemes, and apply. No-op if no analyser or no VRM yet. */
+  private updateLipsync(): void {
+    const analyser = this.audioAnalyser;
+    const vrm = this.vrm;
+    if (!analyser || !vrm) return;
+    const em = vrm.expressionManager;
+    if (!em) return;
+
+    if (!this.audioTimeData || this.audioTimeData.length !== analyser.fftSize) {
+      this.audioTimeData = new Float32Array(analyser.fftSize);
+    }
+    analyser.getFloatTimeDomainData(this.audioTimeData);
+    let sumSq = 0;
+    for (let i = 0; i < this.audioTimeData.length; i += 1) {
+      const v = this.audioTimeData[i];
+      sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / this.audioTimeData.length);
+    // EMA smoothing (alpha 0.35 — responsive but not jittery)
+    this.smoothedRms = 0.35 * rms + 0.65 * this.smoothedRms;
+    const w = envelopeToVisemes(this.smoothedRms);
+    em.setValue("aa", w.aa);
+    em.setValue("ih", w.ih);
+    em.setValue("ou", w.ou);
+  }
+
+  /** Attach the AnalyserNode from the audio playback pipeline so the
+   *  RAF loop can drive visemes from actual sample energy. Caller owns
+   *  the node; controller only reads it. Safe to call before or after
+   *  the VRM finishes loading.
+   */
+  attachAudioAnalyser(analyser: AnalyserNode): void {
+    this.audioAnalyser = analyser;
+    this.audioTimeData = new Float32Array(analyser.fftSize);
+    this.smoothedRms = 0;
+  }
+
+  /** Pull the VRM out of its shipped T-pose into a natural standing
+   *  rest pose by rotating the upper arms down at the sides. Called
+   *  once after loadAvatar(). The values target ~68° outward rotation
+   *  around the bone's local Z axis, which for most VRM rigs maps to
+   *  "drop the arm toward the hip". Adjust if your model ships with a
+   *  different axis convention — the Euler is applied in local space.
+   */
+  private applyIdlePose(): void {
+    const vrm = this.vrm;
+    const humanoid = vrm?.humanoid;
+    if (!humanoid) return;
+
+    const setBoneEuler = (name: string, e: Euler): void => {
+      const node = humanoid.getRawBoneNode(name) as Object3D | null | undefined;
+      if (!node) return;
+      const q = new Quaternion().setFromEuler(e);
+      node.quaternion.copy(q);
+    };
+
+    // ~68 degrees outward on each upper arm, plus a tiny forward lean
+    // on the forearm so the arms don't clip through the torso.
+    setBoneEuler("leftUpperArm", new Euler(0, 0, 1.2));
+    setBoneEuler("rightUpperArm", new Euler(0, 0, -1.2));
+    setBoneEuler("leftLowerArm", new Euler(0, -0.15, 0));
+    setBoneEuler("rightLowerArm", new Euler(0, 0.15, 0));
+  }
+
   async loadAvatar(url: string): Promise<void> {
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -112,6 +186,7 @@ export class VrmAvatarController implements AvatarAdapter {
     VRMUtils.rotateVRM0(loadedVrm);
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
+    this.applyIdlePose();
   }
 
   async playAudioWithLipSync(stream: ReadableStream<Uint8Array>): Promise<void> {

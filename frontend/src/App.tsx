@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SeraphineWS } from './ws/client';
 import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
+import type { VrmAvatarController } from './avatar/VrmAvatarController';
 import { MicCapture, PCMPlayback } from './audio';
 import { ApprovalPanel } from './tools';
 
@@ -15,13 +16,18 @@ export function App(): JSX.Element {
   const chunkOffRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    // Eagerly create the player so its AnalyserNode exists before the
+    // VRM avatar is ready to attach to it. AudioContext is idle until
+    // a source actually starts, so there's no cost.
+    if (!playbackRef.current) {
+      playbackRef.current = new PCMPlayback();
+    }
     const ws = new SeraphineWS();
     wsRef.current = ws;
     const offStatus = ws.onStatus((s) => setStatus(s));
     const offMsg = ws.onMessage((msg) => {
       if (msg instanceof ArrayBuffer) {
-        if (!playbackRef.current) playbackRef.current = new PCMPlayback();
-        playbackRef.current.pushChunk(msg);
+        playbackRef.current?.pushChunk(msg);
         return;
       }
       if ((msg as { type?: string }).type === 'tts_end') {
@@ -35,9 +41,17 @@ export function App(): JSX.Element {
       chunkOffRef.current?.();
       micRef.current?.stop();
       playbackRef.current?.dispose();
+      playbackRef.current = null;
       ws.close();
       wsRef.current = null;
     };
+  }, []);
+
+  // Attach the playback's AnalyserNode into the avatar controller so
+  // the RAF loop can drive lipsync visemes from the running audio.
+  const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
+    const pb = playbackRef.current;
+    if (pb) controller.attachAudioAnalyser(pb.getAnalyser());
   }, []);
 
   const handleTalkStart = async (): Promise<void> => {
@@ -79,7 +93,10 @@ export function App(): JSX.Element {
       <div className="layout">
         <aside className="sidebar">
           <div className="avatar-stage">
-            <VrmAvatar avatarUrl="/avatars/seraphine.vrm" />
+            <VrmAvatar
+              avatarUrl="/avatars/seraphine.vrm"
+              onReady={handleAvatarReady}
+            />
           </div>
 
           <div className="controls">
