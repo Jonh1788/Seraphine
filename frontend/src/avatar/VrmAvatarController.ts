@@ -157,11 +157,13 @@ export class VrmAvatarController implements AvatarAdapter {
    *  via setNormalizedPose so vrm.update(delta) (which runs after
    *  this in the RAF loop) respects them instead of snapping back.
    *
-   *  Axis convention, assuming standard VRM T-pose bind:
-   *   - leftUpperArm local +X points OUT to the character's left
-   *   - rotating around local Z with NEGATIVE angle brings +X toward
-   *     -Y (arm down). Positive Z would lift it up.
-   *   - rightUpperArm is the mirror: POSITIVE Z brings it down.
+   *  Axis convention after empirical verification with VRoid-style
+   *  rigs (VRM0 normalized humanoid):
+   *   - leftUpperArm: POSITIVE Z rotation brings the arm DOWN.
+   *   - rightUpperArm: NEGATIVE Z rotation brings the arm DOWN.
+   *  (Intuition said the opposite; live test showed otherwise. My
+   *   first attempt with `getRawBoneNode` was being half-cancelled
+   *   by vrm.update's normalisation, which hid the sign error.)
    *
    *  ~78° gets the arms hanging at the sides on most VRoid-style
    *  rigs. Bump the constant if your model ends up with the elbow
@@ -180,10 +182,10 @@ export class VrmAvatarController implements AvatarAdapter {
     };
 
     humanoid.setNormalizedPose({
-      leftUpperArm: { rotation: q(new Euler(0, 0, -UPPER_ARM)) },
-      rightUpperArm: { rotation: q(new Euler(0, 0, UPPER_ARM)) },
-      leftLowerArm: { rotation: q(new Euler(0, -LOWER_ARM, 0)) },
-      rightLowerArm: { rotation: q(new Euler(0, LOWER_ARM, 0)) },
+      leftUpperArm: { rotation: q(new Euler(0, 0, UPPER_ARM)) },
+      rightUpperArm: { rotation: q(new Euler(0, 0, -UPPER_ARM)) },
+      leftLowerArm: { rotation: q(new Euler(0, LOWER_ARM, 0)) },
+      rightLowerArm: { rotation: q(new Euler(0, -LOWER_ARM, 0)) },
     });
   }
 
