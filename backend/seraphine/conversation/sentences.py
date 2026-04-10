@@ -18,6 +18,8 @@ The splitter is intentionally tiny and PT/EN-friendly:
 
 from __future__ import annotations
 
+import re
+
 _END_PUNCT = set(".!?…")
 # A small abbreviation set; if a `.` is preceded by one of these (case
 # sensitive on the dot's left side), skip the split. Keep the list short on
@@ -117,3 +119,76 @@ def flush_remainder(remainder: str) -> str | None:
     """Trim the trailing tail and return it as a final sentence, or None."""
     s = remainder.strip()
     return s or None
+
+
+# ------------------------------------------------------------------
+# Markdown stripping for TTS
+# ------------------------------------------------------------------
+# The LLM often emits markdown formatting (bold/italic/code/headings/
+# links/lists) that renders nicely in the chat UI but is pure noise
+# when fed to a TTS model — you end up hearing "asterisk asterisk"
+# or the TTS getting confused by stray punctuation. Strip it BEFORE
+# pushing sentences to the speak queue. The client still receives
+# the raw formatted text over the WS for the ChatView to render.
+
+_RE_CODE_FENCE = re.compile(r"```[\s\S]*?```")
+_RE_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_RE_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_RE_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_RE_BOLD_STAR = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_RE_BOLD_UNDER = re.compile(r"__(.+?)__", re.DOTALL)
+_RE_ITALIC_STAR = re.compile(r"(?<![*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![*\w])")
+_RE_ITALIC_UNDER = re.compile(r"(?<![_\w])_(?!\s)([^_\n]+?)(?<!\s)_(?![_\w])")
+_RE_STRIKE = re.compile(r"~~(.+?)~~", re.DOTALL)
+_RE_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_RE_BLOCKQUOTE = re.compile(r"^\s{0,3}>\s?", re.MULTILINE)
+_RE_BULLET = re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE)
+_RE_ORDERED = re.compile(r"^\s{0,3}\d+[.)]\s+", re.MULTILINE)
+_RE_HR = re.compile(r"^\s{0,3}(?:---+|___+|\*\*\*+)\s*$", re.MULTILINE)
+_RE_HTML_TAG = re.compile(r"<[^>]+>")
+_RE_TABLE_PIPE = re.compile(r"\s*\|\s*")
+_RE_MULTI_WS = re.compile(r"[ \t]{2,}")
+_RE_MULTI_NL = re.compile(r"\n{3,}")
+
+
+def strip_markdown_for_tts(text: str) -> str:
+    """Return a TTS-friendly plain-text version of `text`.
+
+    Intentionally small and regex-based — this is NOT a markdown
+    parser, just a scrubber for the common constructs Gemma emits.
+    Anything we miss will still be TTS'd, just with a bit of noise.
+    """
+    if not text:
+        return text
+    s = text
+    # Fenced code blocks disappear entirely — reading them aloud is
+    # useless and they wreck prosody.
+    s = _RE_CODE_FENCE.sub(" ", s)
+    # Inline code: keep the content, drop the backticks.
+    s = _RE_INLINE_CODE.sub(r"\1", s)
+    # Images: drop entirely (alt text isn't worth the noise).
+    s = _RE_IMAGE.sub(" ", s)
+    # Links: keep the label, drop the URL.
+    s = _RE_LINK.sub(r"\1", s)
+    # Bold / italic / strike — keep the inner text.
+    s = _RE_BOLD_STAR.sub(r"\1", s)
+    s = _RE_BOLD_UNDER.sub(r"\1", s)
+    s = _RE_ITALIC_STAR.sub(r"\1", s)
+    s = _RE_ITALIC_UNDER.sub(r"\1", s)
+    s = _RE_STRIKE.sub(r"\1", s)
+    # Block-level markers at line start: drop the marker, keep the
+    # content.
+    s = _RE_HEADING.sub("", s)
+    s = _RE_BLOCKQUOTE.sub("", s)
+    s = _RE_BULLET.sub("", s)
+    s = _RE_ORDERED.sub("", s)
+    # Horizontal rules and raw HTML tags vanish.
+    s = _RE_HR.sub("", s)
+    s = _RE_HTML_TAG.sub("", s)
+    # Tables: replace pipe separators with a single space so each row
+    # reads as "col col col" instead of "col pipe col pipe col".
+    s = _RE_TABLE_PIPE.sub(" ", s)
+    # Collapse whitespace noise left behind by the substitutions.
+    s = _RE_MULTI_WS.sub(" ", s)
+    s = _RE_MULTI_NL.sub("\n\n", s)
+    return s.strip()

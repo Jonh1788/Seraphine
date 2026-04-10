@@ -19,7 +19,11 @@ from seraphine.conversation.audio_engine import (
     TurnEndEvent as AudioTurnEndEvent,
 )
 from seraphine.conversation.engine import ConversationEngine
-from seraphine.conversation.sentences import flush_remainder, split_sentences
+from seraphine.conversation.sentences import (
+    flush_remainder,
+    split_sentences,
+    strip_markdown_for_tts,
+)
 
 logger = logging.getLogger("seraphine.ws")
 
@@ -169,7 +173,9 @@ async def conversation_ws(ws: WebSocket) -> None:
                         return
                     sents, sentence_buf = split_sentences(sentence_buf)
                     for s in sents:
-                        speak_queue.put_nowait(s)
+                        cleaned = strip_markdown_for_tts(s)
+                        if cleaned:
+                            speak_queue.put_nowait(cleaned)
 
                 if engine.tools is None:
                     async for event in engine.handle_user_message(conv_id, content):
@@ -190,7 +196,9 @@ async def conversation_ws(ws: WebSocket) -> None:
                                 # Drain final partial sentence as the last unit.
                                 tail = flush_remainder(sentence_buf)
                                 if tail:
-                                    speak_queue.put_nowait(tail)
+                                    cleaned_tail = strip_markdown_for_tts(tail)
+                                    if cleaned_tail:
+                                        speak_queue.put_nowait(cleaned_tail)
                                     sentence_buf = ""
                                 speak_queue.put_nowait(_SENTENCE_EOS)
                         await ws.send_json(event.model_dump())
@@ -217,7 +225,9 @@ async def conversation_ws(ws: WebSocket) -> None:
                                 if speak and speak_queue is not None:
                                     tail = flush_remainder(sentence_buf)
                                     if tail:
-                                        speak_queue.put_nowait(tail)
+                                        cleaned_tail = strip_markdown_for_tts(tail)
+                                        if cleaned_tail:
+                                            speak_queue.put_nowait(cleaned_tail)
                                         sentence_buf = ""
                                     speak_queue.put_nowait(_SENTENCE_EOS)
                             await ws.send_json(event.model_dump())
