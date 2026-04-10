@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # at the RTX box, which exposes its own /v1/audio/voice-clone shape
     # with pre-registered voice aliases (the speaker x-vector is
     # pre-computed server-side from the mounted reference audio).
-    tts_base_url: str = "http://192.168.15.6:8010"
+    tts_base_url: str = "http://192.168.15.6:8011"
     tts_voice: str = "dubgrav"
     tts_language: str = "Portuguese"
     tts_x_vector_only_mode: bool = True
