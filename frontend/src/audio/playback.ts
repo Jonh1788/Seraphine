@@ -35,7 +35,7 @@ const PREBUFFER_SECONDS = 0.6;
  * consecutive chunks leave an audible gap of `duration * (1 - 1/rate)`
  * between them.
  */
-const PLAYBACK_RATE = 1.05;
+const PLAYBACK_RATE = 1.03;
 
 export class PCMPlayback {
   private ctx: AudioContext;

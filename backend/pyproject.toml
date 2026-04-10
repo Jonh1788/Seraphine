@@ -13,6 +13,7 @@ dependencies = [
     "chromadb>=0.5",
     "beautifulsoup4>=4.12",
     "truststore>=0.10",
+    "mlx-whisper>=0.4.3",
 ]
 
 [project.optional-dependencies]

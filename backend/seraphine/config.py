@@ -24,10 +24,25 @@ class Settings(BaseSettings):
     # at the RTX box, which exposes its own /v1/audio/voice-clone shape
     # with pre-registered voice aliases (the speaker x-vector is
     # pre-computed server-side from the mounted reference audio).
+    # Local STT (mic input → text). Uses mlx-whisper, runs on MLX /
+    # Metal on Apple Silicon. First call downloads the model weights
+    # from Hugging Face to ~/.cache/huggingface/hub.
+    stt_model: str = "mlx-community/whisper-small-mlx-q4"
+    stt_language: str = "pt"
+
     tts_base_url: str = "http://192.168.15.6:8011"
     tts_voice: str = "dubgrav"
     tts_language: str = "Portuguese"
-    tts_x_vector_only_mode: bool = True
+    tts_x_vector_only_mode: bool = False
+    # Transcrição do áudio de referência do voice alias (necessária em ICL mode,
+    # i.e. x_vector_only_mode=False). Deve casar literalmente com o que é falado
+    # no WAV de referência montado no servidor sob o nome `tts_voice`.
+    tts_ref_text: str = ""
+    tts_max_new_tokens: int = 512
+    tts_temperature: float = 0.85
+    tts_top_k: int = 65
+    tts_repetition_penalty: float = 1.05
+    tts_seed: int = 42
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

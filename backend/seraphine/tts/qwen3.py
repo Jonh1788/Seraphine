@@ -63,12 +63,24 @@ class Qwen3TtsAdapter(TTSAdapter):
         default_voice: str = "dubgrav",
         language: str = "Portuguese",
         x_vector_only_mode: bool = True,
+        ref_text: str = "",
+        max_new_tokens: int = 512,
+        temperature: float = 0.85,
+        top_k: int = 65,
+        repetition_penalty: float = 1.05,
+        seed: int = 42,
         timeout: float = 180.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.default_voice = default_voice
         self.language = language
         self.x_vector_only_mode = x_vector_only_mode
+        self.ref_text = ref_text
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+        self.top_k = top_k
+        self.repetition_penalty = repetition_penalty
+        self.seed = seed
         self.timeout = timeout
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
 
@@ -96,7 +108,14 @@ class Qwen3TtsAdapter(TTSAdapter):
             "voice": voice_id if voice_id is not None else self.default_voice,
             "language": self.language,
             "x_vector_only_mode": self.x_vector_only_mode,
+            "max_new_tokens": self.max_new_tokens,
+            "temperature": self.temperature,
+            "top_k": self.top_k,
+            "repetition_penalty": self.repetition_penalty,
+            "seed": self.seed,
         }
+        if not self.x_vector_only_mode and self.ref_text:
+            body["ref_text"] = self.ref_text
 
         try:
             resp = await self._client.post("/v1/audio/voice-clone", json=body)

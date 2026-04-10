@@ -13,6 +13,7 @@ from seraphine.conversation.audio_engine import (
     AudioEngine,
     ErrorEvent as AudioErrorEvent,
     TokenEvent as AudioTokenEvent,
+    TranscriptionEvent,
     TtsChunkEvent,
     TtsEndEvent,
     TtsStartEvent,
@@ -30,6 +31,12 @@ logger = logging.getLogger("seraphine.ws")
 router = APIRouter()
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB safety cap per utterance
+
+# Minimum character threshold before the speak worker sends a batch to TTS.
+# Sentences accumulate until this limit is reached, then the whole batch is
+# synthesized in a single request. Larger batches = better prosody & fewer
+# HTTP round-trips, at the cost of slightly higher time-to-first-audio.
+TTS_CHUNK_MIN_CHARS = 120
 
 
 class PongMessage(BaseModel):
@@ -76,37 +83,56 @@ async def _speak_worker(
                 return
 
     started = False
-    while True:
-        item = await queue.get()
-        if item is _SENTENCE_EOS:
-            if started:
-                await ws.send_json({"type": "tts_end", "turn_id": turn_id})
-            return
-        sentence = item if isinstance(item, str) else ""
-        if not sentence:
-            continue
+    batch: list[str] = []
+    batch_len = 0
+
+    async def _synth_batch() -> bool:
+        """Synthesize the accumulated batch. Returns False on TTS failure."""
+        nonlocal started, batch, batch_len
+        if not batch:
+            return True
+        text = " ".join(batch)
+        batch = []
+        batch_len = 0
         if not started:
             await ws.send_json(
                 {"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000}
             )
             started = True
         try:
-            async for chunk in tts.synthesize_stream(sentence):
+            async for chunk in tts.synthesize_stream(text):
                 if chunk:
                     await ws.send_bytes(chunk)
         except Exception as e:
-            logger.warning("speak worker tts failure on sentence: %s", e)
+            logger.warning("speak worker tts failure on batch: %s", e)
             await ws.send_json(
                 {"type": "error", "code": "tts_unavailable", "message": str(e)}
             )
-            # Drain remaining sentences without synthesizing — the worker
-            # still needs to emit tts_end so the client closes its player.
-            while True:
-                item = await queue.get()
-                if item is _SENTENCE_EOS:
-                    if started:
-                        await ws.send_json({"type": "tts_end", "turn_id": turn_id})
-                    return
+            return False
+        return True
+
+    while True:
+        item = await queue.get()
+        if item is _SENTENCE_EOS:
+            await _synth_batch()
+            if started:
+                await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+            return
+        sentence = item if isinstance(item, str) else ""
+        if not sentence:
+            continue
+        batch.append(sentence)
+        batch_len += len(sentence)
+        if batch_len >= TTS_CHUNK_MIN_CHARS:
+            ok = await _synth_batch()
+            if not ok:
+                # Drain remaining sentences — still need tts_end.
+                while True:
+                    item = await queue.get()
+                    if item is _SENTENCE_EOS:
+                        if started:
+                            await ws.send_json({"type": "tts_end", "turn_id": turn_id})
+                        return
 
 
 @router.websocket("/ws/conversation")
@@ -311,7 +337,55 @@ async def conversation_ws(ws: WebSocket) -> None:
                     continue
                 conv_id = payload.get("conversation_id")
                 buf = bytes(audio_buf)
+
+                # Mic path always produces an audio reply: run sentence-
+                # level streaming TTS on the assistant tokens exactly
+                # like the user_message speak=true path does.
+                audio_sentence_buf = ""
+                audio_final_turn_id: str | None = None
+                audio_speak_queue: "asyncio.Queue[str | object]" | None = None
+                audio_speak_task: asyncio.Task[None] | None = None
+
                 async for event in audio_engine.handle_user_audio(conv_id, buf):
+                    if isinstance(event, TranscriptionEvent):
+                        await ws.send_json(event.model_dump())
+                        continue
+                    if isinstance(event, AudioTokenEvent):
+                        text_chunk = event.text
+                        audio_sentence_buf += text_chunk
+                        if audio_speak_queue is None:
+                            audio_final_turn_id = event.turn_id
+                            audio_speak_queue = asyncio.Queue()
+                            audio_speak_task = asyncio.create_task(
+                                _speak_worker(
+                                    ws, audio_speak_queue, audio_final_turn_id or ""
+                                )
+                            )
+                        sents, audio_sentence_buf = split_sentences(audio_sentence_buf)
+                        for s in sents:
+                            cleaned = strip_markdown_for_tts(s)
+                            if cleaned:
+                                audio_speak_queue.put_nowait(cleaned)
+                        await ws.send_json(event.model_dump())
+                        continue
+                    if isinstance(event, AudioTurnEndEvent):
+                        audio_final_turn_id = event.turn_id
+                        if audio_speak_queue is not None:
+                            tail = flush_remainder(audio_sentence_buf)
+                            if tail:
+                                cleaned_tail = strip_markdown_for_tts(tail)
+                                if cleaned_tail:
+                                    audio_speak_queue.put_nowait(cleaned_tail)
+                                audio_sentence_buf = ""
+                            audio_speak_queue.put_nowait(_SENTENCE_EOS)
+                        await ws.send_json(event.model_dump())
+                        continue
+                    if isinstance(event, AudioErrorEvent):
+                        await ws.send_json(event.model_dump())
+                        continue
+                    # Legacy paths (TtsStart/TtsChunk/TtsEnd emitted
+                    # directly by the old AudioEngine) are still
+                    # handled just in case a caller injects them.
                     if isinstance(event, TtsChunkEvent):
                         await ws.send_bytes(event.pcm)
                     elif isinstance(event, TtsStartEvent):
@@ -326,10 +400,12 @@ async def conversation_ws(ws: WebSocket) -> None:
                         await ws.send_json(
                             {"type": "tts_end", "turn_id": event.turn_id}
                         )
-                    elif isinstance(
-                        event, (AudioTokenEvent, AudioTurnEndEvent, AudioErrorEvent)
-                    ):
-                        await ws.send_json(event.model_dump())
+
+                if audio_speak_task is not None:
+                    try:
+                        await audio_speak_task
+                    except Exception as e:  # pragma: no cover
+                        logger.warning("audio speak_task failed: %s", e)
                 audio_buf = bytearray()
             else:
                 await ws.send_json(EchoMessage(data=payload).model_dump())

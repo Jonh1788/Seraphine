@@ -14,6 +14,7 @@ from seraphine.llm.client import OllamaClient
 from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
+from seraphine.stt.whisper import WhisperSTT
 from seraphine.tools.registry import build_default_registry
 from seraphine.tts.qwen3 import Qwen3TtsAdapter
 from seraphine.ws.routes import router as ws_router
@@ -54,13 +55,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         default_voice=settings.tts_voice,
         language=settings.tts_language,
         x_vector_only_mode=settings.tts_x_vector_only_mode,
+        ref_text=settings.tts_ref_text,
+        max_new_tokens=settings.tts_max_new_tokens,
+        temperature=settings.tts_temperature,
+        top_k=settings.tts_top_k,
+        repetition_penalty=settings.tts_repetition_penalty,
+        seed=settings.tts_seed,
     )
     logger.info(
         "Qwen3-TTS adapter wired (base_url=%s voice=%s)",
         settings.tts_base_url,
         settings.tts_voice,
     )
-    audio_engine = AudioEngine(llm, tts, store)
+    # Local STT for the mic path. Lazy-loads mlx-whisper + model on
+    # first transcribe() call so backend startup isn't blocked.
+    stt = WhisperSTT(model=settings.stt_model, language=settings.stt_language)
+    logger.info(
+        "WhisperSTT wired (model=%s language=%s)",
+        settings.stt_model,
+        settings.stt_language,
+    )
+    audio_engine = AudioEngine(llm, tts, store, stt=stt, engine=engine)
 
     app.state.store = store
     app.state.llm = llm

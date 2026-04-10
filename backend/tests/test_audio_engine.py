@@ -10,15 +10,13 @@ from seraphine.conversation.audio_engine import (
     AudioEngine,
     ErrorEvent,
     TokenEvent,
-    TtsChunkEvent,
-    TtsEndEvent,
-    TtsStartEvent,
+    TranscriptionEvent,
     TurnEndEvent,
 )
+from seraphine.conversation.engine import ConversationEngine
 from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
 from seraphine.memory.store import MemoryStore
-from seraphine.tts.base import TTSAdapter
-from seraphine.tts.moss import FakeTTSAdapter, TTSUnavailableError
+from seraphine.stt.whisper import STTUnavailableError, Transcription
 
 
 class FakeLLM:
@@ -28,7 +26,7 @@ class FakeLLM:
         *,
         model: str | None = None,
         temperature: float = 0.7,
-        audio: bytes | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[Token]:
         for c in ["he", "llo"]:
             yield Token(text=c, done=False)
@@ -43,77 +41,91 @@ class BrokenLLM:
         yield Token(text="", done=True)  # pragma: no cover
 
 
-class BrokenTTS(TTSAdapter):
-    async def synthesize_stream(  # type: ignore[override]
-        self, text: Any, *, voice_id: str | None = None
-    ) -> AsyncIterator[bytes]:
-        raise TTSUnavailableError("tts down")
-        yield b""  # pragma: no cover
+class FakeSTT:
+    def __init__(self, text: str = "olá mundo") -> None:
+        self._text = text
+
+    async def transcribe(self, pcm: bytes, sample_rate: int = 16000) -> Transcription:
+        return Transcription(text=self._text, language="pt", duration_seconds=0.5)
+
+
+class EmptySTT:
+    async def transcribe(self, pcm: bytes, sample_rate: int = 16000) -> Transcription:
+        return Transcription(text="", language="pt", duration_seconds=0.0)
+
+
+class BrokenSTT:
+    async def transcribe(self, pcm: bytes, sample_rate: int = 16000) -> Transcription:
+        raise STTUnavailableError("whisper down")
+
+
+def _make_engine(llm: Any, store: MemoryStore, stt: Any) -> AudioEngine:
+    conv = ConversationEngine(llm=llm, store=store)
+    return AudioEngine(llm, None, store, stt=stt, engine=conv)
 
 
 @pytest.mark.asyncio
-async def test_audio_engine_full_sequence(tmp_path: Path) -> None:
+async def test_audio_engine_transcribes_then_delegates(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "t.sqlite")
     await store.ensure_schema()
-    tts = FakeTTSAdapter([b"\x00\x01", b"\x02\x03"])
-    engine = AudioEngine(FakeLLM(), tts, store)
+    engine = _make_engine(FakeLLM(), store, FakeSTT("olá mundo"))
 
     events = []
     async for ev in engine.handle_user_audio(None, b"\x00" * 32):
         events.append(ev)
 
-    token_events = [e for e in events if isinstance(e, TokenEvent)]
-    assert len(token_events) == 2
+    tx = [e for e in events if isinstance(e, TranscriptionEvent)]
+    assert len(tx) == 1 and tx[0].text == "olá mundo"
+    tokens = [e for e in events if isinstance(e, TokenEvent)]
+    assert len(tokens) >= 1
     assert sum(isinstance(e, TurnEndEvent) for e in events) == 1
-    assert sum(isinstance(e, TtsStartEvent) for e in events) == 1
-    chunks = [e for e in events if isinstance(e, TtsChunkEvent)]
-    assert len(chunks) == 2
-    assert sum(isinstance(e, TtsEndEvent) for e in events) == 1
+    assert events.index(tx[0]) < events.index(tokens[0])
 
-    # Order: tokens -> turn_end -> tts_start -> chunks -> tts_end
-    types_order = [type(e).__name__ for e in events]
-    assert types_order.index("TurnEndEvent") > types_order.index("TokenEvent")
-    assert types_order.index("TtsStartEvent") > types_order.index("TurnEndEvent")
-    assert types_order.index("TtsEndEvent") > types_order.index("TtsChunkEvent")
-
-    conv_id = token_events[0].conversation_id
+    conv_id = tokens[0].conversation_id
     turns = await store.get_turns(conv_id)
-    # Audio user turns are intentionally NOT persisted (placeholder pollutes
-    # both prior context and Phase 5 episodic memory). Only the assistant's
-    # text reply lands in storage until real STT is wired in.
-    assert len(turns) == 1
-    assert turns[0].role == "assistant"
-    assert turns[0].content == "hello"
+    # Real transcript now persists as the user turn (no more "[audio]" pollution).
+    assert [t.role for t in turns] == ["user", "assistant"]
+    assert turns[0].content == "olá mundo"
+    assert turns[1].content == "hello"
 
 
 @pytest.mark.asyncio
-async def test_audio_engine_llm_error(tmp_path: Path) -> None:
+async def test_audio_engine_stt_unavailable(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "t.sqlite")
     await store.ensure_schema()
-    engine = AudioEngine(BrokenLLM(), FakeTTSAdapter([b"\x00"]), store)
+    engine = AudioEngine(FakeLLM(), None, store, stt=None)
 
-    events = []
-    async for ev in engine.handle_user_audio(None, b"\x00"):
-        events.append(ev)
-
-    assert any(
-        isinstance(e, ErrorEvent) and e.code == "llm_unavailable" for e in events
-    )
-    assert not any(isinstance(e, TtsStartEvent) for e in events)
+    events = [ev async for ev in engine.handle_user_audio(None, b"\x00")]
+    assert any(isinstance(e, ErrorEvent) and e.code == "stt_unavailable" for e in events)
 
 
 @pytest.mark.asyncio
-async def test_audio_engine_tts_error(tmp_path: Path) -> None:
+async def test_audio_engine_stt_empty(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "t.sqlite")
     await store.ensure_schema()
-    engine = AudioEngine(FakeLLM(), BrokenTTS(), store)
+    engine = _make_engine(FakeLLM(), store, EmptySTT())
 
-    events = []
-    async for ev in engine.handle_user_audio(None, b"\x00"):
-        events.append(ev)
+    events = [ev async for ev in engine.handle_user_audio(None, b"\x00")]
+    assert any(isinstance(e, ErrorEvent) and e.code == "stt_empty" for e in events)
+    assert not any(isinstance(e, TokenEvent) for e in events)
 
-    assert any(isinstance(e, TurnEndEvent) for e in events)
-    assert any(
-        isinstance(e, ErrorEvent) and e.code == "tts_unavailable" for e in events
-    )
-    assert not any(isinstance(e, TtsEndEvent) for e in events)
+
+@pytest.mark.asyncio
+async def test_audio_engine_stt_failed(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "t.sqlite")
+    await store.ensure_schema()
+    engine = _make_engine(FakeLLM(), store, BrokenSTT())
+
+    events = [ev async for ev in engine.handle_user_audio(None, b"\x00")]
+    assert any(isinstance(e, ErrorEvent) and e.code == "stt_failed" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_audio_engine_llm_error_after_transcription(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "t.sqlite")
+    await store.ensure_schema()
+    engine = _make_engine(BrokenLLM(), store, FakeSTT())
+
+    events = [ev async for ev in engine.handle_user_audio(None, b"\x00")]
+    assert any(isinstance(e, TranscriptionEvent) for e in events)
+    assert any(isinstance(e, ErrorEvent) for e in events)
