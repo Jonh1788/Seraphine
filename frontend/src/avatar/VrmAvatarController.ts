@@ -135,7 +135,15 @@ export class VrmAvatarController implements AvatarAdapter {
     const rms = Math.sqrt(sumSq / this.audioTimeData.length);
     // EMA smoothing (alpha 0.35 — responsive but not jittery)
     this.smoothedRms = 0.35 * rms + 0.65 * this.smoothedRms;
-    const w = envelopeToVisemes(this.smoothedRms);
+    // Gain the RMS before mapping to visemes. Real speech usually
+    // peaks at RMS ~0.1-0.15 (normalized -1..1 samples), and the
+    // envelopeToVisemes thresholds expect up to 0.4 for full 'ih'
+    // weight. Without this boost the mouth only half-opens. 2.8
+    // tuned empirically so a normal-volume TTS reply drives the
+    // mouth through the full `aa` range at vowels without clipping
+    // silences open.
+    const boosted = Math.min(1, this.smoothedRms * 2.8);
+    const w = envelopeToVisemes(boosted);
     em.setValue("aa", w.aa);
     em.setValue("ih", w.ih);
     em.setValue("ou", w.ou);
