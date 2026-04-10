@@ -499,6 +499,40 @@ button:disabled {
   color: #fda4a4;
 }
 
+/* ---------- Bubble images (inline thumbnails in chat) ---------- */
+
+.bubble__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.bubble__image-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  padding: 0;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 80ms ease;
+}
+
+.bubble__image-thumb:hover {
+  border-color: var(--accent-dim);
+  transform: scale(1.05);
+}
+
+.bubble__image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .cursor {
   display: inline-block;
   width: 2px;
@@ -542,6 +576,171 @@ button:disabled {
 
 .chat__input:disabled {
   opacity: 0.5;
+}
+
+/* ---------- Attach button (image picker) ---------- */
+
+.btn-attach {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.btn-attach:hover:not(:disabled) {
+  background: var(--bg-2);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.btn-attach__icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- Image preview strip (above composer) ---------- */
+
+.image-preview-strip {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.image-preview {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.image-preview__badge {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.image-preview__img {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.image-preview__remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  padding: 0;
+  border: 1px solid var(--bg-1);
+  cursor: pointer;
+  transition: transform 80ms ease;
+}
+
+.image-preview__remove:hover {
+  transform: scale(1.15);
+}
+
+.image-preview__name {
+  font-size: 9px;
+  color: var(--text-faint);
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* ---------- Lightbox (full-size image overlay) ---------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.lightbox__close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.lightbox__close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.lightbox__img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  cursor: default;
+}
+
+/* ---------- Visually hidden utility ---------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- Approval panel ---------- */
@@ -1484,6 +1683,19 @@ button:disabled {
   .chat__input {
     padding: 10px 12px;
     font-size: 16px; /* prevents iOS zoom on focus */
+  }
+
+  /* --- Attach button: match mic size on mobile --- */
+  .btn-attach {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* --- Image preview strip compact --- */
+  .image-preview-strip {
+    padding: var(--space-2) var(--space-3);
   }
 
   /* --- Mic button: slightly larger for touch --- */

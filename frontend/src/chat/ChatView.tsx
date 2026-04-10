@@ -17,6 +17,8 @@ interface Turn {
   streaming?: boolean;
   /** If set, this turn is an inline MCP task approval request. */
   mcpApproval?: McpApproval;
+  /** Attached images (data URLs) for user turns with vision content. */
+  images?: string[];
 }
 
 /**
@@ -189,6 +191,9 @@ export function ChatView({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<{name: string; dataUrl: string}[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, 'approved' | 'rejected'>>(new Map());
   const CONV_KEY = 'seraphine_conversation_id';
@@ -320,23 +325,46 @@ export function ChatView({
   }, [turns]);
 
   const isStreaming = streamingTurnId !== null;
-  const canSend = status === 'connected' && !isStreaming && draft.trim().length > 0;
+  const canSend = status === 'connected' && !isStreaming && (draft.trim().length > 0 || pendingImages.length > 0);
 
   const send = (): void => {
     if (!canSend) return;
     const content = draft.trim();
+    const images = pendingImages.length > 0 ? pendingImages.map((i) => i.dataUrl) : undefined;
     setTurns((prev) => [
       ...prev,
-      { id: `u-${Date.now()}`, role: 'user', content },
+      { id: `u-${Date.now()}`, role: 'user', content: content || '(imagem)', images },
     ]);
     ws.send({
       type: 'user_message',
       conversation_id: conversationIdRef.current,
-      content,
+      content: content || '',
       speak,
       think,
+      ...(images ? { images } : {}),
     });
     setDraft('');
+    setPendingImages([]);
+  };
+
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setPendingImages((prev) => [...prev, { name: file.name, dataUrl: reader.result as string }]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset so the same file can be selected again
+    e.target.value = '';
+  };
+
+  const removePendingImage = (index: number): void => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleMcpApproval = useCallback(
@@ -415,12 +443,12 @@ export function ChatView({
     <>
       {turns.length > 0 && (
         <div className="chat__toolbar">
-          <button type="button" className="btn-new-chat" onClick={handleNewConversation}>
+          <button type="button" className="btn-new-chat" aria-label="Nova conversa" onClick={handleNewConversation}>
             Nova conversa
           </button>
         </div>
       )}
-      <div ref={messagesRef} className="chat__messages">
+      <div ref={messagesRef} className="chat__messages" role="log" aria-live="polite">
         {turns.length === 0 && (
           <div className="chat__empty">
             <strong>Comece a conversa</strong>
@@ -441,6 +469,21 @@ export function ChatView({
                   {t.role === 'user' ? 'Voce' : t.role === 'assistant' ? 'Seraphine' : 'Erro'}
                 </div>
                 <div className="bubble__content">
+                  {t.images && t.images.length > 0 && (
+                    <div className="bubble__images">
+                      {t.images.map((src, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          className="bubble__image-thumb"
+                          onClick={() => setLightboxSrc(src)}
+                          title={`Imagem ${idx + 1}`}
+                        >
+                          <img src={src} alt={`Imagem ${idx + 1}`} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {parsed && parsed.thinking !== null && (
                     <ThinkingBlock
                       thinking={parsed.thinking}
@@ -486,6 +529,27 @@ export function ChatView({
         </div>
       )}
 
+      {/* Image preview strip */}
+      {pendingImages.length > 0 && (
+        <div className="image-preview-strip">
+          {pendingImages.map((img, idx) => (
+            <div key={idx} className="image-preview">
+              <span className="image-preview__badge">{idx + 1}</span>
+              <img src={img.dataUrl} alt={img.name} className="image-preview__img" />
+              <button
+                type="button"
+                className="image-preview__remove"
+                onClick={() => removePendingImage(idx)}
+                aria-label={`Remover ${img.name}`}
+              >
+                &times;
+              </button>
+              <span className="image-preview__name">{img.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="chat__composer">
         {talking ? (
           /* While recording, replace the input with recording controls */
@@ -515,8 +579,30 @@ export function ChatView({
           /* Normal text input */
           <>
             <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="visually-hidden"
+              onChange={handleFilesSelected}
+              tabIndex={-1}
+            />
+            <button
+              type="button"
+              className="btn-attach"
+              aria-label="Anexar imagem"
+              title="Anexar imagem"
+              disabled={!connected || isStreaming}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="btn-attach__icon">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+            <input
               type="text"
               className="chat__input"
+              aria-label="Mensagem"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -526,12 +612,14 @@ export function ChatView({
                 connected
                   ? isStreaming
                     ? 'Aguarde a resposta...'
-                    : 'Digite e Enter...'
+                    : pendingImages.length > 0
+                      ? 'Pergunte sobre as imagens...'
+                      : 'Digite e Enter...'
                   : 'Desconectado'
               }
               disabled={!connected || isStreaming}
             />
-            <button type="button" className="btn btn-primary" onClick={send} disabled={!canSend}>
+            <button type="button" className="btn btn-primary" aria-label="Enviar" onClick={send} disabled={!canSend}>
               Enviar
             </button>
           </>
@@ -541,6 +629,7 @@ export function ChatView({
         <button
           type="button"
           className={`btn-mic${talking ? ' btn-mic--active' : ''}`}
+          aria-label="Gravar áudio"
           disabled={!connected}
           onPointerDown={handleMicPointerDown}
           onPointerMove={handleMicPointerMove}
@@ -569,6 +658,14 @@ export function ChatView({
           </svg>
         </button>
       </div>
+
+      {/* Lightbox for full-size image viewing */}
+      {lightboxSrc && (
+        <div className="lightbox" onClick={() => setLightboxSrc(null)}>
+          <button type="button" className="lightbox__close" aria-label="Fechar">&times;</button>
+          <img src={lightboxSrc} alt="Imagem ampliada" className="lightbox__img" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </>
   );
 }

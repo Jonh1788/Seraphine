@@ -28,6 +28,8 @@ export interface UserMessage {
   /** When true, the backend follows turn_end with TTS frames so the
    *  assistant reply is also spoken aloud (typed input + voice output). */
   speak?: boolean;
+  /** Base64 data-URL images attached to this message (vision support). */
+  images?: string[];
 }
 
 export interface TokenMessage {

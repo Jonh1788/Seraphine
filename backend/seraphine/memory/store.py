@@ -47,11 +47,21 @@ def _now() -> str:
 class MemoryStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
+        self._conn: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        if self._conn is not None:
+            return self._conn
+        conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
+        self._conn = conn
         return conn
+
+    async def aclose(self) -> None:
+        """Close the persistent connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     async def ensure_schema(self) -> None:
         def _work() -> None:
@@ -195,13 +205,14 @@ class MemoryStore:
 
         return await asyncio.to_thread(_work)
 
-    async def get_turns(self, conversation_id: str) -> list[Turn]:
+    async def get_turns(self, conversation_id: str, *, limit: int = 500) -> list[Turn]:
         def _work() -> list[Turn]:
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT id, conversation_id, role, content, created_at, token_count"
-                    " FROM turns WHERE conversation_id = ? ORDER BY created_at ASC",
-                    (conversation_id,),
+                    " FROM turns WHERE conversation_id = ? ORDER BY created_at ASC"
+                    " LIMIT ?",
+                    (conversation_id, limit),
                 ).fetchall()
             return [
                 Turn(
@@ -314,10 +325,13 @@ class MemoryStore:
                     " FROM conversations c ORDER BY c.created_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
-            return [
-                {"id": r[0], "created_at": r[1], "preview": r[2] or ""}
-                for r in rows
-            ]
+            results = []
+            for r in rows:
+                preview = r[2] or ""
+                if len(preview) > 100:
+                    preview = preview[:100] + "..."
+                results.append({"id": r[0], "created_at": r[1], "preview": preview})
+            return results
 
         return await asyncio.to_thread(_work)
 

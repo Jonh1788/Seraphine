@@ -71,6 +71,7 @@ class MemoryManager:
         self.chroma_path = Path(chroma_path)
         self.llm = llm
         self._collection: Any = None
+        self._fact_embedding_cache: dict[str, list[float]] = {}
 
     async def start(self) -> None:
         if self._collection is not None:
@@ -150,7 +151,13 @@ class MemoryManager:
         source: str = "explicit",
         confidence: float = 1.0,
     ) -> Fact:
-        return await self.store.add_fact(text=text, source=source, confidence=confidence)
+        fact = await self.store.add_fact(text=text, source=source, confidence=confidence)
+        try:
+            vecs = await self.embeddings.embed([text])
+            self._fact_embedding_cache[fact.id] = vecs[0]
+        except Exception as e:
+            logger.warning("learn_fact: embed for cache failed: %s", e)
+        return fact
 
     async def forget(self, memory_id: str) -> None:
         existing_fact = await self.store.get_fact(memory_id)
@@ -158,6 +165,7 @@ class MemoryManager:
             # Self-supersede so list_facts (which filters WHERE superseded_by IS NULL)
             # excludes it. A real new fact id can also be passed via store.supersede_fact.
             await self.store.supersede_fact(memory_id, memory_id)
+            self._fact_embedding_cache.pop(memory_id, None)
             return
         if self._collection is not None:
             self._collection.delete(ids=[memory_id])
@@ -197,16 +205,24 @@ class MemoryManager:
         if not candidates:
             return 0
 
-        # Dedup against existing non-superseded facts.
+        # Dedup against existing non-superseded facts using cached embeddings.
         existing = await self.store.list_facts(limit=200)
-        existing_texts = [f.text for f in existing]
-        existing_vecs: list[list[float]] = []
-        if existing_texts:
+
+        # Only embed facts not already in cache.
+        uncached = [f for f in existing if f.id not in self._fact_embedding_cache]
+        if uncached:
             try:
-                existing_vecs = await self.embeddings.embed(existing_texts)
+                new_vecs = await self.embeddings.embed([f.text for f in uncached])
+                for fact, vec in zip(uncached, new_vecs):
+                    self._fact_embedding_cache[fact.id] = vec
             except Exception as e:
-                logger.warning("reflect: embed existing facts failed: %s", e)
-                existing_vecs = []
+                logger.warning("reflect: embed uncached facts failed: %s", e)
+
+        existing_vecs = [
+            self._fact_embedding_cache[f.id]
+            for f in existing
+            if f.id in self._fact_embedding_cache
+        ]
 
         try:
             cand_vecs = await self.embeddings.embed(candidates)
@@ -223,9 +239,10 @@ class MemoryManager:
                     break
             if duplicate:
                 continue
-            await self.store.add_fact(
+            fact = await self.store.add_fact(
                 text=text, source="reflection", confidence=0.7
             )
+            self._fact_embedding_cache[fact.id] = vec
             existing_vecs.append(vec)
             inserted += 1
         return inserted

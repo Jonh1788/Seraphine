@@ -354,6 +354,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                 content = payload.get("content", "")
                 speak = bool(payload.get("speak", False))
                 think = bool(payload.get("think", False))
+                images = payload.get("images") or None
 
                 # Sentence-level streaming TTS state. We start the worker
                 # eagerly when speak=true so the first complete sentence is
@@ -418,7 +419,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                             speak_queue.put_nowait(cleaned)
 
                 if engine.tools is None:
-                    async for event in engine.handle_user_message(conv_id, content, think=think):
+                    async for event in engine.handle_user_message(conv_id, content, think=think, images=images):
                         etype = getattr(event, "type", None)
                         if etype == "token":
                             tts_text = _tts_filter_think(getattr(event, "text", ""))
@@ -447,7 +448,7 @@ async def conversation_ws(ws: WebSocket) -> None:
 
                     async def _drive_turn() -> None:
                         nonlocal sentence_buf, final_turn_id, speak_queue, speak_task
-                        async for event in engine.handle_user_message(conv_id, content, think=think):
+                        async for event in engine.handle_user_message(conv_id, content, think=think, images=images):
                             etype = getattr(event, "type", None)
                             if etype == "token":
                                 tts_text = _tts_filter_think(getattr(event, "text", ""))

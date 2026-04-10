@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     tts_top_k: int = 65
     tts_repetition_penalty: float = 1.05
     tts_seed: int = 42
+    # Streaming TTS server port (Qwen3-TTS-streaming). If set, uses
+    # /v1/audio/voice-clone-stream for real-time chunked audio (~25ms TTFB).
+    # Falls back to non-streaming /v1/audio/voice-clone if unavailable.
+    tts_streaming_port: int = 8013
 
     # MCP (Supertasks) integration — leave url empty to disable
     mcp_url: str = ""

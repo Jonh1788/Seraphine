@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 class Token(BaseModel):

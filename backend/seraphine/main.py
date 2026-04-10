@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         top_k=settings.tts_top_k,
         repetition_penalty=settings.tts_repetition_penalty,
         seed=settings.tts_seed,
+        streaming_port=settings.tts_streaming_port or None,
     )
     logger.info(
         "Qwen3-TTS adapter wired (base_url=%s voice=%s)",

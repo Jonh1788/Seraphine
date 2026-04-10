@@ -244,7 +244,12 @@ class ConversationEngine:
         return messages
 
     async def handle_user_message(
-        self, conversation_id: str | None, content: str, *, think: bool = False
+        self,
+        conversation_id: str | None,
+        content: str,
+        *,
+        think: bool = False,
+        images: list[str] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         if conversation_id is None:
             conversation_id = await self.store.create_conversation()
@@ -259,7 +264,16 @@ class ConversationEngine:
         # Use compaction-aware context building
         compacted = await self._compact_context(conversation_id, prior)
         messages.extend(compacted)
-        messages.append(ChatMessage(role="user", content=content))
+
+        # Build vision-format content when images are attached
+        if images:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": content}]
+            for img_url in images:
+                parts.append({"type": "image_url", "image_url": {"url": img_url}})
+            msg_content: str | list[dict[str, Any]] = parts
+        else:
+            msg_content = content
+        messages.append(ChatMessage(role="user", content=msg_content))
 
         user_turn = await self.store.add_turn(conversation_id, "user", content)
 
