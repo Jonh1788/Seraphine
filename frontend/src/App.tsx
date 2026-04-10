@@ -68,6 +68,16 @@ export function App(): JSX.Element {
       } else if (type === 'tts_end') {
         void playbackRef.current?.flush();
         tsTtsStartRef.current = 0;
+      } else if (type === 'notification') {
+        // Proactive notification from Supertasks MCP
+        const notif = msg as { message?: string; title?: string; status?: string };
+        const text = notif.message || `Task "${notif.title}" ${notif.status}`;
+        // Show as a browser notification if permitted
+        if (Notification.permission === 'granted') {
+          new Notification('Seraphine', { body: text });
+        } else if (Notification.permission !== 'denied') {
+          void Notification.requestPermission();
+        }
       } else if (type === 'transcription') {
         // STT latency: audio_end to transcription
         if (tsAudioEndRef.current) {
@@ -107,9 +117,13 @@ export function App(): JSX.Element {
 
   // Attach the playback's AnalyserNode into the avatar controller so
   // the RAF loop can drive lipsync visemes from the running audio.
+  // The analyser may not exist yet (AudioContext deferred until user
+  // gesture), so we use the callback form to attach when ready.
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
     const pb = playbackRef.current;
-    if (pb) controller.attachAudioAnalyser(pb.getAnalyser());
+    if (!pb) return;
+    const analyser = pb.getAnalyser((a) => controller.attachAudioAnalyser(a));
+    if (analyser) controller.attachAudioAnalyser(analyser);
   }, []);
 
   const handleTalkStart = async (): Promise<void> => {

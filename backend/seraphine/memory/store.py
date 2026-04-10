@@ -83,6 +83,15 @@ class MemoryStore:
                     );
                     CREATE INDEX IF NOT EXISTS idx_facts_created
                       ON facts(created_at DESC);
+                    CREATE TABLE IF NOT EXISTS conversation_summaries (
+                      id              TEXT PRIMARY KEY,
+                      conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                      summary         TEXT NOT NULL,
+                      up_to_turn_id   TEXT NOT NULL,
+                      created_at      TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_summaries_conv
+                      ON conversation_summaries(conversation_id, created_at DESC);
                     CREATE TABLE IF NOT EXISTS tool_audit (
                       id             TEXT PRIMARY KEY,
                       request_id     TEXT NOT NULL,
@@ -191,6 +200,61 @@ class MemoryStore:
                     created_at=r[4],
                     token_count=r[5],
                 )
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    # ---------- conversation summaries ----------
+
+    async def get_summary(self, conversation_id: str) -> tuple[str, str] | None:
+        """Return (summary, up_to_turn_id) for the latest summary, or None."""
+
+        def _work() -> tuple[str, str] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT summary, up_to_turn_id FROM conversation_summaries"
+                    " WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return (row[0], row[1])
+
+        return await asyncio.to_thread(_work)
+
+    async def save_summary(
+        self, conversation_id: str, summary: str, up_to_turn_id: str
+    ) -> None:
+        sid = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO conversation_summaries"
+                    "(id, conversation_id, summary, up_to_turn_id, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (sid, conversation_id, summary, up_to_turn_id, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    # ---------- recent conversations ----------
+
+    async def get_recent_conversations(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent conversations with their first user message as preview."""
+
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT c.id, c.created_at,"
+                    " (SELECT content FROM turns WHERE conversation_id = c.id"
+                    "  AND role = 'user' ORDER BY created_at ASC LIMIT 1) AS preview"
+                    " FROM conversations c ORDER BY c.created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {"id": r[0], "created_at": r[1], "preview": r[2] or ""}
                 for r in rows
             ]
 

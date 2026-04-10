@@ -96,12 +96,40 @@ export interface ToolApprovalMessage {
   approved: boolean;
 }
 
+// MCP task notifications
+export interface NotificationMessage {
+  type: 'notification';
+  source: string;
+  event: string;
+  task_id: string;
+  title: string;
+  status: string;
+  summary: string;
+  message: string;
+}
+
+export interface McpApprovalRequestMessage {
+  type: 'mcp_approval_request';
+  task_id: string;
+  title: string;
+  body: string;
+  plan: string;
+}
+
+export interface McpApprovalResponseMessage {
+  type: 'mcp_approval_response';
+  task_id: string;
+  approved: boolean;
+  comment?: string;
+}
+
 export type ClientMessage =
   | PingMessage
   | UserMessage
   | AudioStartMessage
   | AudioEndMessage
   | ToolApprovalMessage
+  | McpApprovalResponseMessage
   | { type: string; [k: string]: unknown };
 export type ServerMessage =
   | PongMessage
@@ -113,4 +141,6 @@ export type ServerMessage =
   | TtsEndMessage
   | TranscriptionMessage
   | ToolRequestMessage
-  | ToolResultMessage;
+  | ToolResultMessage
+  | NotificationMessage
+  | McpApprovalRequestMessage;

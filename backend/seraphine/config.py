@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "gemma4:e4b"
+    llm_base_url: str = "http://localhost:1234"
+    llm_model: str = "gemma-4-26b-a4b-jang_4m-crack"
+    llm_backend: str = "openai"  # "ollama" or "openai" (vMLX, LM Studio etc)
     embedding_model: str = "nomic-embed-text"
 
     sqlite_path: Path = Path("../data/seraphine.sqlite")
@@ -43,6 +45,10 @@ class Settings(BaseSettings):
     tts_top_k: int = 65
     tts_repetition_penalty: float = 1.05
     tts_seed: int = 42
+
+    # MCP (Supertasks) integration — leave url empty to disable
+    mcp_url: str = ""
+    mcp_api_key: str = ""
 
     cors_origins: list[str] = ["*"]
 

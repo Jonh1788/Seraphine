@@ -10,13 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from seraphine.config import settings
 from seraphine.conversation.audio_engine import AudioEngine
 from seraphine.conversation.engine import ConversationEngine
-from seraphine.llm.client import OllamaClient
+from seraphine.llm.client import OllamaClient, OpenAICompatClient
 from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
 from seraphine.stt.whisper import WhisperSTT
 from seraphine.tools.registry import build_default_registry
 from seraphine.tts.qwen3 import Qwen3TtsAdapter
+from seraphine.conversation.routes import router as conversation_router
 from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
 
@@ -29,11 +30,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = MemoryStore(settings.sqlite_path)
     await store.ensure_schema()
 
-    llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
-    # Warmup: fire a dummy chat so gemma4 is loaded, warm, and KV-cached
-    # before the first user turn. Cold model load on Apple Silicon is
-    # ~4.5 s for an 8B Q4 — we'd rather pay it here than on the first
-    # real interaction.
+    if settings.llm_backend == "openai":
+        llm = OpenAICompatClient(settings.llm_base_url, settings.llm_model)
+        logger.info("Using OpenAI-compatible backend (vMLX/LM Studio) at %s", settings.llm_base_url)
+    else:
+        llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
     try:
         await llm.warmup()
         logger.info("LLM warmup complete (model=%s)", settings.llm_model)
@@ -50,6 +51,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
     )
+    # ------------------------------------------------------------------
+    # MCP (Supertasks) integration — optional
+    # ------------------------------------------------------------------
+    mcp_client = None
+    if settings.mcp_url:
+        from seraphine.tools.mcp_client import McpClient
+        from seraphine.tools.mcp_tools import register_mcp_tools
+
+        mcp_client = McpClient(
+            base_url=settings.mcp_url,
+            api_key=settings.mcp_api_key,
+        )
+        try:
+            n = await register_mcp_tools(tools, mcp_client)
+            logger.info("Registered %d MCP tools from %s", n, settings.mcp_url)
+        except Exception as e:
+            logger.warning("MCP tool registration failed (continuing without): %s", e)
+            await mcp_client.aclose()
+            mcp_client = None
+
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
     tts = Qwen3TtsAdapter(
         settings.tts_base_url,
@@ -78,6 +99,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     audio_engine = AudioEngine(llm, tts, store, stt=stt, engine=engine)
 
+    # ------------------------------------------------------------------
+    # MCP SSE event listener — proactive notifications
+    # ------------------------------------------------------------------
+    mcp_event_listener = None
+    if mcp_client is not None and settings.mcp_url:
+        from seraphine.tools.mcp_events import McpEventListener
+
+        events_url = settings.mcp_url.rsplit("/", 1)[0] + "/events"
+        mcp_event_listener = McpEventListener(
+            events_url=events_url,
+            api_key=settings.mcp_api_key,
+        )
+        mcp_event_listener.start()
+
     app.state.store = store
     app.state.llm = llm
     app.state.embeddings = embeddings
@@ -86,14 +121,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.tts = tts
     app.state.audio_engine = audio_engine
     app.state.tools = tools
+    app.state.mcp_client = mcp_client
+    app.state.mcp_event_listener = mcp_event_listener
+    # Connected WS clients — the event listener pushes notifications here
+    app.state.ws_clients: set = set()
 
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
     finally:
+        if mcp_event_listener is not None:
+            await mcp_event_listener.stop()
         await llm.aclose()
         await embeddings.aclose()
         await tts.aclose()
+        if mcp_client is not None:
+            await mcp_client.aclose()
 
 
 def create_app() -> FastAPI:
@@ -111,6 +154,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(conversation_router)
     app.include_router(memory_router)
     app.include_router(ws_router)
 

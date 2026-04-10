@@ -15,6 +15,8 @@ export class MicCapture {
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC();
+    // Ensure AudioContext is running (mobile browsers may start it suspended)
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
     this.source = this.ctx.createMediaStreamSource(this.stream);
     const processor = this.ctx.createScriptProcessor(4096, 1, 1);
     this.processor = processor;

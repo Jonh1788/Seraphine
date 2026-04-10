@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Markdown from 'react-markdown';
 import type { SeraphineWS } from '../ws/client';
-import type { ServerMessage } from '../ws/types';
+import type { McpApprovalRequestMessage, ServerMessage } from '../ws/types';
+
+interface McpApproval {
+  taskId: string;
+  title: string;
+  body: string;
+  plan: string;
+}
 
 interface Turn {
   id: string;
   role: 'user' | 'assistant' | 'error';
   content: string;
   streaming?: boolean;
+  /** If set, this turn is an inline MCP task approval request. */
+  mcpApproval?: McpApproval;
 }
 
 /**
@@ -84,6 +94,68 @@ function ThinkingBlock({
   );
 }
 
+/** Inline MCP approval request rendered inside an assistant bubble. */
+function McpApprovalBlock({
+  approval,
+  resolved,
+  onRespond,
+}: {
+  approval: McpApproval;
+  resolved: 'approved' | 'rejected' | null;
+  onRespond: (approved: boolean) => void;
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const hasDetails = !!(approval.body || approval.plan);
+
+  return (
+    <div className="mcp-approval">
+      <div className="mcp-approval__title">{approval.title}</div>
+      {hasDetails && (
+        <button
+          type="button"
+          className="mcp-approval__toggle"
+          onClick={() => setDetailsOpen((v) => !v)}
+        >
+          <span className={`mcp-approval__arrow${detailsOpen ? ' mcp-approval__arrow--open' : ''}`}>
+            {'\u25B6'}
+          </span>
+          Detalhes
+        </button>
+      )}
+      {hasDetails && detailsOpen && (
+        <div className="mcp-approval__details">
+          {approval.body && <p>{approval.body}</p>}
+          {approval.plan && (
+            <pre className="mcp-approval__plan">{approval.plan}</pre>
+          )}
+        </div>
+      )}
+      {resolved === null ? (
+        <div className="mcp-approval__buttons">
+          <button
+            type="button"
+            className="btn mcp-approval__btn-approve"
+            onClick={() => onRespond(true)}
+          >
+            Aprovar
+          </button>
+          <button
+            type="button"
+            className="btn mcp-approval__btn-reject"
+            onClick={() => onRespond(false)}
+          >
+            Rejeitar
+          </button>
+        </div>
+      ) : (
+        <div className={`mcp-approval__resolved mcp-approval__resolved--${resolved}`}>
+          {resolved === 'approved' ? 'Aprovado' : 'Rejeitado'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ChatViewProps {
   ws: SeraphineWS;
   status: 'connected' | 'disconnected';
@@ -117,6 +189,8 @@ export function ChatView({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
+  /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
+  const [mcpDecisions, setMcpDecisions] = useState<Map<string, 'approved' | 'rejected'>>(new Map());
   const conversationIdRef = useRef<string | undefined>(undefined);
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
@@ -182,6 +256,34 @@ export function ChatView({
           },
         ]);
         setStreamingTurnId(null);
+      } else if (msg.type === 'mcp_approval_request') {
+        const req = msg as McpApprovalRequestMessage;
+        const approvalData: McpApproval = {
+          taskId: req.task_id,
+          title: req.title,
+          body: req.body,
+          plan: req.plan,
+        };
+        setTurns((prev) => {
+          // Try to attach to the most recent assistant turn (the notification message)
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant' && !prev[i].mcpApproval) {
+              const next = prev.slice();
+              next[i] = { ...next[i], mcpApproval: approvalData };
+              return next;
+            }
+          }
+          // Fallback: create a standalone approval turn
+          return [
+            ...prev,
+            {
+              id: `mcp-approval-${req.task_id}`,
+              role: 'assistant',
+              content: `Task "${req.title}" aguardando aprovacao.`,
+              mcpApproval: approvalData,
+            },
+          ];
+        });
       }
     });
   }, [ws]);
@@ -212,6 +314,22 @@ export function ChatView({
     });
     setDraft('');
   };
+
+  const handleMcpApproval = useCallback(
+    (taskId: string, approved: boolean) => {
+      ws.send({
+        type: 'mcp_approval_response',
+        task_id: taskId,
+        approved,
+      });
+      setMcpDecisions((prev) => {
+        const next = new Map(prev);
+        next.set(taskId, approved ? 'approved' : 'rejected');
+        return next;
+      });
+    },
+    [ws],
+  );
 
   // --- Mic button press & drag handlers ---
 
@@ -288,8 +406,19 @@ export function ChatView({
                       streaming={!!t.streaming}
                     />
                   )}
-                  {parsed ? parsed.response : t.content}
+                  {t.role === 'assistant' ? (
+                    <Markdown>{parsed ? parsed.response : t.content}</Markdown>
+                  ) : (
+                    parsed ? parsed.response : t.content
+                  )}
                   {t.streaming && <span className="cursor" />}
+                  {t.mcpApproval && (
+                    <McpApprovalBlock
+                      approval={t.mcpApproval}
+                      resolved={mcpDecisions.get(t.mcpApproval.taskId) ?? null}
+                      onRespond={(approved) => handleMcpApproval(t.mcpApproval!.taskId, approved)}
+                    />
+                  )}
                 </div>
               </div>
             </div>

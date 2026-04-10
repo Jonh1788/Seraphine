@@ -34,6 +34,10 @@ DEFAULT_SYSTEM_PROMPT = (
 APPROVAL_TIMEOUT_SECONDS = 300
 MAX_TOOL_ITERATIONS = 5
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
+# Context compaction: estimated token threshold (~4 chars/token)
+COMPACTION_TOKEN_THRESHOLD = 8000
+COMPACTION_CHAR_THRESHOLD = COMPACTION_TOKEN_THRESHOLD * 4
+COMPACTION_KEEP_RECENT = 10
 # Run reflect() automatically every N assistant turns to let Seraphine
 # learn facts about the user on her own.
 AUTO_REFLECT_EVERY_N_TURNS = 3
@@ -155,6 +159,83 @@ class ConversationEngine:
                 lines.append(f"- {m.text}")
         return "\n".join(lines)
 
+    async def _compact_context(
+        self, conversation_id: str, turns: list[Any]
+    ) -> list[ChatMessage]:
+        """Return conversation turns as ChatMessages, compacting old ones if needed.
+
+        If the total character count of all turns exceeds COMPACTION_CHAR_THRESHOLD,
+        older turns are summarized into a single "Previously:" system message.
+        The summary is cached in the conversation_summaries table.
+        """
+        # Build messages from turns
+        chat_turns: list[tuple[str, str, str]] = []  # (turn_id, role, content)
+        for t in turns:
+            if t.role in ("user", "assistant"):
+                chat_turns.append((t.id, t.role, t.content))
+
+        total_chars = sum(len(c) for _, _, c in chat_turns)
+        if total_chars <= COMPACTION_CHAR_THRESHOLD or len(chat_turns) <= COMPACTION_KEEP_RECENT:
+            # Under threshold — return as-is
+            return [
+                ChatMessage(role=role, content=content)  # type: ignore[arg-type]
+                for _, role, content in chat_turns
+            ]
+
+        # Split: old turns to summarize, recent turns to keep verbatim
+        split_idx = len(chat_turns) - COMPACTION_KEEP_RECENT
+        old_turns = chat_turns[:split_idx]
+        recent_turns = chat_turns[split_idx:]
+        last_old_turn_id = old_turns[-1][0]
+
+        # Check if we already have a cached summary covering these turns
+        existing = await self.store.get_summary(conversation_id)
+        if existing and existing[1] == last_old_turn_id:
+            summary_text = existing[0]
+        else:
+            # Ask the LLM to summarize the old turns
+            summary_prompt = (
+                "Summarize the following conversation concisely in one paragraph. "
+                "Preserve key facts, decisions, and context the user shared. "
+                "Reply in the same language as the conversation.\n\n"
+            )
+            for _, role, content in old_turns:
+                label = "User" if role == "user" else "Assistant"
+                summary_prompt += f"{label}: {content}\n"
+
+            summary_messages = [
+                ChatMessage(role="system", content="You are a helpful summarizer."),
+                ChatMessage(role="user", content=summary_prompt),
+            ]
+
+            summary_parts: list[str] = []
+            try:
+                async for tok in self.llm.chat(summary_messages, temperature=0.3):
+                    if tok.text:
+                        summary_parts.append(tok.text)
+            except Exception as e:
+                logger.warning("context compaction summary failed: %s", e)
+                # Fallback: just use all turns uncompacted
+                return [
+                    ChatMessage(role=role, content=content)  # type: ignore[arg-type]
+                    for _, role, content in chat_turns
+                ]
+
+            summary_text = "".join(summary_parts).strip()
+            # Cache it
+            await self.store.save_summary(conversation_id, summary_text, last_old_turn_id)
+
+        # Build compacted message list
+        messages: list[ChatMessage] = [
+            ChatMessage(
+                role="system",
+                content=f"Previously: {summary_text}",
+            ),
+        ]
+        for _, role, content in recent_turns:
+            messages.append(ChatMessage(role=role, content=content))  # type: ignore[arg-type]
+        return messages
+
     async def handle_user_message(
         self, conversation_id: str | None, content: str, *, think: bool = False
     ) -> AsyncIterator[StreamEvent]:
@@ -167,9 +248,10 @@ class ConversationEngine:
         recall_block = await self._build_recall_block(content)
         if recall_block:
             messages.append(ChatMessage(role="system", content=recall_block))
-        for t in prior:
-            if t.role in ("user", "assistant"):
-                messages.append(ChatMessage(role=t.role, content=t.content))  # type: ignore[arg-type]
+
+        # Use compaction-aware context building
+        compacted = await self._compact_context(conversation_id, prior)
+        messages.extend(compacted)
         messages.append(ChatMessage(role="user", content=content))
 
         user_turn = await self.store.add_turn(conversation_id, "user", content)

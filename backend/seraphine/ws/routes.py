@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -137,11 +138,104 @@ async def _speak_worker(
                         return
 
 
+async def _setup_mcp_notifications(ws: WebSocket) -> None:
+    """Register this WS for MCP task event push notifications."""
+    listener = getattr(ws.app.state, "mcp_event_listener", None)
+    if listener is None:
+        return
+
+    async def _on_mcp_event(event_type: str, data: dict) -> None:
+        task_id = data.get("id", "")
+        title = data.get("title", "")
+        status = data.get("status", event_type)
+        result = data.get("agentResult", {})
+        summary = ""
+        if isinstance(result, dict):
+            summary = result.get("summary", "") or result.get("output", "")
+        if isinstance(summary, str) and len(summary) > 500:
+            summary = summary[:500] + "..."
+
+        labels = {
+            "task.done": "concluída",
+            "task.failed": "falhou",
+            "task.awaiting_approval": "aguardando aprovação",
+        }
+        label = labels.get(event_type, status)
+
+        message_text = f"Task \"{title}\" {label}." + (f" {summary}" if summary else "")
+
+        # 1. Send the original notification envelope (browser notification)
+        notif_msg = {
+            "type": "notification",
+            "source": "supertasks",
+            "event": event_type,
+            "task_id": task_id,
+            "title": title,
+            "status": label,
+            "summary": summary,
+            "message": message_text,
+        }
+        try:
+            await ws.send_json(notif_msg)
+        except Exception:
+            pass
+
+        # 2. Inject as a chat message so it appears in ChatView
+        turn_id = str(uuid.uuid4())
+        try:
+            await ws.send_json({
+                "type": "token",
+                "conversation_id": "system",
+                "turn_id": turn_id,
+                "text": message_text,
+            })
+            await ws.send_json({
+                "type": "turn_end",
+                "conversation_id": "system",
+                "turn_id": turn_id,
+            })
+        except Exception:
+            pass
+
+        # 3. For awaiting_approval events, send inline approval request
+        if event_type == "task.awaiting_approval":
+            body = data.get("body", "") or ""
+            plan = data.get("plan", "") or ""
+            if not body and summary:
+                body = summary
+            try:
+                await ws.send_json({
+                    "type": "mcp_approval_request",
+                    "task_id": task_id,
+                    "title": title,
+                    "body": body,
+                    "plan": plan,
+                })
+            except Exception:
+                pass
+
+        # 4. Speak the notification via TTS if available
+        tts = getattr(ws.app.state, "tts", None)
+        if tts is not None:
+            try:
+                notif_speak_queue: asyncio.Queue[str | object] = asyncio.Queue()
+                cleaned = strip_markdown_for_tts(message_text)
+                if cleaned:
+                    notif_speak_queue.put_nowait(cleaned)
+                notif_speak_queue.put_nowait(_SENTENCE_EOS)
+                await _speak_worker(ws, notif_speak_queue, turn_id)
+            except Exception as exc:
+                logger.warning("MCP notification TTS failed: %s", exc)
+
+    listener.on_event(_on_mcp_event)
+
+
 @router.websocket("/ws/conversation")
 async def conversation_ws(ws: WebSocket) -> None:
     await ws.accept()
     client = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
     logger.info("WS connected: %s", client)
+    await _setup_mcp_notifications(ws)
     audio_buf = bytearray()
     try:
         while True:
@@ -456,6 +550,36 @@ async def conversation_ws(ws: WebSocket) -> None:
                     except Exception as e:  # pragma: no cover
                         logger.warning("audio speak_task failed: %s", e)
                 audio_buf = bytearray()
+            elif mtype == "mcp_approval_response":
+                mcp_client = getattr(ws.app.state, "mcp_client", None)
+                if mcp_client is None:
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "mcp_unavailable",
+                            "message": "MCP client not configured",
+                        }
+                    )
+                    continue
+                task_id = str(payload.get("task_id", ""))
+                approved = bool(payload.get("approved", False))
+                comment = payload.get("comment") or None
+                tool_name = "approve_task" if approved else "reject_task"
+                tool_args: dict[str, Any] = {"id": task_id}
+                if comment:
+                    tool_args["comment"] = comment
+                try:
+                    result = await mcp_client.call_tool(tool_name, tool_args)
+                    logger.info("MCP %s(%s) result: %s", tool_name, task_id, result)
+                except Exception as exc:
+                    logger.warning("MCP %s(%s) failed: %s", tool_name, task_id, exc)
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "code": "mcp_tool_error",
+                            "message": f"{tool_name} failed: {exc}",
+                        }
+                    )
             else:
                 await ws.send_json(EchoMessage(data=payload).model_dump())
     except WebSocketDisconnect:

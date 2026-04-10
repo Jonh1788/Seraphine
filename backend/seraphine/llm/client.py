@@ -9,6 +9,112 @@ import httpx
 from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
 
 
+class OpenAICompatClient:
+    """Client for OpenAI-compatible APIs (vMLX, LM Studio, etc).
+    Uses /v1/chat/completions with SSE streaming."""
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        *,
+        timeout: float = 120.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def warmup(self) -> None:
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "."}],
+            "stream": False,
+            "max_tokens": 1,
+        }
+        try:
+            resp = await self._client.post("/v1/chat/completions", json=body, timeout=60.0)
+            resp.raise_for_status()
+        except (httpx.HTTPError, httpx.ConnectError):
+            pass
+
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        audio: bytes | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        think: bool = False,
+    ) -> AsyncIterator[Token]:
+        dumped = [m.model_dump() for m in messages]
+        body: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": dumped,
+            "stream": True,
+            "temperature": temperature,
+        }
+        if tools is not None:
+            body["tools"] = tools
+        # vMLX reasoning parser support
+        if think:
+            body["enable_thinking"] = True
+        done_seen = False
+        try:
+            async with self._client.stream("POST", "/v1/chat/completions", json=body) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data.strip() == "[DONE]":
+                        done_seen = True
+                        yield Token(text="", done=True)
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    text = delta.get("content", "") or ""
+                    finish = choices[0].get("finish_reason")
+                    tool_calls_delta = delta.get("tool_calls")
+                    if tool_calls_delta:
+                        # Accumulate tool call data
+                        tc_list = []
+                        for tc in tool_calls_delta:
+                            fn = tc.get("function", {})
+                            tc_list.append({
+                                "function": {
+                                    "name": fn.get("name", ""),
+                                    "arguments": fn.get("arguments", "{}"),
+                                }
+                            })
+                        if tc_list:
+                            done_seen = True
+                            yield Token(text="", done=True, tool_calls=tc_list)
+                            break
+                    done = finish is not None
+                    if done:
+                        done_seen = True
+                    yield Token(text=text, done=done)
+                    if done:
+                        break
+        except httpx.ConnectError as e:
+            raise LLMUnavailableError(str(e)) from e
+        except httpx.HTTPError as e:
+            raise LLMUnavailableError(str(e)) from e
+        if not done_seen:
+            yield Token(text="", done=True)
+
+
 class OllamaClient:
     def __init__(
         self,

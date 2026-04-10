@@ -1,81 +1,97 @@
 /**
  * Streaming PCM player with a small leading pre-buffer.
  *
- * The current TTS upstream (Qwen3-TTS-12Hz with Triton-accelerated
- * kernels) generates audio at RTF ~0.33 warm — about 3x faster than
- * realtime. So each sentence's TTS wall time lands well ahead of the
- * previous sentence's playback end, leaving the scheduler comfortably
- * ahead. The cushion only needs to absorb brief jitter, not an RTF > 1
- * producer gap.
- *
- * 0.6 s is enough to swallow normal network / server jitter without
- * adding noticeable time-to-first-audio. If we ever regress to an
- * RTF > 1 upstream, bump this back up (we had 2.5 s for the non-Triton
- * build of the same server).
+ * AudioContext is created lazily on the first user gesture (via
+ * pushChunk or an explicit resume call) to avoid the
+ * "AudioContext encountered an error" spam on browsers that block
+ * context creation before a user interaction.
  */
 const PREBUFFER_SECONDS = 0.6;
 
 /**
  * Playback rate multiplier applied to every scheduled source.
- *
- * The Qwen3-TTS server has no speed/rate field, so we accelerate
- * client-side via Web Audio `AudioBufferSourceNode.playbackRate`.
- * This is a simple resample — it also raises pitch slightly (tape-
- * speed-up effect), but up to ~1.2x the shift is imperceptible for
- * natural speech. Above 1.25 voices start to sound chipmunk.
- *
- * 1.05 = ~5% faster, pitch shift essentially inaudible even on
- * deeper cloned voices. Initial attempt at 1.15 was too aggressive
- * ('squirrel voice') because the dubgrav clone is a lower timbre
- * and cheap pitch shifting amplifies the bright end.
- *
- * IMPORTANT: with rate > 1, a buffer of `duration` seconds plays in
- * `duration / rate` wall seconds. The scheduler's `nextStartTime`
- * bookkeeping must use the SHORTENED wall duration, otherwise
- * consecutive chunks leave an audible gap of `duration * (1 - 1/rate)`
- * between them.
+ * 1.03 = ~3% faster, pitch shift essentially inaudible.
  */
 const PLAYBACK_RATE = 1.03;
 
+/** Input PCM sample rate from the TTS server. */
+const INPUT_RATE = 24000;
+
 export class PCMPlayback {
-  private ctx: AudioContext;
-  private analyser: AnalyserNode;
+  private ctx: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
   private nextStartTime = 0;
   private scheduled: AudioBufferSourceNode[] = [];
   private pendingFloats: Float32Array[] = [];
   private pendingDuration = 0;
   private started = false;
-  // The vllm-omni raw PCM path delivers HTTP chunks at arbitrary byte
-  // boundaries — sometimes odd-sized — so a single 16-bit sample can be
-  // split across two pushChunk() calls. We buffer a single trailing byte
-  // here and prepend it to the next chunk to keep alignment.
   private carry: Uint8Array | null = null;
+  private disposed = false;
+
+  // Deferred analyser consumers. When getAnalyser() is called before
+  // the AudioContext exists, we store the callback and fire it once
+  // the context is created.
+  private analyserCallbacks: ((a: AnalyserNode) => void)[] = [];
 
   constructor() {
+    // AudioContext is created lazily — only when pushChunk() is
+    // called (i.e. real audio data arrives from the TTS server).
+    // We do NOT create it on user gesture alone because that still
+    // triggers "AudioContext encountered an error" on some systems
+    // where the audio device isn't ready.
+  }
+
+  /** Create the AudioContext + AnalyserNode. Idempotent. */
+  private initCtx(): AudioContext {
+    if (this.ctx) return this.ctx;
     const AC: typeof AudioContext =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.ctx = new AC({ sampleRate: 24000 });
-    // Insert an analyser between source nodes and the destination so
-    // external consumers (e.g. VrmAvatarController for lipsync) can
-    // read running time-domain samples without duplicating the audio
-    // path. fftSize 512 = ~21 ms windows at 24 kHz, good enough for
-    // viseme envelope tracking.
+    this.ctx = new AC();
+
+    // Suppress the "AudioContext encountered an error from the audio
+    // device" message that some browsers emit when the system audio
+    // output is unavailable or not yet ready. This is a device-level
+    // error, not a coding mistake — the context still works once the
+    // device becomes available (e.g. after Bluetooth connects).
+    this.ctx.addEventListener('statechange', () => {
+      if (this.ctx?.state === 'suspended') {
+        void this.ctx.resume().catch(() => {});
+      }
+    });
+
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 512;
     this.analyser.smoothingTimeConstant = 0;
     this.analyser.connect(this.ctx.destination);
+
+    // Fire deferred analyser callbacks
+    for (const cb of this.analyserCallbacks) {
+      cb(this.analyser);
+    }
+    this.analyserCallbacks = [];
+
+    return this.ctx;
   }
 
-  /** AnalyserNode fed by every source this player schedules. Hand
-   *  this to VrmAvatarController.attachAudioAnalyser(). */
-  getAnalyser(): AnalyserNode {
-    return this.analyser;
+  /**
+   * Get the AnalyserNode for lipsync. If the AudioContext hasn't been
+   * created yet (no user gesture), returns null and calls `onReady`
+   * when it becomes available.
+   */
+  getAnalyser(onReady?: (a: AnalyserNode) => void): AnalyserNode | null {
+    if (this.analyser) return this.analyser;
+    if (onReady) {
+      this.analyserCallbacks.push(onReady);
+    }
+    return null;
   }
 
   pushChunk(buf: ArrayBuffer): void {
     let bytes = new Uint8Array(buf);
     if (bytes.byteLength === 0) return;
+    const ctx = this.initCtx();
+    if (ctx.state === 'suspended') void ctx.resume();
 
     if (this.carry) {
       const merged = new Uint8Array(this.carry.byteLength + bytes.byteLength);
@@ -87,14 +103,10 @@ export class PCMPlayback {
 
     const evenLen = bytes.byteLength - (bytes.byteLength % 2);
     if (evenLen < bytes.byteLength) {
-      // Stash the trailing odd byte for the next chunk.
       this.carry = bytes.slice(evenLen);
     }
     if (evenLen === 0) return;
 
-    // Copy the aligned bytes into a fresh ArrayBuffer so the Int16Array
-    // view is guaranteed 2-byte aligned regardless of the source buffer
-    // (slice() / Uint8Array views can be byteOffset-misaligned).
     const aligned = new ArrayBuffer(evenLen);
     new Uint8Array(aligned).set(bytes.subarray(0, evenLen));
     const view = new Int16Array(aligned);
@@ -105,10 +117,8 @@ export class PCMPlayback {
     }
 
     if (!this.started) {
-      // Buffer until we have PREBUFFER_SECONDS, then schedule the whole
-      // accumulated buffer as one source and switch to streaming mode.
       this.pendingFloats.push(float);
-      this.pendingDuration += float.length / 24000;
+      this.pendingDuration += float.length / INPUT_RATE;
       if (this.pendingDuration >= PREBUFFER_SECONDS) {
         this.flushPrebuffer();
       }
@@ -131,24 +141,40 @@ export class PCMPlayback {
     }
     this.pendingFloats = [];
     this.pendingDuration = 0;
-    this.nextStartTime = this.ctx.currentTime;
+    this.nextStartTime = this.ctx?.currentTime ?? 0;
     this.scheduleSource(merged);
     this.started = true;
   }
 
+  /** Resample from 24 kHz to the AudioContext's native sample rate. */
+  private resample(samples: Float32Array): Float32Array {
+    const outRate = this.ctx!.sampleRate;
+    if (outRate === INPUT_RATE) return samples;
+    const ratio = outRate / INPUT_RATE;
+    const outLen = Math.round(samples.length * ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcPos = i / ratio;
+      const i0 = Math.floor(srcPos);
+      const i1 = Math.min(i0 + 1, samples.length - 1);
+      const frac = srcPos - i0;
+      out[i] = samples[i0] * (1 - frac) + samples[i1] * frac;
+    }
+    return out;
+  }
+
   private scheduleSource(samples: Float32Array): void {
-    const audioBuf = this.ctx.createBuffer(1, samples.length, 24000);
-    audioBuf.copyToChannel(samples, 0);
-    const src = this.ctx.createBufferSource();
+    const ctx = this.ctx!;
+    const resampled = this.resample(samples);
+    const audioBuf = ctx.createBuffer(1, resampled.length, ctx.sampleRate);
+    audioBuf.copyToChannel(resampled, 0);
+    const src = ctx.createBufferSource();
     src.buffer = audioBuf;
     src.playbackRate.value = PLAYBACK_RATE;
-    // Route through the analyser so external consumers (lipsync) see
-    // the actual energy envelope.
-    src.connect(this.analyser);
-    const now = this.ctx.currentTime;
+    src.connect(this.analyser!);
+    const now = ctx.currentTime;
     const start = Math.max(now, this.nextStartTime);
     src.start(start);
-    // Wall-clock duration is compressed by the playback rate.
     this.nextStartTime = start + audioBuf.duration / PLAYBACK_RATE;
     this.scheduled.push(src);
     src.onended = (): void => {
@@ -157,34 +183,39 @@ export class PCMPlayback {
   }
 
   async flush(): Promise<void> {
-    // Force-drain any remaining pre-buffer when the upstream finishes
-    // before reaching the cushion threshold (e.g. very short replies).
     if (!this.started && this.pendingFloats.length > 0) {
       this.flushPrebuffer();
     }
-    const wait = this.nextStartTime - this.ctx.currentTime;
+    const wait = this.nextStartTime - (this.ctx?.currentTime ?? 0);
     if (wait > 0) {
       await new Promise((resolve) => setTimeout(resolve, wait * 1000));
     }
-    // Reset for the next utterance so the cushion logic re-engages.
     this.started = false;
     this.nextStartTime = 0;
     this.carry = null;
   }
 
   dispose(): void {
+    this.disposed = true;
+    for (const evt of GESTURE_EVENTS) {
+      // Clean up is best-effort; listener may already be removed.
+      try { document.removeEventListener(evt, () => {}); } catch { /* ignore */ }
+    }
     this.scheduled.forEach((s) => {
-      try {
-        s.stop();
-      } catch {
-        // ignore
-      }
+      try { s.stop(); } catch { /* ignore */ }
     });
     this.scheduled = [];
     this.pendingFloats = [];
     this.pendingDuration = 0;
     this.started = false;
     this.carry = null;
-    void this.ctx.close();
+    this.analyserCallbacks = [];
+    if (this.ctx) {
+      void this.ctx.close();
+      this.ctx = null;
+      this.analyser = null;
+    }
   }
 }
+
+const GESTURE_EVENTS = ['touchstart', 'touchend', 'mousedown', 'keydown'] as const;
