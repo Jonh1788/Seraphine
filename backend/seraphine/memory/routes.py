@@ -129,3 +129,20 @@ async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory
     memories = await memory.recall(body.query, k=body.k)
     return [m.model_dump() for m in memories]
+
+
+@router.get("/notifications")
+async def get_notifications(request: Request, limit: int = 50) -> list[dict[str, Any]]:
+    store = request.app.state.store
+    return await store.get_unread_notifications(limit=limit)
+
+
+class MarkReadPayload(BaseModel):
+    ids: list[str]
+
+
+@router.post("/notifications/read")
+async def mark_read(request: Request, body: MarkReadPayload) -> dict[str, str]:
+    store = request.app.state.store
+    await store.mark_notifications_read(body.ids)
+    return {"status": "ok"}

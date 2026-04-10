@@ -1,3 +1,11 @@
+/**
+ * Mic capture with downsampling to 16 kHz PCM16.
+ *
+ * Uses the shared AudioContext to avoid creating a second context
+ * that deadlocks CoreAudio on macOS.
+ */
+import { getSharedAudioContext } from './sharedContext';
+
 type ChunkListener = (pcm: Int16Array) => void;
 
 const TARGET_RATE = 16000;
@@ -7,16 +15,17 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
+  /** Silent sink so the ScriptProcessorNode runs without playing mic audio. */
+  private silentGain: GainNode | null = null;
   private listeners = new Set<ChunkListener>();
 
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const AC: typeof AudioContext =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.ctx = new AC();
-    // Ensure AudioContext is running (mobile browsers may start it suspended)
+
+    // Reuse the shared AudioContext (never create a new one).
+    this.ctx = getSharedAudioContext();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
+
     this.source = this.ctx.createMediaStreamSource(this.stream);
     const processor = this.ctx.createScriptProcessor(4096, 1, 1);
     this.processor = processor;
@@ -33,18 +42,29 @@ export class MicCapture {
       this.listeners.forEach((cb) => cb(pcm));
     };
 
+    // Connect processor to a silent GainNode instead of ctx.destination
+    // to avoid playing the mic input through speakers (feedback loop).
+    this.silentGain = this.ctx.createGain();
+    this.silentGain.gain.value = 0;
+    this.silentGain.connect(this.ctx.destination);
+
     this.source.connect(processor);
-    processor.connect(this.ctx.destination);
+    processor.connect(this.silentGain);
   }
 
   stop(): void {
+    // Disconnect audio nodes but do NOT close the shared AudioContext.
     this.processor?.disconnect();
     this.source?.disconnect();
+    if (this.silentGain) {
+      try { this.silentGain.disconnect(); } catch { /* ignore */ }
+      this.silentGain = null;
+    }
     this.stream?.getTracks().forEach((t) => t.stop());
-    void this.ctx?.close();
     this.processor = null;
     this.source = null;
     this.stream = null;
+    // Keep this.ctx reference but don't close it — it's shared.
     this.ctx = null;
   }
 

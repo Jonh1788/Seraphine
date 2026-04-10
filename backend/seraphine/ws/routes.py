@@ -145,13 +145,19 @@ async def _setup_mcp_notifications(ws: WebSocket) -> None:
         return
 
     async def _on_mcp_event(event_type: str, data: dict) -> None:
-        task_id = data.get("id", "")
-        title = data.get("title", "")
-        status = data.get("status", event_type)
-        result = data.get("agentResult", {})
+        # SSE payload is {"event": "...", "task": {...}, "timestamp": "..."}
+        # The actual task data is nested inside data["task"].
+        task_data = data.get("task", data)  # fallback to root if no nesting
+        task_id = task_data.get("id", "")
+        title = task_data.get("title", "")
+        status = task_data.get("status", event_type)
+        # Result can be in "result" (string) or "agentResult" (dict)
+        result_raw = task_data.get("result", "") or task_data.get("agentResult", {})
         summary = ""
-        if isinstance(result, dict):
-            summary = result.get("summary", "") or result.get("output", "")
+        if isinstance(result_raw, str):
+            summary = result_raw
+        elif isinstance(result_raw, dict):
+            summary = result_raw.get("summary", "") or result_raw.get("output", "")
         if isinstance(summary, str) and len(summary) > 500:
             summary = summary[:500] + "..."
 
@@ -163,6 +169,21 @@ async def _setup_mcp_notifications(ws: WebSocket) -> None:
         label = labels.get(event_type, status)
 
         message_text = f"Task \"{title}\" {label}." + (f" {summary}" if summary else "")
+
+        # 0. Persist notification so it's available when frontend reconnects
+        store = getattr(ws.app.state, "store", None)
+        if store is not None:
+            try:
+                import json as _json
+                await store.add_notification(
+                    event=event_type,
+                    task_id=task_id,
+                    title=title,
+                    summary=summary[:500] if summary else "",
+                    payload=_json.dumps(task_data, ensure_ascii=False, default=str),
+                )
+            except Exception:
+                pass
 
         # 1. Send the original notification envelope (browser notification)
         notif_msg = {
@@ -199,8 +220,8 @@ async def _setup_mcp_notifications(ws: WebSocket) -> None:
 
         # 3. For awaiting_approval events, send inline approval request
         if event_type == "task.awaiting_approval":
-            body = data.get("body", "") or ""
-            plan = data.get("plan", "") or ""
+            body = task_data.get("body", "") or ""
+            plan = task_data.get("plan", "") or ""
             if not body and summary:
                 body = summary
             try:
@@ -230,12 +251,64 @@ async def _setup_mcp_notifications(ws: WebSocket) -> None:
     listener.on_event(_on_mcp_event)
 
 
+async def _deliver_pending_notifications(ws: WebSocket) -> None:
+    """On reconnect, deliver any notifications that arrived while the frontend was closed."""
+    store = getattr(ws.app.state, "store", None)
+    if store is None:
+        return
+    try:
+        unread = await store.get_unread_notifications(limit=20)
+    except Exception:
+        return
+    if not unread:
+        return
+
+    ids_to_mark: list[str] = []
+    for notif in reversed(unread):  # oldest first
+        labels = {
+            "task.done": "concluída",
+            "task.failed": "falhou",
+            "task.awaiting_approval": "aguardando aprovação",
+        }
+        label = labels.get(notif["event"], notif["event"])
+        title = notif.get("title", "")
+        summary = notif.get("summary", "")
+        message_text = f"[Enquanto você estava fora] Task \"{title}\" {label}."
+        if summary:
+            message_text += f" {summary[:300]}"
+
+        turn_id = str(uuid.uuid4())
+        try:
+            await ws.send_json({
+                "type": "token",
+                "conversation_id": "system",
+                "turn_id": turn_id,
+                "text": message_text,
+            })
+            await ws.send_json({
+                "type": "turn_end",
+                "conversation_id": "system",
+                "turn_id": turn_id,
+            })
+            ids_to_mark.append(notif["id"])
+        except Exception:
+            break
+
+    if ids_to_mark:
+        try:
+            await store.mark_notifications_read(ids_to_mark)
+        except Exception:
+            pass
+
+
 @router.websocket("/ws/conversation")
 async def conversation_ws(ws: WebSocket) -> None:
     await ws.accept()
     client = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
     logger.info("WS connected: %s", client)
     await _setup_mcp_notifications(ws)
+    # Deliver any unread notifications that arrived while the frontend was closed
+    await _deliver_pending_notifications(ws)
     audio_buf = bytearray()
     try:
         while True:

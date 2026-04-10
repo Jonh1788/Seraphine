@@ -4,6 +4,7 @@ import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
 import type { VrmAvatarController } from './avatar/VrmAvatarController';
 import { MicCapture, PCMPlayback } from './audio';
+import { warmSharedAudioContext } from './audio/sharedContext';
 import { MemoryPanel } from './memory';
 import { ApprovalPanel } from './tools';
 import { MetricsBar } from './metrics';
@@ -127,12 +128,19 @@ export function App(): JSX.Element {
   }, []);
 
   const handleTalkStart = async (): Promise<void> => {
+    warmSharedAudioContext(); // ensure context is running from user gesture
     const ws = wsRef.current;
     if (!ws || status !== 'connected') return;
     if (!micRef.current) micRef.current = new MicCapture();
     setTalking(true);
     ws.send({ type: 'audio_start', sample_rate: 16000 });
-    await micRef.current.start();
+    try {
+      await micRef.current.start();
+    } catch (err) {
+      console.error('Mic start failed:', err);
+      setTalking(false);
+      return;
+    }
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
       const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength);
       ws.sendBinary(slice);
@@ -191,7 +199,7 @@ export function App(): JSX.Element {
   const connected = status === 'connected';
 
   return (
-    <div className="app">
+    <div className="app" onClick={() => warmSharedAudioContext()} onTouchStart={() => warmSharedAudioContext()}>
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">

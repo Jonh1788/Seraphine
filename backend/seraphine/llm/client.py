@@ -64,6 +64,7 @@ class OpenAICompatClient:
         if think:
             body["enable_thinking"] = True
         done_seen = False
+        in_thinking = False
         try:
             async with self._client.stream("POST", "/v1/chat/completions", json=body) as resp:
                 resp.raise_for_status()
@@ -72,6 +73,10 @@ class OpenAICompatClient:
                         continue
                     data = line[6:]
                     if data.strip() == "[DONE]":
+                        # Close thinking tag if still open
+                        if in_thinking:
+                            yield Token(text="</think>", done=False)
+                            in_thinking = False
                         done_seen = True
                         yield Token(text="", done=True)
                         break
@@ -84,7 +89,21 @@ class OpenAICompatClient:
                         continue
                     delta = choices[0].get("delta", {})
                     text = delta.get("content", "") or ""
+                    reasoning = delta.get("reasoning_content", "") or ""
                     finish = choices[0].get("finish_reason")
+
+                    # Wrap reasoning_content in <think> tags so the
+                    # frontend can display it in a collapsible block.
+                    if reasoning:
+                        if not in_thinking:
+                            in_thinking = True
+                            yield Token(text="<think>", done=False)
+                        yield Token(text=reasoning, done=False)
+                        continue
+                    if in_thinking and text:
+                        # Thinking ended, regular content starting
+                        in_thinking = False
+                        yield Token(text="</think>", done=False)
                     tool_calls_delta = delta.get("tool_calls")
                     if tool_calls_delta:
                         # Accumulate tool call data

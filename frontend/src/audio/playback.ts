@@ -1,21 +1,27 @@
 /**
  * Streaming PCM player with a small leading pre-buffer.
  *
- * AudioContext is created lazily on the first user gesture (via
- * pushChunk or an explicit resume call) to avoid the
- * "AudioContext encountered an error" spam on browsers that block
- * context creation before a user interaction.
+ * Uses the shared AudioContext from sharedContext.ts to avoid creating
+ * multiple contexts that deadlock CoreAudio on macOS.
  */
+import { getSharedAudioContext } from './sharedContext';
+
 const PREBUFFER_SECONDS = 0.6;
 
 /**
  * Playback rate multiplier applied to every scheduled source.
  * 1.03 = ~3% faster, pitch shift essentially inaudible.
  */
-const PLAYBACK_RATE = 1.03;
+const PLAYBACK_RATE = 1.0;
 
 /** Input PCM sample rate from the TTS server. */
 const INPUT_RATE = 24000;
+
+/**
+ * Hard cap on concurrently scheduled source nodes.
+ * Prevents exhausting CoreAudio's rendering graph buffer.
+ */
+const MAX_SCHEDULED = 50;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
@@ -36,29 +42,12 @@ export class PCMPlayback {
   constructor() {
     // AudioContext is created lazily — only when pushChunk() is
     // called (i.e. real audio data arrives from the TTS server).
-    // We do NOT create it on user gesture alone because that still
-    // triggers "AudioContext encountered an error" on some systems
-    // where the audio device isn't ready.
   }
 
   /** Create the AudioContext + AnalyserNode. Idempotent. */
   private initCtx(): AudioContext {
     if (this.ctx) return this.ctx;
-    const AC: typeof AudioContext =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.ctx = new AC();
-
-    // Suppress the "AudioContext encountered an error from the audio
-    // device" message that some browsers emit when the system audio
-    // output is unavailable or not yet ready. This is a device-level
-    // error, not a coding mistake — the context still works once the
-    // device becomes available (e.g. after Bluetooth connects).
-    this.ctx.addEventListener('statechange', () => {
-      if (this.ctx?.state === 'suspended') {
-        void this.ctx.resume().catch(() => {});
-      }
-    });
+    this.ctx = getSharedAudioContext();
 
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 512;
@@ -163,6 +152,20 @@ export class PCMPlayback {
     return out;
   }
 
+  /** Stop and disconnect a source node (best-effort). */
+  private killSource(src: AudioBufferSourceNode): void {
+    try { src.stop(); } catch { /* already stopped or not started */ }
+    try { src.disconnect(); } catch { /* already disconnected */ }
+  }
+
+  /** Enforce the hard cap on concurrently scheduled sources. */
+  private enforceMaxScheduled(): void {
+    while (this.scheduled.length > MAX_SCHEDULED) {
+      const oldest = this.scheduled.shift();
+      if (oldest) this.killSource(oldest);
+    }
+  }
+
   private scheduleSource(samples: Float32Array): void {
     const ctx = this.ctx!;
     const resampled = this.resample(samples);
@@ -178,18 +181,34 @@ export class PCMPlayback {
     this.nextStartTime = start + audioBuf.duration / PLAYBACK_RATE;
     this.scheduled.push(src);
     src.onended = (): void => {
+      src.disconnect();
       this.scheduled = this.scheduled.filter((s) => s !== src);
     };
+    this.enforceMaxScheduled();
+  }
+
+  /** Stop and disconnect ALL scheduled sources. */
+  private stopAllSources(): void {
+    for (const s of this.scheduled) {
+      this.killSource(s);
+    }
+    this.scheduled = [];
   }
 
   async flush(): Promise<void> {
+    // Force-drain any remaining pre-buffer when the upstream finishes
+    // before reaching the cushion threshold (e.g. very short replies).
     if (!this.started && this.pendingFloats.length > 0) {
       this.flushPrebuffer();
     }
+    // Wait for all scheduled sources to finish playing naturally.
+    // Do NOT stop them — that would cut off the audio mid-sentence.
     const wait = this.nextStartTime - (this.ctx?.currentTime ?? 0);
     if (wait > 0) {
       await new Promise((resolve) => setTimeout(resolve, wait * 1000));
     }
+    // Now that all sources have finished, clean up for the next utterance.
+    this.stopAllSources();
     this.started = false;
     this.nextStartTime = 0;
     this.carry = null;
@@ -197,25 +216,18 @@ export class PCMPlayback {
 
   dispose(): void {
     this.disposed = true;
-    for (const evt of GESTURE_EVENTS) {
-      // Clean up is best-effort; listener may already be removed.
-      try { document.removeEventListener(evt, () => {}); } catch { /* ignore */ }
-    }
-    this.scheduled.forEach((s) => {
-      try { s.stop(); } catch { /* ignore */ }
-    });
-    this.scheduled = [];
+    this.stopAllSources();
     this.pendingFloats = [];
     this.pendingDuration = 0;
     this.started = false;
     this.carry = null;
     this.analyserCallbacks = [];
-    if (this.ctx) {
-      void this.ctx.close();
-      this.ctx = null;
+    // Don't close the shared AudioContext — other consumers may use it.
+    // Just disconnect our analyser from the destination.
+    if (this.analyser) {
+      try { this.analyser.disconnect(); } catch { /* ignore */ }
       this.analyser = null;
     }
+    this.ctx = null;
   }
 }
-
-const GESTURE_EVENTS = ['touchstart', 'touchend', 'mousedown', 'keydown'] as const;

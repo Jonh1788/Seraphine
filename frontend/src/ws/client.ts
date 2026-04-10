@@ -4,7 +4,9 @@ type StatusListener = (status: 'connected' | 'disconnected') => void;
 type MessageListener = (msg: ServerMessage | ArrayBuffer) => void;
 type SendListener = (msg: ClientMessage) => void;
 
-const DEFAULT_URL = `ws://${window.location.hostname}:8000/ws/conversation`;
+// Use the same host as the page — Vite proxies /ws to the backend.
+// Works on localhost, LAN, and through tunnels (cloudflared/ngrok).
+const DEFAULT_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/conversation`;
 const BACKOFF_MS = [1000, 2000, 5000];
 
 export class SeraphineWS {

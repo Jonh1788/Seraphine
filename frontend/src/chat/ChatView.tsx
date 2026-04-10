@@ -191,8 +191,29 @@ export function ChatView({
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, 'approved' | 'rejected'>>(new Map());
-  const conversationIdRef = useRef<string | undefined>(undefined);
+  const CONV_KEY = 'seraphine_conversation_id';
+  const conversationIdRef = useRef<string | undefined>(
+    localStorage.getItem(CONV_KEY) || undefined
+  );
   const messagesRef = useRef<HTMLDivElement | null>(null);
+
+  // Restore chat history from backend on mount
+  useEffect(() => {
+    const convId = conversationIdRef.current;
+    if (!convId) return;
+    fetch(`/conversations/${convId}/turns`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: Array<{ id: string; role: string; content: string }>) => {
+        if (data.length > 0) {
+          setTurns(data.map((t) => ({
+            id: t.id,
+            role: t.role as 'user' | 'assistant',
+            content: t.content,
+          })));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Recording UI state
   const [locked, setLocked] = useState(false);
@@ -225,7 +246,10 @@ export function ChatView({
     return ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
       if (msg instanceof ArrayBuffer) return;
       if (msg.type === 'token') {
-        if (!conversationIdRef.current) conversationIdRef.current = msg.conversation_id;
+        if (!conversationIdRef.current) {
+          conversationIdRef.current = msg.conversation_id;
+          localStorage.setItem(CONV_KEY, msg.conversation_id);
+        }
         const turnId = msg.turn_id;
         setStreamingTurnId(turnId);
         setTurns((prev) => {
@@ -336,9 +360,12 @@ export function ChatView({
   const handleMicPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (status !== 'connected' || talking) return;
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // setPointerCapture tracks move/up even if finger moves off button
+      try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
       startYRef.current = e.clientY;
       didLockRef.current = false;
+      // Call onTalkStart synchronously from the gesture handler —
+      // getUserMedia requires a direct user-gesture call chain on mobile.
       void onTalkStart();
     },
     [status, talking, onTalkStart],
@@ -376,8 +403,23 @@ export function ChatView({
 
   const connected = status === 'connected';
 
+  const handleNewConversation = () => {
+    localStorage.removeItem(CONV_KEY);
+    conversationIdRef.current = undefined;
+    setTurns([]);
+    setStreamingTurnId(null);
+    setMcpDecisions(new Map());
+  };
+
   return (
     <>
+      {turns.length > 0 && (
+        <div className="chat__toolbar">
+          <button type="button" className="btn-new-chat" onClick={handleNewConversation}>
+            Nova conversa
+          </button>
+        </div>
+      )}
       <div ref={messagesRef} className="chat__messages">
         {turns.length === 0 && (
           <div className="chat__empty">
@@ -503,6 +545,11 @@ export function ChatView({
           onPointerDown={handleMicPointerDown}
           onPointerMove={handleMicPointerMove}
           onPointerUp={handleMicPointerUp}
+          onTouchStart={(e) => {
+            // Prevent text selection on long-press without blocking getUserMedia
+            e.stopPropagation();
+          }}
+          onContextMenu={(e) => e.preventDefault()}
           title="Segure para gravar (ou Space)"
         >
           {/* SVG mic icon */}

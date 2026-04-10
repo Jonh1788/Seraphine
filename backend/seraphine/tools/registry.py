@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
+
+
 from seraphine.tools.base import Tool
 from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.shell import RunShellTool
+from seraphine.tools.browser import LearnMusicTasteTool, OpenUrlTool, PlayMusicTool
 from seraphine.tools.routes import RoutePlannerTool
 from seraphine.tools.search import WebSearchTool
 from seraphine.tools.web import WebFetchTool
@@ -51,6 +54,7 @@ def build_default_registry(
     allowed_roots: list[Path],
     *,
     skills_dir: Path | None = None,
+    store: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -60,6 +64,9 @@ def build_default_registry(
     reg.register(WebFetchTool())
     reg.register(WebSearchTool())
     reg.register(RoutePlannerTool())
+    reg.register(PlayMusicTool())
+    reg.register(LearnMusicTasteTool(store=store))
+    reg.register(OpenUrlTool())
     if skills_dir is not None:
         reg.register(RequestSkillTool(skills_dir))
     return reg

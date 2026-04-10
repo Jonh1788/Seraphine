@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
+        store=store,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -97,6 +98,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.stt_model,
         settings.stt_language,
     )
+    # Warmup: transcribe a tiny silent PCM so mlx-whisper imports + loads
+    # model weights before the first real mic input. ~5s one-time cost.
+    try:
+        await stt.transcribe(b"\x00" * 3200, sample_rate=16000)  # 100ms silence
+        logger.info("WhisperSTT warmup complete")
+    except Exception as e:
+        logger.warning("WhisperSTT warmup failed (continuing anyway): %s", e)
     audio_engine = AudioEngine(llm, tts, store, stt=stt, engine=engine)
 
     # ------------------------------------------------------------------

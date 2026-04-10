@@ -92,6 +92,18 @@ class MemoryStore:
                     );
                     CREATE INDEX IF NOT EXISTS idx_summaries_conv
                       ON conversation_summaries(conversation_id, created_at DESC);
+                    CREATE TABLE IF NOT EXISTS notifications (
+                      id         TEXT PRIMARY KEY,
+                      event      TEXT NOT NULL,
+                      task_id    TEXT,
+                      title      TEXT,
+                      summary    TEXT,
+                      payload    TEXT NOT NULL,
+                      read       INTEGER NOT NULL DEFAULT 0,
+                      created_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_notif_unread
+                      ON notifications(read, created_at DESC);
                     CREATE TABLE IF NOT EXISTS tool_audit (
                       id             TEXT PRIMARY KEY,
                       request_id     TEXT NOT NULL,
@@ -235,6 +247,55 @@ class MemoryStore:
                     "(id, conversation_id, summary, up_to_turn_id, created_at)"
                     " VALUES (?, ?, ?, ?, ?)",
                     (sid, conversation_id, summary, up_to_turn_id, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    # ---------- notifications ----------
+
+    async def add_notification(
+        self, event: str, task_id: str, title: str, summary: str, payload: str,
+    ) -> str:
+        nid = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO notifications(id, event, task_id, title, summary, payload, read, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (nid, event, task_id, title, summary, payload, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return nid
+
+    async def get_unread_notifications(self, limit: int = 50) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, event, task_id, title, summary, payload, created_at"
+                    " FROM notifications WHERE read = 0"
+                    " ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {"id": r[0], "event": r[1], "task_id": r[2], "title": r[3],
+                 "summary": r[4], "payload": r[5], "created_at": r[6]}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def mark_notifications_read(self, ids: list[str]) -> None:
+        if not ids:
+            return
+
+        def _work() -> None:
+            with self._connect() as conn:
+                placeholders = ",".join("?" for _ in ids)
+                conn.execute(
+                    f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})",
+                    ids,
                 )
 
         await asyncio.to_thread(_work)
