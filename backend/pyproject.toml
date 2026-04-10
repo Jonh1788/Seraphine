@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "chromadb>=0.5",
+    "beautifulsoup4>=4.12",
+    "truststore>=0.10",
 ]
 
 [project.optional-dependencies]

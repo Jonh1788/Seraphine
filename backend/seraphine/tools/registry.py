@@ -7,6 +7,7 @@ from seraphine.tools.base import Tool
 from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.shell import RunShellTool
+from seraphine.tools.web import WebFetchTool
 
 
 class ToolRegistry:
@@ -54,6 +55,7 @@ def build_default_registry(
     reg.register(ListDirTool(allowed_roots))
     reg.register(WriteFileTool(allowed_roots))
     reg.register(RunShellTool())
+    reg.register(WebFetchTool())
     if skills_dir is not None:
         reg.register(RequestSkillTool(skills_dir))
     return reg

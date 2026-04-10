@@ -5,6 +5,7 @@ from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.registry import ToolRegistry, build_default_registry
 from seraphine.tools.shell import RunShellTool
+from seraphine.tools.web import WebFetchTool
 
 __all__ = [
     "Tool",
@@ -16,4 +17,5 @@ __all__ = [
     "WriteFileTool",
     "RunShellTool",
     "RequestSkillTool",
+    "WebFetchTool",
 ]
