@@ -15,6 +15,25 @@
  */
 const PREBUFFER_SECONDS = 0.6;
 
+/**
+ * Playback rate multiplier applied to every scheduled source.
+ *
+ * The Qwen3-TTS server has no speed/rate field, so we accelerate
+ * client-side via Web Audio `AudioBufferSourceNode.playbackRate`.
+ * This is a simple resample — it also raises pitch slightly (tape-
+ * speed-up effect), but up to ~1.2x the shift is imperceptible for
+ * natural speech. Above 1.25 voices start to sound chipmunk.
+ *
+ * 1.15 = ~15% faster, still sounds natural.
+ *
+ * IMPORTANT: with rate > 1, a buffer of `duration` seconds plays in
+ * `duration / rate` wall seconds. The scheduler's `nextStartTime`
+ * bookkeeping must use the SHORTENED wall duration, otherwise
+ * consecutive chunks leave an audible gap of `duration * (1 - 1/rate)`
+ * between them.
+ */
+const PLAYBACK_RATE = 1.15;
+
 export class PCMPlayback {
   private ctx: AudioContext;
   private nextStartTime = 0;
@@ -103,11 +122,13 @@ export class PCMPlayback {
     audioBuf.copyToChannel(samples, 0);
     const src = this.ctx.createBufferSource();
     src.buffer = audioBuf;
+    src.playbackRate.value = PLAYBACK_RATE;
     src.connect(this.ctx.destination);
     const now = this.ctx.currentTime;
     const start = Math.max(now, this.nextStartTime);
     src.start(start);
-    this.nextStartTime = start + audioBuf.duration;
+    // Wall-clock duration is compressed by the playback rate.
+    this.nextStartTime = start + audioBuf.duration / PLAYBACK_RATE;
     this.scheduled.push(src);
     src.onended = (): void => {
       this.scheduled = this.scheduled.filter((s) => s !== src);
