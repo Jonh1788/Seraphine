@@ -4,16 +4,29 @@ import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
 import type { VrmAvatarController } from './avatar/VrmAvatarController';
 import { MicCapture, PCMPlayback } from './audio';
+import { MemoryPanel } from './memory';
 import { ApprovalPanel } from './tools';
+import { MetricsBar } from './metrics';
+import type { LatencyMetrics } from './metrics';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
   const [speak, setSpeak] = useState<boolean>(true);
+  const [think, setThink] = useState<boolean>(false);
   const [talking, setTalking] = useState<boolean>(false);
+  const [metrics, setMetrics] = useState<LatencyMetrics>({});
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
   const chunkOffRef = useRef<(() => void) | null>(null);
+
+  // Timestamp refs for latency tracking
+  const tsSendRef = useRef<number>(0);
+  const tsFirstTokenRef = useRef<boolean>(false);
+  const tsTtsStartRef = useRef<number>(0);
+  const tsTtsFirstChunkRef = useRef<boolean>(false);
+  const tsAudioEndRef = useRef<number>(0);
 
   useEffect(() => {
     // Eagerly create the player so its AnalyserNode exists before the
@@ -26,18 +39,63 @@ export function App(): JSX.Element {
     wsRef.current = ws;
     const offStatus = ws.onStatus((s) => setStatus(s));
     const offMsg = ws.onMessage((msg) => {
+      const now = performance.now();
       if (msg instanceof ArrayBuffer) {
         playbackRef.current?.pushChunk(msg);
+        // TTS latency: first binary chunk after tts_start
+        if (tsTtsStartRef.current && !tsTtsFirstChunkRef.current) {
+          tsTtsFirstChunkRef.current = true;
+          setMetrics((prev) => ({ ...prev, ttsLatency: now - tsTtsStartRef.current }));
+        }
         return;
       }
-      if ((msg as { type?: string }).type === 'tts_end') {
+      const type = (msg as { type?: string }).type;
+      if (type === 'token') {
+        // TTFT: first token after user_message send
+        if (tsSendRef.current && !tsFirstTokenRef.current) {
+          tsFirstTokenRef.current = true;
+          setMetrics((prev) => ({ ...prev, ttft: now - tsSendRef.current }));
+        }
+      } else if (type === 'turn_end') {
+        // Turn duration
+        if (tsSendRef.current) {
+          setMetrics((prev) => ({ ...prev, turnDuration: now - tsSendRef.current }));
+          tsSendRef.current = 0;
+        }
+      } else if (type === 'tts_start') {
+        tsTtsStartRef.current = now;
+        tsTtsFirstChunkRef.current = false;
+      } else if (type === 'tts_end') {
         void playbackRef.current?.flush();
+        tsTtsStartRef.current = 0;
+      } else if (type === 'transcription') {
+        // STT latency: audio_end to transcription
+        if (tsAudioEndRef.current) {
+          setMetrics((prev) => ({ ...prev, sttLatency: now - tsAudioEndRef.current }));
+          tsAudioEndRef.current = 0;
+        }
+        // For voice input, measure TTFT from transcription arrival
+        if (!tsSendRef.current) {
+          tsSendRef.current = now;
+          tsFirstTokenRef.current = false;
+        }
+      }
+    });
+    const offSend = ws.onSend((msg) => {
+      const now = performance.now();
+      if (msg.type === 'user_message') {
+        tsSendRef.current = now;
+        tsFirstTokenRef.current = false;
+        setMetrics({});
+      } else if (msg.type === 'audio_end') {
+        tsAudioEndRef.current = now;
       }
     });
     ws.connect();
     return () => {
       offStatus();
       offMsg();
+      offSend();
       chunkOffRef.current?.();
       micRef.current?.stop();
       playbackRef.current?.dispose();
@@ -78,15 +136,64 @@ export function App(): JSX.Element {
     }
   };
 
+  const handleTalkCancel = (): void => {
+    chunkOffRef.current?.();
+    chunkOffRef.current = null;
+    micRef.current?.stop();
+    setTalking(false);
+    // No audio_end sent — discard the recording
+  };
+
+  // Global push-to-talk hotkey (Space)
+  const talkingRef = useRef(false);
+  talkingRef.current = talking;
+
+  useEffect(() => {
+    const isTyping = (): boolean => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable === true;
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || e.repeat || talkingRef.current || isTyping()) return;
+      e.preventDefault();
+      void handleTalkStart();
+    };
+
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || isTyping()) return;
+      e.preventDefault();
+      handleTalkEnd();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [status]);
+
   const connected = status === 'connected';
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
-        <div className={`status ${connected ? 'status--connected' : ''}`}>
-          <span className="status__dot" />
-          {connected ? 'online' : 'reconectando…'}
+        <div className="topbar__right">
+          <div className={`status ${connected ? 'status--connected' : ''}`}>
+            <span className="status__dot" />
+            {connected ? 'online' : 'reconectando…'}
+          </div>
+          <button
+            className="mobile-menu-btn"
+            aria-label="Menu"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+          >
+            <span className={`hamburger ${mobileMenuOpen ? 'hamburger--open' : ''}`}>
+              <span /><span /><span />
+            </span>
+          </button>
         </div>
       </header>
 
@@ -100,25 +207,6 @@ export function App(): JSX.Element {
           </div>
 
           <div className="controls">
-            <button
-              type="button"
-              className="btn btn-talk"
-              disabled={!connected}
-              onMouseDown={() => {
-                void handleTalkStart();
-              }}
-              onMouseUp={handleTalkEnd}
-              onMouseLeave={() => {
-                if (talking) handleTalkEnd();
-              }}
-              onTouchStart={() => {
-                void handleTalkStart();
-              }}
-              onTouchEnd={handleTalkEnd}
-            >
-              {talking ? 'Ouvindo… (solte)' : 'Falar (segure)'}
-            </button>
-
             <label className="toggle">
               <span>Responder com áudio</span>
               <input
@@ -127,15 +215,46 @@ export function App(): JSX.Element {
                 onChange={(e) => setSpeak(e.target.checked)}
               />
             </label>
+
+            <label className="toggle">
+              <span>Pensar antes de responder</span>
+              <input
+                type="checkbox"
+                checked={think}
+                onChange={(e) => setThink(e.target.checked)}
+              />
+            </label>
           </div>
 
-          <ApprovalPanel ws={wsRef.current} />
+          <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
+            <ApprovalPanel ws={wsRef.current} />
+            <MemoryPanel />
+            <MetricsBar metrics={metrics} />
+          </div>
         </aside>
 
         <section className="chat">
-          {wsRef.current && <ChatView ws={wsRef.current} status={status} speak={speak} />}
+          {wsRef.current && (
+            <ChatView
+              ws={wsRef.current}
+              status={status}
+              speak={speak}
+              think={think}
+              talking={talking}
+              onTalkStart={handleTalkStart}
+              onTalkEnd={handleTalkEnd}
+              onTalkCancel={handleTalkCancel}
+            />
+          )}
         </section>
       </div>
+
+      {mobileMenuOpen && (
+        <div
+          className="mobile-overlay"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
     </div>
   );
 }

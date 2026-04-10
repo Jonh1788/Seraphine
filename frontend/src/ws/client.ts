@@ -2,8 +2,9 @@ import type { ClientMessage, ServerMessage } from './types';
 
 type StatusListener = (status: 'connected' | 'disconnected') => void;
 type MessageListener = (msg: ServerMessage | ArrayBuffer) => void;
+type SendListener = (msg: ClientMessage) => void;
 
-const DEFAULT_URL = 'ws://localhost:8000/ws/conversation';
+const DEFAULT_URL = `ws://${window.location.hostname}:8000/ws/conversation`;
 const BACKOFF_MS = [1000, 2000, 5000];
 
 export class SeraphineWS {
@@ -11,6 +12,7 @@ export class SeraphineWS {
   private url: string;
   private statusListeners = new Set<StatusListener>();
   private messageListeners = new Set<MessageListener>();
+  private sendListeners = new Set<SendListener>();
   private retry = 0;
   private closed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -28,6 +30,7 @@ export class SeraphineWS {
   send(msg: ClientMessage): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg));
+      this.sendListeners.forEach((cb) => cb(msg));
     }
   }
 
@@ -40,6 +43,11 @@ export class SeraphineWS {
   onMessage(cb: MessageListener): () => void {
     this.messageListeners.add(cb);
     return () => this.messageListeners.delete(cb);
+  }
+
+  onSend(cb: SendListener): () => void {
+    this.sendListeners.add(cb);
+    return () => this.sendListeners.delete(cb);
   }
 
   onStatus(cb: StatusListener): () => void {

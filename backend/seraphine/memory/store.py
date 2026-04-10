@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -259,6 +259,46 @@ class MemoryStore:
                 )
 
         await asyncio.to_thread(_work)
+
+    async def update_fact(self, fact_id: str, text: str | None = None, confidence: float | None = None) -> Fact | None:
+        def _work() -> Fact | None:
+            with self._connect() as conn:
+                parts: list[str] = []
+                vals: list[Any] = []
+                if text is not None:
+                    parts.append("text = ?")
+                    vals.append(text)
+                if confidence is not None:
+                    parts.append("confidence = ?")
+                    vals.append(confidence)
+                if not parts:
+                    return None
+                vals.append(fact_id)
+                conn.execute(
+                    f"UPDATE facts SET {', '.join(parts)} WHERE id = ?",
+                    vals,
+                )
+                row = conn.execute(
+                    "SELECT id, text, source, confidence, created_at, superseded_by"
+                    " FROM facts WHERE id = ?",
+                    (fact_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return Fact(
+                id=row[0], text=row[1], source=row[2],
+                confidence=row[3], created_at=row[4], superseded_by=row[5],
+            )
+
+        return await asyncio.to_thread(_work)
+
+    async def delete_fact(self, fact_id: str) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
+                return cur.rowcount > 0
+
+        return await asyncio.to_thread(_work)
 
     # ---------- tool audit ----------
 

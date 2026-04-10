@@ -58,6 +58,7 @@ class OllamaClient:
         temperature: float = 0.7,
         audio: bytes | None = None,
         tools: list[dict[str, Any]] | None = None,
+        think: bool = False,
     ) -> AsyncIterator[Token]:
         dumped: list[dict[str, Any]] = [m.model_dump() for m in messages]
         if audio is not None and dumped:
@@ -79,7 +80,7 @@ class OllamaClient:
             # voice agent that's a latency killer (we saw a 4.2 s outlier
             # in benchmarking). Disable by default; callers that want
             # reasoning for complex tasks can flip this per-request later.
-            "think": False,
+            "think": think,
             "options": {
                 "temperature": temperature,
                 "num_batch": self.num_batch,

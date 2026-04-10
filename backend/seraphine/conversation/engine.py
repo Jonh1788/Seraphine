@@ -34,6 +34,9 @@ DEFAULT_SYSTEM_PROMPT = (
 APPROVAL_TIMEOUT_SECONDS = 300
 MAX_TOOL_ITERATIONS = 5
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
+# Run reflect() automatically every N assistant turns to let Seraphine
+# learn facts about the user on her own.
+AUTO_REFLECT_EVERY_N_TURNS = 3
 
 
 class _LLMLike(Protocol):
@@ -115,6 +118,7 @@ class ConversationEngine:
         self.memory = memory
         self.tools = tools
         self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
+        self._turn_counter: int = 0
 
     async def submit_approval(self, request_id: str, approved: bool) -> bool:
         q = self.pending_approvals.get(request_id)
@@ -152,7 +156,7 @@ class ConversationEngine:
         return "\n".join(lines)
 
     async def handle_user_message(
-        self, conversation_id: str | None, content: str
+        self, conversation_id: str | None, content: str, *, think: bool = False
     ) -> AsyncIterator[StreamEvent]:
         if conversation_id is None:
             conversation_id = await self.store.create_conversation()
@@ -179,9 +183,9 @@ class ConversationEngine:
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
                 if self.tools is not None:
-                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools())  # type: ignore[call-arg]
+                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think)  # type: ignore[call-arg]
                 else:
-                    stream = self.llm.chat(messages)
+                    stream = self.llm.chat(messages, think=think)
 
                 pending_tool_calls: list[dict[str, Any]] | None = None
                 async for tok in stream:
@@ -322,3 +326,19 @@ class ConversationEngine:
                 await self.memory.remember_episode(assistant_turn)
             except Exception as e:  # pragma: no cover
                 logger.warning("remember_episode failed: %s", e)
+            # Auto-reflect: every N turns, ask the LLM to extract durable
+            # facts about the user from recent conversation. Runs in a
+            # background task so it never blocks the response stream.
+            self._turn_counter += 1
+            if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
+                asyncio.create_task(self._auto_reflect())
+
+    async def _auto_reflect(self) -> None:
+        if self.memory is None:
+            return
+        try:
+            n = await self.memory.reflect()
+            if n:
+                logger.info("auto-reflect: learned %d new fact(s)", n)
+        except Exception as e:
+            logger.warning("auto-reflect failed: %s", e)

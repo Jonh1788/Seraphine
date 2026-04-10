@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import pytest
 
@@ -23,7 +23,7 @@ class CannedLLM:
         messages: list[ChatMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.7, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         self.calls.append(messages)
         for chunk in self.raw:

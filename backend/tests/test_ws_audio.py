@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -20,7 +22,7 @@ class FakeLLM:
         *,
         model: str | None = None,
         temperature: float = 0.7,
-        audio: bytes | None = None,
+        audio: bytes | None = None, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         yield Token(text="hi", done=False)
         yield Token(text="", done=True)

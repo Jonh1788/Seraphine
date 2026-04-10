@@ -6,7 +6,7 @@
 set -euo pipefail
 
 PORT="${PORT:-8000}"
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-0.0.0.0}"
 
 cd "$(dirname "$0")/.."
 
@@ -28,5 +28,19 @@ if [[ -n "$pids" ]]; then
   exit 1
 fi
 
-echo "starting uvicorn on $HOST:$PORT ${RELOAD_FLAG:+(reload)}"
+# Print accessible URLs
+echo "=================================="
+echo "  Seraphine Backend"
+echo "=================================="
+echo "  Local:   http://127.0.0.1:$PORT"
+# List all non-loopback IPv4 addresses on the machine
+for ip in $(ifconfig 2>/dev/null | grep 'inet ' | awk '{print $2}' | grep -v '127.0.0.1'); do
+  echo "  Rede:    http://$ip:$PORT"
+done
+echo "  Health:  http://127.0.0.1:$PORT/health"
+echo "  WS:      ws://<ip>:$PORT/ws/conversation"
+echo "  Memory:  http://127.0.0.1:$PORT/memory/facts"
+echo "=================================="
+echo ""
+
 exec uv run uvicorn seraphine.main:app --host "$HOST" --port "$PORT" $RELOAD_FLAG "$@"

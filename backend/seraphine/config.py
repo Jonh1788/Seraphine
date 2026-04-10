@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     tts_repetition_penalty: float = 1.05
     tts_seed: int = 42
 
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["*"]
 
     allowed_tool_roots: list[Path] = [Path.home()]
 

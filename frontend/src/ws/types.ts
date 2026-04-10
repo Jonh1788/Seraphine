@@ -66,6 +66,13 @@ export interface TtsEndMessage {
   turn_id: string;
 }
 
+// Phase 2 — STT transcription result
+export interface TranscriptionMessage {
+  type: 'transcription';
+  conversation_id: string;
+  text: string;
+}
+
 // Phase 4 — tool use with approval gate
 export interface ToolRequestMessage {
   type: 'tool_request';
@@ -104,5 +111,6 @@ export type ServerMessage =
   | TurnEndMessage
   | TtsStartMessage
   | TtsEndMessage
+  | TranscriptionMessage
   | ToolRequestMessage
   | ToolResultMessage;

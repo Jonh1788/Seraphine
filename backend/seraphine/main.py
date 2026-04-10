@@ -17,6 +17,7 @@ from seraphine.memory.store import MemoryStore
 from seraphine.stt.whisper import WhisperSTT
 from seraphine.tools.registry import build_default_registry
 from seraphine.tts.qwen3 import Qwen3TtsAdapter
+from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(memory_router)
     app.include_router(ws_router)
 
     logger.info("Seraphine app initialized (model=%s)", settings.llm_model)

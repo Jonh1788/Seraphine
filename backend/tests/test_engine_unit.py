@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import pytest
 
@@ -24,7 +24,7 @@ class FakeLLM:
         messages: list[ChatMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.7, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         for c in self.chunks:
             yield Token(text=c, done=False)
@@ -37,7 +37,7 @@ class BrokenLLM:
         messages: list[ChatMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.7, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         raise LLMUnavailableError("boom")
         yield  # pragma: no cover

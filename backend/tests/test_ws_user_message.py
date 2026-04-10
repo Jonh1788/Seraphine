@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +18,7 @@ class FakeLLM:
         messages: list[ChatMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.7, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         for c in ["o", "i", "!"]:
             yield Token(text=c, done=False)
@@ -105,7 +105,7 @@ class MultiSentenceLLM:
         messages: list[ChatMessage],
         *,
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.7, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         for piece in [
             "Olá",

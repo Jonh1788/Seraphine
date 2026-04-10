@@ -30,7 +30,7 @@ class ScriptedLLM:
         *,
         model: str | None = None,
         temperature: float = 0.7,
-        tools: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None, **kwargs: Any,
     ) -> AsyncIterator[Token]:
         self.calls.append(list(messages))
         idx = len(self.calls) - 1

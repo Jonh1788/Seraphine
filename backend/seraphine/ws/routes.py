@@ -32,11 +32,10 @@ router = APIRouter()
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB safety cap per utterance
 
-# Minimum character threshold before the speak worker sends a batch to TTS.
-# Sentences accumulate until this limit is reached, then the whole batch is
-# synthesized in a single request. Larger batches = better prosody & fewer
-# HTTP round-trips, at the cost of slightly higher time-to-first-audio.
-TTS_CHUNK_MIN_CHARS = 120
+# First chunk sent to TTS is short for fast time-to-first-audio.
+# Subsequent chunks are longer for better prosody and fewer round-trips.
+TTS_FIRST_CHUNK_MIN_CHARS = 40
+TTS_CHUNK_MIN_CHARS = 200
 
 
 class PongMessage(BaseModel):
@@ -83,12 +82,13 @@ async def _speak_worker(
                 return
 
     started = False
+    first_batch_done = False
     batch: list[str] = []
     batch_len = 0
 
     async def _synth_batch() -> bool:
         """Synthesize the accumulated batch. Returns False on TTS failure."""
-        nonlocal started, batch, batch_len
+        nonlocal started, first_batch_done, batch, batch_len
         if not batch:
             return True
         text = " ".join(batch)
@@ -109,6 +109,7 @@ async def _speak_worker(
                 {"type": "error", "code": "tts_unavailable", "message": str(e)}
             )
             return False
+        first_batch_done = True
         return True
 
     while True:
@@ -123,7 +124,8 @@ async def _speak_worker(
             continue
         batch.append(sentence)
         batch_len += len(sentence)
-        if batch_len >= TTS_CHUNK_MIN_CHARS:
+        threshold = TTS_CHUNK_MIN_CHARS if first_batch_done else TTS_FIRST_CHUNK_MIN_CHARS
+        if batch_len >= threshold:
             ok = await _synth_batch()
             if not ok:
                 # Drain remaining sentences — still need tts_end.
@@ -184,6 +186,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                 conv_id = payload.get("conversation_id")
                 content = payload.get("content", "")
                 speak = bool(payload.get("speak", False))
+                think = bool(payload.get("think", False))
 
                 # Sentence-level streaming TTS state. We start the worker
                 # eagerly when speak=true so the first complete sentence is
@@ -192,6 +195,50 @@ async def conversation_ws(ws: WebSocket) -> None:
                 final_turn_id: str | None = None
                 speak_queue: "asyncio.Queue[str | object]" | None = None
                 speak_task: asyncio.Task[None] | None = None
+
+                # Track whether we are inside a <think>…</think> block so
+                # that thinking tokens are NOT fed to TTS.
+                _inside_think = False
+                # Buffer used to detect partial tag boundaries across chunks.
+                _think_tag_buf = ""
+
+                def _tts_filter_think(raw: str) -> str:
+                    """Return only the portions of *raw* that are outside
+                    ``<think>…</think>`` blocks.  Updates the outer
+                    ``_inside_think`` / ``_think_tag_buf`` state."""
+                    nonlocal _inside_think, _think_tag_buf
+
+                    # Prepend any leftover partial-tag bytes from the last call.
+                    text = _think_tag_buf + raw
+                    _think_tag_buf = ""
+
+                    # If the tail looks like it could be a partial <think or
+                    # </think tag, stash it and process the rest on the next
+                    # call so we don't accidentally send half a tag to TTS.
+                    for i in range(1, min(len(text), 9)):  # len("</think>") == 8
+                        tail = text[-i:]
+                        if "<think>".startswith(tail) or "</think>".startswith(tail):
+                            _think_tag_buf = tail
+                            text = text[:-i]
+                            break
+
+                    out: list[str] = []
+                    while text:
+                        if _inside_think:
+                            end = text.find("</think>")
+                            if end == -1:
+                                break  # still inside think – discard all
+                            _inside_think = False
+                            text = text[end + len("</think>"):]
+                        else:
+                            start = text.find("<think>")
+                            if start == -1:
+                                out.append(text)
+                                break
+                            out.append(text[:start])
+                            _inside_think = True
+                            text = text[start + len("<think>"):]
+                    return "".join(out)
 
                 def _maybe_push_sentences() -> None:
                     nonlocal sentence_buf
@@ -204,10 +251,11 @@ async def conversation_ws(ws: WebSocket) -> None:
                             speak_queue.put_nowait(cleaned)
 
                 if engine.tools is None:
-                    async for event in engine.handle_user_message(conv_id, content):
+                    async for event in engine.handle_user_message(conv_id, content, think=think):
                         etype = getattr(event, "type", None)
                         if etype == "token":
-                            sentence_buf += getattr(event, "text", "")
+                            tts_text = _tts_filter_think(getattr(event, "text", ""))
+                            sentence_buf += tts_text
                             if speak:
                                 if speak_queue is None:
                                     final_turn_id = getattr(event, "turn_id", None)
@@ -232,10 +280,11 @@ async def conversation_ws(ws: WebSocket) -> None:
 
                     async def _drive_turn() -> None:
                         nonlocal sentence_buf, final_turn_id, speak_queue, speak_task
-                        async for event in engine.handle_user_message(conv_id, content):
+                        async for event in engine.handle_user_message(conv_id, content, think=think):
                             etype = getattr(event, "type", None)
                             if etype == "token":
-                                sentence_buf += getattr(event, "text", "")
+                                tts_text = _tts_filter_think(getattr(event, "text", ""))
+                                sentence_buf += tts_text
                                 if speak:
                                     if speak_queue is None:
                                         final_turn_id = getattr(event, "turn_id", None)

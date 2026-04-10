@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 
@@ -9,18 +9,143 @@ interface Turn {
   streaming?: boolean;
 }
 
+/**
+ * Parse assistant content that may contain `<think>…</think>` blocks.
+ * Returns { thinking: string | null; response: string; thinkingDone: boolean }.
+ */
+function parseThinking(raw: string): {
+  thinking: string | null;
+  response: string;
+  thinkingDone: boolean;
+} {
+  const openTag = '<think>';
+  const closeTag = '</think>';
+  const openIdx = raw.indexOf(openTag);
+  if (openIdx === -1) return { thinking: null, response: raw, thinkingDone: false };
+
+  const afterOpen = openIdx + openTag.length;
+  const closeIdx = raw.indexOf(closeTag, afterOpen);
+
+  if (closeIdx === -1) {
+    // Still inside thinking — everything after <think> is thinking content
+    return {
+      thinking: raw.slice(afterOpen),
+      response: '',
+      thinkingDone: false,
+    };
+  }
+
+  // Thinking is complete
+  return {
+    thinking: raw.slice(afterOpen, closeIdx),
+    response: raw.slice(closeIdx + closeTag.length),
+    thinkingDone: true,
+  };
+}
+
+/** Collapsible thinking block shown inside assistant bubbles. */
+function ThinkingBlock({
+  thinking,
+  done,
+  streaming,
+}: {
+  thinking: string;
+  done: boolean;
+  streaming: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Auto-collapse when thinking finishes
+  const prevDone = useRef(done);
+  useEffect(() => {
+    if (done && !prevDone.current) setCollapsed(true);
+    prevDone.current = done;
+  }, [done]);
+
+  return (
+    <div className={`thinking-block${done ? ' thinking-block--done' : ''}`}>
+      <button
+        type="button"
+        className="thinking-block__header"
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        <span className={`thinking-block__arrow${collapsed ? '' : ' thinking-block__arrow--open'}`}>
+          {'\u25B6'}
+        </span>
+        <span>Pensando...</span>
+        {!done && streaming && <span className="thinking-indicator"><span /><span /><span /></span>}
+      </button>
+      <div
+        className={`thinking-block__content${collapsed ? ' thinking-block__content--collapsed' : ''}`}
+      >
+        {thinking}
+      </div>
+    </div>
+  );
+}
+
 interface ChatViewProps {
   ws: SeraphineWS;
   status: 'connected' | 'disconnected';
   speak?: boolean;
+  think?: boolean;
+  talking: boolean;
+  onTalkStart: () => Promise<void>;
+  onTalkEnd: () => void;
+  onTalkCancel: () => void;
 }
 
-export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Element {
+/** Threshold (px) the user must drag upward to lock recording */
+const LOCK_DRAG_THRESHOLD = 60;
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+export function ChatView({
+  ws,
+  status,
+  speak = false,
+  think = false,
+  talking,
+  onTalkStart,
+  onTalkEnd,
+  onTalkCancel,
+}: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+
+  // Recording UI state
+  const [locked, setLocked] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startYRef = useRef(0);
+  const didLockRef = useRef(false);
+
+  // Start elapsed timer when recording begins, clear when it stops
+  useEffect(() => {
+    if (talking) {
+      setElapsed(0);
+      elapsedRef.current = setInterval(() => {
+        setElapsed((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current);
+        elapsedRef.current = null;
+      }
+      setLocked(false);
+      didLockRef.current = false;
+    }
+    return () => {
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+    };
+  }, [talking]);
 
   useEffect(() => {
     return ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
@@ -83,9 +208,55 @@ export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Elem
       conversation_id: conversationIdRef.current,
       content,
       speak,
+      think,
     });
     setDraft('');
   };
+
+  // --- Mic button press & drag handlers ---
+
+  const handleMicPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (status !== 'connected' || talking) return;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      startYRef.current = e.clientY;
+      didLockRef.current = false;
+      void onTalkStart();
+    },
+    [status, talking, onTalkStart],
+  );
+
+  const handleMicPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!talking || locked || didLockRef.current) return;
+      const deltaY = startYRef.current - e.clientY;
+      if (deltaY > LOCK_DRAG_THRESHOLD) {
+        didLockRef.current = true;
+        setLocked(true);
+      }
+    },
+    [talking, locked],
+  );
+
+  const handleMicPointerUp = useCallback(() => {
+    if (!talking) return;
+    if (didLockRef.current || locked) {
+      // Already locked -- don't stop, user will use stop/cancel buttons
+      return;
+    }
+    // Normal release: send
+    onTalkEnd();
+  }, [talking, locked, onTalkEnd]);
+
+  const handleLockedSend = useCallback(() => {
+    onTalkEnd();
+  }, [onTalkEnd]);
+
+  const handleLockedCancel = useCallback(() => {
+    onTalkCancel();
+  }, [onTalkCancel]);
+
+  const connected = status === 'connected';
 
   return (
     <>
@@ -93,47 +264,133 @@ export function ChatView({ ws, status, speak = false }: ChatViewProps): JSX.Elem
         {turns.length === 0 && (
           <div className="chat__empty">
             <strong>Comece a conversa</strong>
-            Digite uma mensagem ou segure o botão pra falar.
+            Digite uma mensagem ou segure o microfone pra falar.
           </div>
         )}
-        {turns.map((t) => (
-          <div key={t.id} className={`bubble bubble--${t.role}`}>
-            <div className="bubble__avatar">
-              {t.role === 'user' ? 'V' : t.role === 'assistant' ? 'S' : '!'}
-            </div>
-            <div className="bubble__body">
-              <div className="bubble__name">
-                {t.role === 'user' ? 'Você' : t.role === 'assistant' ? 'Seraphine' : 'Erro'}
+        {turns.map((t) => {
+          const parsed =
+            t.role === 'assistant' ? parseThinking(t.content) : null;
+
+          return (
+            <div key={t.id} className={`bubble bubble--${t.role}`}>
+              <div className="bubble__avatar">
+                {t.role === 'user' ? 'V' : t.role === 'assistant' ? 'S' : '!'}
               </div>
-              <div className="bubble__content">
-                {t.content}
-                {t.streaming && <span className="cursor" />}
+              <div className="bubble__body">
+                <div className="bubble__name">
+                  {t.role === 'user' ? 'Voce' : t.role === 'assistant' ? 'Seraphine' : 'Erro'}
+                </div>
+                <div className="bubble__content">
+                  {parsed && parsed.thinking !== null && (
+                    <ThinkingBlock
+                      thinking={parsed.thinking}
+                      done={parsed.thinkingDone}
+                      streaming={!!t.streaming}
+                    />
+                  )}
+                  {parsed ? parsed.response : t.content}
+                  {t.streaming && <span className="cursor" />}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
+      {/* Recording indicator bar -- shown above composer while recording */}
+      {talking && (
+        <div className={`rec-bar${locked ? ' rec-bar--locked' : ''}`}>
+          <span className="rec-bar__dot" />
+          <span className="rec-bar__time">{formatElapsed(elapsed)}</span>
+          {locked ? (
+            <span className="rec-bar__hint">Gravacao travada</span>
+          ) : (
+            <>
+              <span className="rec-bar__waveform">
+                <span /><span /><span /><span /><span />
+              </span>
+              <span className="rec-bar__hint">Deslize pra cima pra travar</span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="chat__composer">
-        <input
-          type="text"
-          className="chat__input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') send();
-          }}
-          placeholder={
-            status === 'connected'
-              ? isStreaming
-                ? 'Aguarde a resposta…'
-                : 'Digite e Enter…'
-              : 'Desconectado'
-          }
-          disabled={status !== 'connected' || isStreaming}
-        />
-        <button type="button" className="btn btn-primary" onClick={send} disabled={!canSend}>
-          Enviar
+        {talking ? (
+          /* While recording, replace the input with recording controls */
+          locked ? (
+            <div className="rec-locked-controls">
+              <button
+                type="button"
+                className="btn rec-locked-controls__cancel"
+                onClick={handleLockedCancel}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn rec-locked-controls__send"
+                onClick={handleLockedSend}
+              >
+                Enviar
+              </button>
+            </div>
+          ) : (
+            <div className="rec-hold-hint">
+              Solte pra enviar
+            </div>
+          )
+        ) : (
+          /* Normal text input */
+          <>
+            <input
+              type="text"
+              className="chat__input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') send();
+              }}
+              placeholder={
+                connected
+                  ? isStreaming
+                    ? 'Aguarde a resposta...'
+                    : 'Digite e Enter...'
+                  : 'Desconectado'
+              }
+              disabled={!connected || isStreaming}
+            />
+            <button type="button" className="btn btn-primary" onClick={send} disabled={!canSend}>
+              Enviar
+            </button>
+          </>
+        )}
+
+        {/* Mic button -- always visible in composer */}
+        <button
+          type="button"
+          className={`btn-mic${talking ? ' btn-mic--active' : ''}`}
+          disabled={!connected}
+          onPointerDown={handleMicPointerDown}
+          onPointerMove={handleMicPointerMove}
+          onPointerUp={handleMicPointerUp}
+          title="Segure para gravar (ou Space)"
+        >
+          {/* SVG mic icon */}
+          <svg
+            className="btn-mic__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="9" y="1" width="6" height="13" rx="3" />
+            <path d="M5 10a7 7 0 0 0 14 0" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+          </svg>
         </button>
       </div>
     </>

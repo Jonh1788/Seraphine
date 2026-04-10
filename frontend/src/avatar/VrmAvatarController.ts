@@ -46,8 +46,9 @@ export class VrmAvatarController implements AvatarAdapter {
     const width = canvas.width || 400;
     const height = canvas.height || 600;
     this.camera = new PerspectiveCamera(30, width / height, 0.1, 20);
-    this.camera.position.set(0, 1.4, 2);
-    this.camera.lookAt(0, 1.3, 0);
+    // Frame bust/upper body — closer to the model, looking at chest level
+    this.camera.position.set(0, 1.45, 0.9);
+    this.camera.lookAt(0, 1.35, 0);
 
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -92,12 +93,33 @@ export class VrmAvatarController implements AvatarAdapter {
     // humanoid API expects rotations as per-bone quaternions in
     // NORMALIZED space.
     this.applyRestPose();
-    // Breathing — chest bone directly (raw, outside the humanoid
-    // normalisation so setNormalizedPose doesn't clobber it).
+
+    const t = this.elapsed;
+
+    // Breathing — chest rises gently on a ~4s cycle
     const chest = vrm.humanoid?.getRawBoneNode("chest") as Object3D | null | undefined;
     if (chest) {
-      chest.rotation.x = Math.sin((this.elapsed * 2 * Math.PI) / 4) * 0.02;
+      const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
+      chest.rotation.x = breathPhase * 0.015;
+      // Subtle shoulder rise with breath
+      chest.position.y = breathPhase * 0.002;
     }
+
+    // Subtle head micro-movement — slow drift on two axes, different periods
+    const head = vrm.humanoid?.getRawBoneNode("head") as Object3D | null | undefined;
+    if (head) {
+      head.rotation.x = Math.sin(t * 0.7) * 0.01 + Math.sin(t * 0.3) * 0.005;
+      head.rotation.y = Math.sin(t * 0.5) * 0.015 + Math.cos(t * 0.2) * 0.008;
+      head.rotation.z = Math.sin(t * 0.4) * 0.005;
+    }
+
+    // Gentle body sway — spine bone, very slow and subtle
+    const spine = vrm.humanoid?.getRawBoneNode("spine") as Object3D | null | undefined;
+    if (spine) {
+      spine.rotation.z = Math.sin(t * 0.3) * 0.008;
+      spine.rotation.x = Math.sin(t * 0.25) * 0.005;
+    }
+
     // Blink
     const em = vrm.expressionManager;
     if (em) {
