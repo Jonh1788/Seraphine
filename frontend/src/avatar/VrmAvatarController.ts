@@ -3,6 +3,7 @@ import {
   Clock,
   DirectionalLight,
   Euler,
+  MathUtils,
   PerspectiveCamera,
   Quaternion,
   Scene,
@@ -84,7 +85,15 @@ export class VrmAvatarController implements AvatarAdapter {
   private updateIdle(): void {
     const vrm = this.vrm;
     if (!vrm) return;
-    // Breathing
+    // Re-apply the rest pose every frame. vrm.update(delta) (called
+    // after this method in the loop) syncs normalized humanoid bones
+    // → raw skeleton; if we only wrote once at load time the
+    // normalized tree would snap back to its bind pose. The VRM
+    // humanoid API expects rotations as per-bone quaternions in
+    // NORMALIZED space.
+    this.applyRestPose();
+    // Breathing — chest bone directly (raw, outside the humanoid
+    // normalisation so setNormalizedPose doesn't clobber it).
     const chest = vrm.humanoid?.getRawBoneNode("chest") as Object3D | null | undefined;
     if (chest) {
       chest.rotation.x = Math.sin((this.elapsed * 2 * Math.PI) / 4) * 0.02;
@@ -143,31 +152,39 @@ export class VrmAvatarController implements AvatarAdapter {
     this.smoothedRms = 0;
   }
 
-  /** Pull the VRM out of its shipped T-pose into a natural standing
-   *  rest pose by rotating the upper arms down at the sides. Called
-   *  once after loadAvatar(). The values target ~68° outward rotation
-   *  around the bone's local Z axis, which for most VRM rigs maps to
-   *  "drop the arm toward the hip". Adjust if your model ships with a
-   *  different axis convention — the Euler is applied in local space.
+  /** Push the VRM out of its shipped T-pose into a natural standing
+   *  rest pose every frame. Writes to the normalized humanoid bones
+   *  via setNormalizedPose so vrm.update(delta) (which runs after
+   *  this in the RAF loop) respects them instead of snapping back.
+   *
+   *  Axis convention, assuming standard VRM T-pose bind:
+   *   - leftUpperArm local +X points OUT to the character's left
+   *   - rotating around local Z with NEGATIVE angle brings +X toward
+   *     -Y (arm down). Positive Z would lift it up.
+   *   - rightUpperArm is the mirror: POSITIVE Z brings it down.
+   *
+   *  ~78° gets the arms hanging at the sides on most VRoid-style
+   *  rigs. Bump the constant if your model ends up with the elbow
+   *  still poking out, drop it if the arms clip into the hips.
    */
-  private applyIdlePose(): void {
-    const vrm = this.vrm;
-    const humanoid = vrm?.humanoid;
+  private applyRestPose(): void {
+    const humanoid = this.vrm?.humanoid;
     if (!humanoid) return;
 
-    const setBoneEuler = (name: string, e: Euler): void => {
-      const node = humanoid.getRawBoneNode(name) as Object3D | null | undefined;
-      if (!node) return;
-      const q = new Quaternion().setFromEuler(e);
-      node.quaternion.copy(q);
+    const UPPER_ARM = MathUtils.degToRad(78);
+    const LOWER_ARM = MathUtils.degToRad(8);
+
+    const q = (e: Euler): [number, number, number, number] => {
+      const quat = new Quaternion().setFromEuler(e);
+      return [quat.x, quat.y, quat.z, quat.w];
     };
 
-    // ~68 degrees outward on each upper arm, plus a tiny forward lean
-    // on the forearm so the arms don't clip through the torso.
-    setBoneEuler("leftUpperArm", new Euler(0, 0, 1.2));
-    setBoneEuler("rightUpperArm", new Euler(0, 0, -1.2));
-    setBoneEuler("leftLowerArm", new Euler(0, -0.15, 0));
-    setBoneEuler("rightLowerArm", new Euler(0, 0.15, 0));
+    humanoid.setNormalizedPose({
+      leftUpperArm: { rotation: q(new Euler(0, 0, -UPPER_ARM)) },
+      rightUpperArm: { rotation: q(new Euler(0, 0, UPPER_ARM)) },
+      leftLowerArm: { rotation: q(new Euler(0, -LOWER_ARM, 0)) },
+      rightLowerArm: { rotation: q(new Euler(0, LOWER_ARM, 0)) },
+    });
   }
 
   async loadAvatar(url: string): Promise<void> {
@@ -186,7 +203,8 @@ export class VrmAvatarController implements AvatarAdapter {
     VRMUtils.rotateVRM0(loadedVrm);
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
-    this.applyIdlePose();
+    // Rest pose is applied every frame by updateIdle() via
+    // applyRestPose(); no one-shot needed here.
   }
 
   async playAudioWithLipSync(stream: ReadableStream<Uint8Array>): Promise<void> {
