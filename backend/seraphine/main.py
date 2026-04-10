@@ -28,6 +28,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await store.ensure_schema()
 
     llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
+    # Warmup: fire a dummy chat so gemma4 is loaded, warm, and KV-cached
+    # before the first user turn. Cold model load on Apple Silicon is
+    # ~4.5 s for an 8B Q4 — we'd rather pay it here than on the first
+    # real interaction.
+    try:
+        await llm.warmup()
+        logger.info("LLM warmup complete (model=%s)", settings.llm_model)
+    except Exception as e:
+        logger.warning("LLM warmup failed (continuing anyway): %s", e)
     embeddings = OllamaEmbeddings(settings.ollama_base_url, settings.embedding_model)
     memory = MemoryManager(store, embeddings, settings.chroma_path, llm=llm)
     try:

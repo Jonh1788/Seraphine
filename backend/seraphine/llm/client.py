@@ -10,16 +10,45 @@ from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, model: str, *, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        *,
+        timeout: float = 120.0,
+        num_batch: int = 2048,
+        keep_alive: str | int = -1,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.num_batch = num_batch
+        self.keep_alive = keep_alive
         self._client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=self.base_url, timeout=timeout
         )
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def warmup(self) -> None:
+        """Prime the model on the server: one dummy request at startup so
+        the first real user message doesn't pay the cold-load cost
+        (~4.5 s for gemma4:e4b on Apple Silicon). Also primes the prefix
+        cache for the default system prompt. Errors are swallowed because
+        the backend should start even if Ollama is momentarily down."""
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "."}],
+            "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": {"num_predict": 1, "num_batch": self.num_batch},
+        }
+        try:
+            resp = await self._client.post("/api/chat", json=body, timeout=60.0)
+            resp.raise_for_status()
+        except (httpx.HTTPError, httpx.ConnectError):
+            pass
 
     async def chat(
         self,
@@ -39,11 +68,22 @@ class OllamaClient:
                 if dumped[i].get("role") == "user":
                     dumped[i]["audio"] = [b64]
                     break
-        body = {
+        body: dict[str, Any] = {
             "model": model or self.model,
             "messages": dumped,
             "stream": True,
-            "options": {"temperature": temperature},
+            "keep_alive": self.keep_alive,
+            # gemma4 has `thinking` capability — if the model decides to
+            # enter reasoning mode, it will emit N tokens of hidden thought
+            # BEFORE the first visible content token. For an interactive
+            # voice agent that's a latency killer (we saw a 4.2 s outlier
+            # in benchmarking). Disable by default; callers that want
+            # reasoning for complex tasks can flip this per-request later.
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_batch": self.num_batch,
+            },
         }
         if tools is not None:
             body["tools"] = tools
