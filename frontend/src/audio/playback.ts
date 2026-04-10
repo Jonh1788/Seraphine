@@ -24,7 +24,10 @@ const PREBUFFER_SECONDS = 0.6;
  * speed-up effect), but up to ~1.2x the shift is imperceptible for
  * natural speech. Above 1.25 voices start to sound chipmunk.
  *
- * 1.15 = ~15% faster, still sounds natural.
+ * 1.05 = ~5% faster, pitch shift essentially inaudible even on
+ * deeper cloned voices. Initial attempt at 1.15 was too aggressive
+ * ('squirrel voice') because the dubgrav clone is a lower timbre
+ * and cheap pitch shifting amplifies the bright end.
  *
  * IMPORTANT: with rate > 1, a buffer of `duration` seconds plays in
  * `duration / rate` wall seconds. The scheduler's `nextStartTime`
@@ -32,7 +35,7 @@ const PREBUFFER_SECONDS = 0.6;
  * consecutive chunks leave an audible gap of `duration * (1 - 1/rate)`
  * between them.
  */
-const PLAYBACK_RATE = 1.15;
+const PLAYBACK_RATE = 1.05;
 
 export class PCMPlayback {
   private ctx: AudioContext;
