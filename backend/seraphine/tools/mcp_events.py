@@ -41,6 +41,13 @@ class McpEventListener:
         """Register a callback: async def callback(event_type: str, data: dict)"""
         self._callbacks.append(callback)
 
+    def off_event(self, callback: Any) -> None:
+        """Unregister a previously registered callback. No-op if not found."""
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
+
     def start(self) -> None:
         """Start the background SSE listener loop."""
         if self._task is not None:

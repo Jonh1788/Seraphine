@@ -18,6 +18,7 @@ The splitter is intentionally tiny and PT/EN-friendly:
 
 from __future__ import annotations
 
+import html
 import re
 
 _END_PUNCT = set(".!?…")
@@ -150,6 +151,69 @@ _RE_TABLE_PIPE = re.compile(r"\s*\|\s*")
 _RE_MULTI_WS = re.compile(r"[ \t]{2,}")
 _RE_MULTI_NL = re.compile(r"\n{3,}")
 
+# --- noise scrubbers (run BEFORE the markdown ones above) ---
+# UUIDs (canonical 8-4-4-4-12 form). Killed entirely.
+_RE_UUID = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+# URLs: http(s)://… and bare www.… — replaced with the word "link" so the
+# sentence still flows naturally instead of having a dangling preposition.
+# We deliberately stop before trailing sentence punctuation so that the
+# period after a URL still ends the sentence cleanly.
+_RE_URL = re.compile(
+    r"\b(?:https?://|www\.)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'\"]",
+    re.IGNORECASE,
+)
+# POSIX-style file paths. Requires a leading `/` (not preceded by a
+# letter, digit or another slash so we don't bite into URLs or words),
+# AND at least three slashes total — that's enough to filter out
+# colloquial constructs like "yes/no/maybe" while still catching real
+# absolute paths such as `/Users/jonh1788/Dev/foo.py`.
+_RE_FILE_PATH = re.compile(
+    r"(?<![A-Za-z0-9/])/(?:[A-Za-z0-9._-]+/){2,}[A-Za-z0-9._-]*"
+)
+# Windows-style file paths: C:\foo\bar
+_RE_WIN_PATH = re.compile(r"\b[A-Za-z]:\\(?:[A-Za-z0-9._-]+\\?)+")
+# Function-call syntax. We are deliberately conservative: only match when
+# the identifier contains a `_` (snake_case) or a `.` (method call), OR
+# when the args clearly look like code (contain `=`, a quote or `:`).
+# That way we leave Portuguese like "ela disse (talvez)" alone but still
+# scrub `web_search(query="x")`, `obj.method(1, 2)`, `f(a=1)`.
+_RE_FUNC_CALL = re.compile(
+    r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)+[A-Za-z_][A-Za-z0-9_]*\([^)\n]*\)"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]*\([^)\n]*\)"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*\([^)\n]*[=\"':][^)\n]*\)"
+)
+# Long alphanumeric ID-like tokens (>=20 chars) that mix letters and digits.
+# Pure-letter words (even long Portuguese ones) are left alone.
+_RE_LONG_ID = re.compile(
+    r"\b(?=[A-Za-z0-9]{20,}\b)(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+\b"
+)
+# Bracket references like [1], [12], [ref], [Ref: 42]
+_RE_BRACKET_REF = re.compile(r"\[(?:\d+|[Rr]ef[^\]]*)\]")
+# Emojis + misc pictographs + dingbats. Wide ranges, not exhaustive but
+# covers what Gemma actually emits.
+_RE_EMOJI = re.compile(
+    "["
+    "\U0001f300-\U0001fAFF"  # symbols & pictographs, supplemental, emoticons
+    "\U0001f000-\U0001f2FF"  # mahjong, playing cards, enclosed alphanum
+    "\U00002600-\U000027BF"  # misc symbols + dingbats
+    "\U0001F1E6-\U0001F1FF"  # regional indicators (flags)
+    "]",
+    flags=re.UNICODE,
+)
+# Arrows and a couple of common math glyphs that TTS reads as garbage.
+_RE_ARROW = re.compile(r"[\u2190-\u21FF\u27F0-\u27FF\u2900-\u297F]")
+# <think>...</think> chain-of-thought scratchpads (sometimes leak past
+# the upstream filter).
+_RE_THINK = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
+# Stray backticks/tildes that survived the structural passes. We do NOT
+# include `*` or `_` here because they show up in legit math/identifiers
+# (`3 * 4`, `snake_case`) — the bold/italic rules above handle them when
+# they actually delimit markdown.
+_RE_LEFTOVER_NOISE = re.compile(r"[`~]+")
+
 
 def strip_markdown_for_tts(text: str) -> str:
     """Return a TTS-friendly plain-text version of `text`.
@@ -161,15 +225,37 @@ def strip_markdown_for_tts(text: str) -> str:
     if not text:
         return text
     s = text
+    # Decode HTML entities up front so &amp; etc. don't survive as noise
+    # nor block downstream regexes.
+    s = html.unescape(s)
+    # Drop chain-of-thought scratchpads that may leak through.
+    s = _RE_THINK.sub(" ", s)
     # Fenced code blocks disappear entirely — reading them aloud is
     # useless and they wreck prosody.
     s = _RE_CODE_FENCE.sub(" ", s)
-    # Inline code: keep the content, drop the backticks.
-    s = _RE_INLINE_CODE.sub(r"\1", s)
-    # Images: drop entirely (alt text isn't worth the noise).
+    # Images: drop entirely (alt text isn't worth the noise). Done before
+    # the link rule because the syntax overlaps.
     s = _RE_IMAGE.sub(" ", s)
     # Links: keep the label, drop the URL.
     s = _RE_LINK.sub(r"\1", s)
+    # Bare URLs that weren't wrapped in markdown link syntax. Replaced
+    # with "link" so the surrounding sentence still flows.
+    s = _RE_URL.sub("link", s)
+    # Inline code: drop backticks first so the func-call scrubber below
+    # can see whatever was wrapped in them.
+    s = _RE_INLINE_CODE.sub(r"\1", s)
+    # File paths — POSIX and Windows. Done after URLs so we don't strip
+    # the path component of an http URL.
+    s = _RE_FILE_PATH.sub(" ", s)
+    s = _RE_WIN_PATH.sub(" ", s)
+    # UUIDs and long mixed-alphanum IDs.
+    s = _RE_UUID.sub(" ", s)
+    # Bracket references like [1] or [Ref: 42] (before LONG_ID so the
+    # content of [Ref: ...] is killed as a unit).
+    s = _RE_BRACKET_REF.sub(" ", s)
+    s = _RE_LONG_ID.sub(" ", s)
+    # Function-call / tool-call syntax like `web_search(query="x")`.
+    s = _RE_FUNC_CALL.sub(" ", s)
     # Bold / italic / strike — keep the inner text.
     s = _RE_BOLD_STAR.sub(r"\1", s)
     s = _RE_BOLD_UNDER.sub(r"\1", s)
@@ -188,7 +274,15 @@ def strip_markdown_for_tts(text: str) -> str:
     # Tables: replace pipe separators with a single space so each row
     # reads as "col col col" instead of "col pipe col pipe col".
     s = _RE_TABLE_PIPE.sub(" ", s)
+    # Emojis and arrows / math glyphs.
+    s = _RE_EMOJI.sub("", s)
+    s = _RE_ARROW.sub(" ", s)
+    # Anything that LOOKS like markdown noise but slipped past the
+    # structural passes (lone backticks/asterisks/etc.).
+    s = _RE_LEFTOVER_NOISE.sub("", s)
     # Collapse whitespace noise left behind by the substitutions.
     s = _RE_MULTI_WS.sub(" ", s)
     s = _RE_MULTI_NL.sub("\n\n", s)
+    # Tidy up dangling spaces around punctuation produced by deletions.
+    s = re.sub(r"\s+([,.;:!?])", r"\1", s)
     return s.strip()
