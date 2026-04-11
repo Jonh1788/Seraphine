@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, AsyncIterator, Literal, Protocol, Union
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
@@ -36,16 +38,44 @@ DEFAULT_SYSTEM_PROMPT = (
     "shell, Supertasks MCP, request_skill (for missing capabilities)."
 )
 
+def _build_date_context() -> str:
+    """Injected as a second system message on every turn so the model
+    never hallucinates 'today'. Kept short (~70 tokens) and placed after
+    the cached static prompt so prefix-cache hits the static portion."""
+    now = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    return (
+        f"Current date: {now.strftime('%Y-%m-%d')} ({now.strftime('%A')}), "
+        f"local time {now.strftime('%H:%M')} (Brasília, America/Sao_Paulo). "
+        f"Resolve 'hoje'/'amanhã'/'semana que vem' from this reference. "
+        f"For tool arguments that take a date, ALWAYS use ISO 8601 with "
+        f"the correct YEAR (e.g. 2026-07-14T14:00:00-03:00). But when "
+        f"SPEAKING dates and times to the user in the reply text, write "
+        f"them in natural Portuguese so the TTS reads them correctly — "
+        f"never '14/07' or '14:30', always '14 de julho' and '14 horas "
+        f"e 30' (or 'duas e meia da tarde'). Weekdays also by name: "
+        f"'terça-feira', not 'ter'."
+    )
+
+
 APPROVAL_TIMEOUT_SECONDS = 300
 MAX_TOOL_ITERATIONS = 5
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
 # Context compaction: estimated token threshold (~4 chars/token)
-COMPACTION_TOKEN_THRESHOLD = 8000
+# Bumped from 8000 → 24000 after vMLX chunked-prefill patch lifted the
+# Metal OOM ceiling. Real ceiling is now ~35-40k tokens; we keep 24k to
+# leave headroom for the system prompt + tools (~4-6k) + user message.
+COMPACTION_TOKEN_THRESHOLD = 24000
 COMPACTION_CHAR_THRESHOLD = COMPACTION_TOKEN_THRESHOLD * 4
-COMPACTION_KEEP_RECENT = 10
+COMPACTION_KEEP_RECENT = 20
 # Run reflect() automatically every N assistant turns to let Seraphine
 # learn facts about the user on her own.
 AUTO_REFLECT_EVERY_N_TURNS = 3
+
+
+class TurnCancelled(Exception):
+    """Raised inside the engine loop when the active turn's ``cancel_event``
+    has been signalled. Callers surface this as a ``TurnCancelledEvent``
+    rather than an error — it is the normal response to a user interrupt."""
 
 
 class _LLMLike(Protocol):
@@ -67,6 +97,12 @@ class TokenEvent(BaseModel):
 
 class TurnEndEvent(BaseModel):
     type: Literal["turn_end"] = "turn_end"
+    conversation_id: str
+    turn_id: str
+
+
+class TurnCancelledEvent(BaseModel):
+    type: Literal["turn_cancelled"] = "turn_cancelled"
     conversation_id: str
     turn_id: str
 
@@ -95,7 +131,12 @@ class ToolResultEvent(BaseModel):
 
 
 StreamEvent = Union[
-    TokenEvent, TurnEndEvent, ErrorEvent, ToolRequestEvent, ToolResultEvent
+    TokenEvent,
+    TurnEndEvent,
+    TurnCancelledEvent,
+    ErrorEvent,
+    ToolRequestEvent,
+    ToolResultEvent,
 ]
 
 
@@ -249,13 +290,24 @@ class ConversationEngine:
         *,
         think: bool = False,
         images: list[str] | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        # Default to a never-set event so the rest of the function can
+        # call is_set() unconditionally without branching.
+        if cancel_event is None:
+            cancel_event = asyncio.Event()
+
+        def _raise_if_cancelled() -> None:
+            if cancel_event.is_set():
+                raise TurnCancelled()
+
         if conversation_id is None:
             conversation_id = await self.store.create_conversation()
 
         prior = await self.store.get_turns(conversation_id)
 
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
+        messages.append(ChatMessage(role="system", content=_build_date_context()))
         recall_block = await self._build_recall_block(content)
         if recall_block:
             messages.append(ChatMessage(role="system", content=recall_block))
@@ -282,15 +334,26 @@ class ConversationEngine:
         # pending_approvals on exception/cancellation paths.
         turn_requests: list[str] = []
 
+        # Track the active LLM stream so we can explicitly aclose() it
+        # on cancellation. This runs the ``async with self._client.stream(...)``
+        # cleanup in the real adapters, releasing the httpx connection
+        # deterministically instead of waiting for garbage collection.
+        active_stream: AsyncIterator[Token] | None = None
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
+                _raise_if_cancelled()
                 if self.tools is not None:
                     stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think)  # type: ignore[call-arg]
                 else:
                     stream = self.llm.chat(messages, think=think)
+                active_stream = stream
 
                 pending_tool_calls: list[dict[str, Any]] | None = None
                 async for tok in stream:
+                    # Checked on every token so cancellation exits the
+                    # async-for promptly; leaving the generator closes
+                    # the underlying httpx stream in the client.
+                    _raise_if_cancelled()
                     if tok.tool_calls:
                         pending_tool_calls = tok.tool_calls
                         break
@@ -301,11 +364,13 @@ class ConversationEngine:
                             turn_id=turn_id,
                             text=tok.text,
                         )
+                active_stream = None
 
                 if pending_tool_calls is None or self.tools is None:
                     break
 
                 for tc in pending_tool_calls:
+                    _raise_if_cancelled()
                     tool_name, tool_args = _parse_tool_call(tc)
                     request_id = str(uuid.uuid4())
                     turn_requests.append(request_id)
@@ -333,7 +398,12 @@ class ConversationEngine:
                             ChatMessage(
                                 role="tool",
                                 content=json.dumps(
-                                    {"tool": tool_name, "ok": False, "error": result.error}
+                                    {
+                                        "tool": tool_name,
+                                        "args": tool_args,
+                                        "ok": False,
+                                        "error": result.error,
+                                    }
                                 ),
                             )
                         )
@@ -395,6 +465,15 @@ class ConversationEngine:
                             content=json.dumps(
                                 {
                                     "tool": tool_name,
+                                    # Anthropic adapter needs the ORIGINAL
+                                    # args to rebuild a synthetic tool_use
+                                    # block before this tool_result. Empty
+                                    # {} misled Claude into thinking the
+                                    # call had been argless and it retried
+                                    # the tool in a loop (up to
+                                    # MAX_TOOL_ITERATIONS). See
+                                    # llm/anthropic.py::_convert_messages.
+                                    "args": tool_args,
                                     "ok": result.ok,
                                     "output": result.output,
                                     "error": result.error,
@@ -402,6 +481,28 @@ class ConversationEngine:
                             ),
                         )
                     )
+        except TurnCancelled:
+            for rid in turn_requests:
+                self.pending_approvals.pop(rid, None)
+            # Deterministically close the in-flight LLM stream. In real
+            # adapters this exits ``async with self._client.stream(...)``
+            # and tears down the httpx connection immediately rather
+            # than waiting for Python's GC.
+            if active_stream is not None:
+                aclose = getattr(active_stream, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception as close_exc:  # pragma: no cover
+                        logger.debug(
+                            "aclose on cancelled LLM stream raised: %s", close_exc
+                        )
+            logger.info("turn cancelled by client: %s", turn_id)
+            yield TurnCancelledEvent(
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+            )
+            return
         except LLMUnavailableError as e:
             for rid in turn_requests:
                 self.pending_approvals.pop(rid, None)

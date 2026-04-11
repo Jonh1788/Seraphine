@@ -17,6 +17,7 @@ Write tools (``requires_confirmation=True``, go through the approval gate):
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -132,7 +133,10 @@ class CalendarListEventsTool(Tool):
         "reunião?', 'tenho algo amanhã?', 'o que tenho essa semana?'. "
         "If time_min/time_max are omitted, defaults to now → +7 days. "
         "Accepts an optional free-text query 'q' for searching by title "
-        "or attendee."
+        "or attendee. Each row in the output is prefixed with "
+        "'event_id=<id>' — pass that id verbatim to calendar_delete_event "
+        "or calendar_update_event when the user asks to cancel or edit a "
+        "specific event from the list."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -212,6 +216,7 @@ class CalendarListEventsTool(Tool):
 
         lines: list[str] = []
         for ev in events:
+            ev_id = ev.get("id", "")
             summary = ev.get("summary", "(sem título)")
             start = (ev.get("start") or {}).get("dateTime") or (
                 ev.get("start") or {}
@@ -220,7 +225,11 @@ class CalendarListEventsTool(Tool):
                 ev.get("end") or {}
             ).get("date", "")
             loc = ev.get("location")
-            line = f"- {summary} | {start} → {end}"
+            # Include event_id FIRST so the model can pass it verbatim to
+            # calendar_delete_event / calendar_update_event. Format is
+            # `event_id=<id> | summary | start → end [| location]` so the
+            # model can parse it structurally even in a bulk listing.
+            line = f"event_id={ev_id} | {summary} | {start} → {end}"
             if loc:
                 line += f" | {loc}"
             lines.append(line)
@@ -619,6 +628,124 @@ class CalendarDeleteEventTool(Tool):
             ok=True,
             output=f"Evento {event_id} deletado.",
             metadata={"ok": True, "event_id": event_id},
+        )
+
+
+class CalendarBulkDeleteEventsTool(Tool):
+    name = "calendar_bulk_delete_events"
+    description = (
+        "Delete MANY Google Calendar events in a single batch. Accepts a "
+        "list of event_ids and fires all DELETE requests in parallel "
+        "server-side. Use this instead of calling calendar_delete_event "
+        "repeatedly when the user asks to wipe a group of events (e.g. "
+        "'delete all my Aula events', 'cancel all events from last week'). "
+        "Gets ONE approval from the user for the whole batch instead of N "
+        "separate confirmations. Get the ids first by calling "
+        "calendar_list_events — each row starts with 'event_id=<id>'."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "event_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "List of Calendar event ids to delete. Minimum 1, "
+                    "maximum 200 per call."
+                ),
+            },
+            "calendar_id": {
+                "type": "string",
+                "description": "Target calendar id (default 'primary').",
+            },
+        },
+        "required": ["event_ids"],
+    }
+    requires_confirmation = True
+    category = "network"
+
+    # Upper bound to avoid 1000-item runaway. Google rate limits ~10 r/s
+    # per user so 200 also caps wall time at ~20s.
+    _MAX_IDS = 200
+
+    def __init__(self, google_client: GoogleClient) -> None:
+        self._client = google_client
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        raw = args.get("event_ids") or []
+        if not isinstance(raw, list):
+            return ToolResult(ok=False, error="event_ids must be a list")
+        event_ids = [str(eid).strip() for eid in raw if str(eid).strip()]
+        if not event_ids:
+            return ToolResult(ok=False, error="event_ids is empty")
+        if len(event_ids) > self._MAX_IDS:
+            return ToolResult(
+                ok=False,
+                error=f"too many event_ids ({len(event_ids)} > {self._MAX_IDS})",
+            )
+        calendar_id = str(args.get("calendar_id") or "primary")
+
+        try:
+            if not await self._client.is_authed():
+                return _not_authed_result()
+        except Exception as e:
+            return ToolResult(ok=False, error=f"auth check failed: {e}")
+
+        async def _delete_one(eid: str) -> tuple[str, bool, str | None]:
+            url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{eid}"
+            try:
+                resp = await self._client._authed_request("DELETE", url)
+                # Google returns 204 No Content on success; 410 Gone is
+                # acceptable too (already-deleted / cancelled).
+                if resp.status_code in (204, 200, 410):
+                    return eid, True, None
+                return eid, False, f"HTTP {resp.status_code}"
+            except GoogleAuthError as e:
+                return eid, False, f"auth: {e}"
+            except Exception as e:
+                return eid, False, str(e)
+
+        # Fire all deletes in parallel. Google's per-user quota is ~10 r/s;
+        # asyncio.gather means we submit them all at once and let httpx
+        # connection pooling handle the concurrency. Typical 100-item
+        # delete completes in under 5 seconds.
+        results = await asyncio.gather(*(_delete_one(eid) for eid in event_ids))
+
+        # Invalidate cache for this calendar after bulk mutation.
+        try:
+            self._client.event_cache.invalidate_calendar(calendar_id)
+        except Exception:
+            pass
+
+        deleted = [eid for eid, ok, _ in results if ok]
+        failed = [(eid, err) for eid, ok, err in results if not ok]
+
+        if not failed:
+            return ToolResult(
+                ok=True,
+                output=f"Deletados {len(deleted)} de {len(event_ids)} eventos.",
+                metadata={
+                    "deleted_count": len(deleted),
+                    "deleted_ids": deleted,
+                    "failed": [],
+                },
+            )
+
+        # Partial or total failure — surface the first few error reasons
+        # so the model can explain to the user.
+        failure_sample = "; ".join(f"{eid[:12]}…={err}" for eid, err in failed[:3])
+        return ToolResult(
+            ok=len(deleted) > 0,
+            output=(
+                f"Deletados {len(deleted)} de {len(event_ids)} eventos. "
+                f"Falharam {len(failed)}. Exemplos: {failure_sample}"
+            ),
+            error=None if deleted else "all deletes failed",
+            metadata={
+                "deleted_count": len(deleted),
+                "deleted_ids": deleted,
+                "failed": [{"event_id": eid, "error": err} for eid, err in failed],
+            },
         )
 
 

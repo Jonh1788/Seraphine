@@ -78,7 +78,10 @@ async def test_anthropic_request_shape_and_text_stream() -> None:
     body = captured["body"]
     assert body["model"] == "claude-sonnet-4-6"
     assert body["stream"] is True
-    assert body["system"] == "be nice"
+    # system is a list of content blocks so cache_control can attach.
+    assert body["system"] == [
+        {"type": "text", "text": "be nice", "cache_control": {"type": "ephemeral"}}
+    ]
     assert body["messages"] == [{"role": "user", "content": "oi"}]
     assert "max_tokens" in body
 
@@ -113,7 +116,13 @@ async def test_anthropic_merges_multiple_system_messages() -> None:
             pass
     finally:
         await client.aclose()
-    assert captured["body"]["system"] == "be nice\n\nreply in PT"
+    assert captured["body"]["system"] == [
+        {
+            "type": "text",
+            "text": "be nice\n\nreply in PT",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
     assert captured["body"]["messages"] == [{"role": "user", "content": "oi"}]
 
 

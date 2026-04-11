@@ -199,6 +199,76 @@ def _check_elevenlabs() -> None:
         _log(f"ElevenLabs check failed: {e} — proceeding", "⚠")
 
 
+def _check_remote_whisper() -> None:
+    """Abort boot with a clear message if stt_backend=remote and the
+    RTX whisper service isn't reachable. Do NOT fall back to local
+    silently — the user chose remote explicitly and a silent fallback
+    would mask hardware/network issues."""
+    url = f"{settings.stt_remote_base_url.rstrip('/')}/health"
+    try:
+        r = httpx.get(url, timeout=5.0)
+        if r.status_code != 200:
+            _log(
+                f"Remote whisper {url} returned HTTP {r.status_code}",
+                "✗",
+            )
+            sys.exit(1)
+        data = r.json()
+        warm = data.get("warm", False)
+        device = data.get("device", "?")
+        model = data.get("model", "?")
+        if not warm:
+            _log(
+                f"Remote whisper reachable but not warm yet (model={model}, "
+                f"device={device}) — first request may be slow",
+                "⚠",
+            )
+        else:
+            _log(
+                f"Remote whisper ready at {settings.stt_remote_base_url} "
+                f"(model={model}, device={device})",
+                "✓",
+            )
+    except Exception as e:
+        _log(
+            f"Remote whisper unreachable at {url}: {e}. "
+            f"Either start the service on the RTX box (spec 007) or set "
+            f"SERAPHINE_STT_BACKEND=local in .env.",
+            "✗",
+        )
+        sys.exit(1)
+
+
+def _start_caffeinate() -> None:
+    """Keep the Mac awake while Seraphine runs.
+
+    ``caffeinate -i -w <pid>`` prevents idle sleep (the kind that kicks
+    in after inactivity) and exits automatically when the watched PID
+    dies. We pass our own PID — after ``os.execvp`` replaces us with
+    uvicorn the PID is unchanged, so caffeinate tracks uvicorn's
+    lifetime and vanishes when the backend stops. No flag for display
+    sleep on purpose: screen can still dim/sleep, only system sleep is
+    blocked.
+    """
+    if sys.platform != "darwin":
+        return
+    if subprocess.call(
+        ["which", "caffeinate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    ) != 0:
+        _log("caffeinate binary not found — Mac may sleep while running", "⚠")
+        return
+    if _pgrep(f"caffeinate -i -w {os.getpid()}"):
+        _log("caffeinate already tracking our pid", "✓")
+        return
+    _log(f"caffeinate -i (keeping Mac awake, tied to pid {os.getpid()})")
+    subprocess.Popen(
+        ["caffeinate", "-i", "-w", str(os.getpid())],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def _print_access_banner() -> None:
     try:
         out = subprocess.check_output(["ifconfig"], text=True)
@@ -255,11 +325,21 @@ def bootstrap() -> None:
         _log(f"Unknown tts_backend: {settings.tts_backend}", "✗")
         sys.exit(1)
 
+    # ── STT backend ────────────────────────────────────────────────
+    # Local (MLX whisper) needs no startup check — it lazy-loads.
+    # Remote requires the RTX service to be up, else abort.
+    if settings.stt_backend == "remote":
+        _check_remote_whisper()
+    elif settings.stt_backend != "local":
+        _log(f"Unknown stt_backend: {settings.stt_backend}", "✗")
+        sys.exit(1)
+
     # Ollama is always needed for embeddings (memory recall), regardless
     # of which LLM backend is active.
     if settings.llm_backend != "ollama":
         _check_ollama_embeddings()
 
+    _start_caffeinate()
     _print_access_banner()
     _header("Bootstrap OK — launching uvicorn on :8000")
 

@@ -76,6 +76,7 @@ def build_default_registry(
         reg.register(RequestSkillTool(skills_dir))
     if google_client is not None:
         from seraphine.tools.google import (
+            CalendarBulkDeleteEventsTool,
             CalendarCreateEventTool,
             CalendarDeleteEventTool,
             CalendarListEventsTool,
@@ -94,5 +95,6 @@ def build_default_registry(
         reg.register(CalendarCreateEventTool(google_client))
         reg.register(CalendarUpdateEventTool(google_client))
         reg.register(CalendarDeleteEventTool(google_client))
+        reg.register(CalendarBulkDeleteEventsTool(google_client))
         reg.register(GmailSendMessageTool(google_client, allowed_roots))
     return reg

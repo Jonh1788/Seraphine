@@ -36,8 +36,10 @@ class ElevenLabsAdapter(TTSAdapter):
         *,
         model_id: str = _DEFAULT_MODEL_ID,
         base_url: str = "https://api.elevenlabs.io",
-        stability: float = 0.5,
+        stability: float = 0.35,
         similarity_boost: float = 0.75,
+        speed: float = 1.15,
+        optimize_streaming_latency: int = 3,
         timeout: float = 180.0,
     ) -> None:
         if not voice_id:
@@ -51,6 +53,14 @@ class ElevenLabsAdapter(TTSAdapter):
         self.base_url = base_url.rstrip("/")
         self.stability = stability
         self.similarity_boost = similarity_boost
+        # Server-side speed (0.7..1.2 for eleven_turbo_v2_5). Setting this
+        # server-side means the frontend can play at native rate (1.0x)
+        # without the pitch shift that HTMLAudioElement.playbackRate causes.
+        self.speed = max(0.7, min(1.2, speed))
+        # 0..4. Higher = faster TTFB at the cost of some audio quality.
+        # 3 disables the text normalizer, shaving ~300-500ms off first-
+        # chunk latency which is crucial for realtime feel.
+        self.optimize_streaming_latency = max(0, min(4, optimize_streaming_latency))
         self.timeout = timeout
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -72,6 +82,7 @@ class ElevenLabsAdapter(TTSAdapter):
             "voice_settings": {
                 "stability": self.stability,
                 "similarity_boost": self.similarity_boost,
+                "speed": self.speed,
             },
         }
 
@@ -93,9 +104,13 @@ class ElevenLabsAdapter(TTSAdapter):
 
         effective_voice = voice_id or self.voice_id
         body = self._build_body(full_text)
-        # ElevenLabs honors the output_format via query string, not body.
         url = f"/v1/text-to-speech/{effective_voice}/stream"
-        params = {"output_format": _OUTPUT_FORMAT}
+        # ElevenLabs honors output_format and optimize_streaming_latency
+        # as query string params, not body.
+        params = {
+            "output_format": _OUTPUT_FORMAT,
+            "optimize_streaming_latency": str(self.optimize_streaming_latency),
+        }
 
         try:
             async with self._client.stream(

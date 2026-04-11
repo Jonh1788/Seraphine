@@ -58,15 +58,102 @@ def _now_iso() -> str:
 _SENTENCE_EOS: object = object()
 
 
+# Per-WebSocket speech queues. Each connected WS gets its own asyncio.Queue
+# of (text, turn_id, done_event) tuples, drained serially by a single
+# background worker task. This guarantees that TTS playback for one
+# utterance fully completes (including the tts_end frame) before the next
+# utterance starts — so an incoming MCP notification can never cut off the
+# current speech.
+#
+# Sentinel ``None`` queued during disconnect tells the worker to exit.
+SpeechItem = "tuple[str, str, asyncio.Event, asyncio.Event | None] | None"
+_speech_queues: dict[int, "asyncio.Queue[SpeechItem]"] = {}
+_speech_workers: dict[int, asyncio.Task[None]] = {}
+
+
+async def _enqueue_speech(
+    ws: WebSocket,
+    text: str,
+    turn_id: str,
+    cancel_event: asyncio.Event | None = None,
+) -> asyncio.Event | None:
+    """Queue *text* to be spoken after any in-flight utterance finishes.
+
+    Returns an :class:`asyncio.Event` that fires once this specific
+    utterance has finished playing (or failed). Callers that need to
+    back-pressure on completion can ``await event.wait()``; fire-and-forget
+    callers can ignore the return value.
+
+    If *cancel_event* is provided and set, the worker will drop this item
+    without speaking it, and will stop any in-flight TTS playback of it
+    (by leaving the adapter's chunk loop). One event per user turn lets
+    `interrupt` messages abort the whole turn's pending speech in one go.
+
+    Returns ``None`` (and skips queueing) when the WS has no speech queue
+    (e.g. shutdown raced us) or when the text is empty.
+    """
+    q = _speech_queues.get(id(ws))
+    if q is None:
+        return None
+    if not text or not text.strip():
+        return None
+    done = asyncio.Event()
+    await q.put((text, turn_id, done, cancel_event))
+    return done
+
+
+async def _speech_worker(
+    ws: WebSocket,
+    queue: "asyncio.Queue[SpeechItem]",
+) -> None:
+    """Drain *queue* serially, speaking one utterance at a time.
+
+    A failure in a single utterance is logged and the worker keeps going,
+    so transient TTS errors don't poison subsequent speech. The
+    per-item ``done_event`` is always set, even on failure, so callers
+    awaiting completion can never deadlock.
+    """
+    while True:
+        item = await queue.get()
+        if item is None:
+            return
+        # Items are (text, turn_id, done, cancel_event?). Backward-compat
+        # for any caller that queues a 3-tuple.
+        if len(item) == 4:
+            text, turn_id, done, cancel_event = item
+        else:  # pragma: no cover — legacy shape, kept for safety
+            text, turn_id, done = item  # type: ignore[misc]
+            cancel_event = None
+        # Drop items whose turn was cancelled while they sat in the queue.
+        if cancel_event is not None and cancel_event.is_set():
+            done.set()
+            continue
+        try:
+            await _speak_full(ws, text, turn_id, cancel_event=cancel_event)
+        except WebSocketDisconnect:
+            done.set()
+            return
+        except Exception as e:
+            logger.warning("speech worker failed: %s", e)
+        finally:
+            done.set()
+
+
 async def _speak_full(
     ws: WebSocket,
     text: str,
     turn_id: str,
+    cancel_event: asyncio.Event | None = None,
 ) -> None:
     """Send the full text to the streaming TTS server in one shot.
     The server streams back PCM chunks progressively — we forward each
     one as a binary WS frame. Much simpler than the sentence-batching
-    approach and takes full advantage of the streaming TTS endpoint."""
+    approach and takes full advantage of the streaming TTS endpoint.
+
+    If *cancel_event* is provided and set while streaming, the chunk
+    loop exits promptly. Leaving the ``async for`` closes the adapter's
+    generator, which exits its ``async with client.stream(...)`` block
+    and tears down the underlying httpx connection."""
     tts = getattr(ws.app.state, "tts", None)
     if tts is None:
         await ws.send_json(
@@ -75,10 +162,14 @@ async def _speak_full(
         return
     if not text.strip():
         return
+    if cancel_event is not None and cancel_event.is_set():
+        return
 
     await ws.send_json({"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000})
     try:
         async for chunk in tts.synthesize_stream(text):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             if chunk:
                 await ws.send_bytes(chunk)
     except Exception as e:
@@ -153,11 +244,15 @@ async def _speak_full(
 #                         return
 
 
-async def _setup_mcp_notifications(ws: WebSocket) -> None:
-    """Register this WS for MCP task event push notifications."""
+async def _setup_mcp_notifications(ws: WebSocket) -> Any:
+    """Register this WS for MCP task event push notifications.
+
+    Returns the registered callback (or ``None`` if no listener) so the
+    caller can unregister it on disconnect.
+    """
     listener = getattr(ws.app.state, "mcp_event_listener", None)
     if listener is None:
-        return
+        return None
 
     async def _on_mcp_event(event_type: str, data: dict) -> None:
         # SSE payload is {"event": "...", "task": {...}, "timestamp": "..."}
@@ -250,17 +345,20 @@ async def _setup_mcp_notifications(ws: WebSocket) -> None:
             except Exception:
                 pass
 
-        # 4. Speak the notification via TTS if available
+        # 4. Queue the notification for TTS playback. Using the per-WS
+        # speech queue means it will wait its turn behind any in-flight
+        # utterance instead of cutting it off.
         tts = getattr(ws.app.state, "tts", None)
         if tts is not None:
             try:
                 cleaned = strip_markdown_for_tts(message_text)
                 if cleaned:
-                    await _speak_full(ws, cleaned, turn_id)
+                    await _enqueue_speech(ws, cleaned, turn_id)
             except Exception as exc:
-                logger.warning("MCP notification TTS failed: %s", exc)
+                logger.warning("MCP notification TTS enqueue failed: %s", exc)
 
     listener.on_event(_on_mcp_event)
+    return _on_mcp_event
 
 
 async def _deliver_pending_notifications(ws: WebSocket) -> None:
@@ -318,11 +416,20 @@ async def conversation_ws(ws: WebSocket) -> None:
     await ws.accept()
     client = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
     logger.info("WS connected: %s", client)
-    await _setup_mcp_notifications(ws)
-    # Deliver any unread notifications that arrived while the frontend was closed
-    await _deliver_pending_notifications(ws)
+
+    # Per-WS speech queue + serial worker. All TTS playback funnels
+    # through this so notifications never interrupt in-flight speech.
+    speech_queue: "asyncio.Queue[SpeechItem]" = asyncio.Queue()
+    _speech_queues[id(ws)] = speech_queue
+    speech_worker = asyncio.create_task(_speech_worker(ws, speech_queue))
+    _speech_workers[id(ws)] = speech_worker
+
+    mcp_callback: Any = None
     audio_buf = bytearray()
     try:
+        mcp_callback = await _setup_mcp_notifications(ws)
+        # Deliver any unread notifications that arrived while the frontend was closed
+        await _deliver_pending_notifications(ws)
         while True:
             message = await ws.receive()
             if message.get("type") == "websocket.disconnect":
@@ -368,36 +475,49 @@ async def conversation_ws(ws: WebSocket) -> None:
                 think = bool(payload.get("think", False))
                 images = payload.get("images") or None
 
-                # Sentence-level streaming TTS state. We start the worker
-                # eagerly when speak=true so the first complete sentence is
-                # synthesized while the LLM is still generating the rest.
+                # Sentence-level streaming TTS state. The reply is queued
+                # on the per-WS speech queue so it serializes behind any
+                # in-flight notification or earlier utterance.
                 sentence_buf = ""
                 final_turn_id: str | None = None
-                # speak_queue removed — using _speak_full (streaming TTS)
-                speak_task: asyncio.Task[None] | None = None
+                speak_done: asyncio.Event | None = None
 
-                # Track whether we are inside a <think>…</think> block so
-                # that thinking tokens are NOT fed to TTS.
+                # Track whether we are inside a thinking block so that
+                # thinking tokens are NOT fed to TTS. Supports both:
+                #   <think>…</think>                       (standard)
+                #   <|channel>thought\n…<channel|>         (Gemma 4 native)
                 _inside_think = False
-                # Buffer used to detect partial tag boundaries across chunks.
                 _think_tag_buf = ""
+                # Longest possible partial tag we need to buffer
+                _MAX_TAG_LEN = max(len("<|channel>thought"), len("<channel|>"), len("</think>"), len("<think>"))
+
+                _OPEN_TAGS = ("<think>", "<|channel>thought")
+                _CLOSE_TAGS = ("</think>", "<channel|>")
+
+                def _find_first(text: str, tags: tuple[str, ...]) -> tuple[int, str]:
+                    """Return (position, matched_tag) or (-1, '') if none found."""
+                    best_pos = -1
+                    best_tag = ""
+                    for tag in tags:
+                        pos = text.find(tag)
+                        if pos != -1 and (best_pos == -1 or pos < best_pos):
+                            best_pos = pos
+                            best_tag = tag
+                    return best_pos, best_tag
 
                 def _tts_filter_think(raw: str) -> str:
                     """Return only the portions of *raw* that are outside
-                    ``<think>…</think>`` blocks.  Updates the outer
-                    ``_inside_think`` / ``_think_tag_buf`` state."""
+                    thinking blocks, consuming partial tags across chunks."""
                     nonlocal _inside_think, _think_tag_buf
 
-                    # Prepend any leftover partial-tag bytes from the last call.
                     text = _think_tag_buf + raw
                     _think_tag_buf = ""
 
-                    # If the tail looks like it could be a partial <think or
-                    # </think tag, stash it and process the rest on the next
-                    # call so we don't accidentally send half a tag to TTS.
-                    for i in range(1, min(len(text), 9)):  # len("</think>") == 8
+                    # If the tail looks like a partial opening/closing tag,
+                    # stash it for the next call.
+                    for i in range(1, min(len(text), _MAX_TAG_LEN + 1)):
                         tail = text[-i:]
-                        if "<think>".startswith(tail) or "</think>".startswith(tail):
+                        if any(t.startswith(tail) for t in _OPEN_TAGS + _CLOSE_TAGS):
                             _think_tag_buf = tail
                             text = text[:-i]
                             break
@@ -405,123 +525,158 @@ async def conversation_ws(ws: WebSocket) -> None:
                     out: list[str] = []
                     while text:
                         if _inside_think:
-                            end = text.find("</think>")
-                            if end == -1:
+                            pos, tag = _find_first(text, _CLOSE_TAGS)
+                            if pos == -1:
                                 break  # still inside think – discard all
                             _inside_think = False
-                            text = text[end + len("</think>"):]
+                            text = text[pos + len(tag):]
                         else:
-                            start = text.find("<think>")
-                            if start == -1:
+                            pos, tag = _find_first(text, _OPEN_TAGS)
+                            if pos == -1:
                                 out.append(text)
                                 break
-                            out.append(text[:start])
+                            out.append(text[:pos])
                             _inside_think = True
-                            text = text[start + len("<think>"):]
+                            text = text[pos + len(tag):]
                     return "".join(out)
 
-                # -- Streaming TTS: accumulate full text, send at turn_end --
-                if engine.tools is None:
-                    async for event in engine.handle_user_message(conv_id, content, think=think, images=images):
+                # Fresh cancellation event per user turn. Engine and
+                # speech worker both cooperatively observe this event on
+                # every yielded token / TTS chunk, so a client-side
+                # `interrupt` message stops LLM generation AND in-flight
+                # TTS playback without killing the connection.
+                turn_cancel_event = asyncio.Event()
+
+                # -- Streaming TTS: enqueue each complete sentence as it
+                # becomes available, so the first audio chunk starts
+                # playing before the LLM has finished the full turn. The
+                # unified task+select loop (also used when tools are on)
+                # lets `interrupt` messages land mid-turn.
+                async def _drive_turn() -> None:
+                    nonlocal sentence_buf, final_turn_id, speak_done
+                    async for event in engine.handle_user_message(
+                        conv_id,
+                        content,
+                        think=think,
+                        images=images,
+                        cancel_event=turn_cancel_event,
+                    ):
                         etype = getattr(event, "type", None)
                         if etype == "token":
                             tts_text = _tts_filter_think(getattr(event, "text", ""))
                             sentence_buf += tts_text
                             if not final_turn_id:
                                 final_turn_id = getattr(event, "turn_id", None)
+                            if speak:
+                                sentences, sentence_buf = split_sentences(sentence_buf)
+                                for sent in sentences:
+                                    cleaned = strip_markdown_for_tts(sent)
+                                    if cleaned:
+                                        speak_done = await _enqueue_speech(
+                                            ws,
+                                            cleaned,
+                                            final_turn_id or "",
+                                            cancel_event=turn_cancel_event,
+                                        )
                         elif etype == "turn_end":
                             final_turn_id = getattr(event, "turn_id", None)
                             if speak and sentence_buf.strip():
-                                cleaned = strip_markdown_for_tts(sentence_buf)
-                                if cleaned:
-                                    speak_task = asyncio.create_task(
-                                        _speak_full(ws, cleaned, final_turn_id or "")
-                                    )
-                                sentence_buf = ""
-                        await ws.send_json(event.model_dump())
-                else:
-
-                    async def _drive_turn() -> None:
-                        nonlocal sentence_buf, final_turn_id, speak_task
-                        async for event in engine.handle_user_message(conv_id, content, think=think, images=images):
-                            etype = getattr(event, "type", None)
-                            if etype == "token":
-                                tts_text = _tts_filter_think(getattr(event, "text", ""))
-                                sentence_buf += tts_text
-                                if not final_turn_id:
-                                    final_turn_id = getattr(event, "turn_id", None)
-                            elif etype == "turn_end":
-                                final_turn_id = getattr(event, "turn_id", None)
-                                if speak and sentence_buf.strip():
-                                    cleaned = strip_markdown_for_tts(sentence_buf)
+                                tail = flush_remainder(sentence_buf)
+                                if tail:
+                                    cleaned = strip_markdown_for_tts(tail)
                                     if cleaned:
-                                        speak_task = asyncio.create_task(
-                                            _speak_full(ws, cleaned, final_turn_id or "")
+                                        speak_done = await _enqueue_speech(
+                                            ws,
+                                            cleaned,
+                                            final_turn_id or "",
+                                            cancel_event=turn_cancel_event,
                                         )
-                                    sentence_buf = ""
-                            await ws.send_json(event.model_dump())
+                                sentence_buf = ""
+                        elif etype == "turn_cancelled":
+                            # Engine acknowledged our interrupt. Forward
+                            # to client so the UI can tear down local
+                            # state. Drop any buffered tokens.
+                            final_turn_id = getattr(event, "turn_id", final_turn_id)
+                            sentence_buf = ""
+                        await ws.send_json(event.model_dump())
 
-                    turn_task = asyncio.create_task(_drive_turn())
-                    recv_task: asyncio.Task[Any] | None = None
-                    while not turn_task.done():
-                        if recv_task is None:
-                            recv_task = asyncio.create_task(ws.receive())
-                        done, _pending = await asyncio.wait(
-                            {turn_task, recv_task},
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                        if recv_task in done:
-                            inner = recv_task.result()
-                            recv_task = None
-                            if inner.get("type") == "websocket.disconnect":
-                                # Cancel the turn task AND await it so the
-                                # async generator's finally clause runs and
-                                # cleans up pending_approvals entries.
-                                turn_task.cancel()
-                                try:
-                                    await turn_task
-                                except BaseException:
-                                    pass
-                                raise WebSocketDisconnect()
-                            inner_text = inner.get("text")
-                            if inner_text is None:
-                                continue
+                turn_task = asyncio.create_task(_drive_turn())
+                recv_task: asyncio.Task[Any] | None = None
+                while not turn_task.done():
+                    if recv_task is None:
+                        recv_task = asyncio.create_task(ws.receive())
+                    done, _pending = await asyncio.wait(
+                        {turn_task, recv_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if recv_task in done:
+                        inner = recv_task.result()
+                        recv_task = None
+                        if inner.get("type") == "websocket.disconnect":
+                            # Signal cancel so the engine unwinds cleanly
+                            # then cancel the turn task and await it so
+                            # the async generator's finally runs and
+                            # pending_approvals is cleaned up.
+                            turn_cancel_event.set()
+                            turn_task.cancel()
                             try:
-                                inner_payload = json.loads(inner_text)
-                            except json.JSONDecodeError:
-                                continue
-                            if (
-                                isinstance(inner_payload, dict)
-                                and inner_payload.get("type") == "tool_approval"
-                            ):
-                                rid = str(inner_payload.get("request_id", ""))
-                                approved = bool(inner_payload.get("approved", False))
-                                ok = await engine.submit_approval(rid, approved)
-                                if not ok:
-                                    await ws.send_json(
-                                        {
-                                            "type": "error",
-                                            "code": "unknown_request_id",
-                                            "message": rid,
-                                        }
-                                    )
-                    if recv_task is not None and not recv_task.done():
-                        recv_task.cancel()
+                                await turn_task
+                            except BaseException:
+                                pass
+                            raise WebSocketDisconnect()
+                        inner_text = inner.get("text")
+                        if inner_text is None:
+                            continue
                         try:
-                            await recv_task
-                        except BaseException:
-                            pass
-                    await turn_task
-                if speak:
-                    if speak_task is None and final_turn_id is not None:
-                        # Edge case: the engine produced no token events
-                        # (e.g. immediate error). Nothing to speak.
+                            inner_payload = json.loads(inner_text)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(inner_payload, dict):
+                            continue
+                        inner_type = inner_payload.get("type")
+                        if inner_type == "tool_approval":
+                            rid = str(inner_payload.get("request_id", ""))
+                            approved = bool(inner_payload.get("approved", False))
+                            ok = await engine.submit_approval(rid, approved)
+                            if not ok:
+                                await ws.send_json(
+                                    {
+                                        "type": "error",
+                                        "code": "unknown_request_id",
+                                        "message": rid,
+                                    }
+                                )
+                        elif inner_type == "interrupt":
+                            # Signal the engine loop; it exits on the
+                            # next await and yields a turn_cancelled
+                            # event which _drive_turn forwards. The
+                            # speech worker sees the same event and
+                            # drops queued items / exits in-flight TTS.
+                            turn_cancel_event.set()
+                        elif inner_type == "ping":
+                            await ws.send_json(PongMessage(ts=_now_iso()).model_dump())
+                if recv_task is not None and not recv_task.done():
+                    recv_task.cancel()
+                    try:
+                        await recv_task
+                    except BaseException:
                         pass
-                    if speak_task is not None:
-                        try:
-                            await speak_task
-                        except Exception as e:  # pragma: no cover
-                            logger.warning("speak_task failed: %s", e)
+                await turn_task
+                if speak and speak_done is not None:
+                    # Back-pressure: wait until this reply has actually
+                    # finished playing through the speech queue before we
+                    # accept the next user message. The worker always
+                    # sets the event, even on TTS failure, so this can't
+                    # deadlock.
+                    try:
+                        await speak_done.wait()
+                    except Exception as e:  # pragma: no cover
+                        logger.warning("speak_done wait failed: %s", e)
+            elif mtype == "interrupt":
+                # Interrupt arrived while no turn is active. No-op; the
+                # per-turn handler above intercepts interrupts that race
+                # in while a turn is running.
+                logger.debug("interrupt received with no active turn (ignored)")
             elif mtype == "audio_start":
                 audio_buf = bytearray()
             elif mtype == "audio_end":
@@ -541,10 +696,12 @@ async def conversation_ws(ws: WebSocket) -> None:
                 conv_id = payload.get("conversation_id")
                 buf = bytes(audio_buf)
 
-                # Mic path: accumulate full text, send to streaming TTS at turn_end
+                # Mic path: accumulate full text, enqueue on the per-WS
+                # speech queue at turn_end so it serializes behind any
+                # in-flight notification or earlier utterance.
                 audio_sentence_buf = ""
                 audio_final_turn_id: str | None = None
-                audio_speak_task: asyncio.Task[None] | None = None
+                audio_speak_done: asyncio.Event | None = None
 
                 async for event in audio_engine.handle_user_audio(conv_id, buf):
                     if isinstance(event, TranscriptionEvent):
@@ -561,8 +718,8 @@ async def conversation_ws(ws: WebSocket) -> None:
                         if audio_sentence_buf.strip():
                             cleaned = strip_markdown_for_tts(audio_sentence_buf)
                             if cleaned:
-                                audio_speak_task = asyncio.create_task(
-                                    _speak_full(ws, cleaned, audio_final_turn_id or "")
+                                audio_speak_done = await _enqueue_speech(
+                                    ws, cleaned, audio_final_turn_id or ""
                                 )
                             audio_sentence_buf = ""
                         await ws.send_json(event.model_dump())
@@ -588,11 +745,11 @@ async def conversation_ws(ws: WebSocket) -> None:
                             {"type": "tts_end", "turn_id": event.turn_id}
                         )
 
-                if audio_speak_task is not None:
+                if audio_speak_done is not None:
                     try:
-                        await audio_speak_task
+                        await audio_speak_done.wait()
                     except Exception as e:  # pragma: no cover
-                        logger.warning("audio speak_task failed: %s", e)
+                        logger.warning("audio speak_done wait failed: %s", e)
                 audio_buf = bytearray()
             elif mtype == "mcp_approval_response":
                 mcp_client = getattr(ws.app.state, "mcp_client", None)
@@ -628,3 +785,32 @@ async def conversation_ws(ws: WebSocket) -> None:
                 await ws.send_json(EchoMessage(data=payload).model_dump())
     except WebSocketDisconnect:
         logger.info("WS disconnected: %s", client)
+    finally:
+        # Unregister the MCP callback so dead WebSockets don't accumulate
+        # in the listener's callback list.
+        if mcp_callback is not None:
+            listener = getattr(ws.app.state, "mcp_event_listener", None)
+            if listener is not None:
+                try:
+                    listener.off_event(mcp_callback)
+                except Exception:
+                    pass
+
+        # Drain the speech queue and shut down the worker. Pop the queue
+        # from the registry first so any racing notification callback
+        # finds nothing to enqueue on.
+        _speech_queues.pop(id(ws), None)
+        try:
+            await speech_queue.put(None)
+        except Exception:
+            pass
+        worker = _speech_workers.pop(id(ws), None)
+        if worker is not None:
+            try:
+                await asyncio.wait_for(worker, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                worker.cancel()
+                try:
+                    await worker
+                except BaseException:
+                    pass

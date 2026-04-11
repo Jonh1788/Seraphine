@@ -70,6 +70,14 @@ class OpenAICompatClient:
         # vMLX reasoning parser support
         if think:
             body["enable_thinking"] = True
+            # Thinking mode at 5bit is prone to self-talk loops
+            # ("Wait, I'll call X. Actually, I'll call X..."). Tighten
+            # sampling and bump rep penalty per-request to break loops
+            # before they exhaust the thinking budget. These override
+            # vMLX defaults only for this single request.
+            body["top_p"] = 0.9
+            body["top_k"] = 40
+            body["repetition_penalty"] = 1.15
         done_seen = False
         in_thinking = False
         try:

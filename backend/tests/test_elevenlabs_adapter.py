@@ -48,11 +48,16 @@ async def test_elevenlabs_posts_correct_url_headers_body() -> None:
     assert captured["method"] == "POST"
     assert "/v1/text-to-speech/voice-1/stream" in captured["url"]
     assert "output_format=pcm_24000" in captured["url"]
+    assert "optimize_streaming_latency=" in captured["url"]
     assert captured["headers"]["xi-api-key"] == "xi-test"
     body = captured["body"]
     assert body["text"] == "oi mundo"
     assert body["model_id"] == "eleven_turbo_v2_5"
-    assert body["voice_settings"] == {"stability": 0.5, "similarity_boost": 0.75}
+    assert body["voice_settings"] == {
+        "stability": 0.35,
+        "similarity_boost": 0.75,
+        "speed": 1.15,
+    }
 
 
 @pytest.mark.asyncio

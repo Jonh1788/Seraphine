@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # from Hugging Face to ~/.cache/huggingface/hub.
     stt_model: str = "mlx-community/whisper-small-mlx-q4"
     stt_language: str = "pt"
+    # STT backend: "local" (mlx-whisper on Apple Silicon) or "remote"
+    # (HTTP client for the RTX whisper service defined in spec 007).
+    stt_backend: str = "local"
+    stt_remote_base_url: str = "http://192.168.15.6:8012"
+    stt_remote_timeout: float = 10.0
 
     # TTS backend: "qwen3" (local Qwen3-TTS) or "elevenlabs" (cloud).
     # Default stays local.
@@ -51,6 +56,16 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = ""  # user sets this from their ElevenLabs account
     elevenlabs_model_id: str = "eleven_turbo_v2_5"
+    # Server-side speed (0.7..1.2 for turbo_v2_5). Setting this server-side
+    # eliminates the need for frontend PLAYBACK_RATE (which caused pitch shift).
+    elevenlabs_speed: float = 1.10
+    # ElevenLabs "optimize_streaming_latency" knob (0-4). 3 shaves ~400ms
+    # off first-chunk latency by disabling the text normalizer; good for
+    # realtime voice. Bump to 4 for maximum speed, 0 for best quality.
+    elevenlabs_optimize_latency: int = 3
+    # Voice stability (0..1). Lower = snappier/more expressive start,
+    # higher = more conservative. 0.35 is a good low-latency default.
+    elevenlabs_stability: float = 0.35
 
     tts_base_url: str = "http://192.168.15.6:8011"
     tts_voice: str = "dubgrav"

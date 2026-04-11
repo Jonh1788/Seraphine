@@ -20,12 +20,16 @@ SDK, staying consistent with the other clients in this module.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator
 
 import httpx
 
 from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+
+logger = logging.getLogger("seraphine.anthropic")
 
 
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -117,6 +121,7 @@ def _convert_messages(
     """
     system_parts: list[str] = []
     out: list[dict[str, Any]] = []
+    tool_use_counter = 0
     for msg in messages:
         content = msg.content
         if msg.role == "system":
@@ -128,21 +133,65 @@ def _convert_messages(
                         system_parts.append(part.get("text", ""))
             continue
         if msg.role == "tool":
-            # Tool results come back into the conversation as a user turn
-            # with a tool_result block. We don't know the tool_use_id here
-            # (the engine doesn't round-trip it), so synthesize a stable
-            # placeholder — Anthropic requires the field but the value is
-            # only used for correlation, which we don't need for single-turn
-            # tool use.
-            text = content if isinstance(content, str) else json.dumps(content)
+            # Anthropic requires that a tool_result block appears in a
+            # user turn that IMMEDIATELY follows an assistant turn
+            # containing a matching tool_use block. Our engine stores the
+            # tool output as a `role="tool"` ChatMessage without the prior
+            # assistant-side tool_use info, so we reconstruct both sides
+            # from the stored JSON payload (see engine.run() line ~411).
+            tool_name = "unknown_tool"
+            tool_args: dict[str, Any] = {}
+            tool_output: str = ""
+            try:
+                body = (
+                    json.loads(content) if isinstance(content, str) else content
+                )
+                if isinstance(body, dict):
+                    tool_name = str(body.get("tool") or "unknown_tool")
+                    maybe_args = body.get("args")
+                    if isinstance(maybe_args, dict):
+                        tool_args = maybe_args
+                    tool_output = json.dumps(
+                        body.get("output")
+                        if body.get("output") is not None
+                        else body
+                    )
+                else:
+                    tool_output = json.dumps(body)
+            except (json.JSONDecodeError, TypeError):
+                tool_output = content if isinstance(content, str) else str(content)
+
+            tool_use_id = f"toolu_synth_{tool_use_counter:04d}"
+            tool_use_counter += 1
+
+            # Synthetic assistant turn carrying the tool_use block.
+            # `input` MUST be the real args that were originally passed —
+            # otherwise Claude sees an empty-input call in history, thinks
+            # "I didn't give it args, I should retry properly", and loops
+            # the same tool call again (up to MAX_TOOL_ITERATIONS). The
+            # engine stores the args in the role='tool' payload under
+            # "args" specifically for this round-trip.
+            out.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": tool_use_id,
+                            "name": tool_name,
+                            "input": tool_args,
+                        }
+                    ],
+                }
+            )
             out.append(
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "tool_result",
-                            "tool_use_id": "tool_result",
-                            "content": text,
+                            "tool_use_id": tool_use_id,
+                            "content": tool_output,
                         }
                     ],
                 }
@@ -232,11 +281,25 @@ class AnthropicClient:
             "stream": True,
             "temperature": temperature,
         }
+        # Prompt caching: mark the system prompt and the tools block with
+        # cache_control so Anthropic discounts repeat reads by ~90%. Cache
+        # lives ~5 minutes per breakpoint; a steady stream of turns within
+        # a conversation stays hot. System must be a list of blocks for
+        # cache_control to attach to it. Cache on the last tool applies
+        # to the entire tools array including everything before it.
         if system:
-            body["system"] = system
+            body["system"] = [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         converted_tools = _convert_tools(tools)
-        if converted_tools is not None:
-            body["tools"] = converted_tools
+        if converted_tools:
+            tools_with_cache = [dict(t) for t in converted_tools]
+            tools_with_cache[-1]["cache_control"] = {"type": "ephemeral"}
+            body["tools"] = tools_with_cache
         if think:
             body["thinking"] = {"type": "enabled", "budget_tokens": 4000}
             # Anthropic rejects non-1.0 temperature when extended thinking is on.
@@ -248,9 +311,57 @@ class AnthropicClient:
         block_types: dict[int, str] = {}
         tool_use_state: dict[int, dict[str, Any]] = {}
 
+        # 429 retry: Anthropic Tier 1 has tight TPM limits (30K input /
+        # 8K output). A single tool-heavy turn can hit them. We open the
+        # stream, and if status is 429, close it, wait `retry-after`
+        # seconds, and try again. Max 2 retries. On success, we use the
+        # already-open response for the rest of the streaming loop.
+        # Connection / HTTP errors here propagate out as LLMUnavailable.
+        attempt = 0
+        max_attempts = 3
+        resp = None
+        resp_cm = None
         try:
-            async with self._client.stream("POST", "/v1/messages", json=body) as resp:
+            while True:
+                resp_cm = self._client.stream("POST", "/v1/messages", json=body)
+                resp = await resp_cm.__aenter__()
+                if resp.status_code != 429:
+                    break
+                retry_after = resp.headers.get("retry-after")
+                await resp_cm.__aexit__(None, None, None)
+                attempt += 1
+                if attempt >= max_attempts:
+                    raise LLMUnavailableError(
+                        "Anthropic rate-limited (429) after retries. "
+                        "Tier 1 limits are 30K input / 8K output tokens "
+                        "per minute — consider waiting ~60s or upgrading tier."
+                    )
+                try:
+                    wait_s = float(retry_after) if retry_after else 2.0
+                except ValueError:
+                    wait_s = 2.0
+                wait_s = min(max(wait_s, 0.5), 30.0)
+                logger.info(
+                    "Anthropic 429 — retrying in %.1fs (attempt %d/%d)",
+                    wait_s,
+                    attempt,
+                    max_attempts,
+                )
+                await asyncio.sleep(wait_s)
+        except httpx.ConnectError as e:
+            raise LLMUnavailableError(str(e)) from e
+        except httpx.HTTPError as e:
+            raise LLMUnavailableError(str(e)) from e
+
+        try:
+            try:
                 resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                await resp_cm.__aexit__(None, None, None)
+                raise LLMUnavailableError(
+                    f"Anthropic HTTP {e.response.status_code}"
+                ) from e
+            try:
                 current_event: str | None = None
                 async for line in resp.aiter_lines():
                     if not line:
@@ -363,6 +474,10 @@ class AnthropicClient:
                         raise LLMUnavailableError(
                             err.get("message", "anthropic stream error")
                         )
+            finally:
+                # Always release the streaming response (esp. on early
+                # return via message_stop / stop_reason=tool_use).
+                await resp_cm.__aexit__(None, None, None)
         except httpx.ConnectError as e:
             raise LLMUnavailableError(str(e)) from e
         except httpx.HTTPError as e:
