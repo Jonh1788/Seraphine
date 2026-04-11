@@ -17,6 +17,7 @@ export function App(): JSX.Element {
   const [speak, setSpeak] = useState<boolean>(true);
   const [think, setThink] = useState<boolean>(false);
   const [talking, setTalking] = useState<boolean>(false);
+  const [realtimeActive, setRealtimeActive] = useState<boolean>(false);
   const [metrics, setMetrics] = useState<LatencyMetrics>({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [googleAuthed, setGoogleAuthed] = useState<boolean>(false);
@@ -358,6 +359,25 @@ export function App(): JSX.Element {
               onTalkStart={handleTalkStart}
               onTalkEnd={handleTalkEnd}
               onTalkCancel={handleTalkCancel}
+              realtimeActive={realtimeActive}
+              onRealtimeToggle={() => {
+                setRealtimeActive((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    // Leaving realtime: ensure any in-flight TTS is stopped
+                    // and the backend drops the outstanding turn.
+                    playbackRef.current?.stop();
+                    wsRef.current?.send({ type: 'interrupt' });
+                  } else {
+                    // Entering realtime: ensure AudioContext is primed
+                    // from the click gesture.
+                    warmSharedAudioContext();
+                    playbackRef.current?.ensureCtx();
+                  }
+                  return next;
+                });
+              }}
+              playback={playbackRef.current}
             />
           )}
         </section>

@@ -22,8 +22,8 @@ const INPUT_RATE = 24000;
 const SEGMENT_SECONDS = 1.5;
 const SEGMENT_SAMPLES = Math.floor(SEGMENT_SECONDS * INPUT_RATE);
 
-/** Playback speed multiplier. 1.0 = normal, 1.1 = 10% faster. */
-const PLAYBACK_RATE = 1.1;
+/** Playback speed multiplier. 1.0 = normal, 1.15 = 15% faster. */
+const PLAYBACK_RATE = 1.15;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
@@ -261,6 +261,53 @@ export class PCMPlayback {
     this.accumSamples = 0;
     this.flushing = false;
     this.flushResolve = null;
+  }
+
+  /**
+   * Stop all in-flight playback immediately (barge-in).
+   *
+   * Clears the pending queue, pauses and releases the currently playing
+   * <audio> element, and drops any accumulated PCM bytes. Does NOT touch
+   * the AudioContext or AnalyserNode, so the instance stays reusable for
+   * the next turn.
+   */
+  stop(): void {
+    // Pending accumulator
+    this.carry = null;
+    this.accumBytes = [];
+    this.accumSamples = 0;
+
+    // Drain queued segments
+    for (const url of this.queue) {
+      URL.revokeObjectURL(url);
+    }
+    this.queue = [];
+
+    // Tear down the playing element without disposing the graph
+    if (this.currentSource) {
+      try { this.currentSource.disconnect(); } catch { /* ignore */ }
+      this.currentSource = null;
+    }
+    if (this.currentAudio) {
+      this.currentAudio.onended = null;
+      this.currentAudio.onerror = null;
+      try { this.currentAudio.pause(); } catch { /* ignore */ }
+      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
+      this.currentAudio = null;
+    }
+
+    this.playing = false;
+    this.playNextScheduled = false;
+
+    // If a flush() was awaiting, release it
+    if (this.flushing) {
+      this.flushing = false;
+      if (this.flushResolve) {
+        const r = this.flushResolve;
+        this.flushResolve = null;
+        r();
+      }
+    }
   }
 
   dispose(): void {

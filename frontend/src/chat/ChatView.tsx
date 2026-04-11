@@ -6,6 +6,8 @@ import type {
   ServerMessage,
   ToolResultMessage,
 } from '../ws/types';
+import type { PCMPlayback } from '../audio/playback';
+import { RealtimeController } from '../realtime';
 
 interface McpApproval {
   taskId: string;
@@ -26,7 +28,9 @@ interface Turn {
 }
 
 /**
- * Parse assistant content that may contain `<think>…</think>` blocks.
+ * Parse assistant content that may contain thinking blocks in either
+ * `<think>…</think>` (standard) or `<|channel>thought\n…<channel|>`
+ * (Gemma 4 native) format.
  * Returns { thinking: string | null; response: string; thinkingDone: boolean }.
  */
 function parseThinking(raw: string): {
@@ -34,6 +38,29 @@ function parseThinking(raw: string): {
   response: string;
   thinkingDone: boolean;
 } {
+  // Try Gemma 4 channel format first: <|channel>thought\n...<channel|>
+  const gemmaOpen = '<|channel>thought';
+  const gemmaClose = '<channel|>';
+  const gemmaOpenIdx = raw.indexOf(gemmaOpen);
+  if (gemmaOpenIdx !== -1) {
+    const afterGemmaOpen = gemmaOpenIdx + gemmaOpen.length;
+    const gemmaCloseIdx = raw.indexOf(gemmaClose, afterGemmaOpen);
+    // Skip an optional leading \n after <|channel>thought
+    const contentStart = raw[afterGemmaOpen] === '\n' ? afterGemmaOpen + 1 : afterGemmaOpen;
+    if (gemmaCloseIdx === -1) {
+      return {
+        thinking: raw.slice(contentStart),
+        response: raw.slice(0, gemmaOpenIdx),
+        thinkingDone: false,
+      };
+    }
+    return {
+      thinking: raw.slice(contentStart, gemmaCloseIdx),
+      response: raw.slice(0, gemmaOpenIdx) + raw.slice(gemmaCloseIdx + gemmaClose.length),
+      thinkingDone: true,
+    };
+  }
+
   const openTag = '<think>';
   const closeTag = '</think>';
   const openIdx = raw.indexOf(openTag);
@@ -171,6 +198,10 @@ interface ChatViewProps {
   onTalkStart: () => Promise<void>;
   onTalkEnd: () => void;
   onTalkCancel: () => void;
+  /** Realtime (continuous VAD) mode toggle + playback reference. */
+  realtimeActive: boolean;
+  onRealtimeToggle: () => void;
+  playback: PCMPlayback | null;
 }
 
 /** Threshold (px) the user must drag upward to lock recording */
@@ -191,6 +222,9 @@ export function ChatView({
   onTalkStart,
   onTalkEnd,
   onTalkCancel,
+  realtimeActive,
+  onRealtimeToggle,
+  playback,
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
@@ -608,6 +642,18 @@ export function ChatView({
         </div>
       )}
 
+      {realtimeActive && (
+        <RealtimeController
+          ws={ws}
+          playback={playback}
+          active={realtimeActive}
+          onToggle={onRealtimeToggle}
+          conversationId={conversationIdRef.current}
+          speak={speak}
+          think={think}
+        />
+      )}
+
       <div className="chat__composer">
         {talking ? (
           /* While recording, replace the input with recording controls */
@@ -684,12 +730,35 @@ export function ChatView({
           </>
         )}
 
+        {/* Realtime conversation toggle -- sits next to the mic button */}
+        <button
+          type="button"
+          className={`btn-realtime${realtimeActive ? ' btn-realtime--active' : ''}`}
+          aria-label="Modo realtime"
+          aria-pressed={realtimeActive}
+          title="Modo realtime (conversa contínua)"
+          disabled={!connected || talking}
+          onClick={onRealtimeToggle}
+        >
+          <svg
+            className="btn-realtime__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 12h2l2-6 4 12 3-9 2 6 2-3h3" />
+          </svg>
+        </button>
+
         {/* Mic button -- always visible in composer */}
         <button
           type="button"
           className={`btn-mic${talking ? ' btn-mic--active' : ''}`}
           aria-label="Gravar áudio"
-          disabled={!connected}
+          disabled={!connected || realtimeActive}
           onPointerDown={handleMicPointerDown}
           onPointerMove={handleMicPointerMove}
           onPointerUp={handleMicPointerUp}

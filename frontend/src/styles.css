@@ -1265,6 +1265,180 @@ button:disabled {
   50%      { box-shadow: 0 0 22px rgba(239, 68, 68, 0.7); transform: scale(1.06); }
 }
 
+/* ---------- Realtime toggle button ---------- */
+
+.btn-realtime {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease,
+              box-shadow 120ms ease, transform 80ms ease, color 120ms ease;
+}
+
+.btn-realtime:hover:not(:disabled) {
+  background: var(--bg-2);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.btn-realtime:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-realtime__icon {
+  width: 20px;
+  height: 20px;
+}
+
+.btn-realtime--active {
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(167, 139, 250, 0.55);
+}
+
+.btn-realtime--active::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0.7;
+  animation: realtime-ring 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes realtime-ring {
+  0%   { transform: scale(0.9); opacity: 0.7; }
+  70%  { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+/* ---------- Realtime conversation panel ---------- */
+
+.realtime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 var(--space-4) var(--space-3);
+  background: linear-gradient(180deg,
+    rgba(167, 139, 250, 0.08),
+    rgba(167, 139, 250, 0.02));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  animation: fadeIn 200ms ease;
+}
+
+.realtime-panel--botSpeaking {
+  border-color: rgba(167, 139, 250, 0.45);
+  box-shadow: 0 0 22px rgba(167, 139, 250, 0.15);
+}
+
+.realtime-panel--userSpeaking {
+  border-color: rgba(74, 222, 128, 0.45);
+  box-shadow: 0 0 22px rgba(74, 222, 128, 0.15);
+}
+
+.realtime-panel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 0.2px;
+}
+
+.realtime-panel__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.realtime-panel__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.realtime-panel__dot--listening,
+.realtime-panel__dot--userSpeaking {
+  background: var(--user);
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+  animation: realtime-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.realtime-panel__dot--botSpeaking {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.7);
+  animation: realtime-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.realtime-panel__dot--processing {
+  background: var(--warning);
+  animation: realtime-dot-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes realtime-dot-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+
+.realtime-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.realtime-panel__close:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.realtime-panel__waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100px;
+}
+
+.realtime-waveform {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.realtime-panel__error {
+  font-size: 12px;
+  color: var(--danger);
+  padding: var(--space-2);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: var(--r-sm);
+}
+
 /* ---------- Recording indicator bar ---------- */
 
 .rec-bar {
