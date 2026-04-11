@@ -4,6 +4,12 @@ import type { ServerMessage } from '../ws/types';
 import type { PCMPlayback } from '../audio/playback';
 import { warmSharedAudioContext } from '../audio/sharedContext';
 import { createRealtimeVAD, type RealtimeVAD } from './vad';
+import {
+  computeRmsByteTimeDomain,
+  shouldAllowBargeIn,
+  MIC_OVER_PLAYBACK_RATIO,
+  MIN_MIC_RMS,
+} from './gating';
 import { Waveform, type WaveformMode } from './Waveform';
 
 /**
@@ -33,6 +39,14 @@ interface RealtimeControllerProps {
   conversationId?: string;
   speak?: boolean;
   think?: boolean;
+  /**
+   * Hard mute toggle controlled by the user (localStorage-persisted in
+   * App.tsx). When true, the mic tracks are forcibly disabled so no
+   * VAD events can fire and no barge-in is possible — useful when the
+   * user wants to just listen without risk of interrupting.
+   */
+  manualMute: boolean;
+  onManualMuteToggle: () => void;
 }
 
 const STATE_LABELS: Record<RealtimeState, string> = {
@@ -64,6 +78,8 @@ export function RealtimeController({
   conversationId,
   speak = true,
   think = false,
+  manualMute,
+  onManualMuteToggle,
 }: RealtimeControllerProps): JSX.Element {
   const [state, setState] = useState<RealtimeState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +102,17 @@ export function RealtimeController({
   const audioStartedRef = useRef<boolean>(false);
   const [micAnalyser, setMicAnalyser] = useState<AnalyserNode | null>(null);
   const [botAnalyser, setBotAnalyser] = useState<AnalyserNode | null>(null);
+
+  // Live value refs for the barge-in gating path. These are updated by
+  // a RAF loop that samples the playback AnalyserNode, and by the VAD
+  // itself for the mic side. We keep them as refs (not state) because
+  // the gating read happens inside the Silero onSpeechStart callback,
+  // which must not trigger React re-renders to fire.
+  const botAnalyserRef = useRef<AnalyserNode | null>(null);
+  botAnalyserRef.current = botAnalyser;
+  const botRmsRef = useRef<number>(0);
+  const manualMuteRef = useRef<boolean>(manualMute);
+  manualMuteRef.current = manualMute;
 
   // Helper: send a single PCM frame as binary to the backend.
   const sendFrame = useCallback((frame: Float32Array): void => {
@@ -154,8 +181,28 @@ export function RealtimeController({
           onSpeechStart: () => {
             const cur = stateRef.current;
             if (cur === 'botSpeaking') {
-              // BARGE-IN
-              console.log('[realtime] barge-in');
+              // BARGE-IN candidate. The mic is live while Seraphine
+              // speaks, so this callback will fire on actual user
+              // interruption AND on echo from the laptop speakers.
+              // Software-AEC gate: require mic RMS to be above the
+              // floor AND meaningfully louder than current playback.
+              // See ./gating.ts for the tunable constants.
+              if (manualMuteRef.current) {
+                // Shouldn't normally get here (mic is hard-muted),
+                // but be defensive — ignore any stray event.
+                return;
+              }
+              const micRms = vadRef.current?.getMicRms() ?? 0;
+              const playbackRms = botRmsRef.current;
+              if (!shouldAllowBargeIn(micRms, playbackRms)) {
+                console.debug(
+                  `[realtime] barge-in rejected: mic=${micRms.toFixed(4)} playback=${playbackRms.toFixed(4)} (ratio=${MIC_OVER_PLAYBACK_RATIO} floor=${MIN_MIC_RMS})`,
+                );
+                return;
+              }
+              console.log(
+                `[realtime] barge-in accepted: mic=${micRms.toFixed(4)} playback=${playbackRms.toFixed(4)}`,
+              );
               playbackRef.current?.stop();
               sendInterrupt();
               beginUserSegment();
@@ -197,6 +244,11 @@ export function RealtimeController({
         await vad.start();
         // Re-read the analyser — MicVAD sometimes only creates it on start.
         setMicAnalyser(vad.getAnalyser());
+        // Apply any pending manual-mute state that was set before VAD
+        // was ready (e.g. user persisted `true` in localStorage).
+        if (manualMuteRef.current) {
+          vad.suspendForPlayback();
+        }
       } catch (err) {
         console.error('[realtime] VAD init failed:', err);
         if (!cancelled) {
@@ -225,13 +277,31 @@ export function RealtimeController({
       }
       const type = (msg as { type?: string }).type;
       if (type === 'tts_start') {
+        // No more unconditional mic suspend here. The mic stays live
+        // during botSpeaking so the user CAN interrupt by speaking;
+        // echo from the laptop speakers is rejected by the software
+        // AEC gate in onSpeechStart (see ./gating.ts). The manual
+        // mute toggle is the only thing that hard-mutes the mic now.
         if (stateRef.current === 'processing' || stateRef.current === 'listening') {
           setState('botSpeaking');
         }
-      } else if (type === 'tts_end' || type === 'turn_end') {
-        if (stateRef.current === 'botSpeaking' || stateRef.current === 'processing') {
-          setState('listening');
-        }
+      } else if (type === 'tts_end') {
+        // Per-sentence tts_end — no-op. State transitions happen on
+        // turn_end (after the full utterance drains) or on barge-in.
+      } else if (type === 'turn_end') {
+        // Wait for the player to actually drain the last queued
+        // segment before transitioning back to listening, so the
+        // waveform stays on the 'bot' channel until audio truly stops.
+        void (async () => {
+          try {
+            await playbackRef.current?.flush();
+          } catch {
+            /* ignore */
+          }
+          if (stateRef.current === 'botSpeaking' || stateRef.current === 'processing') {
+            setState('listening');
+          }
+        })();
       } else if (type === 'error') {
         if (stateRef.current !== 'idle') setState('listening');
       }
@@ -249,21 +319,106 @@ export function RealtimeController({
     if (a) setBotAnalyser(a);
   }, [playback]);
 
+  // --- Playback RMS sampler -------------------------------------------
+  // Continuously sample the playback AnalyserNode while realtime is
+  // active so the barge-in gate always has a sub-frame-fresh value to
+  // compare against the mic. We sample inside a RAF loop (~60Hz) which
+  // is plenty — Silero fires at most every 32ms and we read from
+  // botRmsRef.current synchronously when it does.
+  useEffect(() => {
+    if (!active) {
+      botRmsRef.current = 0;
+      return;
+    }
+    let raf = 0;
+    let buf: Uint8Array<ArrayBuffer> | null = null;
+    let bufBins = 0;
+
+    const loop = (): void => {
+      const a = botAnalyserRef.current;
+      if (a) {
+        if (!buf || bufBins !== a.fftSize) {
+          buf = new Uint8Array(new ArrayBuffer(a.fftSize));
+          bufBins = a.fftSize;
+        }
+        a.getByteTimeDomainData(buf);
+        botRmsRef.current = computeRmsByteTimeDomain(buf);
+      } else {
+        botRmsRef.current = 0;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+
+    return (): void => {
+      if (raf) cancelAnimationFrame(raf);
+      botRmsRef.current = 0;
+    };
+  }, [active]);
+
+  // --- Manual mute sync ------------------------------------------------
+  // When the user toggles manualMute, hard-mute / unmute the mic tracks.
+  // This is the only remaining path that calls suspend/resume on the
+  // VAD — the tts_start auto-mute is gone.
+  useEffect(() => {
+    if (!active) return;
+    const vad = vadRef.current;
+    if (!vad) return;
+    if (manualMute) {
+      vad.suspendForPlayback();
+    } else {
+      vad.resumeAfterPlayback();
+    }
+  }, [active, manualMute]);
+
   const waveformMode: WaveformMode =
-    state === 'botSpeaking' ? 'bot'
+    manualMute && state !== 'botSpeaking' ? 'idle'
+    : state === 'botSpeaking' ? 'bot'
     : state === 'userSpeaking' || state === 'listening' ? 'mic'
     : 'idle';
 
   const waveformAnalyser =
     state === 'botSpeaking' ? botAnalyser
-    : (state === 'userSpeaking' || state === 'listening') ? micAnalyser
+    : (state === 'userSpeaking' || state === 'listening') && !manualMute ? micAnalyser
     : null;
 
+  const statusLabel = manualMute && state !== 'botSpeaking'
+    ? 'Microfone mudo — clique no icone para falar'
+    : STATE_LABELS[state];
+
   return (
-    <div className={`realtime-panel realtime-panel--${state}`}>
+    <div className={`realtime-panel realtime-panel--${state}${manualMute ? ' realtime-panel--muted' : ''}`}>
       <div className="realtime-panel__header">
         <span className={`realtime-panel__dot realtime-panel__dot--${state}`} />
-        <span className="realtime-panel__label">{STATE_LABELS[state]}</span>
+        <span className="realtime-panel__label">{statusLabel}</span>
+        <button
+          type="button"
+          className={`realtime-panel__mute${manualMute ? ' realtime-panel__mute--on' : ''}`}
+          onClick={onManualMuteToggle}
+          aria-label={manualMute ? 'Ativar meu microfone' : 'Silenciar meu microfone'}
+          aria-pressed={manualMute}
+          title={manualMute ? 'Microfone mudo (clique para ativar)' : 'Silenciar meu microfone'}
+        >
+          {manualMute ? (
+            // mic-slash (muted) icon
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="1" y1="1" x2="23" y2="23" />
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          ) : (
+            // mic (live) icon
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="9" y="2" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          )}
+          <span className="realtime-panel__mute-label">{manualMute ? 'Mudo' : 'Ativo'}</span>
+        </button>
         <button
           type="button"
           className="realtime-panel__close"

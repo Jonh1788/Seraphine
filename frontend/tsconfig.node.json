@@ -5,7 +5,15 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    // Never emit vite.config.js / vite.config.d.ts next to the source .ts
+    // file. Vite's config loader prefers a sibling `.js` over `.ts`, so
+    // stale emitted artifacts (from `tsc --build`) would silently shadow
+    // edits to vite.config.ts. Emit declarations-only into a scratch dir
+    // that we never read from.
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./.tsbuild-node"
   },
   "include": ["vite.config.ts"]
 }

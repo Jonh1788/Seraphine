@@ -18,12 +18,30 @@ import { getSharedAudioContext } from './sharedContext';
 /** Input PCM sample rate from the TTS server. */
 const INPUT_RATE = 24000;
 
-/** Accumulate this many seconds before creating an audio segment. */
-const SEGMENT_SECONDS = 1.5;
-const SEGMENT_SAMPLES = Math.floor(SEGMENT_SECONDS * INPUT_RATE);
+/**
+ * First segment is small so the player starts making sound almost
+ * immediately. Previous value was 1.5s, meaning the user waited a full
+ * 1.5 seconds of accumulated PCM before hearing the first byte — a
+ * massive TTFB hit. 0.35s is short enough to feel instant and still
+ * large enough that HTMLAudioElement doesn't stutter on initial load.
+ */
+const FIRST_SEGMENT_SECONDS = 0.35;
+const FIRST_SEGMENT_SAMPLES = Math.floor(FIRST_SEGMENT_SECONDS * INPUT_RATE);
+/**
+ * Subsequent segments are larger to reduce blob-URL churn. The first
+ * segment is already playing by the time these are built, so their
+ * size affects gapless continuity, not perceived latency.
+ */
+const NEXT_SEGMENT_SECONDS = 1.0;
+const NEXT_SEGMENT_SAMPLES = Math.floor(NEXT_SEGMENT_SECONDS * INPUT_RATE);
 
-/** Playback speed multiplier. 1.0 = normal, 1.15 = 15% faster. */
-const PLAYBACK_RATE = 1.15;
+/**
+ * Playback speed multiplier. Keep at 1.0 when the TTS backend applies
+ * server-side speed (e.g. ElevenLabs voice_settings.speed). Using
+ * HTMLAudioElement.playbackRate > 1 pitch-shifts the voice and makes
+ * it sound cartoonish; server-side speed preserves pitch.
+ */
+const PLAYBACK_RATE = 1.0;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
@@ -33,6 +51,12 @@ export class PCMPlayback {
   /** Accumulated raw s16le bytes waiting to become a segment. */
   private accumBytes: Uint8Array[] = [];
   private accumSamples = 0;
+  /**
+   * First segment per utterance uses the small threshold for fast TTFB;
+   * subsequent segments use the larger threshold. Reset to false on
+   * every new utterance via `flush()` / `reset()`.
+   */
+  private firstSegmentEmitted = false;
 
   /** Queue of WAV blob URLs ready to play. */
   private queue: string[] = [];
@@ -103,7 +127,10 @@ export class PCMPlayback {
     this.accumBytes.push(input.slice(0, evenLen));
     this.accumSamples += evenLen / 2;
 
-    if (this.accumSamples >= SEGMENT_SAMPLES) {
+    const threshold = this.firstSegmentEmitted
+      ? NEXT_SEGMENT_SAMPLES
+      : FIRST_SEGMENT_SAMPLES;
+    if (this.accumSamples >= threshold) {
       this.flushAccumToSegment();
     }
   }
@@ -122,6 +149,8 @@ export class PCMPlayback {
     }
     this.accumBytes = [];
     this.accumSamples = 0;
+    // Any subsequent segment in this utterance uses the larger threshold.
+    this.firstSegmentEmitted = true;
 
     // Create WAV blob
     const wav = createWavBlob(merged, INPUT_RATE);
@@ -230,6 +259,19 @@ export class PCMPlayback {
     });
   }
 
+  /**
+   * Push any PCM bytes currently sitting in the accumulator into a
+   * queued segment WITHOUT waiting for playback to drain. Safe to call
+   * repeatedly — does not touch `flushResolve` / `flushing`, so it
+   * won't collide with a concurrent `flush()` awaiting full drain.
+   *
+   * Used by per-sentence `tts_end` handlers that want the tail of each
+   * sentence to play but don't need to block on it.
+   */
+  flushPending(): void {
+    this.flushAccumToSegment();
+  }
+
   async flush(): Promise<void> {
     // Drain any remaining accumulated data
     this.flushAccumToSegment();
@@ -259,6 +301,7 @@ export class PCMPlayback {
     this.carry = null;
     this.accumBytes = [];
     this.accumSamples = 0;
+    this.firstSegmentEmitted = false;
     this.flushing = false;
     this.flushResolve = null;
   }

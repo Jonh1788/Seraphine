@@ -14,8 +14,27 @@ import { getAuthStatus, listImportantEmails } from './google/api';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
-  const [speak, setSpeak] = useState<boolean>(true);
-  const [think, setThink] = useState<boolean>(false);
+  const [speak, setSpeak] = useState<boolean>(() => {
+    const v = localStorage.getItem('seraphine.speak');
+    return v === null ? true : v === 'true';
+  });
+  const [think, setThink] = useState<boolean>(() => {
+    const v = localStorage.getItem('seraphine.think');
+    return v === null ? false : v === 'true';
+  });
+  const [manualMute, setManualMute] = useState<boolean>(() => {
+    const v = localStorage.getItem('seraphine.realtime.manualMute');
+    return v === 'true';
+  });
+  useEffect(() => {
+    localStorage.setItem('seraphine.speak', String(speak));
+  }, [speak]);
+  useEffect(() => {
+    localStorage.setItem('seraphine.think', String(think));
+  }, [think]);
+  useEffect(() => {
+    localStorage.setItem('seraphine.realtime.manualMute', String(manualMute));
+  }, [manualMute]);
   const [talking, setTalking] = useState<boolean>(false);
   const [realtimeActive, setRealtimeActive] = useState<boolean>(false);
   const [metrics, setMetrics] = useState<LatencyMetrics>({});
@@ -74,7 +93,13 @@ export function App(): JSX.Element {
         tsTtsStartRef.current = now;
         tsTtsFirstChunkRef.current = false;
       } else if (type === 'tts_end') {
-        void playbackRef.current?.flush();
+        // Push the sentence's tail bytes into a queued segment so they
+        // actually play, but don't await drain — RealtimeController
+        // owns the real flush() on turn_end. A blocking flush here
+        // would race with that call and deadlock on flushResolve
+        // (single-slot promise that gets overwritten by the second
+        // caller), leaving the state stuck at botSpeaking.
+        playbackRef.current?.flushPending();
         tsTtsStartRef.current = 0;
       } else if (type === 'notification') {
         // Proactive notification from Supertasks MCP
@@ -378,6 +403,8 @@ export function App(): JSX.Element {
                 });
               }}
               playback={playbackRef.current}
+              manualMute={manualMute}
+              onManualMuteToggle={() => setManualMute((v) => !v)}
             />
           )}
         </section>

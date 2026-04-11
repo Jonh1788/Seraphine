@@ -7,8 +7,22 @@
  * uses the shared AudioContext so it never fights CoreAudio for the
  * HAL lock on macOS.
  */
+import * as ort from 'onnxruntime-web';
 import { MicVAD } from '@ricky0123/vad-web';
 import { getSharedAudioContext } from '../audio/sharedContext';
+import { computeRmsFloat32 } from './gating';
+
+// Disable threaded wasm worker. onnxruntime-web's default path spawns
+// `new Worker(new URL('./ort-wasm-simd-threaded.mjs', ...))` for
+// multithreaded inference. Vite's dev server resolves that URL to
+// `/ort/ort-wasm-simd-threaded.mjs` (our public/ asset), tries to
+// transform it as a module, and errors out because public files can't
+// be imported from source. Silero VAD is ~1.5MB and runs comfortably
+// single-threaded — disabling the worker sidesteps the whole problem.
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.proxy = false;
+// wasm binaries are still served from /public/ort as static files.
+ort.env.wasm.wasmPaths = '/ort/';
 
 export interface RealtimeVADOptions {
   /** Fires when Silero commits to an actual speech segment. */
@@ -28,6 +42,24 @@ export interface RealtimeVAD {
   getAnalyser: () => AnalyserNode | null;
   /** True once `start()` has resolved and the VAD is listening. */
   isListening: () => boolean;
+  /**
+   * Mute the mic tracks (no audio enters VAD) without tearing down the
+   * pipeline. Used now exclusively by the manual mute toggle — the
+   * auto-mute-during-TTS workaround was replaced by the software AEC
+   * gate in gating.ts, which keeps the mic live so barge-in works.
+   */
+  suspendForPlayback: () => void;
+  /** Re-enable mic tracks after a manual mute toggle / cleanup. */
+  resumeAfterPlayback: () => void;
+  /** True when the mic tracks are currently hard-muted. */
+  isSuspended: () => boolean;
+  /**
+   * Latest smoothed mic RMS on a 0..1 scale. Updated on every VAD
+   * frame (~every 32ms at 16kHz/512 samples). Used by the barge-in
+   * gating logic in `RealtimeController` to discount echo from the
+   * speakers. Returns 0 while the mic is suspended.
+   */
+  getMicRms: () => number;
 }
 
 export async function createRealtimeVAD(
@@ -72,19 +104,29 @@ export async function createRealtimeVAD(
     return micStream;
   };
 
-  // At 16 kHz / 512-sample frames, each frame is 32 ms.
-  // The original brief specified these in frames; convert to ms:
-  //   minSpeechFrames: 4   -> 128 ms
-  //   redemptionFrames: 8  -> 256 ms
-  //   preSpeechPadFrames: 1 -> 32 ms
+  // State for the running mic-RMS EMA used by the barge-in gate. Declared
+  // before MicVAD.new so the onFrameProcessed closure captures the
+  // already-initialised binding rather than hitting TDZ on early frames.
+  let listening = false;
+  let suspended = false;
+  let micRmsSmoothed = 0;
+
+  // Conversation-tuned VAD timings (16 kHz / 512-sample frames, 32 ms each):
+  //   minSpeechMs: 200    — reject sub-200ms chirps (cough, mouse click)
+  //   redemptionMs: 750   — tolerate natural mid-sentence pauses up to
+  //                         ~750 ms before declaring end-of-utterance.
+  //                         Lower values fragmented "fala... pausa... fala"
+  //                         into two separate audio_end round-trips.
+  //   preSpeechPadMs: 64  — include 64 ms of pre-roll so the first phoneme
+  //                         isn't clipped.
   const vad = await MicVAD.new({
     audioContext,
     model: 'legacy',
     positiveSpeechThreshold: 0.7,
     negativeSpeechThreshold: 0.3,
-    minSpeechMs: 128,
-    redemptionMs: 256,
-    preSpeechPadMs: 32,
+    minSpeechMs: 200,
+    redemptionMs: 750,
+    preSpeechPadMs: 64,
     submitUserSpeechOnPause: false,
     // Asset paths (served from /public by Vite — see /public/vad, /public/ort).
     baseAssetPath: '/vad/',
@@ -109,13 +151,21 @@ export async function createRealtimeVAD(
       try { opts.onMisfire?.(); } catch (err) { console.error('[realtime-vad] onMisfire:', err); }
     },
     onFrameProcessed: (_probs, frame) => {
+      // Update the running mic RMS on every processed frame so the
+      // barge-in gate has a sub-50ms-fresh value to compare against
+      // playback. When the mic is suspended the frame is silent (all
+      // zeros from the muted track), which naturally drags the
+      // smoothed value to 0 — good, since we never want a stale loud
+      // reading to unblock barge-in after a manual mute.
+      const instant = computeRmsFloat32(frame);
+      // One-pole EMA (alpha ~0.3) gives a ~100ms effective window at
+      // 32ms frames without a ring buffer allocation.
+      micRmsSmoothed = micRmsSmoothed * 0.7 + instant * 0.3;
       if (opts.onAudioFrame) {
         try { opts.onAudioFrame(frame); } catch (err) { console.error('[realtime-vad] onAudioFrame:', err); }
       }
     },
   });
-
-  let listening = false;
 
   return {
     start: async () => {
@@ -143,5 +193,20 @@ export async function createRealtimeVAD(
     },
     getAnalyser: () => analyser,
     isListening: () => listening,
+    suspendForPlayback: () => {
+      suspended = true;
+      micRmsSmoothed = 0;
+      if (micStream) {
+        micStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+      }
+    },
+    resumeAfterPlayback: () => {
+      suspended = false;
+      if (micStream) {
+        micStream.getAudioTracks().forEach((t) => { t.enabled = true; });
+      }
+    },
+    isSuspended: () => suspended,
+    getMicRms: () => (suspended ? 0 : micRmsSmoothed),
   };
 }

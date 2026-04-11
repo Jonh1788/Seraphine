@@ -3,3 +3,10 @@ dist
 .vite
 coverage
 *.log
+.tsbuild-node
+tsconfig.tsbuildinfo
+tsconfig.*.tsbuildinfo
+# Stale emitted artifacts for vite.config.ts — if they exist alongside the
+# .ts source, Vite will load the .js instead, silently ignoring edits.
+/vite.config.js
+/vite.config.d.ts

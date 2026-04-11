@@ -202,6 +202,9 @@ interface ChatViewProps {
   realtimeActive: boolean;
   onRealtimeToggle: () => void;
   playback: PCMPlayback | null;
+  /** Hard mute toggle for the user's mic while realtime is active. */
+  manualMute: boolean;
+  onManualMuteToggle: () => void;
 }
 
 /** Threshold (px) the user must drag upward to lock recording */
@@ -225,6 +228,8 @@ export function ChatView({
   realtimeActive,
   onRealtimeToggle,
   playback,
+  manualMute,
+  onManualMuteToggle,
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
@@ -651,6 +656,8 @@ export function ChatView({
           conversationId={conversationIdRef.current}
           speak={speak}
           think={think}
+          manualMute={manualMute}
+          onManualMuteToggle={onManualMuteToggle}
         />
       )}
 
