@@ -94,5 +94,5 @@ def build_default_registry(
         reg.register(CalendarCreateEventTool(google_client))
         reg.register(CalendarUpdateEventTool(google_client))
         reg.register(CalendarDeleteEventTool(google_client))
-        reg.register(GmailSendMessageTool(google_client))
+        reg.register(GmailSendMessageTool(google_client, allowed_roots))
     return reg

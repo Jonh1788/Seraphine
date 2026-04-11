@@ -18,8 +18,14 @@ Write tools (``requires_confirmation=True``, go through the approval gate):
 from __future__ import annotations
 
 import base64
+import logging
+import mimetypes
 from datetime import datetime, timedelta, timezone
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import encoders
+from pathlib import Path
 from typing import Any, Optional
 
 from seraphine.google.client import (
@@ -30,6 +36,23 @@ from seraphine.google.client import (
     _rfc3339,
 )
 from seraphine.tools.base import Tool, ToolResult
+
+logger = logging.getLogger(__name__)
+
+
+def _path_under_allowed_roots(path: Path, roots: list[Path]) -> bool:
+    """Mirror filesystem.py: resolve then check relative_to each root."""
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    for r in roots:
+        try:
+            resolved.relative_to(r.resolve())
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _parse_iso(s: str) -> datetime:
@@ -432,6 +455,11 @@ class CalendarCreateEventTool(Tool):
         event = resp.json()
         event_id = event.get("id")
         html_link = event.get("htmlLink")
+        # Phase C cache: the event list for this calendar is now stale.
+        try:
+            self._client.event_cache.invalidate_calendar(calendar_id)
+        except Exception:
+            pass
         return ToolResult(
             ok=True,
             output=f"Evento criado: {summary} (id={event_id})",
@@ -529,6 +557,10 @@ class CalendarUpdateEventTool(Tool):
             return ToolResult(ok=False, error=f"calendar update failed: {e}")
 
         event = resp.json()
+        try:
+            self._client.event_cache.invalidate_calendar(calendar_id)
+        except Exception:
+            pass
         return ToolResult(
             ok=True,
             output=f"Evento {event_id} atualizado.",
@@ -579,6 +611,10 @@ class CalendarDeleteEventTool(Tool):
         except Exception as e:
             return ToolResult(ok=False, error=f"calendar delete failed: {e}")
 
+        try:
+            self._client.event_cache.invalidate_calendar(calendar_id)
+        except Exception:
+            pass
         return ToolResult(
             ok=True,
             output=f"Evento {event_id} deletado.",
@@ -592,8 +628,10 @@ class GmailSendMessageTool(Tool):
         "Send a plain-text email via the user's Gmail account. Requires "
         "user approval via the confirmation gate. If "
         "`in_reply_to_message_id` is provided, the message is threaded as "
-        "a reply using Gmail's threadId and RFC 2822 In-Reply-To / "
-        "References headers."
+        "a reply using Gmail's threadId and RFC 5322 In-Reply-To / "
+        "References headers. Optional `attachments` is a list of "
+        "{path, mime_type?} objects; files must reside under the "
+        "configured allowed_tool_roots for safety."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -624,8 +662,35 @@ class GmailSendMessageTool(Tool):
                 "description": (
                     "Gmail message id to reply to. When set, the tool "
                     "looks up the original Message-Id header and threadId "
-                    "so the reply threads correctly."
+                    "so the reply threads correctly. If the lookup fails "
+                    "(404, permissions, etc.) the tool falls back to a "
+                    "plain (unthreaded) send and logs a warning."
                 ),
+            },
+            "attachments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "Absolute path to the file. Must be under "
+                                "the configured allowed_tool_roots."
+                            ),
+                        },
+                        "mime_type": {
+                            "type": "string",
+                            "description": (
+                                "Optional MIME type; guessed from the "
+                                "filename if omitted, fallback "
+                                "application/octet-stream."
+                            ),
+                        },
+                    },
+                    "required": ["path"],
+                },
+                "description": "Optional list of file attachments.",
             },
         },
         "required": ["to", "subject", "body"],
@@ -633,8 +698,110 @@ class GmailSendMessageTool(Tool):
     requires_confirmation = True
     category = "network"
 
-    def __init__(self, google_client: GoogleClient) -> None:
+    def __init__(
+        self,
+        google_client: GoogleClient,
+        allowed_roots: list[Path] | None = None,
+    ) -> None:
         self._client = google_client
+        self._allowed_roots: list[Path] = (
+            [Path(r) for r in allowed_roots] if allowed_roots else []
+        )
+
+    async def _resolve_reply_headers(
+        self, reply_ref: str
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Return ``(thread_id, reply_msgid, combined_refs)``.
+
+        On any non-auth failure (404, permissions, parse errors) returns
+        ``(None, None, None)`` and logs a warning so the caller falls
+        back to a plain send. A ``GoogleAuthError`` is re-raised so the
+        caller can surface an un-authed hint to the user.
+        """
+        detail_url = f"{GMAIL_API}/users/me/messages/{reply_ref}"
+        try:
+            resp = await self._client._authed_request(
+                "GET",
+                detail_url,
+                params={
+                    "format": "metadata",
+                    "metadataHeaders": ["Message-Id", "References"],
+                },
+            )
+        except GoogleAuthError:
+            raise
+        except Exception as e:
+            logger.warning(
+                "gmail_send_message: failed to fetch reply target %s, "
+                "falling back to plain send: %s",
+                reply_ref, e,
+            )
+            return (None, None, None)
+
+        raw = resp.json()
+        thread_id = raw.get("threadId")
+        headers = {
+            (h.get("name") or "").lower(): h.get("value", "")
+            for h in (raw.get("payload") or {}).get("headers", [])
+        }
+        reply_msgid = headers.get("message-id") or None
+        prior_refs = (headers.get("references") or "").strip()
+
+        combined_refs: Optional[str] = None
+        if reply_msgid:
+            # RFC 5322 §3.6.4: References is the original References list
+            # with the parent's Message-Id appended. If the original had
+            # no References, the new References is just <parent-msgid>.
+            combined_refs = (
+                f"{prior_refs} {reply_msgid}" if prior_refs else reply_msgid
+            )
+        return (thread_id, reply_msgid, combined_refs)
+
+    def _load_attachment(
+        self, spec: Any
+    ) -> tuple[Optional[MIMEBase], Optional[str]]:
+        """Read + build a MIME part for one attachment spec. Returns
+        ``(part, None)`` on success, ``(None, error_message)`` on failure."""
+        if not isinstance(spec, dict):
+            return (None, "attachment entries must be objects with a 'path' key")
+        raw_path = spec.get("path")
+        if not raw_path or not isinstance(raw_path, str):
+            return (None, "attachment 'path' is required")
+
+        path = Path(raw_path).expanduser()
+        if not self._allowed_roots:
+            return (
+                None,
+                "attachments are disabled: no allowed_tool_roots configured",
+            )
+        if not _path_under_allowed_roots(path, self._allowed_roots):
+            return (None, f"attachment path not under allowed roots: {raw_path}")
+        if not path.exists() or not path.is_file():
+            return (None, f"attachment not found: {raw_path}")
+
+        try:
+            data = path.read_bytes()
+        except Exception as e:
+            return (None, f"failed to read attachment {raw_path}: {e}")
+
+        mime_type = spec.get("mime_type")
+        if not mime_type:
+            guessed, _ = mimetypes.guess_type(path.name)
+            mime_type = guessed or "application/octet-stream"
+        try:
+            maintype, subtype = mime_type.split("/", 1)
+        except ValueError:
+            maintype, subtype = "application", "octet-stream"
+
+        part = MIMEBase(maintype, subtype)
+        part.set_payload(data)
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            "attachment",
+            filename=path.name,
+        )
+        return (part, None)
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         subject = str(args.get("subject") or "").strip()
@@ -653,6 +820,21 @@ class GmailSendMessageTool(Tool):
         if not to_list:
             return ToolResult(ok=False, error="to is required")
 
+        # Validate + load attachments eagerly so we fail *before* any
+        # Google API call if the user passed a bad path.
+        raw_attachments = args.get("attachments") or []
+        if raw_attachments and not isinstance(raw_attachments, (list, tuple)):
+            return ToolResult(
+                ok=False, error="attachments must be a list of {path, mime_type?}"
+            )
+        attachment_parts: list[MIMEBase] = []
+        for spec in raw_attachments:
+            part, err = self._load_attachment(spec)
+            if err is not None:
+                return ToolResult(ok=False, error=err)
+            assert part is not None
+            attachment_parts.append(part)
+
         try:
             if not await self._client.is_authed():
                 return _not_authed_result()
@@ -667,44 +849,33 @@ class GmailSendMessageTool(Tool):
         except Exception:
             from_addr = None
 
-        # Resolve reply metadata if requested.
+        # Resolve reply metadata if requested. A failed fetch degrades
+        # gracefully to a plain (unthreaded) send.
         thread_id: Optional[str] = None
         reply_msgid: Optional[str] = None
         combined_refs: Optional[str] = None
         reply_ref: Optional[str] = args.get("in_reply_to_message_id")
         if reply_ref:
             try:
-                detail_url = f"{GMAIL_API}/users/me/messages/{reply_ref}"
-                resp = await self._client._authed_request(
-                    "GET",
-                    detail_url,
-                    params={
-                        "format": "metadata",
-                        "metadataHeaders": ["Message-Id", "References"],
-                    },
+                thread_id, reply_msgid, combined_refs = (
+                    await self._resolve_reply_headers(reply_ref)
                 )
-                raw = resp.json()
-                thread_id = raw.get("threadId")
-                headers = {
-                    (h.get("name") or "").lower(): h.get("value", "")
-                    for h in (raw.get("payload") or {}).get("headers", [])
-                }
-                reply_msgid = headers.get("message-id") or None
-                prior_refs = headers.get("references") or ""
-                if reply_msgid:
-                    combined_refs = (
-                        f"{prior_refs} {reply_msgid}".strip()
-                        if prior_refs
-                        else reply_msgid
-                    )
             except GoogleAuthError:
                 return _not_authed_result()
-            except Exception as e:
-                return ToolResult(
-                    ok=False, error=f"failed to resolve reply target: {e}"
-                )
 
-        msg = MIMEText(str(body_text), _subtype="plain", _charset="utf-8")
+        # Build the MIME payload. We always use multipart/mixed when
+        # there are attachments; otherwise a single text/plain part
+        # keeps the wire shape identical to the pre-Phase-C behavior
+        # (and keeps existing tests passing).
+        msg: Any
+        if attachment_parts:
+            msg = MIMEMultipart("mixed")
+            msg.attach(MIMEText(str(body_text), _subtype="plain", _charset="utf-8"))
+            for part in attachment_parts:
+                msg.attach(part)
+        else:
+            msg = MIMEText(str(body_text), _subtype="plain", _charset="utf-8")
+
         msg["To"] = ", ".join(to_list)
         if cc_list:
             msg["Cc"] = ", ".join(cc_list)
@@ -742,5 +913,6 @@ class GmailSendMessageTool(Tool):
             metadata={
                 "message_id": message_id,
                 "thread_id": returned_thread,
+                "attachments_count": len(attachment_parts),
             },
         )

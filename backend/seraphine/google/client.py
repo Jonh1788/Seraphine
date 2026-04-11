@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Iterable, Optional
@@ -32,6 +33,69 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 # Refresh when we're within this window of expiry.
 REFRESH_SKEW = timedelta(minutes=5)
 DEFAULT_TIMEOUT = 20.0
+
+# Phase C — Calendar event cache TTL (in seconds). Exposed so tests (and
+# future tuning) can monkeypatch it. 30s is short enough that users who
+# create an event and immediately navigate away/back see their own write
+# on the next window hit (assuming the writer path invalidates the
+# calendar_id, which it does), and long enough that bouncing back and
+# forth between prev/next month in the CalendarModal rehits the cache.
+CALENDAR_CACHE_TTL_SECONDS = 30
+
+
+class CalendarEventCache:
+    """In-memory TTL cache for ``list_events`` responses.
+
+    Keyed by ``(calendar_id, time_min_iso, time_max_iso)``. Values are
+    ``(events_list, fetched_at_monotonic)`` tuples.
+
+    **Thread safety**: the cache is accessed from ``asyncio`` coroutines
+    only, and dict ``get``/``setitem``/``del`` are atomic in CPython.
+    We deliberately skip an ``asyncio.Lock``: the worst race is two
+    coroutines missing at once and both fetching (wasting one API call),
+    which is benign. Invalidation is a bounded scan of a small dict.
+    """
+
+    def __init__(self, ttl_seconds: float = CALENDAR_CACHE_TTL_SECONDS) -> None:
+        self._ttl = ttl_seconds
+        self._data: dict[tuple[str, str, str], tuple[list[dict], float]] = {}
+
+    def get(
+        self, calendar_id: str, time_min_iso: str, time_max_iso: str
+    ) -> list[dict] | None:
+        key = (calendar_id, time_min_iso, time_max_iso)
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        events, fetched_at = entry
+        if (time.monotonic() - fetched_at) > self._ttl:
+            # Lazy eviction of the stale entry.
+            self._data.pop(key, None)
+            return None
+        return events
+
+    def put(
+        self,
+        calendar_id: str,
+        time_min_iso: str,
+        time_max_iso: str,
+        events: list[dict],
+    ) -> None:
+        key = (calendar_id, time_min_iso, time_max_iso)
+        self._data[key] = (events, time.monotonic())
+
+    def invalidate_calendar(self, calendar_id: str) -> int:
+        """Purge all entries for ``calendar_id``. Returns count purged."""
+        to_drop = [k for k in self._data if k[0] == calendar_id]
+        for k in to_drop:
+            self._data.pop(k, None)
+        return len(to_drop)
+
+    def clear(self) -> None:
+        self._data.clear()
+
+    def __len__(self) -> int:  # for tests
+        return len(self._data)
 
 
 class GoogleAuthError(RuntimeError):
@@ -54,6 +118,12 @@ class GoogleClient:
         self._scopes = list(scopes)
         self._bundle: Optional[TokenBundle] = None
         self._lock = asyncio.Lock()
+        self._event_cache = CalendarEventCache()
+
+    @property
+    def event_cache(self) -> CalendarEventCache:
+        """Expose the calendar event cache (for tests + explicit flush)."""
+        return self._event_cache
 
     # ------------------------------------------------------------------
     # Auth
@@ -195,14 +265,34 @@ class GoogleClient:
             "singleEvents": "true",
             "orderBy": "startTime",
         }
+        time_min_iso = _rfc3339(time_min) if time_min is not None else ""
+        time_max_iso = _rfc3339(time_max) if time_max is not None else ""
         if time_min is not None:
-            params["timeMin"] = _rfc3339(time_min)
+            params["timeMin"] = time_min_iso
         if time_max is not None:
-            params["timeMax"] = _rfc3339(time_max)
+            params["timeMax"] = time_max_iso
         if q:
             params["q"] = q
+
+        # Cache only the "plain window" case — adding a ``q`` filter or a
+        # non-default ``max_results`` changes the result set, and the
+        # cache key doesn't carry those. We'd rather miss the cache than
+        # serve a wrong response.
+        cache_eligible = q is None and max_results == 20
+        if cache_eligible:
+            cached = self._event_cache.get(calendar_id, time_min_iso, time_max_iso)
+            if cached is not None:
+                logger.debug(
+                    "calendar cache hit cal=%s window=(%s, %s) n=%d",
+                    calendar_id, time_min_iso, time_max_iso, len(cached),
+                )
+                return cached
+
         resp = await self._authed_request("GET", url, params=params)
-        return resp.json().get("items", [])
+        events = resp.json().get("items", [])
+        if cache_eligible:
+            self._event_cache.put(calendar_id, time_min_iso, time_max_iso, events)
+        return events
 
     async def get_event(
         self, event_id: str, *, calendar_id: str = "primary"
@@ -239,6 +329,7 @@ class GoogleClient:
         if attendees:
             body["attendees"] = [{"email": a} for a in attendees]
         resp = await self._authed_request("POST", url, json=body)
+        self._event_cache.invalidate_calendar(calendar_id)
         return resp.json()
 
     async def update_event(
@@ -265,6 +356,7 @@ class GoogleClient:
         # Any remaining kwargs are passed through verbatim.
         body.update(fields)
         resp = await self._authed_request("PATCH", url, json=body)
+        self._event_cache.invalidate_calendar(calendar_id)
         return resp.json()
 
     async def delete_event(
@@ -272,6 +364,7 @@ class GoogleClient:
     ) -> None:
         url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{event_id}"
         await self._authed_request("DELETE", url)
+        self._event_cache.invalidate_calendar(calendar_id)
 
     # ------------------------------------------------------------------
     # Gmail — read
