@@ -90,6 +90,9 @@ export interface ToolResultMessage {
   ok: boolean;
   output: string | null;
   error: string | null;
+  /** Structured metadata from the tool. E.g. fetch_image puts
+   *  {image_data_url, url, caption, content_type, bytes} here. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ToolApprovalMessage {
@@ -146,3 +149,4 @@ export type ServerMessage =
   | ToolResultMessage
   | NotificationMessage
   | McpApprovalRequestMessage;
+

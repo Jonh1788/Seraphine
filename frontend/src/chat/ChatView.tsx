@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import type { SeraphineWS } from '../ws/client';
-import type { McpApprovalRequestMessage, ServerMessage } from '../ws/types';
+import type {
+  McpApprovalRequestMessage,
+  ServerMessage,
+  ToolResultMessage,
+} from '../ws/types';
 
 interface McpApproval {
   taskId: string;
@@ -285,6 +289,38 @@ export function ChatView({
           },
         ]);
         setStreamingTurnId(null);
+      } else if (msg.type === 'tool_result') {
+        // If a tool returned an image (e.g. fetch_image), attach it to
+        // the most recent assistant turn so it renders inline in the bubble.
+        const tr = msg as ToolResultMessage;
+        const meta = tr.metadata;
+        const imageDataUrl =
+          meta && typeof meta['image_data_url'] === 'string'
+            ? (meta['image_data_url'] as string)
+            : null;
+        if (tr.ok && imageDataUrl) {
+          setTurns((prev) => {
+            // Attach to the last assistant turn (streaming or not).
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = prev.slice();
+                const existing = next[i].images ?? [];
+                next[i] = { ...next[i], images: [...existing, imageDataUrl] };
+                return next;
+              }
+            }
+            // No assistant turn yet — create a standalone one.
+            return [
+              ...prev,
+              {
+                id: `img-${Date.now()}`,
+                role: 'assistant',
+                content: '',
+                images: [imageDataUrl],
+              },
+            ];
+          });
+        }
       } else if (msg.type === 'mcp_approval_request') {
         const req = msg as McpApprovalRequestMessage;
         const approvalData: McpApproval = {
@@ -365,6 +401,28 @@ export function ChatView({
 
   const removePendingImage = (index: number): void => {
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  /** Handle paste — if clipboard contains images, add them to pendingImages. */
+  const handlePaste = (e: React.ClipboardEvent): void => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            const name = `colado-${pendingImages.length + 1}.${file.type.split('/')[1] || 'png'}`;
+            setPendingImages((prev) => [...prev, { name, dataUrl: reader.result as string }]);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    }
   };
 
   const handleMcpApproval = useCallback(
@@ -608,13 +666,14 @@ export function ChatView({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') send();
               }}
+              onPaste={handlePaste}
               placeholder={
                 connected
                   ? isStreaming
                     ? 'Aguarde a resposta...'
                     : pendingImages.length > 0
                       ? 'Pergunte sobre as imagens...'
-                      : 'Digite e Enter...'
+                      : 'Digite e Enter ou cole uma imagem...'
                   : 'Desconectado'
               }
               disabled={!connected || isStreaming}

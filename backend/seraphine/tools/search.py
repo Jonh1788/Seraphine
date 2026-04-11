@@ -59,7 +59,15 @@ class WebSearchTool(Tool):
         self.timeout = timeout
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
+        # Accept both "query" (string) and "queries" (array) — Gemma 4 uses
+        # plural array form natively. Join multiple queries with " OR ".
         query = str(args.get("query", "")).strip()
+        if not query:
+            queries = args.get("queries")
+            if isinstance(queries, list) and queries:
+                query = " OR ".join(str(q).strip() for q in queries if q)
+            elif isinstance(queries, str):
+                query = queries.strip()
         if not query:
             return ToolResult(ok=False, error="query is required")
         num = min(int(args.get("num_results") or DEFAULT_NUM_RESULTS), 10)

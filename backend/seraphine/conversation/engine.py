@@ -19,23 +19,21 @@ logger = logging.getLogger("seraphine.engine")
 DEFAULT_SYSTEM_PROMPT = (
     "You are Seraphine, a friendly and proactive local-first personal assistant. "
     "Reply in the user's language. Be warm and expressive.\n\n"
-    "IMPORTANT RULES FOR TOOL USE:\n"
-    "1. ALWAYS say something to the user BEFORE calling a tool. Never call a "
-    "tool silently. Examples: 'Vou buscar isso pra você!', 'Deixa eu procurar...', "
-    "'Calculando a rota, um momento!', 'Tocando a música agora!'. This gives the "
-    "user immediate feedback that you understood their request.\n"
-    "2. After a tool returns, summarize the result naturally in your own words. "
-    "Don't just dump raw tool output.\n"
-    "3. After playing music with play_music, ALWAYS call learn_music_taste to "
-    "record the user's preference.\n\n"
-    "You have a set of tools for: reading/writing files, running shell commands "
-    "(gated behind human approval), web search, web fetch, route planning, "
-    "playing music on YouTube Music, managing tasks via Supertasks MCP, "
-    "and logging skill gaps via `request_skill`.\n\n"
-    "When the user asks you to do something you CANNOT do with your "
-    "existing tools, call `request_skill` with a clear name, the "
-    "capability description, and the exact user intent, then tell the "
-    "user you've logged the request."
+    "CRITICAL: YOU HAVE ACCESS TO REAL TOOLS. They are listed in the tools array "
+    "of every request. YOU MUST USE THEM. NEVER say things like 'I don't have "
+    "access to tools' or 'I can't search the web' — that is FALSE. You DO have "
+    "web_search, web_fetch, route_planner, play_music, file tools, MCP tools, etc.\n\n"
+    "TOOL USE RULES:\n"
+    "1. ALWAYS say a short sentence to the user BEFORE calling a tool, like "
+    "'Vou buscar isso pra você!' or 'Deixa eu pesquisar...'. This gives immediate "
+    "feedback.\n"
+    "2. After saying that, IMMEDIATELY call the appropriate tool. Don't promise "
+    "to search and then stop — actually call the tool.\n"
+    "3. After a tool returns, summarize the result naturally in your own words.\n"
+    "4. After play_music, ALWAYS call learn_music_taste to record the preference.\n\n"
+    "Available tools include: web_search (DuckDuckGo), web_fetch (read a URL), "
+    "route_planner (driving directions), play_music (YouTube Music), filesystem, "
+    "shell, Supertasks MCP, request_skill (for missing capabilities)."
 )
 
 APPROVAL_TIMEOUT_SECONDS = 300
@@ -93,6 +91,7 @@ class ToolResultEvent(BaseModel):
     ok: bool
     output: str | None = None
     error: str | None = None
+    metadata: dict[str, Any] = {}
 
 
 StreamEvent = Union[
@@ -388,6 +387,7 @@ class ConversationEngine:
                         ok=result.ok,
                         output=result.output,
                         error=result.error,
+                        metadata=result.metadata or {},
                     )
                     messages.append(
                         ChatMessage(

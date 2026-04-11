@@ -18,7 +18,10 @@ export function getSharedAudioContext(): AudioContext {
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     ctx = new AC();
   }
-  if (ctx.state === 'suspended') void ctx.resume();
+  if (ctx.state === 'suspended') {
+    // Fire resume eagerly; callers that need it settled should await it.
+    ctx.resume().catch((err) => console.warn('[sharedContext] resume failed:', err));
+  }
   return ctx;
 }
 

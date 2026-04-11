@@ -1,51 +1,62 @@
 /**
- * Streaming PCM player with a small leading pre-buffer.
+ * Streaming PCM player using HTMLAudioElement.
  *
- * Uses the shared AudioContext from sharedContext.ts to avoid creating
- * multiple contexts that deadlock CoreAudio on macOS.
+ * Previous approaches using Web Audio API (AudioBufferSourceNode,
+ * ScriptProcessorNode) all crashed macOS CoreAudio. This approach
+ * bypasses the Web Audio graph entirely:
+ *
+ * 1. Accumulate s16le PCM chunks into a buffer
+ * 2. When enough data arrives, wrap it in a WAV header
+ * 3. Create a Blob URL and play it via an <audio> element
+ * 4. Chain successive audio elements for gapless playback
+ *
+ * The AnalyserNode for lipsync uses a separate MediaElementSource
+ * from the playing <audio> element.
  */
 import { getSharedAudioContext } from './sharedContext';
-
-const PREBUFFER_SECONDS = 0.6;
-
-/**
- * Playback rate multiplier applied to every scheduled source.
- * 1.03 = ~3% faster, pitch shift essentially inaudible.
- */
-const PLAYBACK_RATE = 1.0;
 
 /** Input PCM sample rate from the TTS server. */
 const INPUT_RATE = 24000;
 
-/**
- * Hard cap on concurrently scheduled source nodes.
- * Prevents exhausting CoreAudio's rendering graph buffer.
- */
-const MAX_SCHEDULED = 50;
+/** Accumulate this many seconds before creating an audio segment. */
+const SEGMENT_SECONDS = 1.5;
+const SEGMENT_SAMPLES = Math.floor(SEGMENT_SECONDS * INPUT_RATE);
+
+/** Playback speed multiplier. 1.0 = normal, 1.1 = 10% faster. */
+const PLAYBACK_RATE = 1.1;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
-  private nextStartTime = 0;
-  private scheduled: AudioBufferSourceNode[] = [];
-  private pendingFloats: Float32Array[] = [];
-  private pendingDuration = 0;
-  private started = false;
   private carry: Uint8Array | null = null;
-  private disposed = false;
 
-  // Deferred analyser consumers. When getAnalyser() is called before
-  // the AudioContext exists, we store the callback and fire it once
-  // the context is created.
+  /** Accumulated raw s16le bytes waiting to become a segment. */
+  private accumBytes: Uint8Array[] = [];
+  private accumSamples = 0;
+
+  /** Queue of WAV blob URLs ready to play. */
+  private queue: string[] = [];
+  /** Currently playing audio element. */
+  private currentAudio: HTMLAudioElement | null = null;
+  private currentSource: MediaElementAudioSourceNode | null = null;
+  /** Whether we're actively playing through the queue. */
+  private playing = false;
+  /** Guard against double-calling playNext from onerror + play().catch */
+  private playNextScheduled = false;
+
+  private flushResolve: (() => void) | null = null;
+  private flushing = false;
+
   private analyserCallbacks: ((a: AnalyserNode) => void)[] = [];
 
-  constructor() {
-    // AudioContext is created lazily — only when pushChunk() is
-    // called (i.e. real audio data arrives from the TTS server).
-  }
+  constructor() {}
 
-  /** Create the AudioContext + AnalyserNode. Idempotent. */
-  private initCtx(): AudioContext {
+  /**
+   * Lazily initialise the AudioContext and AnalyserNode.
+   * MUST be called from a user-gesture context the first time so the
+   * browser lets the AudioContext start in "running" state.
+   */
+  ensureCtx(): AudioContext {
     if (this.ctx) return this.ctx;
     this.ctx = getSharedAudioContext();
 
@@ -54,180 +65,266 @@ export class PCMPlayback {
     this.analyser.smoothingTimeConstant = 0;
     this.analyser.connect(this.ctx.destination);
 
-    // Fire deferred analyser callbacks
+    console.log('[PCMPlayback] AudioContext created, state:', this.ctx.state);
+
     for (const cb of this.analyserCallbacks) {
       cb(this.analyser);
     }
     this.analyserCallbacks = [];
-
     return this.ctx;
   }
 
-  /**
-   * Get the AnalyserNode for lipsync. If the AudioContext hasn't been
-   * created yet (no user gesture), returns null and calls `onReady`
-   * when it becomes available.
-   */
   getAnalyser(onReady?: (a: AnalyserNode) => void): AnalyserNode | null {
     if (this.analyser) return this.analyser;
-    if (onReady) {
-      this.analyserCallbacks.push(onReady);
-    }
+    if (onReady) this.analyserCallbacks.push(onReady);
     return null;
   }
 
   pushChunk(buf: ArrayBuffer): void {
-    let bytes = new Uint8Array(buf);
+    const bytes = new Uint8Array(buf);
     if (bytes.byteLength === 0) return;
-    const ctx = this.initCtx();
-    if (ctx.state === 'suspended') void ctx.resume();
 
+    // Handle carry byte from odd-sized previous chunk
+    let input = bytes;
     if (this.carry) {
       const merged = new Uint8Array(this.carry.byteLength + bytes.byteLength);
       merged.set(this.carry, 0);
       merged.set(bytes, this.carry.byteLength);
-      bytes = merged;
+      input = merged;
       this.carry = null;
     }
 
-    const evenLen = bytes.byteLength - (bytes.byteLength % 2);
-    if (evenLen < bytes.byteLength) {
-      this.carry = bytes.slice(evenLen);
+    const evenLen = input.byteLength - (input.byteLength % 2);
+    if (evenLen < input.byteLength) {
+      this.carry = input.slice(evenLen);
     }
     if (evenLen === 0) return;
 
-    const aligned = new ArrayBuffer(evenLen);
-    new Uint8Array(aligned).set(bytes.subarray(0, evenLen));
-    const view = new Int16Array(aligned);
-    if (view.length === 0) return;
-    const float = new Float32Array(view.length);
-    for (let i = 0; i < view.length; i += 1) {
-      float[i] = view[i] / 32768;
+    this.accumBytes.push(input.slice(0, evenLen));
+    this.accumSamples += evenLen / 2;
+
+    if (this.accumSamples >= SEGMENT_SAMPLES) {
+      this.flushAccumToSegment();
+    }
+  }
+
+  /** Convert accumulated PCM into a WAV blob URL and enqueue for playback. */
+  private flushAccumToSegment(): void {
+    if (this.accumSamples === 0) return;
+
+    // Merge all accumulated byte arrays
+    const totalBytes = this.accumBytes.reduce((s, a) => s + a.byteLength, 0);
+    const merged = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const a of this.accumBytes) {
+      merged.set(a, offset);
+      offset += a.byteLength;
+    }
+    this.accumBytes = [];
+    this.accumSamples = 0;
+
+    // Create WAV blob
+    const wav = createWavBlob(merged, INPUT_RATE);
+    const url = URL.createObjectURL(wav);
+    this.queue.push(url);
+
+    console.log('[PCMPlayback] segment created, queue length:', this.queue.length, 'bytes:', totalBytes);
+
+    // Start playback if not already playing
+    if (!this.playing) {
+      this.playing = true;
+      this.playNext();
+    }
+  }
+
+  /** Play the next segment from the queue. */
+  private playNext(): void {
+    this.playNextScheduled = false;
+
+    // Clean up previous
+    if (this.currentSource) {
+      try { this.currentSource.disconnect(); } catch { /* ignore */ }
+      this.currentSource = null;
+    }
+    if (this.currentAudio) {
+      this.currentAudio.onended = null;
+      this.currentAudio.onerror = null;
+      this.currentAudio.pause();
+      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
+      this.currentAudio = null;
     }
 
-    if (!this.started) {
-      this.pendingFloats.push(float);
-      this.pendingDuration += float.length / INPUT_RATE;
-      if (this.pendingDuration >= PREBUFFER_SECONDS) {
-        this.flushPrebuffer();
+    if (this.queue.length === 0) {
+      this.playing = false;
+      // If flushing and no more segments, we're done
+      if (this.flushing) {
+        this.flushing = false;
+        if (this.flushResolve) {
+          const r = this.flushResolve;
+          this.flushResolve = null;
+          r();
+        }
       }
       return;
     }
-    this.scheduleSource(float);
-  }
 
-  private flushPrebuffer(): void {
-    const totalLen = this.pendingFloats.reduce((s, a) => s + a.length, 0);
-    if (totalLen === 0) {
-      this.started = true;
-      return;
-    }
-    const merged = new Float32Array(totalLen);
-    let offset = 0;
-    for (const f of this.pendingFloats) {
-      merged.set(f, offset);
-      offset += f.length;
-    }
-    this.pendingFloats = [];
-    this.pendingDuration = 0;
-    this.nextStartTime = this.ctx?.currentTime ?? 0;
-    this.scheduleSource(merged);
-    this.started = true;
-  }
+    const url = this.queue.shift()!;
+    const audio = new Audio(url);
+    audio.playbackRate = PLAYBACK_RATE;
+    this.currentAudio = audio;
 
-  /** Resample from 24 kHz to the AudioContext's native sample rate. */
-  private resample(samples: Float32Array): Float32Array {
-    const outRate = this.ctx!.sampleRate;
-    if (outRate === INPUT_RATE) return samples;
-    const ratio = outRate / INPUT_RATE;
-    const outLen = Math.round(samples.length * ratio);
-    const out = new Float32Array(outLen);
-    for (let i = 0; i < outLen; i++) {
-      const srcPos = i / ratio;
-      const i0 = Math.floor(srcPos);
-      const i1 = Math.min(i0 + 1, samples.length - 1);
-      const frac = srcPos - i0;
-      out[i] = samples[i0] * (1 - frac) + samples[i1] * frac;
-    }
-    return out;
-  }
-
-  /** Stop and disconnect a source node (best-effort). */
-  private killSource(src: AudioBufferSourceNode): void {
-    try { src.stop(); } catch { /* already stopped or not started */ }
-    try { src.disconnect(); } catch { /* already disconnected */ }
-  }
-
-  /** Enforce the hard cap on concurrently scheduled sources. */
-  private enforceMaxScheduled(): void {
-    while (this.scheduled.length > MAX_SCHEDULED) {
-      const oldest = this.scheduled.shift();
-      if (oldest) this.killSource(oldest);
-    }
-  }
-
-  private scheduleSource(samples: Float32Array): void {
-    const ctx = this.ctx!;
-    const resampled = this.resample(samples);
-    const audioBuf = ctx.createBuffer(1, resampled.length, ctx.sampleRate);
-    audioBuf.copyToChannel(resampled, 0);
-    const src = ctx.createBufferSource();
-    src.buffer = audioBuf;
-    src.playbackRate.value = PLAYBACK_RATE;
-    src.connect(this.analyser!);
-    const now = ctx.currentTime;
-    const start = Math.max(now, this.nextStartTime);
-    src.start(start);
-    this.nextStartTime = start + audioBuf.duration / PLAYBACK_RATE;
-    this.scheduled.push(src);
-    src.onended = (): void => {
-      src.disconnect();
-      this.scheduled = this.scheduled.filter((s) => s !== src);
+    // Flag to prevent double-advancing from onerror + play().catch
+    let advanced = false;
+    const advance = (): void => {
+      if (advanced) return;
+      advanced = true;
+      URL.revokeObjectURL(url);
+      // Schedule playNext asynchronously to avoid stack buildup
+      if (!this.playNextScheduled) {
+        this.playNextScheduled = true;
+        queueMicrotask(() => this.playNext());
+      }
     };
-    this.enforceMaxScheduled();
-  }
 
-  /** Stop and disconnect ALL scheduled sources. */
-  private stopAllSources(): void {
-    for (const s of this.scheduled) {
-      this.killSource(s);
+    audio.onended = () => {
+      console.log('[PCMPlayback] segment ended');
+      advance();
+    };
+
+    audio.onerror = (ev) => {
+      console.warn('[PCMPlayback] audio error:', ev);
+      advance();
+    };
+
+    // Try to connect to AnalyserNode for lipsync, but NEVER let this
+    // prevent audio from playing. createMediaElementSource() re-routes
+    // the element output through the AudioContext graph, so the context
+    // MUST be running for sound to come out.
+    let connectedToGraph = false;
+    const ctx = this.ctx;
+    if (ctx && this.analyser && ctx.state === 'running') {
+      try {
+        const source = ctx.createMediaElementSource(audio);
+        source.connect(this.analyser);
+        this.currentSource = source;
+        connectedToGraph = true;
+        console.log('[PCMPlayback] connected to analyser graph');
+      } catch (err) {
+        console.warn('[PCMPlayback] createMediaElementSource failed, playing directly:', err);
+        // Audio element will play directly to speakers (no analyser)
+      }
     }
-    this.scheduled = [];
+
+    console.log('[PCMPlayback] playing segment, connectedToGraph:', connectedToGraph,
+      'ctx state:', ctx?.state ?? 'none');
+
+    audio.play().then(() => {
+      console.log('[PCMPlayback] play() started successfully');
+    }).catch((err) => {
+      console.warn('[PCMPlayback] play() rejected:', err);
+      // If autoplay is truly blocked, do NOT silently skip all segments.
+      // Instead, wait for a user gesture. But if we just keep advancing
+      // we'll drain the entire queue without playing anything.
+      // Only advance if this is a non-recoverable error.
+      advance();
+    });
   }
 
   async flush(): Promise<void> {
-    // Force-drain any remaining pre-buffer when the upstream finishes
-    // before reaching the cushion threshold (e.g. very short replies).
-    if (!this.started && this.pendingFloats.length > 0) {
-      this.flushPrebuffer();
+    // Drain any remaining accumulated data
+    this.flushAccumToSegment();
+
+    if (!this.playing && this.queue.length === 0) {
+      this.reset();
+      return;
     }
-    // Wait for all scheduled sources to finish playing naturally.
-    // Do NOT stop them — that would cut off the audio mid-sentence.
-    const wait = this.nextStartTime - (this.ctx?.currentTime ?? 0);
-    if (wait > 0) {
-      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
-    }
-    // Now that all sources have finished, clean up for the next utterance.
-    this.stopAllSources();
-    this.started = false;
-    this.nextStartTime = 0;
+
+    // Wait for all segments to finish playing
+    this.flushing = true;
+    await new Promise<void>((resolve) => {
+      this.flushResolve = resolve;
+      // Safety timeout
+      setTimeout(() => {
+        if (this.flushing) {
+          this.flushing = false;
+          this.flushResolve = null;
+          resolve();
+        }
+      }, 30000);
+    });
+    this.reset();
+  }
+
+  private reset(): void {
     this.carry = null;
+    this.accumBytes = [];
+    this.accumSamples = 0;
+    this.flushing = false;
+    this.flushResolve = null;
   }
 
   dispose(): void {
-    this.disposed = true;
-    this.stopAllSources();
-    this.pendingFloats = [];
-    this.pendingDuration = 0;
-    this.started = false;
-    this.carry = null;
-    this.analyserCallbacks = [];
-    // Don't close the shared AudioContext — other consumers may use it.
-    // Just disconnect our analyser from the destination.
+    // Stop current playback
+    if (this.currentSource) {
+      try { this.currentSource.disconnect(); } catch { /* ignore */ }
+    }
+    if (this.currentAudio) {
+      this.currentAudio.onended = null;
+      this.currentAudio.onerror = null;
+      this.currentAudio.pause();
+      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
+    }
+    // Clear queue
+    for (const url of this.queue) {
+      URL.revokeObjectURL(url);
+    }
+    this.queue = [];
+    this.currentAudio = null;
+    this.currentSource = null;
+    this.playing = false;
+    this.reset();
     if (this.analyser) {
       try { this.analyser.disconnect(); } catch { /* ignore */ }
       this.analyser = null;
     }
+    this.analyserCallbacks = [];
     this.ctx = null;
+  }
+}
+
+/** Create a WAV Blob from raw s16le PCM data. */
+function createWavBlob(pcm: Uint8Array, sampleRate: number): Blob {
+  const headerSize = 44;
+  const buffer = new ArrayBuffer(headerSize + pcm.byteLength);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + pcm.byteLength, true);
+  writeString(view, 8, 'WAVE');
+
+  // fmt chunk
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true);  // PCM format
+  view.setUint16(22, 1, true);  // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true);  // block align
+  view.setUint16(34, 16, true); // bits per sample
+
+  // data chunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, pcm.byteLength, true);
+
+  // Copy PCM data
+  new Uint8Array(buffer, headerSize).set(pcm);
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function writeString(view: DataView, offset: number, str: string): void {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
   }
 }

@@ -129,6 +129,7 @@ export function App(): JSX.Element {
 
   const handleTalkStart = async (): Promise<void> => {
     warmSharedAudioContext(); // ensure context is running from user gesture
+    playbackRef.current?.ensureCtx(); // create analyser from user gesture
     const ws = wsRef.current;
     if (!ws || status !== 'connected') return;
     if (!micRef.current) micRef.current = new MicCapture();
@@ -199,7 +200,7 @@ export function App(): JSX.Element {
   const connected = status === 'connected';
 
   return (
-    <div className="app" onClick={() => warmSharedAudioContext()} onTouchStart={() => warmSharedAudioContext()}>
+    <div className="app" onClick={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }} onTouchStart={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }}>
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">

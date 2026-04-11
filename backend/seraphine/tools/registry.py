@@ -7,10 +7,12 @@ from typing import Any, Iterator
 
 from seraphine.tools.base import Tool
 from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
+from seraphine.tools.image_fetch import FetchImageTool
 from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.shell import RunShellTool
 from seraphine.tools.browser import LearnMusicTasteTool, OpenUrlTool, PlayMusicTool
 from seraphine.tools.routes import RoutePlannerTool
+from seraphine.tools.news import SearchNewsTool
 from seraphine.tools.search import WebSearchTool
 from seraphine.tools.web import WebFetchTool
 
@@ -63,6 +65,8 @@ def build_default_registry(
     reg.register(RunShellTool())
     reg.register(WebFetchTool())
     reg.register(WebSearchTool())
+    reg.register(FetchImageTool())
+    reg.register(SearchNewsTool())
     reg.register(RoutePlannerTool())
     reg.register(PlayMusicTool())
     reg.register(LearnMusicTasteTool(store=store))

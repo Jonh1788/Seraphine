@@ -106,7 +106,7 @@ class OpenAICompatClient:
                         yield Token(text="</think>", done=False)
                     tool_calls_delta = delta.get("tool_calls")
                     if tool_calls_delta:
-                        # Accumulate tool call data
+                        # Standard OpenAI tool call format
                         tc_list = []
                         for tc in tool_calls_delta:
                             fn = tc.get("function", {})
@@ -120,6 +120,7 @@ class OpenAICompatClient:
                             done_seen = True
                             yield Token(text="", done=True, tool_calls=tc_list)
                             break
+
                     done = finish is not None
                     if done:
                         done_seen = True
@@ -132,6 +133,98 @@ class OpenAICompatClient:
             raise LLMUnavailableError(str(e)) from e
         if not done_seen:
             yield Token(text="", done=True)
+
+
+def _parse_gemma_tool_call(buf: str) -> list[dict[str, Any]] | None:
+    """Parse Gemma 4's native tool call format:
+        <|tool_call>call:NAMESPACE:FUNCTION{ARG_KEY: VALUE, ...}<tool_call|>
+
+    Examples:
+        <|tool_call>call:google:web_search{queries: ["clima sao paulo"]}<tool_call|>
+        <|tool_call>call:web_search{query: "test"}<tool_call|>
+
+    Returns a list of OpenAI-style tool call dicts, or None if parsing fails.
+    """
+    import re
+
+    # Extract content between markers
+    m = re.search(r"<\|tool_call>(.*?)<tool_call\|>", buf, re.DOTALL)
+    if not m:
+        return None
+    inner = m.group(1).strip()
+
+    # Strip "call:" prefix and optional namespace (e.g. "google:")
+    if inner.startswith("call:"):
+        inner = inner[5:]
+    # Remove namespace prefix if present (e.g. "google:web_search" -> "web_search")
+    name_match = re.match(r"(?:[a-zA-Z_][a-zA-Z0-9_]*:)*([a-zA-Z_][a-zA-Z0-9_]*)\s*\{", inner)
+    if not name_match:
+        return None
+    name = name_match.group(1)
+    args_str = inner[name_match.end() - 1:]  # include the opening {
+
+    # Find matching closing brace
+    depth = 0
+    end_idx = -1
+    for i, ch in enumerate(args_str):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end_idx = i
+                break
+    if end_idx == -1:
+        return None
+    args_body = args_str[1:end_idx]  # strip outer {}
+
+    # Parse the args — Gemma uses Python-ish syntax (key: value with single
+    # or unquoted keys, sometimes lists with brackets). We try JSON first,
+    # then a tolerant parse.
+    args_dict: dict[str, Any] = {}
+    try:
+        # Try as JSON object
+        args_dict = json.loads("{" + args_body + "}")
+    except json.JSONDecodeError:
+        # Tolerant parse: convert keys to quoted strings
+        # "queries: [\"foo\"]" -> "\"queries\": [\"foo\"]"
+        try:
+            fixed = re.sub(r'(\w+)\s*:', r'"\1":', args_body)
+            args_dict = json.loads("{" + fixed + "}")
+        except json.JSONDecodeError:
+            # Last resort: extract first string value as the only argument
+            str_match = re.search(r'"([^"]+)"', args_body)
+            if str_match:
+                # Guess the param name based on common conventions
+                key_match = re.match(r'(\w+)', args_body)
+                key = key_match.group(1) if key_match else "query"
+                args_dict = {key: str_match.group(1)}
+            else:
+                return None
+
+    # Some Gemma tools use plural names ("queries", "urls"). Normalize
+    # to singular if the value is a 1-element list.
+    _PLURAL_MAP = {
+        "queries": "query",
+        "urls": "url",
+        "ids": "id",
+        "names": "name",
+        "paths": "path",
+    }
+    normalized: dict[str, Any] = {}
+    for k, v in args_dict.items():
+        if isinstance(v, list) and len(v) == 1:
+            singular = _PLURAL_MAP.get(k, k[:-1] if k.endswith("s") and not k.endswith("ss") else k)
+            normalized[singular] = v[0]
+        else:
+            normalized[k] = v
+
+    return [{
+        "function": {
+            "name": name,
+            "arguments": json.dumps(normalized),
+        }
+    }]
 
 
 class OllamaClient:
