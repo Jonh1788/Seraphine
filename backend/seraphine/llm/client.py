@@ -28,15 +28,22 @@ class OpenAICompatClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def warmup(self) -> None:
+    async def warmup(self, system_prompt: str = "") -> None:
+        """Warmup that populates the prefix cache with the real Seraphine
+        system prompt. This makes the FIRST user request nearly as fast
+        as subsequent ones (both hit the cache for the system prefix)."""
+        messages: list[dict] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": "oi"})
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": "."}],
+            "messages": messages,
             "stream": False,
             "max_tokens": 1,
         }
         try:
-            resp = await self._client.post("/v1/chat/completions", json=body, timeout=60.0)
+            resp = await self._client.post("/v1/chat/completions", json=body, timeout=120.0)
             resp.raise_for_status()
         except (httpx.HTTPError, httpx.ConnectError):
             pass

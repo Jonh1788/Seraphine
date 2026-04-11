@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -62,6 +64,43 @@ class Settings(BaseSettings):
     # request_skill meta-tool). One markdown file per skill, keyed by
     # slug. Tracked in git so the backlog is reviewable.
     skills_dir: Path = Path("../skills")
+
+    # ------------------------------------------------------------------
+    # Google Workspace (Calendar + Gmail) — optional
+    # ------------------------------------------------------------------
+    # Leave client_id/client_secret empty to disable the integration
+    # entirely. See specs/006-google-integration.md.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_oauth_port: int = 8765
+    google_scopes: Annotated[list[str], NoDecode] = [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
+    google_token_path: Path = Path.home() / ".seraphine" / "google_tokens.enc"
+
+    @field_validator("google_scopes", mode="before")
+    @classmethod
+    def _split_google_scopes(cls, v):  # type: ignore[no-untyped-def]
+        """Accept a comma- or space-separated string from .env.
+
+        pydantic-settings defaults to JSON parsing for list[str] fields
+        which is awkward for env files. A plain comma-separated value
+        like ``a,b,c`` is more natural and matches the shape the user
+        actually wrote in .env.
+        """
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            # Allow either commas or whitespace as the separator.
+            parts: list[str] = []
+            for chunk in s.split(","):
+                parts.extend(p for p in chunk.split() if p)
+            return parts
+        return v
 
 
 settings = Settings()

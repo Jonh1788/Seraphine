@@ -18,6 +18,7 @@ from seraphine.stt.whisper import WhisperSTT
 from seraphine.tools.registry import build_default_registry
 from seraphine.tts.qwen3 import Qwen3TtsAdapter
 from seraphine.conversation.routes import router as conversation_router
+from seraphine.google.routes import router as google_router
 from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
 
@@ -36,8 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
     try:
-        await llm.warmup()
-        logger.info("LLM warmup complete (model=%s)", settings.llm_model)
+        from seraphine.conversation.engine import DEFAULT_SYSTEM_PROMPT
+        await llm.warmup(system_prompt=DEFAULT_SYSTEM_PROMPT)
+        logger.info("LLM warmup complete — system prompt cached (model=%s)", settings.llm_model)
     except Exception as e:
         logger.warning("LLM warmup failed (continuing anyway): %s", e)
     embeddings = OllamaEmbeddings(settings.ollama_base_url, settings.embedding_model)
@@ -47,10 +49,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("MemoryManager.start() failed: %s", e)
 
+    # ------------------------------------------------------------------
+    # Google Workspace integration — optional
+    # ------------------------------------------------------------------
+    google_client = None
+    if settings.google_client_id and settings.google_client_secret:
+        from seraphine.google.client import GoogleClient
+        from seraphine.google.token_store import TokenStore
+
+        token_store = TokenStore(settings.google_token_path)
+        google_client = GoogleClient(
+            token_store=token_store,
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            scopes=settings.google_scopes,
+        )
+        logger.info(
+            "Google client wired (token_path=%s)", settings.google_token_path
+        )
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
         store=store,
+        google_client=google_client,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -132,6 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.tools = tools
     app.state.mcp_client = mcp_client
     app.state.mcp_event_listener = mcp_event_listener
+    app.state.google_client = google_client
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -166,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(conversation_router)
     app.include_router(memory_router)
     app.include_router(ws_router)
+    app.include_router(google_router)
 
     logger.info("Seraphine app initialized (model=%s)", settings.llm_model)
     return app

@@ -57,6 +57,7 @@ def build_default_registry(
     *,
     skills_dir: Path | None = None,
     store: Any = None,
+    google_client: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -73,4 +74,25 @@ def build_default_registry(
     reg.register(OpenUrlTool())
     if skills_dir is not None:
         reg.register(RequestSkillTool(skills_dir))
+    if google_client is not None:
+        from seraphine.tools.google import (
+            CalendarCreateEventTool,
+            CalendarDeleteEventTool,
+            CalendarListEventsTool,
+            CalendarUpdateEventTool,
+            GmailListImportantTool,
+            GmailReadMessageTool,
+            GmailSendMessageTool,
+            GoogleAuthStatusTool,
+        )
+
+        reg.register(GoogleAuthStatusTool(google_client))
+        reg.register(CalendarListEventsTool(google_client))
+        reg.register(GmailListImportantTool(google_client))
+        reg.register(GmailReadMessageTool(google_client))
+        # Phase B — write tools (approval-gated)
+        reg.register(CalendarCreateEventTool(google_client))
+        reg.register(CalendarUpdateEventTool(google_client))
+        reg.register(CalendarDeleteEventTool(google_client))
+        reg.register(GmailSendMessageTool(google_client))
     return reg

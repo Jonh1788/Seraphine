@@ -9,6 +9,8 @@ import { MemoryPanel } from './memory';
 import { ApprovalPanel } from './tools';
 import { MetricsBar } from './metrics';
 import type { LatencyMetrics } from './metrics';
+import { CalendarModal, EmailInboxModal, GoogleAuthPanel } from './google';
+import { getAuthStatus, listImportantEmails } from './google/api';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -17,6 +19,10 @@ export function App(): JSX.Element {
   const [talking, setTalking] = useState<boolean>(false);
   const [metrics, setMetrics] = useState<LatencyMetrics>({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [googleAuthed, setGoogleAuthed] = useState<boolean>(false);
+  const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
+  const [inboxOpen, setInboxOpen] = useState<boolean>(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
@@ -113,6 +119,60 @@ export function App(): JSX.Element {
       playbackRef.current = null;
       ws.close();
       wsRef.current = null;
+    };
+  }, []);
+
+  // Track Google OAuth state and periodically refresh the unread
+  // badge on the inbox button. Also reacts to the `google-authed`
+  // event dispatched by GoogleAuthPanel after a successful OAuth.
+  const googleAuthedRef = useRef(false);
+  googleAuthedRef.current = googleAuthed;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshStatus = async (): Promise<boolean> => {
+      try {
+        const s = await getAuthStatus();
+        if (!cancelled) {
+          setGoogleAuthed(s.authed);
+          if (!s.authed) setUnreadCount(0);
+        }
+        return s.authed;
+      } catch {
+        return false;
+      }
+    };
+
+    const refreshUnread = async (): Promise<void> => {
+      try {
+        const emails = await listImportantEmails(20);
+        if (!cancelled) setUnreadCount(emails.filter((e) => e.isUnread).length);
+      } catch {
+        if (!cancelled) setUnreadCount(0);
+      }
+    };
+
+    void (async () => {
+      const authed = await refreshStatus();
+      if (authed) void refreshUnread();
+    })();
+
+    const onAuthed = (): void => {
+      void refreshStatus().then((ok) => {
+        if (ok) void refreshUnread();
+      });
+    };
+    window.addEventListener('google-authed', onAuthed);
+
+    const unreadTimer = setInterval(() => {
+      if (googleAuthedRef.current) void refreshUnread();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('google-authed', onAuthed);
+      clearInterval(unreadTimer);
     };
   }, []);
 
@@ -249,8 +309,39 @@ export function App(): JSX.Element {
             </label>
           </div>
 
+          <div className="sidebar-google-buttons">
+            <button
+              type="button"
+              className="sidebar-google-btn"
+              onClick={() => setCalendarOpen(true)}
+              disabled={!googleAuthed}
+              title="Calendario"
+              aria-label="Calendario"
+            >
+              <span className="sidebar-google-btn__icon" aria-hidden>&#128197;</span>
+              <span className="sidebar-google-btn__label">Calendario</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-google-btn"
+              onClick={() => setInboxOpen(true)}
+              disabled={!googleAuthed}
+              title="Inbox"
+              aria-label="Inbox"
+            >
+              <span className="sidebar-google-btn__icon" aria-hidden>&#9993;</span>
+              <span className="sidebar-google-btn__label">Inbox</span>
+              {unreadCount > 0 && (
+                <span className="sidebar-google-btn--badge">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+          </div>
+
           <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
             <ApprovalPanel ws={wsRef.current} />
+            <GoogleAuthPanel />
             <MemoryPanel />
             <MetricsBar metrics={metrics} />
           </div>
@@ -278,6 +369,17 @@ export function App(): JSX.Element {
           onClick={() => setMobileMenuOpen(false)}
         />
       )}
+
+      <CalendarModal
+        open={calendarOpen}
+        onClose={() => setCalendarOpen(false)}
+        ws={wsRef.current}
+      />
+      <EmailInboxModal
+        open={inboxOpen}
+        onClose={() => setInboxOpen(false)}
+        ws={wsRef.current}
+      />
     </div>
   );
 }
