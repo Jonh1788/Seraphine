@@ -57,6 +57,31 @@ def _spawn_detached(cmd: list[str], log_path: str) -> None:
         )
 
 
+def _start_frontend() -> None:
+    if _check_url("http://127.0.0.1:5173"):
+        _log("Vite dev server already running on :5173", "✓")
+        return
+    frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
+    if not (frontend_dir / "package.json").exists():
+        _log(f"Frontend dir not found at {frontend_dir} — skipping", "⚠")
+        return
+    _log("Starting Vite dev server (pnpm dev)")
+    with open("/tmp/vite.log", "w") as log:
+        subprocess.Popen(
+            ["pnpm", "dev"],
+            cwd=str(frontend_dir),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    for _ in range(15):  # up to 30s
+        time.sleep(2)
+        if _check_url("http://127.0.0.1:5173"):
+            _log("Vite ready at http://127.0.0.1:5173", "✓")
+            return
+    _log("Vite did not come up within 30s — check /tmp/vite.log", "⚠")
+
+
 def _start_cloudflared() -> None:
     if _pgrep("cloudflared tunnel"):
         _log("Cloudflared already running", "✓")
@@ -206,6 +231,7 @@ def bootstrap() -> None:
         f"Seraphine startup  ·  LLM={settings.llm_backend}  ·  TTS={settings.tts_backend}"
     )
 
+    _start_frontend()
     _start_cloudflared()
 
     # ── LLM backend ────────────────────────────────────────────────
