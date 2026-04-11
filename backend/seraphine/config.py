@@ -76,6 +76,9 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
 
+    # Bootstrap / service orchestration — consumed by seraphine.bootstrap
+    cloudflared_tunnel_id: str = ""  # empty = skip tunnel startup
+
     allowed_tool_roots: list[Path] = [Path.home()]
 
     # Directory where the LLM logs skill gap requests (via the
