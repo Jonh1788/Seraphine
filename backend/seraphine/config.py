@@ -18,8 +18,16 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     llm_base_url: str = "http://localhost:1234"
     llm_model: str = "gemma-4-26b-a4b-jang_4m-crack"
-    llm_backend: str = "openai"  # "ollama" or "openai" (vMLX, LM Studio etc)
+    # "openai" (vMLX/LM Studio), "ollama", "anthropic". Default stays
+    # local-first; cloud backends are opt-in via .env.
+    llm_backend: str = "openai"
     embedding_model: str = "nomic-embed-text"
+
+    # Anthropic cloud LLM — optional alternative to the local stack.
+    # Only consulted when llm_backend == "anthropic".
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_base_url: str = "https://api.anthropic.com"
 
     sqlite_path: Path = Path("../data/seraphine.sqlite")
     chroma_path: Path = Path("../data/chroma")
@@ -33,6 +41,16 @@ class Settings(BaseSettings):
     # from Hugging Face to ~/.cache/huggingface/hub.
     stt_model: str = "mlx-community/whisper-small-mlx-q4"
     stt_language: str = "pt"
+
+    # TTS backend: "qwen3" (local Qwen3-TTS) or "elevenlabs" (cloud).
+    # Default stays local.
+    tts_backend: str = "qwen3"
+
+    # ElevenLabs cloud TTS — optional alternative to Qwen3-TTS.
+    # Only consulted when tts_backend == "elevenlabs".
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""  # user sets this from their ElevenLabs account
+    elevenlabs_model_id: str = "eleven_turbo_v2_5"
 
     tts_base_url: str = "http://192.168.15.6:8011"
     tts_voice: str = "dubgrav"

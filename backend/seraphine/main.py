@@ -31,7 +31,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = MemoryStore(settings.sqlite_path)
     await store.ensure_schema()
 
-    if settings.llm_backend == "openai":
+    if settings.llm_backend == "anthropic":
+        from seraphine.llm.anthropic import AnthropicClient
+
+        if not settings.anthropic_api_key:
+            raise RuntimeError(
+                "SERAPHINE_LLM_BACKEND=anthropic but SERAPHINE_ANTHROPIC_API_KEY is empty"
+            )
+        llm = AnthropicClient(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            base_url=settings.anthropic_base_url,
+        )
+        logger.info(
+            "Using Anthropic backend (model=%s)", settings.anthropic_model
+        )
+    elif settings.llm_backend == "openai":
         llm = OpenAICompatClient(settings.llm_base_url, settings.llm_model)
         logger.info("Using OpenAI-compatible backend (vMLX/LM Studio) at %s", settings.llm_base_url)
     else:
@@ -95,24 +110,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mcp_client = None
 
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
-    tts = Qwen3TtsAdapter(
-        settings.tts_base_url,
-        default_voice=settings.tts_voice,
-        language=settings.tts_language,
-        x_vector_only_mode=settings.tts_x_vector_only_mode,
-        ref_text=settings.tts_ref_text,
-        max_new_tokens=settings.tts_max_new_tokens,
-        temperature=settings.tts_temperature,
-        top_k=settings.tts_top_k,
-        repetition_penalty=settings.tts_repetition_penalty,
-        seed=settings.tts_seed,
-        streaming_port=settings.tts_streaming_port or None,
-    )
-    logger.info(
-        "Qwen3-TTS adapter wired (base_url=%s voice=%s)",
-        settings.tts_base_url,
-        settings.tts_voice,
-    )
+    if settings.tts_backend == "elevenlabs":
+        from seraphine.tts.elevenlabs import ElevenLabsAdapter
+
+        if not settings.elevenlabs_api_key:
+            raise RuntimeError(
+                "SERAPHINE_TTS_BACKEND=elevenlabs but SERAPHINE_ELEVENLABS_API_KEY is empty"
+            )
+        if not settings.elevenlabs_voice_id:
+            raise RuntimeError(
+                "SERAPHINE_TTS_BACKEND=elevenlabs but SERAPHINE_ELEVENLABS_VOICE_ID is empty"
+            )
+        tts = ElevenLabsAdapter(
+            api_key=settings.elevenlabs_api_key,
+            voice_id=settings.elevenlabs_voice_id,
+            model_id=settings.elevenlabs_model_id,
+        )
+        logger.info(
+            "ElevenLabs TTS adapter wired (voice_id=%s model_id=%s)",
+            settings.elevenlabs_voice_id,
+            settings.elevenlabs_model_id,
+        )
+    else:
+        tts = Qwen3TtsAdapter(
+            settings.tts_base_url,
+            default_voice=settings.tts_voice,
+            language=settings.tts_language,
+            x_vector_only_mode=settings.tts_x_vector_only_mode,
+            ref_text=settings.tts_ref_text,
+            max_new_tokens=settings.tts_max_new_tokens,
+            temperature=settings.tts_temperature,
+            top_k=settings.tts_top_k,
+            repetition_penalty=settings.tts_repetition_penalty,
+            seed=settings.tts_seed,
+            streaming_port=settings.tts_streaming_port or None,
+        )
+        logger.info(
+            "Qwen3-TTS adapter wired (base_url=%s voice=%s)",
+            settings.tts_base_url,
+            settings.tts_voice,
+        )
     # Local STT for the mic path. Lazy-loads mlx-whisper + model on
     # first transcribe() call so backend startup isn't blocked.
     stt = WhisperSTT(model=settings.stt_model, language=settings.stt_language)
