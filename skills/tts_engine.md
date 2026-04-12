@@ -1,7 +1,7 @@
 # Skill: tts_engine
 
 - **Slug**: `tts_engine`
-- **Status**: pending
+- : implemented
 - **Created at**: 2026-04-10T06:36:41+00:00
 
 ## Capability

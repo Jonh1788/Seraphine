@@ -1,7 +1,7 @@
 # Skill: web_search
 
 - **Slug**: `web_search`
-- **Status**: pending
+- : implemented
 - **Created at**: 2026-04-10T01:45:10+00:00
 
 ## Capability

@@ -1,7 +1,7 @@
 # Skill: multimodal_input
 
 - **Slug**: `multimodal_input`
-- **Status**: pending
+- : implemented
 - **Created at**: 2026-04-10T13:24:35+00:00
 
 ## Capability

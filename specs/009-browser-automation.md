@@ -43,8 +43,8 @@ services/browser-agent/
 
 #### POST /navigate
 ```json
-{ "url": "https://app.c6bank.com.br" }
-→ { "ok": true, "url": "https://app.c6bank.com.br/login", "title": "C6 Bank" }
+{ "url": "https://www.c6bank.com.br/web-banking/" }
+→ { "ok": true, "url": "https://www.c6bank.com.br/web-banking//login", "title": "C6 Bank" }
 ```
 
 #### POST /screenshot
@@ -95,7 +95,7 @@ Keys: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp, etc.
 
 #### GET /page
 ```json
-→ { "url": "https://app.c6bank.com.br/pix/enviar", "title": "Enviar Pix - C6 Bank" }
+→ { "url": "https://www.c6bank.com.br/web-banking//pix/enviar", "title": "Enviar Pix - C6 Bank" }
 ```
 
 #### POST /close
@@ -221,7 +221,7 @@ IMPORTANT RULES:
 ### Pré-requisitos
 1. Browser service rodando (`services/browser-agent`)
 2. Usuário já logou no C6 Bank pelo menos uma vez (cookies persistidos)
-3. C6 Bank web: `https://app.c6bank.com.br`
+3. C6 Bank web: `https://www.c6bank.com.br/web-banking/`
 
 ### Fluxo esperado
 
@@ -230,7 +230,7 @@ Usuário: "Faz um PIX de R$50 pro Rodrigo, chave 73999887766"
 
 Seraphine:
   "Vou abrir o C6 Bank e fazer o PIX!"
-  → browser_open("https://app.c6bank.com.br")
+  → browser_open("https://www.c6bank.com.br/web-banking/")
   → browser_screenshot()
   [Claude vê: dashboard do C6 com saldo, menu lateral]
   
