@@ -30,6 +30,49 @@ logger = logging.getLogger("seraphine.tools.screen")
 # directly, so we use sips to scale after capture.
 _MAX_WIDTH = 1280
 
+# Cached screen logical size (points) for coordinate scaling.
+# cliclick operates in logical points; our screenshot is resized to
+# _MAX_WIDTH pixels. We need to scale Claude's image coordinates
+# back to screen points: screen_x = img_x * (screen_w / _MAX_WIDTH).
+_screen_size: dict[str, int] = {}
+
+
+def _get_screen_size() -> tuple[int, int]:
+    """Return (width, height) in logical points (what cliclick uses)."""
+    if _screen_size:
+        return _screen_size["w"], _screen_size["h"]
+    try:
+        import json as _json
+        out = subprocess.check_output(
+            ["system_profiler", "SPDisplaysDataType", "-json"],
+            text=True, timeout=5,
+        )
+        data = _json.loads(out)
+        for gpu in data.get("SPDisplaysDataType", []):
+            for disp in gpu.get("spdisplays_ndrvs", []):
+                res = disp.get("_spdisplays_resolution", "")
+                if "x" in res.lower():
+                    parts = res.lower().split("x")
+                    w = int(parts[0].strip())
+                    h = int(parts[1].strip().split("@")[0].strip())
+                    _screen_size["w"] = w
+                    _screen_size["h"] = h
+                    return w, h
+    except Exception:
+        pass
+    # Fallback: common MacBook Pro resolution
+    _screen_size["w"] = 1728
+    _screen_size["h"] = 1117
+    return 1728, 1117
+
+
+def _scale_coords(img_x: int, img_y: int) -> tuple[int, int]:
+    """Convert coordinates from the screenshot image space to screen points."""
+    screen_w, screen_h = _get_screen_size()
+    # Screenshot is _MAX_WIDTH wide, height proportional
+    scale = screen_w / _MAX_WIDTH
+    return int(img_x * scale), int(img_y * scale)
+
 
 async def _run(cmd: list[str], timeout: float = 10.0) -> subprocess.CompletedProcess:
     """Run a subprocess asynchronously."""
@@ -71,8 +114,9 @@ class ScreenCaptureTool(Tool):
         "browser, error message, modal, etc. Use this when the user asks "
         "'o que tem na minha tela?', 'me ajuda com esse erro', 'fecha "
         "esse modal', or any task that requires seeing their screen. "
-        "The screenshot is 1280px wide. After analyzing it, use "
-        "screen_click to interact with what you see."
+        "The screenshot is 1280px wide. When you call screen_click, pass "
+        "the (x, y) coordinates as they appear in the image — the tool "
+        "automatically scales them to the real screen resolution."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -126,20 +170,23 @@ class ScreenClickTool(Tool):
         double = args.get("double", False)
         right = args.get("right", False)
 
+        # Scale from screenshot coordinates (1280px wide) to screen points
+        real_x, real_y = _scale_coords(int(x), int(y))
+
         try:
             if right:
-                cmd = ["cliclick", f"rc:{x},{y}"]
+                cmd = ["cliclick", f"rc:{real_x},{real_y}"]
             elif double:
-                cmd = ["cliclick", f"dc:{x},{y}"]
+                cmd = ["cliclick", f"dc:{real_x},{real_y}"]
             else:
-                cmd = ["cliclick", f"c:{x},{y}"]
+                cmd = ["cliclick", f"c:{real_x},{real_y}"]
 
             result = await _run(cmd)
             if result.returncode != 0:
                 return ToolResult(ok=False, error=f"cliclick failed: {result.stderr}")
 
             action = "Right-clicked" if right else "Double-clicked" if double else "Clicked"
-            return ToolResult(ok=True, output=f"{action} at ({x}, {y})")
+            return ToolResult(ok=True, output=f"{action} at screen ({real_x}, {real_y}) [from image ({x}, {y})]")
         except FileNotFoundError:
             return ToolResult(
                 ok=False,
