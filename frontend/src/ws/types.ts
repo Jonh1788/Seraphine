@@ -113,6 +113,13 @@ export interface NotificationMessage {
   message: string;
 }
 
+export interface ReminderMessage {
+  type: 'reminder';
+  reminder_id: string;
+  message: string;
+  fired_at: string;
+}
+
 export interface McpApprovalRequestMessage {
   type: 'mcp_approval_request';
   task_id: string;
@@ -148,5 +155,6 @@ export type ServerMessage =
   | ToolRequestMessage
   | ToolResultMessage
   | NotificationMessage
+  | ReminderMessage
   | McpApprovalRequestMessage;
 

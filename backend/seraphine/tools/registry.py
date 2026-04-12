@@ -62,6 +62,7 @@ def build_default_registry(
     whatsapp_client: Any = None,
     browser_client: Any = None,
     wise_client: Any = None,
+    reminder_scheduler: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -155,6 +156,16 @@ def build_default_registry(
         reg.register(WiseRecipientsTool(wise_client))
         reg.register(WiseSendPixTool(wise_client))
         reg.register(WiseTransferStatusTool(wise_client))
+    if reminder_scheduler is not None:
+        from seraphine.tools.reminders import (
+            CancelReminderTool,
+            CreateReminderTool,
+            ListRemindersTool,
+        )
+
+        reg.register(CreateReminderTool(reminder_scheduler))
+        reg.register(ListRemindersTool(reminder_scheduler))
+        reg.register(CancelReminderTool(reminder_scheduler))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":

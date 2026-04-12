@@ -4,6 +4,7 @@ import rehypeRaw from 'rehype-raw';
 import type { SeraphineWS } from '../ws/client';
 import type {
   McpApprovalRequestMessage,
+  ReminderMessage,
   ServerMessage,
   ToolResultMessage,
 } from '../ws/types';
@@ -522,6 +523,18 @@ export function ChatView({
             },
           ];
         });
+      } else if (msg.type === 'reminder') {
+        const rem = msg as ReminderMessage;
+        // Browser notification
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification('Seraphine - Lembrete', { body: rem.message });
+        } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+          Notification.requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              new Notification('Seraphine - Lembrete', { body: rem.message });
+            }
+          });
+        }
       }
     });
   }, [ws, triggerAvatarFromTag, avatarController]);

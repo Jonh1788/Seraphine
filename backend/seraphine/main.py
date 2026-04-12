@@ -145,6 +145,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Browser agent client wired (url=%s)", settings.browser_agent_url
         )
 
+    # ------------------------------------------------------------------
+    # Reminders scheduler — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    import asyncio as _asyncio
+    from seraphine.reminders.scheduler import ReminderScheduler
+    from seraphine.reminders.notify import notify_reminder
+
+    _reminders_db = str(settings.sqlite_path).replace("seraphine.sqlite", "reminders.sqlite")
+    reminder_scheduler = ReminderScheduler(
+        sqlite_path=_reminders_db,
+        on_fire=lambda rid, msg: _asyncio.create_task(
+            notify_reminder(app.state, rid, msg)
+        ),
+    )
+    await reminder_scheduler.start()
+    logger.info("Reminder scheduler started (db=%s)", _reminders_db)
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
@@ -153,6 +170,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         whatsapp_client=whatsapp_client,
         browser_client=browser_client,
         wise_client=wise_client,
+        reminder_scheduler=reminder_scheduler,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -292,6 +310,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.whatsapp_client = whatsapp_client
     app.state.browser_client = browser_client
     app.state.wise_client = wise_client
+    app.state.reminder_scheduler = reminder_scheduler
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -307,6 +326,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 pass
         if mcp_event_listener is not None:
             await mcp_event_listener.stop()
+        await reminder_scheduler.stop()
         await llm.aclose()
         await embeddings.aclose()
         await tts.aclose()
