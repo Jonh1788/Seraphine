@@ -1,0 +1,1 @@
+export { AvatarLab } from './AvatarLab';

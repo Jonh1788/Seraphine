@@ -7,7 +7,32 @@ import type {
   ToolResultMessage,
 } from '../ws/types';
 import type { PCMPlayback } from '../audio/playback';
+import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import { RealtimeController } from '../realtime';
+
+/**
+ * Mapping from audio/emotion tags to avatar expression + optional gesture.
+ * Used to drive the VRM avatar when tags appear in streamed assistant tokens.
+ */
+const TAG_TO_AVATAR: Record<string, { emotion: string; gesture?: string }> = {
+  happy: { emotion: 'happy' },
+  sad: { emotion: 'sad' },
+  excited: { emotion: 'excited', gesture: 'nod' },
+  sarcastic: { emotion: 'sarcastic', gesture: 'tiltHead' },
+  curious: { emotion: 'curious', gesture: 'tiltHead' },
+  serious: { emotion: 'serious' },
+  warm: { emotion: 'warm' },
+  soft: { emotion: 'soft' },
+  laughs: { emotion: 'laughing', gesture: 'nod' },
+  giggles: { emotion: 'happy' },
+  chuckles: { emotion: 'happy' },
+  sighs: { emotion: 'sad' },
+  gasps: { emotion: 'surprised' },
+  whispers: { emotion: 'soft' },
+};
+
+/** Regex to detect [tag] patterns in streamed text. */
+const AVATAR_TAG_RE = /\[([a-zA-Z]+)\]/g;
 
 interface McpApproval {
   taskId: string;
@@ -210,6 +235,8 @@ interface ChatViewProps {
   onTalkStart: () => Promise<void>;
   onTalkEnd: () => void;
   onTalkCancel: () => void;
+  /** Ref to the VRM avatar controller for triggering expressions/gestures. */
+  avatarController?: React.RefObject<VrmAvatarController | null>;
   /** Realtime (continuous VAD) mode toggle + playback reference. */
   realtimeActive: boolean;
   onRealtimeToggle: () => void;
@@ -237,6 +264,7 @@ export function ChatView({
   onTalkStart,
   onTalkEnd,
   onTalkCancel,
+  avatarController,
   realtimeActive,
   onRealtimeToggle,
   playback,
@@ -275,6 +303,32 @@ export function ChatView({
       .catch(() => {});
   }, []);
 
+  // Timer ref for resetting avatar to idle after turn_end
+  const avatarResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Trigger avatar expression/gesture from a detected tag. */
+  const triggerAvatarFromTag = useCallback(
+    (tag: string) => {
+      const ctrl = avatarController?.current;
+      if (!ctrl) return;
+      const mapped = TAG_TO_AVATAR[tag.toLowerCase()];
+      if (!mapped) return;
+      try {
+        ctrl.setExpression?.(mapped.emotion, 300);
+      } catch {
+        // method may not exist yet
+      }
+      if (mapped.gesture) {
+        try {
+          void ctrl.playGesture?.(mapped.gesture);
+        } catch {
+          // method may not exist yet
+        }
+      }
+    },
+    [avatarController],
+  );
+
   // Recording UI state
   const [locked, setLocked] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -310,6 +364,13 @@ export function ChatView({
           conversationIdRef.current = msg.conversation_id;
           localStorage.setItem(CONV_KEY, msg.conversation_id);
         }
+        // Scan incoming token text for [tag] patterns and trigger avatar
+        const tokenText = (msg as { text?: string }).text ?? '';
+        const tagRe = new RegExp(AVATAR_TAG_RE.source, AVATAR_TAG_RE.flags);
+        let tagMatch: RegExpExecArray | null;
+        while ((tagMatch = tagRe.exec(tokenText)) !== null) {
+          triggerAvatarFromTag(tagMatch[1]);
+        }
         const turnId = msg.turn_id;
         setStreamingTurnId(turnId);
         setTurns((prev) => {
@@ -330,6 +391,16 @@ export function ChatView({
           prev.map((t) => (t.id === turnId ? { ...t, streaming: false } : t)),
         );
         setStreamingTurnId(null);
+        // Reset avatar to idle after a short delay
+        if (avatarResetTimerRef.current) clearTimeout(avatarResetTimerRef.current);
+        avatarResetTimerRef.current = setTimeout(() => {
+          try {
+            avatarController?.current?.resetToIdle?.();
+          } catch {
+            // method may not exist yet
+          }
+          avatarResetTimerRef.current = null;
+        }, 2000);
       } else if (msg.type === 'error') {
         setTurns((prev) => [
           ...prev.filter((t) => !t.streaming),
@@ -402,7 +473,7 @@ export function ChatView({
         });
       }
     });
-  }, [ws]);
+  }, [ws, triggerAvatarFromTag, avatarController]);
 
   // Auto-scroll to bottom whenever turns change.
   useLayoutEffect(() => {

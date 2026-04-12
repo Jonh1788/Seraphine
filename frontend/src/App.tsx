@@ -11,6 +11,7 @@ import { MetricsBar } from './metrics';
 import type { LatencyMetrics } from './metrics';
 import { CalendarModal, EmailInboxModal, GoogleAuthPanel } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
+import { AvatarLab } from './lab';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -43,6 +44,8 @@ export function App(): JSX.Element {
   const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
   const [inboxOpen, setInboxOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [labOpen, setLabOpen] = useState<boolean>(false);
+  const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
@@ -207,6 +210,7 @@ export function App(): JSX.Element {
   // The analyser may not exist yet (AudioContext deferred until user
   // gesture), so we use the callback form to attach when ready.
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
+    avatarCtrlRef.current = controller;
     const pb = playbackRef.current;
     if (!pb) return;
     const analyser = pb.getAnalyser((a) => controller.attachAudioAnalyser(a));
@@ -283,6 +287,18 @@ export function App(): JSX.Element {
     };
   }, [status]);
 
+  // Ctrl+L shortcut to toggle Avatar Lab
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+        e.preventDefault();
+        setLabOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const connected = status === 'connected';
 
   return (
@@ -290,6 +306,15 @@ export function App(): JSX.Element {
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">
+          <button
+            type="button"
+            className="btn-lab"
+            aria-label="Avatar Laboratory"
+            title="Avatar Laboratory (Ctrl+L)"
+            onClick={() => setLabOpen((v) => !v)}
+          >
+            &#x1F9EA;
+          </button>
           <div className={`status ${connected ? 'status--connected' : ''}`}>
             <span className="status__dot" />
             {connected ? 'online' : 'reconectando…'}
@@ -384,6 +409,7 @@ export function App(): JSX.Element {
               onTalkStart={handleTalkStart}
               onTalkEnd={handleTalkEnd}
               onTalkCancel={handleTalkCancel}
+              avatarController={avatarCtrlRef}
               realtimeActive={realtimeActive}
               onRealtimeToggle={() => {
                 setRealtimeActive((prev) => {
@@ -427,6 +453,13 @@ export function App(): JSX.Element {
         onClose={() => setInboxOpen(false)}
         ws={wsRef.current}
       />
+
+      {labOpen && (
+        <AvatarLab
+          controller={avatarCtrlRef.current}
+          onClose={() => setLabOpen(false)}
+        />
+      )}
     </div>
   );
 }

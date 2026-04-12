@@ -14,10 +14,18 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
+import { resolveEmotion, EMOTION_MAP, type EmotionMapping } from "./expressions";
+import { GesturePlayer, GESTURE_LIBRARY } from "./gestures";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
 
-const KNOWN_PRESETS = ["neutral", "happy", "sad", "angry"] as const;
+/** Tracked state for a single VRM expression being faded in/out. */
+interface ExpressionState {
+  target: number;
+  current: number;
+  /** Weight change per second (derived from fadeMs). */
+  fadeSpeed: number;
+}
 
 export class VrmAvatarController implements AvatarAdapter {
   private readonly canvas: HTMLCanvasElement;
@@ -28,7 +36,8 @@ export class VrmAvatarController implements AvatarAdapter {
   private vrm: VRM | null = null;
   private rafId: number | null = null;
   private disposed = false;
-  private currentEmotion: string | null = null;
+  /** @deprecated Kept for backward compat with old setEmotion() calls. */
+  private _currentEmotion: string | null = null;
   private elapsed = 0;
   private nextBlinkAt: number;
   private blinkingUntil = 0;
@@ -38,6 +47,25 @@ export class VrmAvatarController implements AvatarAdapter {
   private audioAnalyser: AnalyserNode | null = null;
   private audioTimeData: Float32Array | null = null;
   private smoothedRms = 0;
+
+  // --- Expression transition system ---
+  private activeExpressions = new Map<string, ExpressionState>();
+  /** Head tilt offset from the current emotion (radians). */
+  private emotionHeadTilt: { x: number; y: number; z: number } = {
+    x: 0,
+    y: 0,
+    z: 0,
+  };
+  /** Target head tilt — we lerp emotionHeadTilt toward this. */
+  private emotionHeadTiltTarget: { x: number; y: number; z: number } = {
+    x: 0,
+    y: 0,
+    z: 0,
+  };
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // --- Gesture system ---
+  private readonly gesturePlayer = new GesturePlayer();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -75,7 +103,7 @@ export class VrmAvatarController implements AvatarAdapter {
       this.rafId = requestAnimationFrame(loop);
       const delta = this.clock.getDelta();
       this.elapsed += delta;
-      this.updateIdle();
+      this.updateIdle(delta);
       this.updateLipsync();
       this.vrm?.update(delta);
       this.renderer.render(this.scene, this.camera);
@@ -83,12 +111,14 @@ export class VrmAvatarController implements AvatarAdapter {
     this.rafId = requestAnimationFrame(loop);
   }
 
-  private updateIdle(): void {
+  private updateIdle(delta?: number): void {
     const vrm = this.vrm;
     if (!vrm) return;
+    const dt = delta ?? 0.016;
+
     // Re-apply the rest pose every frame. vrm.update(delta) (called
     // after this method in the loop) syncs normalized humanoid bones
-    // → raw skeleton; if we only wrote once at load time the
+    // -> raw skeleton; if we only wrote once at load time the
     // normalized tree would snap back to its bind pose. The VRM
     // humanoid API expects rotations as per-bone quaternions in
     // NORMALIZED space.
@@ -97,32 +127,134 @@ export class VrmAvatarController implements AvatarAdapter {
     const t = this.elapsed;
 
     // Breathing — chest rises gently on a ~4s cycle
-    const chest = vrm.humanoid?.getRawBoneNode("chest") as Object3D | null | undefined;
+    const chest = vrm.humanoid?.getRawBoneNode("chest") as
+      | Object3D
+      | null
+      | undefined;
     if (chest) {
       const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
-      chest.rotation.x = breathPhase * 0.015;
+      const idleRotX = breathPhase * 0.015;
+      const idleRotY = 0;
+      const idleRotZ = 0;
+      // Add gesture offset additively
+      const gestureOffset = this.gesturePlayer.getOffset("chest");
+      const idleQuat = new Quaternion().setFromEuler(
+        new Euler(idleRotX, idleRotY, idleRotZ),
+      );
+      idleQuat.multiply(gestureOffset);
+      chest.quaternion.copy(idleQuat);
       // Subtle shoulder rise with breath
       chest.position.y = breathPhase * 0.002;
     }
 
     // Subtle head micro-movement — slow drift on two axes, different periods
-    const head = vrm.humanoid?.getRawBoneNode("head") as Object3D | null | undefined;
+    const head = vrm.humanoid?.getRawBoneNode("head") as
+      | Object3D
+      | null
+      | undefined;
     if (head) {
-      head.rotation.x = Math.sin(t * 0.7) * 0.01 + Math.sin(t * 0.3) * 0.005;
-      head.rotation.y = Math.sin(t * 0.5) * 0.015 + Math.cos(t * 0.2) * 0.008;
-      head.rotation.z = Math.sin(t * 0.4) * 0.005;
+      // Lerp emotion head tilt toward target
+      const tiltLerpSpeed = 3.0; // per second
+      this.emotionHeadTilt.x = MathUtils.lerp(
+        this.emotionHeadTilt.x,
+        this.emotionHeadTiltTarget.x,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+      this.emotionHeadTilt.y = MathUtils.lerp(
+        this.emotionHeadTilt.y,
+        this.emotionHeadTiltTarget.y,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+      this.emotionHeadTilt.z = MathUtils.lerp(
+        this.emotionHeadTilt.z,
+        this.emotionHeadTiltTarget.z,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+
+      const idleRotX =
+        Math.sin(t * 0.7) * 0.01 +
+        Math.sin(t * 0.3) * 0.005 +
+        this.emotionHeadTilt.x;
+      const idleRotY =
+        Math.sin(t * 0.5) * 0.015 +
+        Math.cos(t * 0.2) * 0.008 +
+        this.emotionHeadTilt.y;
+      const idleRotZ = Math.sin(t * 0.4) * 0.005 + this.emotionHeadTilt.z;
+
+      // Add gesture offset additively
+      const gestureOffset = this.gesturePlayer.getOffset("head");
+      const idleQuat = new Quaternion().setFromEuler(
+        new Euler(idleRotX, idleRotY, idleRotZ),
+      );
+      idleQuat.multiply(gestureOffset);
+      head.quaternion.copy(idleQuat);
     }
 
     // Gentle body sway — spine bone, very slow and subtle
-    const spine = vrm.humanoid?.getRawBoneNode("spine") as Object3D | null | undefined;
+    const spine = vrm.humanoid?.getRawBoneNode("spine") as
+      | Object3D
+      | null
+      | undefined;
     if (spine) {
-      spine.rotation.z = Math.sin(t * 0.3) * 0.008;
-      spine.rotation.x = Math.sin(t * 0.25) * 0.005;
+      const idleRotX = Math.sin(t * 0.25) * 0.005;
+      const idleRotZ = Math.sin(t * 0.3) * 0.008;
+      const gestureOffset = this.gesturePlayer.getOffset("spine");
+      const idleQuat = new Quaternion().setFromEuler(
+        new Euler(idleRotX, 0, idleRotZ),
+      );
+      idleQuat.multiply(gestureOffset);
+      spine.quaternion.copy(idleQuat);
     }
 
-    // Blink
+    // Gesture-only bones (no idle component): arms, hands
+    for (const boneName of [
+      "rightUpperArm",
+      "rightLowerArm",
+      "rightHand",
+      "leftUpperArm",
+      "leftLowerArm",
+      "leftHand",
+    ] as const) {
+      if (this.gesturePlayer.isPlaying) {
+        const offset = this.gesturePlayer.getOffset(boneName);
+        // Only apply if the gesture actually affects this bone (not identity).
+        if (offset.x !== 0 || offset.y !== 0 || offset.z !== 0 || offset.w !== 1) {
+          const boneNode = vrm.humanoid?.getRawBoneNode(boneName as string) as
+            | Object3D
+            | null
+            | undefined;
+          if (boneNode) {
+            // Compose on top of the rest pose rotation already applied.
+            boneNode.quaternion.multiply(offset);
+          }
+        }
+      }
+    }
+
+    // --- Expression transitions (per-frame lerp) ---
     const em = vrm.expressionManager;
     if (em) {
+      for (const [name, state] of this.activeExpressions) {
+        if (Math.abs(state.current - state.target) < 0.001) {
+          state.current = state.target;
+        } else {
+          const direction = state.target > state.current ? 1 : -1;
+          state.current += direction * state.fadeSpeed * dt;
+          // Clamp to not overshoot.
+          if (direction > 0 && state.current > state.target) {
+            state.current = state.target;
+          } else if (direction < 0 && state.current < state.target) {
+            state.current = state.target;
+          }
+        }
+        em.setValue(name, state.current);
+        // Clean up fully faded-out expressions.
+        if (state.target === 0 && state.current === 0) {
+          this.activeExpressions.delete(name);
+        }
+      }
+
+      // Blink
       if (this.blinkingUntil > 0) {
         if (this.elapsed >= this.blinkingUntil) {
           em.setValue("blink", 0);
@@ -145,7 +277,10 @@ export class VrmAvatarController implements AvatarAdapter {
     const em = vrm.expressionManager;
     if (!em) return;
 
-    if (!this.audioTimeData || this.audioTimeData.length !== analyser.fftSize) {
+    if (
+      !this.audioTimeData ||
+      this.audioTimeData.length !== analyser.fftSize
+    ) {
       this.audioTimeData = new Float32Array(analyser.fftSize);
     }
     analyser.getFloatTimeDomainData(this.audioTimeData);
@@ -189,7 +324,7 @@ export class VrmAvatarController implements AvatarAdapter {
    *   first attempt with `getRawBoneNode` was being half-cancelled
    *   by vrm.update's normalisation, which hid the sign error.)
    *
-   *  ~78° gets the arms hanging at the sides on most VRoid-style
+   *  ~78deg gets the arms hanging at the sides on most VRoid-style
    *  rigs. Bump the constant if your model ends up with the elbow
    *  still poking out, drop it if the arms clip into the hips.
    */
@@ -237,25 +372,127 @@ export class VrmAvatarController implements AvatarAdapter {
     await playAudioWithLipSync(stream, this.vrm);
   }
 
+  // -------------------------------------------------------------------------
+  // Expression system — smooth transitions
+  // -------------------------------------------------------------------------
+
+  /**
+   * Smoothly transition to an emotion expression over `fadeMs` milliseconds.
+   * Automatically fades out after `holdMs` (0 = hold until next call).
+   */
+  setExpression(emotion: string, fadeMs = 300, holdMs = 0): void {
+    const mapping = resolveEmotion(emotion);
+    this.applyEmotionMapping(mapping, fadeMs, holdMs);
+    this._currentEmotion = emotion;
+  }
+
+  /**
+   * Legacy method — backward compatible with existing callers.
+   * Internally delegates to the new expression transition system.
+   */
   setEmotion(label: EmotionLabel): void {
-    const em = this.vrm?.expressionManager;
-    if (!em) return;
-    // reset previous active emotion
-    if (this.currentEmotion) {
-      em.setValue(this.currentEmotion, 0);
+    this.setExpression(label, 300, 0);
+  }
+
+  /** Clear all active expressions back to neutral, cancel any running gesture. */
+  resetToIdle(): void {
+    // Fade out all active expressions.
+    for (const [, state] of this.activeExpressions) {
+      state.target = 0;
+      // Fast fade for reset.
+      state.fadeSpeed = 1 / 0.15;
     }
-    let target = "neutral";
-    let value = 1;
-    if ((KNOWN_PRESETS as readonly string[]).includes(label)) {
-      target = label;
-    } else if (label === "thinking") {
-      target = "sad";
-      value = 0.25;
-    } else {
-      target = "neutral";
+    this.emotionHeadTiltTarget = { x: 0, y: 0, z: 0 };
+    this._currentEmotion = null;
+    if (this.holdTimer !== null) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
     }
-    em.setValue(target, value);
-    this.currentEmotion = target;
+    this.gesturePlayer.cancel();
+  }
+
+  /** Get the list of available expression/emotion names (for the lab UI). */
+  getAvailableExpressions(): string[] {
+    return Object.keys(EMOTION_MAP);
+  }
+
+  /** Get the list of available gesture names (for the lab UI). */
+  getAvailableGestures(): string[] {
+    return Object.keys(GESTURE_LIBRARY);
+  }
+
+  // -------------------------------------------------------------------------
+  // Gesture system
+  // -------------------------------------------------------------------------
+
+  /**
+   * Play a named gesture (wave, nod, shakeHead, tiltHead, bow).
+   * Returns a Promise that resolves when the animation finishes.
+   */
+  playGesture(name: string): Promise<void> {
+    const def = GESTURE_LIBRARY[name];
+    if (!def) {
+      return Promise.reject(new Error(`Unknown gesture: ${name}`));
+    }
+    return this.gesturePlayer.play(def);
+  }
+
+  // -------------------------------------------------------------------------
+  // Private helpers
+  // -------------------------------------------------------------------------
+
+  private applyEmotionMapping(
+    mapping: EmotionMapping,
+    fadeMs: number,
+    holdMs: number,
+  ): void {
+    const fadeSec = Math.max(fadeMs, 1) / 1000;
+    const fadeSpeed = 1 / fadeSec;
+
+    // Fade out all currently active expressions.
+    for (const [, state] of this.activeExpressions) {
+      state.target = 0;
+      state.fadeSpeed = fadeSpeed;
+    }
+
+    // Fade in the new expression targets.
+    for (const { expression, weight } of mapping.expressions) {
+      const existing = this.activeExpressions.get(expression);
+      if (existing) {
+        existing.target = weight;
+        existing.fadeSpeed = fadeSpeed;
+      } else {
+        this.activeExpressions.set(expression, {
+          target: weight,
+          current: 0,
+          fadeSpeed,
+        });
+      }
+    }
+
+    // Head tilt target.
+    this.emotionHeadTiltTarget = {
+      x: mapping.headTilt?.x ?? 0,
+      y: mapping.headTilt?.y ?? 0,
+      z: mapping.headTilt?.z ?? 0,
+    };
+
+    // Hold timer: auto-fade-out after holdMs.
+    if (this.holdTimer !== null) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+    if (holdMs > 0) {
+      this.holdTimer = setTimeout(() => {
+        this.holdTimer = null;
+        // Fade everything back to neutral.
+        for (const [, state] of this.activeExpressions) {
+          state.target = 0;
+        }
+        this.emotionHeadTiltTarget = { x: 0, y: 0, z: 0 };
+        this._currentEmotion = null;
+      }, holdMs);
+    }
   }
 
   dispose(): void {
@@ -265,6 +502,11 @@ export class VrmAvatarController implements AvatarAdapter {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    if (this.holdTimer !== null) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+    this.gesturePlayer.cancel();
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);
