@@ -448,7 +448,6 @@ export function ChatView({
             : null;
         if (tr.ok && imageDataUrl) {
           setTurns((prev) => {
-            // Attach to the last assistant turn (streaming or not).
             for (let i = prev.length - 1; i >= 0; i--) {
               if (prev[i].role === 'assistant') {
                 const next = prev.slice();
@@ -457,7 +456,6 @@ export function ChatView({
                 return next;
               }
             }
-            // No assistant turn yet — create a standalone one.
             return [
               ...prev,
               {
@@ -466,6 +464,31 @@ export function ChatView({
                 content: '',
                 images: [imageDataUrl],
               },
+            ];
+          });
+        }
+        // Rich HTML cards (e.g. weather_forecast) — inject directly
+        // into the chat without waiting for Claude to echo it.
+        const htmlCard =
+          meta && typeof meta['html_card'] === 'string'
+            ? (meta['html_card'] as string)
+            : null;
+        if (tr.ok && htmlCard) {
+          setTurns((prev) => {
+            // Append the HTML to the last assistant turn's content
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = prev.slice();
+                next[i] = {
+                  ...next[i],
+                  content: next[i].content + '\n' + htmlCard,
+                };
+                return next;
+              }
+            }
+            return [
+              ...prev,
+              { id: `card-${Date.now()}`, role: 'assistant', content: htmlCard },
             ];
           });
         }

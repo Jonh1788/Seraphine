@@ -391,4 +391,16 @@ class WeatherForecastTool(Tool):
                 error=f"Failed to render weather card: {e}",
             )
 
-        return ToolResult(ok=True, output=html)
+        # Short text summary for Claude to speak/TTS; the rich HTML goes
+        # in metadata.html_card so the frontend injects it directly into
+        # the chat without depending on Claude echoing the HTML verbatim.
+        current = data.get("current_condition", [{}])[0]
+        temp = current.get("temp_C", "?")
+        desc_raw = (current.get("weatherDesc") or [{}])[0].get("value", "")
+        desc_pt = _get_pt(desc_raw)
+        summary = f"Clima em {city}: {temp}°C, {desc_pt}."
+        return ToolResult(
+            ok=True,
+            output=summary,
+            metadata={"html_card": html},
+        )
