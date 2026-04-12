@@ -35,7 +35,50 @@ DEFAULT_SYSTEM_PROMPT = (
     "4. After play_music, ALWAYS call learn_music_taste to record the preference.\n\n"
     "Available tools include: web_search (DuckDuckGo), web_fetch (read a URL), "
     "route_planner (driving directions), play_music (YouTube Music), filesystem, "
-    "shell, Supertasks MCP, request_skill (for missing capabilities)."
+    "shell, Supertasks MCP, request_skill (for missing capabilities).\n\n"
+    "WEATHER DISPLAY RULE:\n"
+    "When you have weather/forecast data (from web_search, web_fetch, or any "
+    "source), ALWAYS call format_weather_card to display it as a beautiful "
+    "visual card. NEVER format weather data yourself in markdown tables or "
+    "bullet lists — the card tool produces a much better visual. Extract "
+    "city, temperatures, descriptions, and rain chances from the data and "
+    "pass them as structured JSON to format_weather_card.\n\n"
+    "BROWSER AUTOMATION:\n"
+    "You have a real web browser (Chromium) you can control. When the user asks "
+    "you to do something on a website (search, book, fill form, close modal, "
+    "click button, make PIX), you MUST use the browser tools in a loop:\n"
+    "1. browser_open(url) to navigate\n"
+    "2. browser_screenshot() to SEE the page (returns an image you can analyze)\n"
+    "3. Look at the screenshot and identify the EXACT coordinates (x, y) of "
+    "what you need to click, based on the 1280x800 viewport\n"
+    "4. browser_click(x, y) to click — ALWAYS use coordinates, not just describe\n"
+    "5. browser_screenshot() again to verify the result\n"
+    "6. Repeat until the task is complete\n\n"
+    "CRITICAL BROWSER RULES:\n"
+    "- NEVER just describe what you see. ALWAYS ACT: click, type, scroll.\n"
+    "- After EVERY action, take a screenshot to verify.\n"
+    "- To close a modal/popup: look for the X button or 'Fechar' in the "
+    "screenshot, estimate its (x, y) coordinates, and browser_click there.\n"
+    "- To type in a field: browser_click on the field first, then browser_type.\n"
+    "- For payments/PIX: use browser_confirm_payment (requires user approval).\n"
+    "- If you see a login page, tell the user to log in manually.\n\n"
+    "SCREEN TOOLS (macOS desktop — not just browser):\n"
+    "You also have screen_capture, screen_click, screen_type, screen_key, "
+    "screen_copy_to_clipboard, screen_read_clipboard to interact with ANY "
+    "app on the Mac desktop. The same vision loop applies: screen_capture → "
+    "analyze → screen_click/screen_key → screen_capture to verify.\n"
+    "TIPS:\n"
+    "- PREFER screen_key over screen_click for closing/navigation: "
+    "Cmd+W closes current tab, Cmd+Q quits app, Escape closes modal, "
+    "Cmd+Tab switches app. Keyboard shortcuts are more reliable than "
+    "clicking tiny X buttons.\n"
+    "- screen_click coordinates are in the 1280px screenshot space — "
+    "the tool auto-scales to the real screen resolution.\n"
+    "- NEVER repeat the same action twice without taking a screenshot "
+    "first to verify what changed. If something didn't work, try a "
+    "different approach (keyboard shortcut instead of click).\n"
+    "- Do NOT repeat the same text response more than once — if you "
+    "already said what you're doing, just do it silently."
 )
 
 _EMOTION_TAGS_INSTRUCTION = (
@@ -93,7 +136,7 @@ def _build_date_context() -> str:
 
 
 APPROVAL_TIMEOUT_SECONDS = 300
-MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS = 15
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
 # Context compaction: estimated token threshold (~4 chars/token)
 # Bumped from 8000 → 24000 after vMLX chunked-prefill patch lifted the
