@@ -3081,3 +3081,26 @@ button:disabled {
     display: none;
   }
 }
+
+/* WhatsApp notification badge */
+.whatsapp-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  background: #ef5350;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 4px;
+  animation: pulse-badge 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.85; }
+}

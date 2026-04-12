@@ -45,6 +45,7 @@ export function App(): JSX.Element {
   const [inboxOpen, setInboxOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [labOpen, setLabOpen] = useState<boolean>(false);
+  const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -127,6 +128,20 @@ export function App(): JSX.Element {
           new Notification('Seraphine', { body: text });
         } else if (Notification.permission !== 'denied') {
           void Notification.requestPermission();
+        }
+      } else if (type === 'whatsapp_notification') {
+        const wa = msg as { fromMe?: boolean; author?: string; body?: string; chatName?: string; important?: boolean };
+        if (!wa.fromMe) {
+          setWhatsappUnread((prev) => prev + 1);
+          // Important messages also trigger a browser notification
+          if (wa.important) {
+            const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('Seraphine — WhatsApp', { body: text });
+            } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+              void Notification.requestPermission();
+            }
+          }
         }
       } else if (type === 'transcription') {
         // STT latency: audio_end to transcription
@@ -401,6 +416,23 @@ export function App(): JSX.Element {
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
+            </button>
+            <button
+              type="button"
+              className="sidebar-google-btn"
+              onClick={() => setWhatsappUnread(0)}
+              title="WhatsApp"
+              aria-label="WhatsApp"
+            >
+              <span className="sidebar-google-btn__icon" aria-hidden style={{ position: 'relative' }}>
+                &#128172;
+                {whatsappUnread > 0 && (
+                  <span className="whatsapp-badge">
+                    {whatsappUnread > 99 ? '99+' : whatsappUnread}
+                  </span>
+                )}
+              </span>
+              <span className="sidebar-google-btn__label">WhatsApp</span>
             </button>
           </div>
 

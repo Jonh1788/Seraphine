@@ -63,6 +63,7 @@ def build_default_registry(
     browser_client: Any = None,
     wise_client: Any = None,
     reminder_scheduler: Any = None,
+    finance_service: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -166,6 +167,18 @@ def build_default_registry(
         reg.register(CreateReminderTool(reminder_scheduler))
         reg.register(ListRemindersTool(reminder_scheduler))
         reg.register(CancelReminderTool(reminder_scheduler))
+    if finance_service is not None:
+        from seraphine.tools.financial import (
+            AddFinancialEntryTool,
+            FinancialDashboardTool,
+            ImportFinancialPdfTool,
+            ListFinancialEntriesTool,
+        )
+
+        reg.register(FinancialDashboardTool(finance_service))
+        reg.register(AddFinancialEntryTool(finance_service))
+        reg.register(ListFinancialEntriesTool(finance_service))
+        reg.register(ImportFinancialPdfTool(finance_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":

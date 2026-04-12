@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Optional
 
@@ -17,6 +18,42 @@ from seraphine.whatsapp.client import WhatsAppBridgeClient, WhatsAppBridgeError
 
 router = APIRouter(tags=["whatsapp"])
 logger = logging.getLogger(__name__)
+
+# Urgency keywords (Portuguese) for group message importance heuristic
+_URGENCY_RE = re.compile(
+    r"\b(?:urgente|importante|ajuda|socorro|emerg[eê]ncia|agora|preciso"
+    r"|por\s+favor\s+respond[ea])\b",
+    re.IGNORECASE,
+)
+
+# User identifiers for @-mention detection in groups
+_USER_MENTIONS = {"jonathan", "557388836445"}
+
+
+def _is_important(
+    chat_id: str, body: str, from_me: bool,
+) -> bool:
+    """Lightweight heuristic — no LLM call.
+
+    Returns True when the message is likely worth interrupting the user:
+    - Direct chats (non-group) are always important
+    - Group messages that @-mention the user
+    - Group messages with urgency keywords
+    """
+    if from_me:
+        return False
+    # Direct chat: chatId ends with @c.us
+    if not chat_id.endswith("@g.us"):
+        return True
+    # Group: check for @-mention
+    lower = body.lower()
+    for mention in _USER_MENTIONS:
+        if mention in lower:
+            return True
+    # Group: check urgency keywords
+    if _URGENCY_RE.search(body):
+        return True
+    return False
 
 
 def _client_or_503(request: Request) -> WhatsAppBridgeClient:
@@ -84,6 +121,7 @@ async def webhook_whatsapp(request: Request) -> dict[str, bool]:
     author = message.get("author", chat_name)
     body = message.get("body", "")
     msg_id = message.get("id", "")
+    from_me = bool(message.get("fromMe", False))
 
     # 1. Persist notification
     store = getattr(request.app.state, "store", None)
@@ -99,7 +137,14 @@ async def webhook_whatsapp(request: Request) -> dict[str, bool]:
         except Exception as e:
             logger.warning("failed to persist whatsapp notification: %s", e)
 
-    # 2. Broadcast to all connected WS clients
+    # 2. Determine importance (lightweight heuristic, no LLM call)
+    important = _is_important(chat_id, body, from_me)
+    if important:
+        logger.info(
+            "important whatsapp message from %s in %s", author, chat_name,
+        )
+
+    # 3. Broadcast to all connected WS clients
     ws_clients: set = getattr(request.app.state, "ws_clients", set())
     notif_msg = {
         "type": "whatsapp_notification",
@@ -110,6 +155,8 @@ async def webhook_whatsapp(request: Request) -> dict[str, bool]:
         "body": body,
         "messageId": msg_id,
         "timestamp": message.get("timestamp"),
+        "fromMe": from_me,
+        "important": important,
     }
     dead: list[Any] = []
     for ws in ws_clients:

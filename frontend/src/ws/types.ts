@@ -135,6 +135,19 @@ export interface McpApprovalResponseMessage {
   comment?: string;
 }
 
+export interface WhatsAppNotificationMessage {
+  type: 'whatsapp_notification';
+  event: string;
+  chatId: string;
+  chatName: string;
+  author: string;
+  body: string;
+  messageId: string;
+  timestamp?: number;
+  fromMe?: boolean;
+  important?: boolean;
+}
+
 export type ClientMessage =
   | PingMessage
   | UserMessage
@@ -156,5 +169,6 @@ export type ServerMessage =
   | ToolResultMessage
   | NotificationMessage
   | ReminderMessage
-  | McpApprovalRequestMessage;
+  | McpApprovalRequestMessage
+  | WhatsAppNotificationMessage;
 
