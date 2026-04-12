@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
 import type { SeraphineWS } from '../ws/client';
 import type {
   McpApprovalRequestMessage,
@@ -39,6 +40,7 @@ interface McpApproval {
   title: string;
   body: string;
   plan: string;
+  assignee?: string;
 }
 
 interface Turn {
@@ -165,21 +167,34 @@ function ThinkingBlock({
 }
 
 /** Inline MCP approval request rendered inside an assistant bubble. */
+type McpAction = 'approve' | 'reject' | 'complete' | 'replan';
+
+const ACTION_LABELS: Record<McpAction, string> = {
+  approve: 'Aprovado',
+  reject: 'Rejeitado',
+  complete: 'Concluido pelo dev',
+  replan: 'Replanejado',
+};
+
 function McpApprovalBlock({
   approval,
   resolved,
   onRespond,
 }: {
   approval: McpApproval;
-  resolved: 'approved' | 'rejected' | null;
-  onRespond: (approved: boolean) => void;
+  resolved: McpAction | null;
+  onRespond: (action: McpAction) => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const hasDetails = !!(approval.body || approval.plan);
+  const isDev = approval.assignee === 'dev';
 
   return (
     <div className="mcp-approval">
       <div className="mcp-approval__title">{approval.title}</div>
+      {isDev && (
+        <span className="mcp-approval__badge">Assignee: dev</span>
+      )}
       {hasDetails && (
         <button
           type="button"
@@ -202,24 +217,35 @@ function McpApprovalBlock({
       )}
       {resolved === null ? (
         <div className="mcp-approval__buttons">
-          <button
-            type="button"
-            className="btn mcp-approval__btn-approve"
-            onClick={() => onRespond(true)}
-          >
-            Aprovar
-          </button>
-          <button
-            type="button"
-            className="btn mcp-approval__btn-reject"
-            onClick={() => onRespond(false)}
-          >
-            Rejeitar
-          </button>
+          {isDev ? (
+            <>
+              <button type="button" className="btn mcp-approval__btn-approve" onClick={() => onRespond('approve')}>
+                Aprovar p/ agente
+              </button>
+              <button type="button" className="btn mcp-approval__btn-complete" onClick={() => onRespond('complete')}>
+                Concluir (dev)
+              </button>
+              <button type="button" className="btn mcp-approval__btn-replan" onClick={() => onRespond('replan')}>
+                Replanejar
+              </button>
+              <button type="button" className="btn mcp-approval__btn-reject" onClick={() => onRespond('reject')}>
+                Rejeitar
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn mcp-approval__btn-approve" onClick={() => onRespond('approve')}>
+                Aprovar
+              </button>
+              <button type="button" className="btn mcp-approval__btn-reject" onClick={() => onRespond('reject')}>
+                Rejeitar
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className={`mcp-approval__resolved mcp-approval__resolved--${resolved}`}>
-          {resolved === 'approved' ? 'Aprovado' : 'Rejeitado'}
+          {ACTION_LABELS[resolved]}
         </div>
       )}
     </div>
@@ -278,7 +304,7 @@ export function ChatView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
-  const [mcpDecisions, setMcpDecisions] = useState<Map<string, 'approved' | 'rejected'>>(new Map());
+  const [mcpDecisions, setMcpDecisions] = useState<Map<string, McpAction>>(new Map());
   const CONV_KEY = 'seraphine_conversation_id';
   const conversationIdRef = useRef<string | undefined>(
     localStorage.getItem(CONV_KEY) || undefined
@@ -450,6 +476,7 @@ export function ChatView({
           title: req.title,
           body: req.body,
           plan: req.plan,
+          assignee: (req as any).assignee || '',
         };
         setTurns((prev) => {
           // Try to attach to the most recent assistant turn (the notification message)
@@ -548,15 +575,17 @@ export function ChatView({
   };
 
   const handleMcpApproval = useCallback(
-    (taskId: string, approved: boolean) => {
+    (taskId: string, action: McpAction) => {
       ws.send({
         type: 'mcp_approval_response',
         task_id: taskId,
-        approved,
+        action,
+        // backward compat: backend also reads 'approved' bool
+        approved: action === 'approve',
       });
       setMcpDecisions((prev) => {
         const next = new Map(prev);
-        next.set(taskId, approved ? 'approved' : 'rejected');
+        next.set(taskId, action);
         return next;
       });
     },
@@ -672,7 +701,7 @@ export function ChatView({
                     />
                   )}
                   {t.role === 'assistant' ? (
-                    <Markdown>
+                    <Markdown rehypePlugins={[rehypeRaw]}>
                       {stripAudioTags(parsed ? parsed.response : t.content)}
                     </Markdown>
                   ) : (
@@ -683,7 +712,7 @@ export function ChatView({
                     <McpApprovalBlock
                       approval={t.mcpApproval}
                       resolved={mcpDecisions.get(t.mcpApproval.taskId) ?? null}
-                      onRespond={(approved) => handleMcpApproval(t.mcpApproval!.taskId, approved)}
+                      onRespond={(action) => handleMcpApproval(t.mcpApproval!.taskId, action)}
                     />
                   )}
                 </div>
