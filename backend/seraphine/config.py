@@ -18,8 +18,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     llm_base_url: str = "http://localhost:1234"
     llm_model: str = "gemma-4-26b-a4b-jang_4m-crack"
-    # "openai" (vMLX/LM Studio), "ollama", "anthropic". Default stays
-    # local-first; cloud backends are opt-in via .env.
+    # "openai" (vMLX/LM Studio), "ollama", "anthropic", "claude_max".
+    # claude_max reads the OAuth token from macOS Keychain (Claude Code
+    # login) and uses the Max subscription with 20× higher rate limits
+    # and zero API cost. Default stays local-first.
     llm_backend: str = "openai"
     embedding_model: str = "nomic-embed-text"
 

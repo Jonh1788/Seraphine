@@ -31,20 +31,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = MemoryStore(settings.sqlite_path)
     await store.ensure_schema()
 
-    if settings.llm_backend == "anthropic":
+    if settings.llm_backend in ("anthropic", "claude_max"):
         from seraphine.llm.anthropic import AnthropicClient
 
-        if not settings.anthropic_api_key:
-            raise RuntimeError(
-                "SERAPHINE_LLM_BACKEND=anthropic but SERAPHINE_ANTHROPIC_API_KEY is empty"
+        if settings.llm_backend == "claude_max":
+            from seraphine.llm.keychain import get_access_token, KeychainError
+
+            try:
+                api_key = get_access_token()
+            except KeychainError as e:
+                raise RuntimeError(
+                    f"SERAPHINE_LLM_BACKEND=claude_max but Keychain read failed: {e}. "
+                    f"Make sure Claude Code is installed and you're logged in."
+                ) from e
+            logger.info(
+                "Using Claude Max backend via Keychain OAuth (model=%s)",
+                settings.anthropic_model,
+            )
+        else:
+            if not settings.anthropic_api_key:
+                raise RuntimeError(
+                    "SERAPHINE_LLM_BACKEND=anthropic but SERAPHINE_ANTHROPIC_API_KEY is empty"
+                )
+            api_key = settings.anthropic_api_key
+            logger.info(
+                "Using Anthropic API backend (model=%s)", settings.anthropic_model
             )
         llm = AnthropicClient(
-            api_key=settings.anthropic_api_key,
+            api_key=api_key,
             model=settings.anthropic_model,
             base_url=settings.anthropic_base_url,
-        )
-        logger.info(
-            "Using Anthropic backend (model=%s)", settings.anthropic_model
         )
     elif settings.llm_backend == "openai":
         llm = OpenAICompatClient(settings.llm_base_url, settings.llm_model)

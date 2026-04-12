@@ -151,6 +151,39 @@ def _check_anthropic() -> None:
         sys.exit(1)
 
 
+def _check_claude_max() -> None:
+    """Validate the Claude Max OAuth token from macOS Keychain."""
+    try:
+        from seraphine.llm.keychain import get_subscription_info, get_access_token
+
+        info = get_subscription_info()
+        if not info["has_token"]:
+            _log(
+                "Claude Max token not found in Keychain. "
+                "Install Claude Code and run `claude` once to log in.",
+                "✗",
+            )
+            sys.exit(1)
+
+        # Validate the token actually works
+        token = get_access_token()
+        expires_ms = info["expires_at_ms"]
+        now_ms = int(time.time() * 1000)
+        remaining_min = (expires_ms - now_ms) / 60000 if expires_ms else 0
+
+        _log(
+            f"Claude Max via Keychain OAuth "
+            f"(tier={info['rate_limit_tier']}, "
+            f"sub={info['subscription_type']}, "
+            f"token expires in {remaining_min:.0f}min, "
+            f"model={settings.anthropic_model})",
+            "✓",
+        )
+    except Exception as e:
+        _log(f"Claude Max Keychain check failed: {e}", "✗")
+        sys.exit(1)
+
+
 def _check_qwen3_tts() -> None:
     # Qwen3-TTS server doesn't expose /health; hit the root and accept
     # any non-5xx response as "up".
@@ -383,6 +416,9 @@ def bootstrap() -> None:
     elif settings.llm_backend == "anthropic":
         _kill_vmlx_if_running()
         _check_anthropic()
+    elif settings.llm_backend == "claude_max":
+        _kill_vmlx_if_running()
+        _check_claude_max()
     elif settings.llm_backend == "ollama":
         _check_ollama_embeddings()
     else:
