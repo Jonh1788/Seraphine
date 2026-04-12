@@ -2,21 +2,25 @@
  * Single stylesheet, dark theme. No framework. */
 
 :root {
-  --bg-0: #0b0b10;
-  --bg-1: #14141c;
-  --bg-2: #1d1d28;
-  --bg-3: #262635;
-  --border: #2c2c3d;
-  --border-strong: #3a3a52;
-  --text: #e8e8f0;
-  --text-dim: #9b9bb0;
-  --text-faint: #6a6a82;
+  --bg-0: #08080d;
+  --bg-1: #11111a;
+  --bg-2: #1a1a28;
+  --bg-3: #232336;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.1);
+  --text: #f0f0f8;
+  --text-dim: #8888a0;
+  --text-faint: #555570;
   --accent: #a78bfa;
   --accent-hi: #c4b5fd;
   --accent-dim: #6d52d8;
   --user: #4ade80;
   --danger: #ef4444;
   --warning: #f59e0b;
+
+  /* Gradient accents */
+  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #6366f1 50%, #818cf8 100%);
+  --accent-glow: 0 0 20px rgba(167, 139, 250, 0.15);
 
   --r-sm: 6px;
   --r-md: 10px;
@@ -30,8 +34,14 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+
+  /* Glass effect */
+  --glass-bg: rgba(17, 17, 26, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: blur(16px);
 
   color-scheme: dark;
 }
@@ -49,7 +59,7 @@ body,
 }
 
 body {
-  background: radial-gradient(ellipse at top, #161624 0%, var(--bg-0) 60%);
+  background: radial-gradient(ellipse at top, #12122a 0%, var(--bg-0) 60%);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui,
     sans-serif;
@@ -57,6 +67,12 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* ---------- Global scrollbar ---------- */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 
 button,
 input,
@@ -69,6 +85,16 @@ button {
   cursor: pointer;
   border: none;
   background: none;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 button:disabled {
@@ -89,18 +115,23 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--border);
-  background: rgba(10, 10, 16, 0.7);
-  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .topbar__brand {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  font-weight: 600;
-  font-size: 16px;
-  letter-spacing: 0.2px;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.3px;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .topbar__brand::before {
@@ -120,8 +151,9 @@ button:disabled {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: rgba(26, 26, 40, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
   color: var(--text-dim);
 }
 
@@ -134,13 +166,19 @@ button:disabled {
 
 .status--connected {
   color: var(--user);
-  border-color: rgba(74, 222, 128, 0.3);
+  border-color: rgba(74, 222, 128, 0.2);
 }
 
 .status--connected .status__dot {
   background: var(--user);
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.7), 0 0 4px rgba(74, 222, 128, 0.4);
   animation: pulse 2s ease-in-out infinite;
+}
+
+.status--disconnected .status__dot {
+  background: var(--danger);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  animation: pulse 2.5s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -174,19 +212,32 @@ button:disabled {
 }
 
 .card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  background: rgba(17, 17, 26, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
-  padding: var(--space-4);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
 }
 
 .avatar-stage {
   background: linear-gradient(160deg, var(--bg-2) 0%, var(--bg-1) 100%);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
   padding: var(--space-3);
   display: flex;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 70%, rgba(167, 139, 250, 0.06) 0%, transparent 70%);
+  pointer-events: none;
 }
 
 .avatar-stage canvas {
@@ -196,6 +247,8 @@ button:disabled {
   height: auto !important;
   max-width: 360px;
   display: block;
+  position: relative;
+  z-index: 1;
 }
 
 .controls {
@@ -209,21 +262,33 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: 10px 16px;
+  padding: 10px 18px;
   border-radius: var(--r-md);
   font-weight: 500;
   font-size: 13px;
-  transition: transform 80ms ease, background 120ms ease, border-color 120ms ease;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid transparent;
 }
 
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
 .btn-primary {
-  background: var(--accent);
+  background: var(--accent-gradient);
   color: #16121f;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  box-shadow: var(--accent-glow);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hi);
+  box-shadow: 0 0 24px rgba(167, 139, 250, 0.25);
 }
 
 .btn-ghost {
@@ -235,6 +300,7 @@ button:disabled {
 .btn-ghost:hover:not(:disabled) {
   background: var(--bg-3);
   border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 /* btn-talk removed — mic button now lives in chat composer */
@@ -250,17 +316,24 @@ button:disabled {
   cursor: pointer;
   font-size: 13px;
   user-select: none;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.toggle:hover {
+  border-color: var(--border-strong);
+  background: rgba(35, 35, 54, 0.6);
 }
 
 .toggle input {
   appearance: none;
-  width: 32px;
-  height: 18px;
+  width: 36px;
+  height: 20px;
   background: var(--bg-3);
   border-radius: 999px;
   position: relative;
-  transition: background 120ms ease;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
   margin: 0;
+  cursor: pointer;
 }
 
 .toggle input::after {
@@ -268,11 +341,11 @@ button:disabled {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--text-dim);
-  transition: transform 120ms ease, background 120ms ease;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease, box-shadow 200ms ease;
 }
 
 .toggle input:checked {
@@ -280,8 +353,9 @@ button:disabled {
 }
 
 .toggle input:checked::after {
-  transform: translateX(14px);
+  transform: translateX(16px);
   background: var(--accent-hi);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
 }
 
 /* ---------- Chat ---------- */
@@ -289,11 +363,14 @@ button:disabled {
 .chat {
   display: grid;
   grid-template-rows: 1fr auto;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  background: rgba(17, 17, 26, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r-lg);
   overflow: hidden;
   min-height: 0;
+  box-shadow: var(--shadow-sm);
 }
 
 .chat__toolbar {
@@ -304,17 +381,20 @@ button:disabled {
 }
 .btn-new-chat {
   font-size: 12px;
-  padding: 4px 12px;
-  border-radius: 6px;
+  padding: 5px 14px;
+  border-radius: 8px;
   background: var(--bg-3);
-  color: var(--text-secondary);
+  color: var(--text-dim);
   border: 1px solid var(--border);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .btn-new-chat:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--accent-gradient);
   color: #fff;
+  border-color: transparent;
+  box-shadow: var(--accent-glow);
+  transform: translateY(-1px);
 }
 .btn-new-chat:disabled {
   opacity: 0.4;
@@ -341,25 +421,44 @@ button:disabled {
   margin: auto;
   text-align: center;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px;
 }
 
-.chat__empty strong {
+.chat__empty strong,
+.chat__empty h2 {
   display: block;
-  color: var(--text-dim);
-  font-size: 15px;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 24px;
+  font-weight: 700;
   margin-bottom: var(--space-2);
+}
+
+.chat__empty p {
+  color: var(--text-dim);
+  font-size: 14px;
+  max-width: 400px;
+  text-align: center;
+  line-height: 1.6;
 }
 
 .bubble {
   display: flex;
   gap: var(--space-3);
   max-width: 78%;
-  animation: fadeIn 200ms ease;
+  animation: fadeIn 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -412,9 +511,9 @@ button:disabled {
 .bubble__content {
   background: var(--bg-2);
   border: 1px solid var(--border);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--r-md);
-  line-height: 1.55;
+  padding: 14px 18px;
+  border-radius: 16px;
+  line-height: 1.6;
 }
 
 .bubble--user .bubble__content {
@@ -486,11 +585,14 @@ button:disabled {
 
 .bubble--user .bubble__content {
   background: rgba(74, 222, 128, 0.08);
-  border-color: rgba(74, 222, 128, 0.2);
+  border: 1px solid rgba(74, 222, 128, 0.12);
+  border-radius: 16px 16px 4px 16px;
 }
 
 .bubble--assistant .bubble__content {
-  background: var(--bg-2);
+  background: rgba(167, 139, 250, 0.04);
+  border: 1px solid rgba(167, 139, 250, 0.08);
+  border-radius: 16px 16px 16px 4px;
 }
 
 .bubble--error .bubble__content {
@@ -550,24 +652,27 @@ button:disabled {
 .chat__composer {
   display: flex;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
-  background: var(--bg-1);
+  padding: 16px 20px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .chat__input {
   flex: 1;
-  background: var(--bg-2);
+  background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 10px 14px;
+  border-radius: 12px;
+  padding: 12px 16px;
   outline: none;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: all 200ms ease;
 }
 
 .chat__input:focus {
-  border-color: var(--accent-dim);
-  background: var(--bg-3);
+  border-color: var(--accent);
+  box-shadow: var(--accent-glow), 0 0 0 3px rgba(167, 139, 250, 0.08);
+  background: var(--bg-0);
 }
 
 .chat__input::placeholder {
@@ -693,6 +798,8 @@ button:disabled {
   inset: 0;
   z-index: 1000;
   background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1047,7 +1154,8 @@ button:disabled {
 }
 
 .memory-panel__add input:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--accent);
+  box-shadow: var(--accent-glow), 0 0 0 3px rgba(167, 139, 250, 0.08);
 }
 
 .memory-panel__add input::placeholder {
@@ -1618,15 +1726,21 @@ button:disabled {
 /* ---------- Thinking / reasoning block ---------- */
 
 .thinking-block {
-  border-left: 2px solid var(--accent-dim);
+  border-left: 3px solid var(--accent-dim);
   border-radius: var(--r-sm);
   margin-bottom: var(--space-3);
   background: rgba(109, 82, 216, 0.06);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(167, 139, 250, 0.08);
+  border-left: 3px solid var(--accent-dim);
 }
 
 .thinking-block--done {
   border-left-color: var(--border);
   background: transparent;
+  backdrop-filter: none;
+  border-color: var(--border);
+  border-left-color: var(--border);
 }
 
 .thinking-block__header {
@@ -1687,10 +1801,11 @@ button:disabled {
 }
 
 .thinking-indicator > span {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--accent-dim);
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.4);
   animation: thinking-dots 1.4s ease-in-out infinite;
 }
 
@@ -1770,6 +1885,8 @@ button:disabled {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     z-index: 90;
   }
 
@@ -2102,7 +2219,7 @@ button:disabled {
   position: relative;
   flex: 1;
   min-height: 48px;
-  padding: var(--space-2);
+  padding: var(--space-3);
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -2112,13 +2229,15 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-google-btn:hover:not(:disabled) {
   background: var(--bg-3);
   border-color: var(--accent-dim);
   color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: var(--accent-glow);
 }
 
 .sidebar-google-btn:disabled {
@@ -2160,14 +2279,14 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(6, 6, 12, 0.72);
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
-  animation: fadeIn 160ms ease;
+  animation: fadeIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-content {
@@ -2175,9 +2294,9 @@ button:disabled {
   max-width: 900px;
   max-height: 85vh;
   background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-md);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3104,7 +3223,6 @@ button:disabled {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.15); opacity: 0.85; }
 }
-}
 
 /* ── Finance: Pending review cards ── */
 
@@ -3115,11 +3233,18 @@ button:disabled {
 }
 
 .finance-pending-card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  background: rgba(17, 17, 26, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r-md);
-  padding: var(--space-3);
+  padding: var(--space-4);
   margin-bottom: var(--space-2);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 200ms ease;
+}
+
+.finance-pending-card:hover {
+  border-color: var(--border-strong);
 }
 
 .finance-pending-card__header {
@@ -3133,8 +3258,14 @@ button:disabled {
   font-weight: 500;
 }
 
-.finance-pending-card__amount--income { color: #66bb6a; }
-.finance-pending-card__amount--expense { color: #ef5350; }
+.finance-pending-card__amount--income {
+  color: #66bb6a;
+  text-shadow: 0 0 12px rgba(102, 187, 106, 0.3);
+}
+.finance-pending-card__amount--expense {
+  color: #ef5350;
+  text-shadow: 0 0 12px rgba(239, 83, 80, 0.3);
+}
 
 .finance-pending-card__meta {
   display: flex;
@@ -3157,6 +3288,7 @@ button:disabled {
   border: 1px solid var(--border);
   cursor: pointer;
   font-size: 0.85rem;
+}
 
 .finance-pending-card__actions button:disabled {
   opacity: 0.5;
@@ -3167,15 +3299,25 @@ button:disabled {
   background: rgba(102, 187, 106, 0.15);
   color: #66bb6a;
   border-color: rgba(102, 187, 106, 0.3);
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.btn-confirm:hover:not(:disabled) { background: rgba(102, 187, 106, 0.25); }
+.btn-confirm:hover:not(:disabled) {
+  background: rgba(102, 187, 106, 0.25);
+  box-shadow: 0 0 16px rgba(102, 187, 106, 0.15);
+  transform: translateY(-1px);
+}
 
 .btn-reject {
   background: rgba(239, 83, 80, 0.15);
   color: #ef5350;
   border-color: rgba(239, 83, 80, 0.3);
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.btn-reject:hover:not(:disabled) { background: rgba(239, 83, 80, 0.25); }
+.btn-reject:hover:not(:disabled) {
+  background: rgba(239, 83, 80, 0.25);
+  box-shadow: 0 0 16px rgba(239, 83, 80, 0.15);
+  transform: translateY(-1px);
+}
 
 /* Finance: Loading & empty states */
 
@@ -3196,7 +3338,7 @@ button:disabled {
 /* Finance: Tab badge */
 
 .finance-tab-badge {
-  background: #ef5350;
+  background: linear-gradient(135deg, #ef5350, #e53935);
   color: #fff;
   font-size: 0.65rem;
   font-weight: 700;
