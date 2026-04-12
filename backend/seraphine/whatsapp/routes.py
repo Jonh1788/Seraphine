@@ -27,7 +27,7 @@ _URGENCY_RE = re.compile(
 )
 
 # User identifiers for @-mention detection in groups
-_USER_MENTIONS = {"jonathan", "557388836445"}
+_USER_MENTIONS = {"jonathan", "557388836445", "jonh"}
 
 
 def _is_important(
@@ -166,5 +166,17 @@ async def webhook_whatsapp(request: Request) -> dict[str, bool]:
             dead.append(ws)
     for ws in dead:
         ws_clients.discard(ws)
+
+    # 4. Feed to task detector (analyses buffered messages for tasks)
+    task_detector = getattr(request.app.state, "whatsapp_task_detector", None)
+    if task_detector and not from_me and body:
+        try:
+            await task_detector.on_message(
+                chat_id=chat_id, chat_name=chat_name, author=author,
+                body=body, message_id=msg_id,
+                timestamp=message.get("timestamp"), from_me=False,
+            )
+        except Exception as e:
+            logger.warning("task detector error: %s", e)
 
     return {"ok": True}

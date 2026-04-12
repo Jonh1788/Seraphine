@@ -113,6 +113,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "WhatsApp bridge client wired (url=%s)", settings.whatsapp_bridge_url
         )
 
+    # WhatsApp task detector — wired after LLM is available
+    whatsapp_task_detector = None
+    if whatsapp_client is not None:
+        from seraphine.whatsapp.task_detector import WhatsAppTaskDetector
+
+        whatsapp_task_detector = WhatsAppTaskDetector(
+            app_state=None,  # patched after app.state is ready
+            whatsapp_client=whatsapp_client,
+            llm_client=llm,
+        )
+        logger.info("WhatsApp task detector wired")
+
     # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
@@ -313,6 +325,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reminder_scheduler = reminder_scheduler
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
+
+    # Patch task detector with live app_state now that it's ready
+    if whatsapp_task_detector is not None:
+        whatsapp_task_detector._app_state = app.state
+        app.state.whatsapp_task_detector = whatsapp_task_detector
 
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
