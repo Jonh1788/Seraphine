@@ -48,5 +48,6 @@ stop_port     "backend (uvicorn)" 8000
 stop_port     "frontend (Vite)"   5173
 stop_pattern  "vMLX (local LLM)"  "vmlx serve"
 stop_pattern  "cloudflared"       "cloudflared tunnel"
+stop_port     "WhatsApp bridge"  3001
 stop_pattern  "caffeinate (keep-awake)" "caffeinate -i -w"
 echo "done"

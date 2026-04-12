@@ -289,18 +289,60 @@ def _print_access_banner() -> None:
     print()
 
 
-def _check_whatsapp_bridge() -> None:
-    """Check WhatsApp bridge connectivity (optional — warning only)."""
+def _start_whatsapp_bridge() -> None:
+    """Start the WhatsApp bridge if configured and not already running.
+
+    The bridge is a Node.js service at ``services/whatsapp-bridge/``
+    that exposes REST on the port extracted from
+    ``settings.whatsapp_bridge_url`` (default 3001). If already
+    reachable, skip. If not, spawn ``npm start`` detached and wait up
+    to 30s for ``/api/status`` to respond.
+    """
     if not settings.whatsapp_bridge_url:
         return
-    url = f"{settings.whatsapp_bridge_url.rstrip('/')}/api/status"
+    url = settings.whatsapp_bridge_url.rstrip("/")
+    if _check_url(f"{url}/api/status"):
+        _log("WhatsApp bridge already running", "✓")
+        _print_whatsapp_status(url)
+        return
+    bridge_dir = Path(__file__).resolve().parent.parent.parent / "services" / "whatsapp-bridge"
+    if not (bridge_dir / "package.json").exists():
+        _log(f"WhatsApp bridge dir not found at {bridge_dir} — skipping", "⚠")
+        return
+    dist_index = bridge_dir / "dist" / "index.js"
+    if not dist_index.exists():
+        _log(
+            f"WhatsApp bridge not built ({dist_index} missing). "
+            f"Run: cd {bridge_dir} && npm run build",
+            "⚠",
+        )
+        return
+    _log("Starting WhatsApp bridge (npm start)")
+    _spawn_detached(
+        ["node", str(dist_index)],
+        "/tmp/whatsapp-bridge.log",
+    )
+    for _ in range(15):  # up to 30s
+        time.sleep(2)
+        if _check_url(f"{url}/api/status"):
+            _log("WhatsApp bridge ready", "✓")
+            _print_whatsapp_status(url)
+            return
+    _log(
+        "WhatsApp bridge did not come up within 30s — check /tmp/whatsapp-bridge.log",
+        "⚠",
+    )
+
+
+def _print_whatsapp_status(url: str) -> None:
+    """Log the bridge auth status (ready / qr_pending / etc.)."""
     try:
-        r = httpx.get(url, timeout=5.0)
+        r = httpx.get(f"{url}/api/status", timeout=5.0)
         if r.status_code >= 400:
             _log(
-                f"WhatsApp bridge at {settings.whatsapp_bridge_url} returned "
-                f"HTTP {r.status_code} -- scan QR via /whatsapp/qr",
-                "\u26a0",
+                f"WhatsApp bridge returned HTTP {r.status_code} — "
+                "scan QR via /whatsapp/qr",
+                "⚠",
             )
             return
         data = r.json()
@@ -308,19 +350,16 @@ def _check_whatsapp_bridge() -> None:
         if st == "ready":
             name = data.get("name", "?")
             phone = data.get("phone", "?")
-            _log(f"WhatsApp bridge ready as {name} ({phone})", "\u2713")
-        else:
+            _log(f"WhatsApp authenticated as {name} ({phone})", "✓")
+        elif st == "qr_pending":
             _log(
-                f"WhatsApp bridge connected but not authenticated (status={st}) "
-                "-- scan QR via /whatsapp/qr",
-                "\u26a0",
+                "WhatsApp waiting for QR scan — open /whatsapp/qr in browser",
+                "⚠",
             )
-    except Exception as e:
-        _log(
-            f"WhatsApp bridge unreachable at {settings.whatsapp_bridge_url}: {e} "
-            "(WhatsApp features disabled)",
-            "\u26a0",
-        )
+        else:
+            _log(f"WhatsApp bridge status: {st}", "⚠")
+    except Exception:
+        pass
 
 
 def _check_ollama_embeddings() -> None:
@@ -373,8 +412,8 @@ def bootstrap() -> None:
     if settings.llm_backend != "ollama":
         _check_ollama_embeddings()
 
-    # ── WhatsApp bridge ──────────────────────────────────────────
-    _check_whatsapp_bridge()
+    # ── WhatsApp bridge (optional) ────────────────────────────────
+    _start_whatsapp_bridge()
 
     _start_caffeinate()
     _print_access_banner()
