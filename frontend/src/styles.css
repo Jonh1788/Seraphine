@@ -2889,6 +2889,48 @@ button:disabled {
   text-align: right;
 }
 
+/* --- Generic button grid (camera, avatar selector) --- */
+
+.avatar-lab__btn-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.avatar-lab__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.avatar-lab__btn:hover {
+  background: var(--bg-2);
+  border-color: var(--accent-dim);
+}
+
+.avatar-lab__btn--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.avatar-lab__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.avatar-lab__btn-icon {
+  font-size: 16px;
+}
+
 /* --- Preset & Gesture buttons --- */
 
 .avatar-lab__presets,

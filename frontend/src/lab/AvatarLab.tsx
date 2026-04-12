@@ -33,6 +33,20 @@ const FALLBACK_EXPRESSIONS = [
 /** Parse [tag] patterns from text. */
 const TAG_RE = /\[([a-zA-Z]+)\]/g;
 
+/** Known VRM avatars in /public/avatars/. */
+const AVATARS: { label: string; url: string }[] = [
+  { label: 'Seraphine (original)', url: '/avatars/seraphine.vrm' },
+  // Add more .vrm files here as they become available:
+  // { label: 'Seraphine v2', url: '/avatars/seraphine-v2.vrm' },
+];
+
+/** Camera presets with Portuguese labels. */
+const CAMERAS: { label: string; icon: string; preset: string }[] = [
+  { label: 'Rosto', icon: '\uD83D\uDC64', preset: 'face' },
+  { label: 'Busto', icon: '\uD83D\uDC67', preset: 'bust' },
+  { label: 'Corpo inteiro', icon: '\uD83E\uDDCD', preset: 'fullBody' },
+];
+
 interface AvatarLabProps {
   controller: VrmAvatarController | null;
   onClose: () => void;
@@ -44,6 +58,9 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
   const [quickText, setQuickText] = useState('');
   const [quickRunning, setQuickRunning] = useState(false);
   const quickAbortRef = useRef(false);
+  const [currentAvatar, setCurrentAvatar] = useState(AVATARS[0]?.url ?? '');
+  const [swappingAvatar, setSwappingAvatar] = useState(false);
+  const [activeCamera, setActiveCamera] = useState('bust');
 
   // Resolve available expressions from controller or fallback
   const expressions = getExpressions(controller);
@@ -107,6 +124,34 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
       // ignore
     }
   }, [controller]);
+
+  const handleCameraPreset = useCallback(
+    (preset: string) => {
+      setActiveCamera(preset);
+      try {
+        controller?.setCameraPreset?.(preset);
+      } catch {
+        // ignore
+      }
+    },
+    [controller],
+  );
+
+  const handleSwapAvatar = useCallback(
+    async (url: string) => {
+      if (swappingAvatar || !controller) return;
+      setSwappingAvatar(true);
+      try {
+        await controller.swapAvatar?.(url);
+        setCurrentAvatar(url);
+      } catch (err) {
+        console.error('[lab] avatar swap failed:', err);
+      } finally {
+        setSwappingAvatar(false);
+      }
+    },
+    [controller, swappingAvatar],
+  );
 
   const handleQuickTest = useCallback(async () => {
     if (!quickText.trim() || quickRunning) return;
@@ -209,6 +254,44 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
 
           {/* Right: controls */}
           <div className="avatar-lab__controls">
+            {/* Camera presets */}
+            <section className="avatar-lab__section">
+              <h3 className="avatar-lab__section-title">Camera</h3>
+              <div className="avatar-lab__btn-grid">
+                {CAMERAS.map((cam) => (
+                  <button
+                    key={cam.preset}
+                    type="button"
+                    className={`avatar-lab__btn${activeCamera === cam.preset ? ' avatar-lab__btn--active' : ''}`}
+                    onClick={() => handleCameraPreset(cam.preset)}
+                  >
+                    <span className="avatar-lab__btn-icon">{cam.icon}</span>
+                    {cam.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* Avatar selector */}
+            {AVATARS.length > 1 && (
+              <section className="avatar-lab__section">
+                <h3 className="avatar-lab__section-title">Avatar</h3>
+                <div className="avatar-lab__btn-grid">
+                  {AVATARS.map((av) => (
+                    <button
+                      key={av.url}
+                      type="button"
+                      className={`avatar-lab__btn${currentAvatar === av.url ? ' avatar-lab__btn--active' : ''}`}
+                      disabled={swappingAvatar}
+                      onClick={() => handleSwapAvatar(av.url)}
+                    >
+                      {av.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Expression sliders */}
             <section className="avatar-lab__section">
               <h3 className="avatar-lab__section-title">Expressoes</h3>

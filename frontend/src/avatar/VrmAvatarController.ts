@@ -67,6 +67,15 @@ export class VrmAvatarController implements AvatarAdapter {
   // --- Gesture system ---
   private readonly gesturePlayer = new GesturePlayer();
 
+  // Camera presets — smooth transition via lerp in the RAF loop
+  private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
+  private cameraCurrent = { ...this.cameraTarget };
+  static readonly CAMERA_PRESETS: Record<string, typeof VrmAvatarController.prototype.cameraTarget> = {
+    bust:     { px: 0, py: 1.45, pz: 0.9,  lx: 0, ly: 1.35, lz: 0, fov: 30 },
+    face:     { px: 0, py: 1.55, pz: 0.45, lx: 0, ly: 1.52, lz: 0, fov: 24 },
+    fullBody: { px: 0, py: 1.0,  pz: 2.5,  lx: 0, ly: 0.9,  lz: 0, fov: 30 },
+  };
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.scene = new Scene();
@@ -74,7 +83,7 @@ export class VrmAvatarController implements AvatarAdapter {
     const width = canvas.width || 400;
     const height = canvas.height || 600;
     this.camera = new PerspectiveCamera(30, width / height, 0.1, 20);
-    // Frame bust/upper body — closer to the model, looking at chest level
+    // Default: bust framing
     this.camera.position.set(0, 1.45, 0.9);
     this.camera.lookAt(0, 1.35, 0);
 
@@ -103,12 +112,32 @@ export class VrmAvatarController implements AvatarAdapter {
       this.rafId = requestAnimationFrame(loop);
       const delta = this.clock.getDelta();
       this.elapsed += delta;
+      this.updateCamera(delta);
       this.updateIdle(delta);
       this.updateLipsync();
       this.vrm?.update(delta);
       this.renderer.render(this.scene, this.camera);
     };
     this.rafId = requestAnimationFrame(loop);
+  }
+
+  /** Smoothly lerp the camera toward the target preset. */
+  private updateCamera(delta: number): void {
+    const speed = 3.0; // higher = snappier transition
+    const t = Math.min(1, speed * delta);
+    const c = this.cameraCurrent;
+    const g = this.cameraTarget;
+    c.px += (g.px - c.px) * t;
+    c.py += (g.py - c.py) * t;
+    c.pz += (g.pz - c.pz) * t;
+    c.lx += (g.lx - c.lx) * t;
+    c.ly += (g.ly - c.ly) * t;
+    c.lz += (g.lz - c.lz) * t;
+    c.fov += (g.fov - c.fov) * t;
+    this.camera.position.set(c.px, c.py, c.pz);
+    this.camera.lookAt(c.lx, c.ly, c.lz);
+    this.camera.fov = c.fov;
+    this.camera.updateProjectionMatrix();
   }
 
   private updateIdle(delta?: number): void {
@@ -419,6 +448,29 @@ export class VrmAvatarController implements AvatarAdapter {
   /** Get the list of available gesture names (for the lab UI). */
   getAvailableGestures(): string[] {
     return Object.keys(GESTURE_LIBRARY);
+  }
+
+  /** Smoothly transition the camera to a named preset.
+   *  Available: 'bust' (default sidebar), 'face' (close-up), 'fullBody'. */
+  setCameraPreset(preset: string): void {
+    const p = VrmAvatarController.CAMERA_PRESETS[preset];
+    if (!p) return;
+    this.cameraTarget = { ...p };
+  }
+
+  /** Get the list of available camera presets. */
+  getAvailableCameraPresets(): string[] {
+    return Object.keys(VrmAvatarController.CAMERA_PRESETS);
+  }
+
+  /** Swap the loaded VRM avatar at runtime. Disposes the old one. */
+  async swapAvatar(url: string): Promise<void> {
+    if (this.vrm) {
+      this.scene.remove(this.vrm.scene);
+      VRMUtils.deepDispose(this.vrm.scene);
+      this.vrm = null;
+    }
+    await this.loadAvatar(url);
   }
 
   // -------------------------------------------------------------------------
