@@ -310,12 +310,15 @@ def build_weather_html(
 class WeatherForecastTool(Tool):
     name = "weather_forecast"
     description = (
-        "Get a beautiful weather forecast for a city. A rich visual card "
-        "is AUTOMATICALLY displayed to the user by the frontend — you do "
+        "Get a beautiful weather forecast for a city (today + up to 3 days). "
+        "A rich visual card is AUTOMATICALLY displayed to the user — you do "
         "NOT need to repeat the weather data. Just add a BRIEF 1-sentence "
         "comment like 'Tá quente!' or 'Leva guarda-chuva!'. "
         "NEVER list temperatures, humidity, wind, or forecast data in your "
         "reply — the card already shows everything visually. "
+        "IMPORTANT: this tool only covers up to 3 days ahead. For forecasts "
+        "further than 3 days (next week, next month), use web_search to find "
+        "the forecast — do NOT invent data. "
         "Triggers: 'como está o tempo?', 'vai chover?', 'previsão do "
         "tempo em Itabuna', 'clima em São Paulo'."
     )
@@ -400,6 +403,119 @@ class WeatherForecastTool(Tool):
         desc_raw = (current.get("weatherDesc") or [{}])[0].get("value", "")
         desc_pt = _get_pt(desc_raw)
         summary = f"Clima em {city}: {temp}°C, {desc_pt}."
+        return ToolResult(
+            ok=True,
+            output=summary,
+            metadata={"html_card": html},
+        )
+
+
+class FormatWeatherCardTool(Tool):
+    name = "format_weather_card"
+    description = (
+        "Format weather data into a beautiful visual card. Use this AFTER "
+        "getting weather data from web_search for forecasts beyond 3 days. "
+        "Extract the data from the search results and pass it as structured "
+        "JSON. The card is auto-displayed to the user — just add a brief "
+        "comment. Do NOT repeat the data in your reply."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "City name"},
+            "current_temp": {"type": "integer", "description": "Current temp in °C (optional)"},
+            "current_description": {"type": "string", "description": "Current weather (e.g. 'Ensolarado', 'Chuva')"},
+            "humidity": {"type": "integer", "description": "Humidity % (optional)"},
+            "wind_kmh": {"type": "integer", "description": "Wind speed km/h (optional)"},
+            "forecast": {
+                "type": "array",
+                "description": "Array of forecast days",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "date": {"type": "string", "description": "Date label (e.g. 'Sáb 19/04')"},
+                        "min_temp": {"type": "integer"},
+                        "max_temp": {"type": "integer"},
+                        "description": {"type": "string", "description": "Weather condition"},
+                        "rain_chance": {"type": "integer", "description": "Rain % (optional)"},
+                    },
+                },
+            },
+        },
+        "required": ["city", "forecast"],
+    }
+    requires_confirmation = False
+    category = "network"
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        city = args.get("city", "?")
+        forecast = args.get("forecast", [])
+        if not forecast:
+            return ToolResult(ok=False, error="forecast array is required")
+
+        current_temp = args.get("current_temp")
+        current_desc = args.get("current_description", "")
+        humidity = args.get("humidity")
+        wind = args.get("wind_kmh")
+
+        # Build the HTML card
+        icon = _get_icon(current_desc) if current_desc else "🌡️"
+        temp_html = ""
+        if current_temp is not None:
+            color = _temp_color(current_temp)
+            temp_html = f'<span style="font-size:2em;font-weight:700;color:{color}">{current_temp}°C</span>'
+
+        desc_pt = _get_pt(current_desc) if current_desc else ""
+
+        # Current conditions row
+        details = []
+        if wind:
+            details.append(f"💨 {wind} km/h")
+        if humidity:
+            details.append(f"💧 {humidity}%")
+
+        details_html = (
+            f'<div style="display:flex;gap:16px;margin:8px 0;font-size:0.9em;opacity:0.85">'
+            + "".join(f"<span>{d}</span>" for d in details)
+            + "</div>"
+        ) if details else ""
+
+        # Forecast rows
+        forecast_rows = ""
+        for day in forecast:
+            d_icon = _get_icon(day.get("description", ""))
+            d_desc = _get_pt(day.get("description", ""))
+            mn = day.get("min_temp", "?")
+            mx = day.get("max_temp", "?")
+            rain = day.get("rain_chance")
+            rain_html = f'<span>🌧️ {rain}%</span>' if rain is not None else ""
+            mn_color = _temp_color(mn) if isinstance(mn, int) else "#e0e0e0"
+            mx_color = _temp_color(mx) if isinstance(mx, int) else "#e0e0e0"
+
+            forecast_rows += f"""
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #2a2a4a">
+              <span style="min-width:90px;font-size:0.85em">{day.get('date', '?')}</span>
+              <span>{d_icon}</span>
+              <span style="color:{mn_color}">{mn}°</span>
+              <span style="opacity:0.5">/</span>
+              <span style="color:{mx_color}">{mx}°</span>
+              {rain_html}
+            </div>"""
+
+        html = f"""<div style="background:#1a1a2e;color:#e0e0e0;border-radius:12px;padding:16px;font-family:system-ui,sans-serif;max-width:420px;margin:8px 0;line-height:1.5">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <span style="font-size:1.1em;font-weight:600">{icon} {city}</span>
+    {temp_html}
+  </div>
+  {f'<div style="opacity:0.8;margin-bottom:4px">{desc_pt}</div>' if desc_pt else ''}
+  {details_html}
+  <div style="margin-top:12px;border-top:1px solid #2a2a4a;padding-top:8px">
+    <div style="font-weight:600;margin-bottom:6px;font-size:0.9em">Previsão:</div>
+    {forecast_rows}
+  </div>
+</div>"""
+
+        summary = f"Previsão para {city}: {len(forecast)} dias."
         return ToolResult(
             ok=True,
             output=summary,
