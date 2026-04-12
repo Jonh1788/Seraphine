@@ -34,7 +34,7 @@ export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
   }, [avatarUrl, onReady]);
 
   return (
-    <div role="img" aria-label="Seraphine avatar">
+    <div id="seraphine-avatar-root" role="img" aria-label="Seraphine avatar">
       <canvas ref={canvasRef} width={width ?? 400} height={height ?? 600} />
     </div>
   );

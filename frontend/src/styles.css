@@ -2783,24 +2783,19 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
-  border: 1px dashed var(--border-strong);
+  min-height: 500px;
+  max-height: 70vh;
   border-radius: var(--r-md);
   background: var(--bg-0);
+  overflow: hidden;
 }
 
-.avatar-lab__preview-hint {
-  text-align: center;
-  padding: var(--space-4);
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.avatar-lab__preview-icon {
-  display: block;
-  font-size: 40px;
-  margin-bottom: var(--space-3);
+/* When the avatar canvas is reparented into the lab, fill the area */
+.avatar-lab__preview canvas {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: var(--r-md);
+  object-fit: contain;
 }
 
 .avatar-lab__controls {

@@ -144,6 +144,37 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     setQuickRunning(false);
   }, [controller, quickText, quickRunning]);
 
+  // Reparent the avatar canvas into the lab's preview area so the user
+  // sees it large inside the modal. On cleanup (close), move it back to
+  // the sidebar. Three.js continues rendering — it follows the canvas.
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const avatarOriginalParentRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const avatarRoot = document.getElementById('seraphine-avatar-root');
+    const preview = previewRef.current;
+    if (!avatarRoot || !preview) return;
+    // Remember where it came from
+    avatarOriginalParentRef.current = avatarRoot.parentElement;
+    // Move into lab
+    preview.appendChild(avatarRoot);
+    // Resize canvas to fill the preview area
+    const canvas = avatarRoot.querySelector('canvas');
+    if (canvas) {
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+    }
+    return () => {
+      // Move back to sidebar
+      if (avatarOriginalParentRef.current && avatarRoot.parentElement === preview) {
+        avatarOriginalParentRef.current.appendChild(avatarRoot);
+        if (canvas) {
+          canvas.style.width = '';
+          canvas.style.height = '';
+        }
+      }
+    };
+  }, []);
+
   // Keyboard shortcut: Escape closes
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -173,14 +204,8 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
         </div>
 
         <div className="avatar-lab__body">
-          {/* Left: info about avatar being in sidebar */}
-          <div className="avatar-lab__preview">
-            <div className="avatar-lab__preview-hint">
-              <span className="avatar-lab__preview-icon" aria-hidden>&#x1F9EA;</span>
-              <p>O avatar esta visivel na barra lateral.</p>
-              <p>Use os controles ao lado para testar expressoes e gestos em tempo real.</p>
-            </div>
-          </div>
+          {/* Left: avatar canvas lives here while lab is open */}
+          <div className="avatar-lab__preview" ref={previewRef} />
 
           {/* Right: controls */}
           <div className="avatar-lab__controls">
