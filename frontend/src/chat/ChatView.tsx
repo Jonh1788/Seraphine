@@ -475,17 +475,18 @@ export function ChatView({
             : null;
         if (tr.ok && htmlCard) {
           setTurns((prev) => {
-            // Append the HTML to the last assistant turn's content
-            for (let i = prev.length - 1; i >= 0; i--) {
-              if (prev[i].role === 'assistant') {
-                const next = prev.slice();
-                next[i] = {
-                  ...next[i],
-                  content: next[i].content + '\n' + htmlCard,
-                };
-                return next;
-              }
+            // Append to the STREAMING turn (current), not the previous one.
+            // The streaming turn is the one being built right now by token events.
+            const streamIdx = prev.findIndex((t) => t.streaming);
+            if (streamIdx !== -1) {
+              const next = prev.slice();
+              next[streamIdx] = {
+                ...next[streamIdx],
+                content: next[streamIdx].content + '\n' + htmlCard,
+              };
+              return next;
             }
+            // Fallback: create a standalone card turn
             return [
               ...prev,
               { id: `card-${Date.now()}`, role: 'assistant', content: htmlCard },

@@ -310,13 +310,14 @@ def build_weather_html(
 class WeatherForecastTool(Tool):
     name = "weather_forecast"
     description = (
-        "Get a beautiful weather forecast for a city. Returns a rich visual "
-        "card with current conditions (temperature, humidity, wind, UV, rain) "
-        "and multi-day forecast. Use when the user asks about weather: "
-        "'como est\u00e1 o tempo?', 'vai chover amanh\u00e3?', "
-        "'previs\u00e3o do tempo em Itabuna', 'clima em S\u00e3o Paulo'. "
-        "The response is a pre-formatted visual card \u2014 just return it "
-        "as-is, do NOT reformat or summarize it."
+        "Get a beautiful weather forecast for a city. A rich visual card "
+        "is AUTOMATICALLY displayed to the user by the frontend — you do "
+        "NOT need to repeat the weather data. Just add a BRIEF 1-sentence "
+        "comment like 'Tá quente!' or 'Leva guarda-chuva!'. "
+        "NEVER list temperatures, humidity, wind, or forecast data in your "
+        "reply — the card already shows everything visually. "
+        "Triggers: 'como está o tempo?', 'vai chover?', 'previsão do "
+        "tempo em Itabuna', 'clima em São Paulo'."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
