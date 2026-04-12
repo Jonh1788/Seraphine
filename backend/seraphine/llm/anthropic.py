@@ -193,25 +193,37 @@ def _convert_messages(
             if isinstance(body, dict):
                 image_data_url = body.get("image")
 
-            if image_data_url and isinstance(image_data_url, str) and image_data_url.startswith("data:"):
+            if (
+                image_data_url
+                and isinstance(image_data_url, str)
+                and image_data_url.startswith("data:image/")
+                and "," in image_data_url
+            ):
                 # Parse "data:image/png;base64,AAAA..." into media_type + raw base64
                 try:
                     header, raw_b64 = image_data_url.split(",", 1)
                     media_type = header.split(":", 1)[1].split(";", 1)[0] or "image/png"
-                except ValueError:
-                    media_type = "image/png"
+                    # Validate base64 before sending — invalid data causes 400
+                    import base64 as _b64
+                    _b64.b64decode(raw_b64, validate=True)
+                except Exception:
+                    # Invalid or corrupt base64 — skip the image, just use text
                     raw_b64 = ""
-                tool_result_content = [
-                    {"type": "text", "text": tool_output},
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": raw_b64,
+
+                if raw_b64:
+                    tool_result_content = [
+                        {"type": "text", "text": tool_output},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": raw_b64,
+                            },
                         },
-                    },
-                ]
+                    ]
+                else:
+                    tool_result_content = tool_output
             else:
                 tool_result_content = tool_output
 
@@ -319,18 +331,27 @@ class AnthropicClient:
         # cache_control to attach to it. Cache on the last tool applies
         # to the entire tools array including everything before it.
         if system:
-            body["system"] = [
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
+            # When using CLIProxyAPI, cache_control may not be supported.
+            # Detect proxy by checking if base_url is localhost (not api.anthropic.com).
+            use_cache = "api.anthropic.com" in self.base_url
+            if use_cache:
+                body["system"] = [
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                body["system"] = system  # plain string, no cache_control
         converted_tools = _convert_tools(tools)
         if converted_tools:
-            tools_with_cache = [dict(t) for t in converted_tools]
-            tools_with_cache[-1]["cache_control"] = {"type": "ephemeral"}
-            body["tools"] = tools_with_cache
+            if use_cache:
+                tools_with_cache = [dict(t) for t in converted_tools]
+                tools_with_cache[-1]["cache_control"] = {"type": "ephemeral"}
+                body["tools"] = tools_with_cache
+            else:
+                body["tools"] = converted_tools
         if think:
             body["thinking"] = {"type": "enabled", "budget_tokens": 4000}
             # Anthropic rejects non-1.0 temperature when extended thinking is on.
@@ -388,9 +409,16 @@ class AnthropicClient:
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
+                # Read the error body for debugging
+                err_body = ""
+                try:
+                    err_body = e.response.text[:500]
+                except Exception:
+                    pass
                 await resp_cm.__aexit__(None, None, None)
+                logger.error("Anthropic %d: %s", e.response.status_code, err_body)
                 raise LLMUnavailableError(
-                    f"Anthropic HTTP {e.response.status_code}"
+                    f"Anthropic HTTP {e.response.status_code}: {err_body}"
                 ) from e
             try:
                 current_event: str | None = None

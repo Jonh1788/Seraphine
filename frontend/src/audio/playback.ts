@@ -25,7 +25,7 @@ const INPUT_RATE = 24000;
  * massive TTFB hit. 0.35s is short enough to feel instant and still
  * large enough that HTMLAudioElement doesn't stutter on initial load.
  */
-const FIRST_SEGMENT_SECONDS = 0.35;
+const FIRST_SEGMENT_SECONDS = 0.2;
 const FIRST_SEGMENT_SAMPLES = Math.floor(FIRST_SEGMENT_SECONDS * INPUT_RATE);
 /**
  * Subsequent segments are larger to reduce blob-URL churn. The first
@@ -41,7 +41,7 @@ const NEXT_SEGMENT_SAMPLES = Math.floor(NEXT_SEGMENT_SECONDS * INPUT_RATE);
  * HTMLAudioElement.playbackRate > 1 pitch-shifts the voice and makes
  * it sound cartoonish; server-side speed preserves pitch.
  */
-const PLAYBACK_RATE = 1.0;
+let PLAYBACK_RATE = 1.0;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
@@ -268,6 +268,16 @@ export class PCMPlayback {
    * Used by per-sentence `tts_end` handlers that want the tail of each
    * sentence to play but don't need to block on it.
    */
+  /** Set playback speed at runtime. Used by the backend to compensate
+   *  when ElevenLabs v3 doesn't accept server-side speed. */
+  setPlaybackRate(rate: number): void {
+    PLAYBACK_RATE = rate;
+    // Apply to the currently playing audio element if any.
+    if (this.currentAudio) {
+      this.currentAudio.playbackRate = rate;
+    }
+  }
+
   flushPending(): void {
     this.flushAccumToSegment();
   }

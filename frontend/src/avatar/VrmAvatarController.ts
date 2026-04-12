@@ -1,4 +1,5 @@
 import {
+  ACESFilmicToneMapping,
   AmbientLight,
   AnimationClip,
   AnimationMixer,
@@ -33,8 +34,14 @@ const FALLBACK_EXPRESSIONS = [
   "aa", "ih", "ou", "ee", "oh",
 ];
 
-/** Map Mixamo bone names to VRM humanoid bone names for retargeting. */
+/**
+ * Map Mixamo bone names to VRM humanoid bone names for retargeting.
+ * Covers both the `mixamorigXxx` prefix style (Mixamo default) AND the
+ * plain `Xxx` style (common when FBX is exported "without skin" or
+ * re-exported through Blender).
+ */
 const MIXAMO_TO_VRM: Record<string, string> = {
+  // With prefix (standard Mixamo)
   mixamorigHips: "hips",
   mixamorigSpine: "spine",
   mixamorigSpine1: "chest",
@@ -57,6 +64,75 @@ const MIXAMO_TO_VRM: Record<string, string> = {
   mixamorigRightLeg: "rightLowerLeg",
   mixamorigRightFoot: "rightFoot",
   mixamorigRightToeBase: "rightToes",
+  // Without prefix (Blender re-export, some Mixamo downloads)
+  Hips: "hips",
+  Spine: "spine",
+  Spine1: "chest",
+  Spine2: "upperChest",
+  Chest: "chest",
+  UpperChest: "upperChest",
+  Neck: "neck",
+  Head: "head",
+  LeftShoulder: "leftShoulder",
+  LeftArm: "leftUpperArm",
+  LeftForeArm: "leftLowerArm",
+  LeftHand: "leftHand",
+  RightShoulder: "rightShoulder",
+  RightArm: "rightUpperArm",
+  RightForeArm: "rightLowerArm",
+  RightHand: "rightHand",
+  LeftUpLeg: "leftUpperLeg",
+  LeftLeg: "leftLowerLeg",
+  LeftFoot: "leftFoot",
+  LeftToeBase: "leftToes",
+  RightUpLeg: "rightUpperLeg",
+  RightLeg: "rightLowerLeg",
+  RightFoot: "rightFoot",
+  RightToeBase: "rightToes",
+  // Blender/custom rig style: BoneName_L / BoneName_R
+  Shoulder_L: "leftShoulder",
+  UpperArm_L: "leftUpperArm",
+  lowerArm_L: "leftLowerArm",
+  LowerArm_L: "leftLowerArm",
+  Hand_L: "leftHand",
+  Shoulder_R: "rightShoulder",
+  UpperArm_R: "rightUpperArm",
+  lowerArm_R: "rightLowerArm",
+  LowerArm_R: "rightLowerArm",
+  Hand_R: "rightHand",
+  UpperLeg_L: "leftUpperLeg",
+  LowerLeg_L: "leftLowerLeg",
+  lowerLeg_L: "leftLowerLeg",
+  Foot_L: "leftFoot",
+  Toes_L: "leftToes",
+  ToeBase_L: "leftToes",
+  UpperLeg_R: "rightUpperLeg",
+  LowerLeg_R: "rightLowerLeg",
+  lowerLeg_R: "rightLowerLeg",
+  Foot_R: "rightFoot",
+  Toes_R: "rightToes",
+  ToeBase_R: "rightToes",
+  // Finger bones (for hand animations)
+  ThumbProximal_L: "leftThumbProximal",
+  ThumbIntermediate_L: "leftThumbDistal",
+  IndexProximal_L: "leftIndexProximal",
+  IndexIntermediate_L: "leftIndexDistal",
+  MiddleProximal_L: "leftMiddleProximal",
+  MiddleIntermediate_L: "leftMiddleDistal",
+  RingProximal_L: "leftRingProximal",
+  RingIntermediate_L: "leftRingDistal",
+  LittleProximal_L: "leftLittleProximal",
+  LittleIntermediate_L: "leftLittleDistal",
+  ThumbProximal_R: "rightThumbProximal",
+  ThumbIntermediate_R: "rightThumbDistal",
+  IndexProximal_R: "rightIndexProximal",
+  IndexIntermediate_R: "rightIndexDistal",
+  MiddleProximal_R: "rightMiddleProximal",
+  MiddleIntermediate_R: "rightMiddleDistal",
+  RingProximal_R: "rightRingProximal",
+  RingIntermediate_R: "rightRingDistal",
+  LittleProximal_R: "rightLittleProximal",
+  LittleIntermediate_R: "rightLittleDistal",
 };
 
 /** Tracked state for a single VRM expression being faded in/out. */
@@ -113,6 +189,18 @@ export class VrmAvatarController implements AvatarAdapter {
   // --- Gesture system ---
   private readonly gesturePlayer = new GesturePlayer();
 
+  // --- Idle look-around system ---
+  // Periodically picks a random head direction and smoothly interpolates
+  // toward it, holds for a random time, then picks a new one. Creates
+  // a natural "alive" fidget without scripted animation.
+  // When `isSpeaking` is true (TTS active), look-around is suppressed
+  // and the head stays forward with subtle conversational nods only.
+  private idleLookTarget = { x: 0, y: 0, z: 0 };
+  private idleLookCurrent = { x: 0, y: 0, z: 0 };
+  private nextIdleLookAt = 0; // elapsed time to pick next target
+  private idleLookSpeed = 1.2; // radians per second (lerp factor)
+  private _isSpeaking = false;
+
   // Camera presets — smooth transition via lerp in the RAF loop
   private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
   private cameraCurrent = { ...this.cameraTarget };
@@ -136,12 +224,26 @@ export class VrmAvatarController implements AvatarAdapter {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(width, height, false);
+    // Tone mapping for richer colors + proper gamma
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
 
-    const ambient = new AmbientLight(0xffffff, 0.7);
+    // --- 3-point lighting for a polished VTuber look ---
+    // Soft ambient fill
+    const ambient = new AmbientLight(0xe8e0f0, 0.5);
     this.scene.add(ambient);
-    const dir = new DirectionalLight(0xffffff, 0.8);
-    dir.position.set(1, 2, 1);
-    this.scene.add(dir);
+    // Key light (warm, front-left, slightly above)
+    const key = new DirectionalLight(0xfff5e6, 1.0);
+    key.position.set(1.5, 2.5, 2);
+    this.scene.add(key);
+    // Fill light (cool, front-right, softer)
+    const fill = new DirectionalLight(0xd0e0ff, 0.4);
+    fill.position.set(-1.5, 1.5, 1.5);
+    this.scene.add(fill);
+    // Rim / back light (accent, behind + above for edge highlight)
+    const rim = new DirectionalLight(0xffffff, 0.6);
+    rim.position.set(0, 2, -2);
+    this.scene.add(rim);
 
     this.clock = new Clock();
     this.nextBlinkAt = this.scheduleBlink(0);
@@ -150,6 +252,99 @@ export class VrmAvatarController implements AvatarAdapter {
 
   private scheduleBlink(now: number): number {
     return now + 3 + Math.random() * 3;
+  }
+
+  /** Pick a random idle head-look direction. Weighted so most of the
+   *  time she looks roughly forward with small variation, but
+   *  occasionally glances to the side, up, or down. */
+  private scheduleIdleLook(): void {
+    const r = Math.random();
+    if (r < 0.30) {
+      // Look mostly forward with small variation
+      this.idleLookTarget = {
+        x: (Math.random() - 0.5) * 0.08,
+        y: (Math.random() - 0.5) * 0.12,
+        z: (Math.random() - 0.5) * 0.04,
+      };
+    } else if (r < 0.50) {
+      // Glance left (15-25 degrees)
+      this.idleLookTarget = {
+        x: (Math.random() - 0.5) * 0.06,
+        y: 0.20 + Math.random() * 0.20,
+        z: Math.random() * 0.05,
+      };
+    } else if (r < 0.70) {
+      // Glance right (15-25 degrees)
+      this.idleLookTarget = {
+        x: (Math.random() - 0.5) * 0.06,
+        y: -(0.20 + Math.random() * 0.20),
+        z: -Math.random() * 0.05,
+      };
+    } else if (r < 0.82) {
+      // Look down (like reading/thinking)
+      this.idleLookTarget = {
+        x: 0.10 + Math.random() * 0.10,
+        y: (Math.random() - 0.5) * 0.08,
+        z: 0,
+      };
+    } else if (r < 0.92) {
+      // Look slightly up
+      this.idleLookTarget = {
+        x: -(0.06 + Math.random() * 0.08),
+        y: (Math.random() - 0.5) * 0.08,
+        z: 0,
+      };
+    } else {
+      // Tilt head curiously to one side
+      this.idleLookTarget = {
+        x: Math.random() * 0.04,
+        y: (Math.random() - 0.5) * 0.10,
+        z: (Math.random() > 0.5 ? 1 : -1) * (0.08 + Math.random() * 0.08),
+      };
+    }
+    // Hold the look for 2-5 seconds before picking the next one
+    this.nextIdleLookAt = this.elapsed + 2 + Math.random() * 3;
+    // Vary the interpolation speed slightly
+    this.idleLookSpeed = 1.0 + Math.random() * 1.0;
+  }
+
+  /** Small forward-facing movements while speaking — subtle nods,
+   *  tiny head tilts, like someone actively talking to you. Never
+   *  looks away, stays engaged with the "camera" (the user). */
+  private scheduleConversationalNod(): void {
+    const r = Math.random();
+    if (r < 0.40) {
+      // Slight nod down (emphasis while talking)
+      this.idleLookTarget = {
+        x: 0.02 + Math.random() * 0.03,
+        y: (Math.random() - 0.5) * 0.02,
+        z: 0,
+      };
+    } else if (r < 0.65) {
+      // Tiny tilt to one side (expressive)
+      this.idleLookTarget = {
+        x: Math.random() * 0.02,
+        y: (Math.random() - 0.5) * 0.02,
+        z: (Math.random() > 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.025),
+      };
+    } else if (r < 0.85) {
+      // Return to center (neutral forward)
+      this.idleLookTarget = {
+        x: (Math.random() - 0.5) * 0.015,
+        y: (Math.random() - 0.5) * 0.015,
+        z: 0,
+      };
+    } else {
+      // Slight up movement (like finishing a thought)
+      this.idleLookTarget = {
+        x: -(0.01 + Math.random() * 0.02),
+        y: (Math.random() - 0.5) * 0.02,
+        z: 0,
+      };
+    }
+    // Faster cycling during speech — 0.8-1.8s between nods
+    this.nextIdleLookAt = this.elapsed + 0.8 + Math.random() * 1.0;
+    this.idleLookSpeed = 1.5 + Math.random() * 1.0;
   }
 
   private startLoop(): void {
@@ -162,11 +357,10 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateIdle(delta);
       this.updateLipsync();
       this.vrm?.update(delta);
-      // Gesture bone offsets MUST apply AFTER vrm.update() because
-      // update() syncs normalized→raw for bones set via
-      // setNormalizedPose (arms in applyRestPose). Writing to raw
-      // bones BEFORE update would be overwritten.
-      this.applyGestureOffsets();
+      // Head + gesture bone writes MUST apply AFTER vrm.update() because
+      // update() syncs normalized→raw and also runs lookAt/humanoid
+      // which overwrites raw bones. Writing before would be lost.
+      this.applyPostUpdate();
       // External animation mixer runs last — it writes directly to
       // raw bone transforms and must not be overwritten by idle/rest.
       this.mixer?.update(delta);
@@ -221,71 +415,57 @@ export class VrmAvatarController implements AvatarAdapter {
         | undefined;
       if (chest) {
         const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
-        const idleRotX = breathPhase * 0.015;
-        const idleRotY = 0;
-        const idleRotZ = 0;
-        // Add gesture offset additively
         const gestureOffset = this.gesturePlayer.getOffset("chest");
         const idleQuat = new Quaternion().setFromEuler(
-          new Euler(idleRotX, idleRotY, idleRotZ),
+          new Euler(breathPhase * 0.015, 0, 0),
         );
         idleQuat.multiply(gestureOffset);
         chest.quaternion.copy(idleQuat);
-        // Subtle shoulder rise with breath
         chest.position.y = breathPhase * 0.002;
       }
 
-      // Subtle head micro-movement — slow drift on two axes, different periods
-      const head = vrm.humanoid?.getRawBoneNode("head") as
-        | Object3D
-        | null
-        | undefined;
-      if (head) {
-        // Lerp emotion head tilt toward target
-        const tiltLerpSpeed = 3.0; // per second
-        this.emotionHeadTilt.x = MathUtils.lerp(
-          this.emotionHeadTilt.x,
-          this.emotionHeadTiltTarget.x,
-          Math.min(1, tiltLerpSpeed * dt),
-        );
-        this.emotionHeadTilt.y = MathUtils.lerp(
-          this.emotionHeadTilt.y,
-          this.emotionHeadTiltTarget.y,
-          Math.min(1, tiltLerpSpeed * dt),
-        );
-        this.emotionHeadTilt.z = MathUtils.lerp(
-          this.emotionHeadTilt.z,
-          this.emotionHeadTiltTarget.z,
-          Math.min(1, tiltLerpSpeed * dt),
-        );
-
-        const idleRotX =
-          Math.sin(t * 0.7) * 0.01 +
-          Math.sin(t * 0.3) * 0.005 +
-          this.emotionHeadTilt.x;
-        const idleRotY =
-          Math.sin(t * 0.5) * 0.015 +
-          Math.cos(t * 0.2) * 0.008 +
-          this.emotionHeadTilt.y;
-        const idleRotZ = Math.sin(t * 0.4) * 0.005 + this.emotionHeadTilt.z;
-
-        // Add gesture offset additively
-        const gestureOffset = this.gesturePlayer.getOffset("head");
-        const idleQuat = new Quaternion().setFromEuler(
-          new Euler(idleRotX, idleRotY, idleRotZ),
-        );
-        idleQuat.multiply(gestureOffset);
-        head.quaternion.copy(idleQuat);
+      // --- Head look-around + emotion tilt ---
+      // Values are computed here but applied in applyPostUpdate()
+      // AFTER vrm.update() so the humanoid sync doesn't overwrite them.
+      // When speaking, head stays mostly forward with tiny conversational nods.
+      if (this.elapsed >= this.nextIdleLookAt) {
+        if (this._isSpeaking) {
+          this.scheduleConversationalNod();
+        } else {
+          this.scheduleIdleLook();
+        }
       }
+      const lookLerp = Math.min(1, this.idleLookSpeed * dt);
+      this.idleLookCurrent.x += (this.idleLookTarget.x - this.idleLookCurrent.x) * lookLerp;
+      this.idleLookCurrent.y += (this.idleLookTarget.y - this.idleLookCurrent.y) * lookLerp;
+      this.idleLookCurrent.z += (this.idleLookTarget.z - this.idleLookCurrent.z) * lookLerp;
 
-      // Gentle body sway — spine bone, very slow and subtle
+      // Lerp emotion head tilt toward target
+      const tiltLerpSpeed = 3.0;
+      this.emotionHeadTilt.x = MathUtils.lerp(
+        this.emotionHeadTilt.x,
+        this.emotionHeadTiltTarget.x,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+      this.emotionHeadTilt.y = MathUtils.lerp(
+        this.emotionHeadTilt.y,
+        this.emotionHeadTiltTarget.y,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+      this.emotionHeadTilt.z = MathUtils.lerp(
+        this.emotionHeadTilt.z,
+        this.emotionHeadTiltTarget.z,
+        Math.min(1, tiltLerpSpeed * dt),
+      );
+
+      // Body sway — spine bone, slow weight-shift
       const spine = vrm.humanoid?.getRawBoneNode("spine") as
         | Object3D
         | null
         | undefined;
       if (spine) {
-        const idleRotX = Math.sin(t * 0.25) * 0.005;
-        const idleRotZ = Math.sin(t * 0.3) * 0.008;
+        const idleRotX = Math.sin(t * 0.25) * 0.006 + Math.sin(t * 0.13) * 0.003;
+        const idleRotZ = Math.sin(t * 0.18) * 0.012 + Math.cos(t * 0.11) * 0.006;
         const gestureOffset = this.gesturePlayer.getOffset("spine");
         const idleQuat = new Quaternion().setFromEuler(
           new Euler(idleRotX, 0, idleRotZ),
@@ -294,8 +474,8 @@ export class VrmAvatarController implements AvatarAdapter {
         spine.quaternion.copy(idleQuat);
       }
 
-      // Gesture arm/hand bones are applied in applyGestureOffsets()
-      // AFTER vrm.update() so setNormalizedPose doesn't overwrite them.
+      // Head + arm/hand bones are applied in applyPostUpdate()
+      // AFTER vrm.update() so the humanoid sync doesn't overwrite them.
     }
 
     // --- Expression transitions (per-frame lerp) ---
@@ -429,6 +609,12 @@ export class VrmAvatarController implements AvatarAdapter {
       return;
     }
     VRMUtils.rotateVRM0(loadedVrm);
+    // Disable VRM lookAt auto-tracking — it fights our manual head
+    // rotation in the idle look-around system. We drive head rotation
+    // ourselves via updateIdle().
+    if (loadedVrm.lookAt) {
+      loadedVrm.lookAt.autoUpdate = false;
+    }
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
     // Rest pose is applied every frame by updateIdle() via
@@ -492,6 +678,18 @@ export class VrmAvatarController implements AvatarAdapter {
 
   /** Smoothly transition the camera to a named preset.
    *  Available: 'bust' (default sidebar), 'face' (close-up), 'fullBody'. */
+  /** When true, head look-around is suppressed and replaced with small
+   *  forward-facing conversational nods. Set to true on tts_start,
+   *  false on tts_end/turn_end so she "looks at you" while speaking. */
+  setSpeaking(speaking: boolean): void {
+    console.log(`[avatar] setSpeaking(${speaking})`);
+    this._isSpeaking = speaking;
+    if (speaking) {
+      // Smoothly return gaze to forward
+      this.idleLookTarget = { x: 0, y: 0, z: 0 };
+    }
+  }
+
   setCameraPreset(preset: string): void {
     const p = VrmAvatarController.CAMERA_PRESETS[preset];
     if (!p) return;
@@ -635,7 +833,17 @@ export class VrmAvatarController implements AvatarAdapter {
       throw new Error(`No animation clips found in ${url}`);
     }
 
-    return this.retargetClip(clips[0], vrm);
+    console.log(`[anim] loaded ${url}: ${clips.length} clip(s), first has ${clips[0].tracks.length} tracks, duration ${clips[0].duration}s`);
+    // Log ALL unique bone names so we can build the mapping
+    const boneNames = [...new Set(clips[0].tracks.map(t => t.name.split('.')[0]))];
+    console.log(`[anim] ALL bone names in FBX (${boneNames.length}):`, boneNames);
+
+    const retargeted = this.retargetClip(clips[0], vrm);
+    console.log(`[anim] retargeted: ${retargeted.tracks.length} tracks (from ${clips[0].tracks.length} original)`);
+    if (retargeted.tracks.length > 0) {
+      console.log(`[anim] retargeted sample:`, retargeted.tracks.slice(0, 3).map(t => t.name));
+    }
+    return retargeted;
   }
 
   /**
@@ -665,7 +873,11 @@ export class VrmAvatarController implements AvatarAdapter {
 
       const newTrackName = `${boneNode.name}.${property}`;
 
-      // Create a new track with the corrected name.
+      // ONLY apply rotation (quaternion) tracks. Position and scale
+      // tracks from external rigs almost always cause deformation
+      // because bone lengths/positions differ between the source rig
+      // and the VRM skeleton. The VRM keeps its own bone positions;
+      // we only drive the rotations from the animation.
       if (
         property === "quaternion" &&
         track instanceof QuaternionKeyframeTrack
@@ -677,28 +889,8 @@ export class VrmAvatarController implements AvatarAdapter {
             Array.from(track.values),
           ),
         );
-      } else if (
-        property === "position" &&
-        track instanceof VectorKeyframeTrack
-      ) {
-        // Scale position tracks — Mixamo uses cm, VRM uses meters
-        // (most Mixamo exports are ~100x larger).
-        const scaledValues = new Float32Array(track.values.length);
-        for (let i = 0; i < track.values.length; i++) {
-          scaledValues[i] = track.values[i] * 0.01;
-        }
-        retargetedTracks.push(
-          new VectorKeyframeTrack(
-            newTrackName,
-            Array.from(track.times),
-            Array.from(scaledValues),
-          ),
-        );
-      } else {
-        // Generic fallback (scale, etc.)
-        retargetedTracks.push(track.clone());
-        retargetedTracks[retargetedTracks.length - 1].name = newTrackName;
       }
+      // Position and scale tracks are intentionally skipped.
     }
 
     return new AnimationClip(clip.name || "retargeted", clip.duration, retargetedTracks);
@@ -763,31 +955,64 @@ export class VrmAvatarController implements AvatarAdapter {
   }
 
   /**
-   * Apply gesture bone offsets AFTER vrm.update() so they aren't
-   * overwritten by the normalized→raw sync. Handles arm and hand
-   * bones that the rest pose controls via setNormalizedPose().
-   * Head/chest/spine gestures blend inside updateIdle() since those
-   * bones aren't managed by setNormalizedPose.
+   * Apply head rotation + gesture bone offsets AFTER vrm.update().
+   * vrm.update() syncs normalized→raw AND runs lookAt/humanoid which
+   * overwrites raw bone rotations. Anything we write in updateIdle()
+   * to raw bones gets clobbered. So we write here, AFTER update(),
+   * and our values are the final word before render().
    */
-  private applyGestureOffsets(): void {
+  private applyPostUpdate(): void {
     const vrm = this.vrm;
-    if (!vrm || !this.gesturePlayer.isPlaying) return;
-    for (const boneName of [
-      "rightUpperArm",
-      "rightLowerArm",
-      "rightHand",
-      "leftUpperArm",
-      "leftLowerArm",
-      "leftHand",
-    ]) {
-      const offset = this.gesturePlayer.getOffset(boneName);
-      if (offset.x !== 0 || offset.y !== 0 || offset.z !== 0 || offset.w !== 1) {
-        const boneNode = vrm.humanoid?.getRawBoneNode(boneName as any) as
-          | Object3D
-          | null
-          | undefined;
-        if (boneNode) {
-          boneNode.quaternion.multiply(offset);
+    if (!vrm) return;
+
+    // --- Head: look-around + emotion tilt + micro-drift + gesture ---
+    if (!this.externalAnimPlaying) {
+      const head = vrm.humanoid?.getRawBoneNode("head") as
+        | Object3D
+        | null
+        | undefined;
+      if (head) {
+        const t = this.elapsed;
+        const idleRotX =
+          this.idleLookCurrent.x +
+          Math.sin(t * 0.7) * 0.005 +
+          this.emotionHeadTilt.x;
+        const idleRotY =
+          this.idleLookCurrent.y +
+          Math.sin(t * 0.5) * 0.008 +
+          this.emotionHeadTilt.y;
+        const idleRotZ =
+          this.idleLookCurrent.z +
+          Math.sin(t * 0.4) * 0.003 +
+          this.emotionHeadTilt.z;
+        const gestureOffset = this.gesturePlayer.getOffset("head");
+        const q = new Quaternion().setFromEuler(
+          new Euler(idleRotX, idleRotY, idleRotZ),
+        );
+        q.multiply(gestureOffset);
+        head.quaternion.copy(q);
+      }
+    }
+
+    // --- Gesture arm/hand bones ---
+    if (this.gesturePlayer.isPlaying) {
+      for (const boneName of [
+        "rightUpperArm",
+        "rightLowerArm",
+        "rightHand",
+        "leftUpperArm",
+        "leftLowerArm",
+        "leftHand",
+      ]) {
+        const offset = this.gesturePlayer.getOffset(boneName);
+        if (offset.x !== 0 || offset.y !== 0 || offset.z !== 0 || offset.w !== 1) {
+          const boneNode = vrm.humanoid?.getRawBoneNode(boneName as any) as
+            | Object3D
+            | null
+            | undefined;
+          if (boneNode) {
+            boneNode.quaternion.multiply(offset);
+          }
         }
       }
     }

@@ -1,0 +1,16 @@
+# CLIProxyAPI — config for Seraphine
+host: "127.0.0.1"
+port: 8317
+
+auth-dir: "~/.cli-proxy-api"
+
+api-keys:
+  - "seraphine-local"
+
+# Disable commercial middleware for lower per-request overhead
+commercial-mode: true
+
+# Disable passthrough of upstream headers (reduce processing)
+passthrough-headers: false
+
+debug: false

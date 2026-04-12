@@ -28,8 +28,12 @@ class Settings(BaseSettings):
     # Anthropic cloud LLM — optional alternative to the local stack.
     # Only consulted when llm_backend == "anthropic".
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     anthropic_base_url: str = "https://api.anthropic.com"
+    # Smart model routing: set to a stronger model (e.g. claude-sonnet-4-6)
+    # to auto-escalate on complex turns (tool calls, vision, thinking).
+    # Leave empty to always use anthropic_model.
+    anthropic_smart_model: str = ""
 
     sqlite_path: Path = Path("../data/seraphine.sqlite")
     chroma_path: Path = Path("../data/chroma")

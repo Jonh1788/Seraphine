@@ -83,6 +83,7 @@ class WiseClient:
 
     async def _ensure_profile(self) -> int:
         """Return the profile ID, auto-detecting if needed."""
+        logger.info("Wise _ensure_profile: configured=%d", self._profile_id)
         if self._profile_id:
             return self._profile_id
         profiles = await self.get_profiles()
@@ -166,18 +167,28 @@ class WiseClient:
         source_currency: str,
         target_currency: str,
         amount: float,
-        pay_out: str = "PIX",
+        pay_out: str | None = None,
     ) -> dict:
         """POST /v3/profiles/{id}/quotes"""
         profile_id = await self._ensure_profile()
         payload: dict[str, Any] = {
             "sourceCurrency": source_currency.upper(),
             "targetCurrency": target_currency.upper(),
-            "targetAmount": amount,
-            "payOut": pay_out,
+            "sourceAmount": amount,
         }
+        if pay_out:
+            payload["payOut"] = pay_out
         return await self._request(
             "POST", f"/v3/profiles/{profile_id}/quotes", json=payload
+        )
+
+    async def get_account_requirements(self, quote_id: str) -> list[dict]:
+        """GET /v1/quotes/{quoteId}/account-requirements
+        Returns dynamic field requirements for the target currency/route.
+        Use this to discover the correct recipient type and details
+        fields for PIX (or any other pay-out method)."""
+        return await self._request(
+            "GET", f"/v1/quotes/{quote_id}/account-requirements"
         )
 
     async def create_recipient(
@@ -186,14 +197,17 @@ class WiseClient:
         pix_key: str,
         pix_key_type: str,
         currency: str = "BRL",
+        recipient_type: str = "pix",
     ) -> dict:
-        """POST /v1/accounts"""
+        """POST /v1/accounts
+        `recipient_type` should come from get_account_requirements
+        (e.g. 'pix', 'brazil', 'brazil_pix'). Defaults to 'pix'."""
         profile_id = await self._ensure_profile()
         payload = {
             "profile": profile_id,
             "accountHolderName": name,
             "currency": currency.upper(),
-            "type": "pix",
+            "type": recipient_type,
             "details": {
                 "pixKey": pix_key,
                 "pixKeyType": pix_key_type.upper(),

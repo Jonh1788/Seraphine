@@ -21,6 +21,7 @@ from seraphine.conversation.audio_engine import (
     TurnEndEvent as AudioTurnEndEvent,
 )
 from seraphine.conversation.engine import ConversationEngine
+from seraphine.config import settings as _settings
 from seraphine.conversation.sentences import (
     flush_remainder,
     split_sentences,
@@ -106,37 +107,101 @@ async def _speech_worker(
     ws: WebSocket,
     queue: "asyncio.Queue[SpeechItem]",
 ) -> None:
-    """Drain *queue* serially, speaking one utterance at a time.
+    """Drain *queue* serially, streaming all queued sentences as ONE
+    continuous audio stream per turn.
 
-    A failure in a single utterance is logged and the worker keeps going,
-    so transient TTS errors don't poison subsequent speech. The
-    per-item ``done_event`` is always set, even on failure, so callers
-    awaiting completion can never deadlock.
+    Instead of sending tts_start/chunks/tts_end per sentence (which
+    causes audible gaps on iOS/iPad where each HTMLAudioElement switch
+    pauses the audio session), we:
+    1. Send ONE tts_start when the first sentence arrives
+    2. Stream chunks from ALL sentences continuously
+    3. Send ONE tts_end when the queue is empty
+
+    This gives the frontend a seamless byte stream — the accumulator
+    creates WAV segments at natural threshold boundaries without forced
+    breaks between sentences.
     """
+    tts = getattr(ws.app.state, "tts", None)
+    streaming = False  # True while we're inside a tts_start..tts_end block
+    current_turn_id = ""
+
     while True:
         item = await queue.get()
         if item is None:
+            # Shutdown sentinel. Close any open stream.
+            if streaming:
+                try:
+                    await ws.send_json({"type": "tts_end", "turn_id": current_turn_id})
+                except Exception:
+                    pass
             return
-        # Items are (text, turn_id, done, cancel_event?). Backward-compat
-        # for any caller that queues a 3-tuple.
+
         if len(item) == 4:
             text, turn_id, done, cancel_event = item
-        else:  # pragma: no cover — legacy shape, kept for safety
+        else:
             text, turn_id, done = item  # type: ignore[misc]
             cancel_event = None
-        # Drop items whose turn was cancelled while they sat in the queue.
+
+        # Drop cancelled items.
         if cancel_event is not None and cancel_event.is_set():
             done.set()
+            # If we were streaming and got cancelled, close the stream.
+            if streaming:
+                try:
+                    await ws.send_json({"type": "tts_end", "turn_id": current_turn_id})
+                except Exception:
+                    pass
+                streaming = False
             continue
+
+        if tts is None or not text.strip():
+            done.set()
+            continue
+
         try:
-            await _speak_full(ws, text, turn_id, cancel_event=cancel_event)
+            # Start a new stream if not already open.
+            if not streaming:
+                playback_rate = 1.0
+                if (
+                    _settings.tts_backend == "elevenlabs"
+                    and "v3" in _settings.elevenlabs_model_id.lower()
+                    and _settings.elevenlabs_speed != 1.0
+                ):
+                    playback_rate = _settings.elevenlabs_speed
+                await ws.send_json({
+                    "type": "tts_start",
+                    "turn_id": turn_id,
+                    "sample_rate": 24000,
+                    "playback_rate": playback_rate,
+                })
+                streaming = True
+                current_turn_id = turn_id
+
+            # Stream this sentence's chunks into the open stream.
+            async for chunk in tts.synthesize_stream(text):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                if chunk:
+                    await ws.send_bytes(chunk)
+
         except WebSocketDisconnect:
             done.set()
             return
         except Exception as e:
-            logger.warning("speech worker failed: %s", e)
+            logger.warning("speech worker TTS failed: %s", e)
         finally:
             done.set()
+
+        # Check if the queue is empty — if so, close the stream.
+        # Use a tiny sleep to let any just-enqueued item land.
+        await asyncio.sleep(0.05)
+        if queue.empty():
+            if streaming:
+                try:
+                    await ws.send_json({"type": "tts_end", "turn_id": current_turn_id})
+                except Exception:
+                    pass
+                streaming = False
 
 
 async def _speak_full(
@@ -165,7 +230,21 @@ async def _speak_full(
     if cancel_event is not None and cancel_event.is_set():
         return
 
-    await ws.send_json({"type": "tts_start", "turn_id": turn_id, "sample_rate": 24000})
+    # When v3, speed can't be set server-side — tell the frontend
+    # to apply playbackRate on the HTMLAudioElement instead.
+    playback_rate = 1.0
+    if (
+        _settings.tts_backend == "elevenlabs"
+        and "v3" in _settings.elevenlabs_model_id.lower()
+        and _settings.elevenlabs_speed != 1.0
+    ):
+        playback_rate = _settings.elevenlabs_speed
+    await ws.send_json({
+        "type": "tts_start",
+        "turn_id": turn_id,
+        "sample_rate": 24000,
+        "playback_rate": playback_rate,
+    })
     try:
         async for chunk in tts.synthesize_stream(text):
             if cancel_event is not None and cancel_event.is_set():
@@ -332,6 +411,7 @@ async def _setup_mcp_notifications(ws: WebSocket) -> Any:
         if event_type == "task.awaiting_approval":
             body = task_data.get("body", "") or ""
             plan = task_data.get("plan", "") or ""
+            assignee = task_data.get("assignee", "") or ""
             if not body and summary:
                 body = summary
             try:
@@ -341,6 +421,7 @@ async def _setup_mcp_notifications(ws: WebSocket) -> Any:
                     "title": title,
                     "body": body,
                     "plan": plan,
+                    "assignee": assignee,
                 })
             except Exception:
                 pass
@@ -426,7 +507,6 @@ async def conversation_ws(ws: WebSocket) -> None:
 
     # Determine once whether to strip ElevenLabs audio tags before TTS.
     # v3 renders tags as real emotion; other models would say them literally.
-    from seraphine.config import settings as _settings
     _strip_audio_tags = not (
         _settings.tts_backend == "elevenlabs"
         and "v3" in _settings.elevenlabs_model_id.lower()
@@ -555,6 +635,19 @@ async def conversation_ws(ws: WebSocket) -> None:
                 # TTS playback without killing the connection.
                 turn_cancel_event = asyncio.Event()
 
+                # Sentence batching: accumulate 2 sentences before
+                # dispatching to TTS for better prosody.
+                _pending_sentences: list[str] = []
+
+                # Prefix for TTS input — [no accent] improves ElevenLabs
+                # v3 PT-BR pronunciation by suppressing foreign accent.
+                _tts_prefix = ""
+                if (
+                    _settings.tts_backend == "elevenlabs"
+                    and "v3" in _settings.elevenlabs_model_id.lower()
+                ):
+                    _tts_prefix = "[no accent] "
+
                 # -- Streaming TTS: enqueue each complete sentence as it
                 # becomes available, so the first audio chunk starts
                 # playing before the LLM has finished the full turn. The
@@ -577,25 +670,64 @@ async def conversation_ws(ws: WebSocket) -> None:
                                 final_turn_id = getattr(event, "turn_id", None)
                             if speak:
                                 sentences, sentence_buf = split_sentences(sentence_buf)
-                                for sent in sentences:
-                                    cleaned = strip_markdown_for_tts(sent, strip_audio_tags=_strip_audio_tags)
+                                # Batch sentences: accumulate into a pending
+                                # list and dispatch when we have 2 (or on
+                                # turn_end for the remainder). Sends fuller
+                                # text to TTS for better prosody.
+                                _pending_sentences.extend(sentences)
+                                if len(_pending_sentences) >= 4:
+                                    batch = " ".join(_pending_sentences)
+                                    _pending_sentences.clear()
+                                    cleaned = strip_markdown_for_tts(batch, strip_audio_tags=_strip_audio_tags)
                                     if cleaned:
+                                        # Prefix [no accent] for ElevenLabs v3
+                                        tts_input = _tts_prefix + cleaned
                                         speak_done = await _enqueue_speech(
                                             ws,
-                                            cleaned,
+                                            tts_input,
+                                            final_turn_id or "",
+                                            cancel_event=turn_cancel_event,
+                                        )
+                        elif etype == "tool_request":
+                            # Flush pending speech BEFORE the tool runs so
+                            # the user hears "Vou buscar isso!" while the
+                            # tool executes, instead of silence.
+                            if speak:
+                                if sentence_buf.strip():
+                                    tail = flush_remainder(sentence_buf)
+                                    if tail:
+                                        _pending_sentences.append(tail)
+                                    sentence_buf = ""
+                                if _pending_sentences:
+                                    batch = " ".join(_pending_sentences)
+                                    _pending_sentences.clear()
+                                    cleaned = strip_markdown_for_tts(batch, strip_audio_tags=_strip_audio_tags)
+                                    if cleaned:
+                                        tts_input = _tts_prefix + cleaned
+                                        speak_done = await _enqueue_speech(
+                                            ws,
+                                            tts_input,
                                             final_turn_id or "",
                                             cancel_event=turn_cancel_event,
                                         )
                         elif etype == "turn_end":
                             final_turn_id = getattr(event, "turn_id", None)
-                            if speak and sentence_buf.strip():
-                                tail = flush_remainder(sentence_buf)
-                                if tail:
-                                    cleaned = strip_markdown_for_tts(tail, strip_audio_tags=_strip_audio_tags)
+                            if speak:
+                                # Flush any remaining buffer through splitter
+                                if sentence_buf.strip():
+                                    tail = flush_remainder(sentence_buf)
+                                    if tail:
+                                        _pending_sentences.append(tail)
+                                # Send all pending sentences (even if < 2)
+                                if _pending_sentences:
+                                    batch = " ".join(_pending_sentences)
+                                    _pending_sentences.clear()
+                                    cleaned = strip_markdown_for_tts(batch, strip_audio_tags=_strip_audio_tags)
                                     if cleaned:
+                                        tts_input = _tts_prefix + cleaned
                                         speak_done = await _enqueue_speech(
                                             ws,
-                                            cleaned,
+                                            tts_input,
                                             final_turn_id or "",
                                             cancel_event=turn_cancel_event,
                                         )
@@ -771,12 +903,35 @@ async def conversation_ws(ws: WebSocket) -> None:
                     )
                     continue
                 task_id = str(payload.get("task_id", ""))
-                approved = bool(payload.get("approved", False))
+                # Action can be: "approve", "reject", "complete", "replan"
+                # (legacy: "approved" bool for backward compat)
+                action = str(payload.get("action", ""))
+                if not action:
+                    # Backward compat with old approve/reject bool
+                    action = "approve" if payload.get("approved", False) else "reject"
                 comment = payload.get("comment") or None
-                tool_name = "approve_task" if approved else "reject_task"
+                notes = payload.get("notes") or None
+                body_text = payload.get("body") or None
+
+                # Map action to the right MCP tool
+                _ACTION_TO_TOOL: dict[str, str] = {
+                    "approve": "approve_task",
+                    "reject": "reject_task",
+                    "complete": "complete_task",
+                    "replan": "replan_task",
+                }
+                tool_name = _ACTION_TO_TOOL.get(action, "approve_task")
                 tool_args: dict[str, Any] = {"id": task_id}
-                if comment:
+                if action == "complete" and comment:
+                    tool_args["completionNote"] = comment
+                elif action == "replan":
+                    if body_text:
+                        tool_args["body"] = body_text
+                    if notes:
+                        tool_args["notes"] = notes
+                elif comment:
                     tool_args["comment"] = comment
+
                 try:
                     result = await mcp_client.call_tool(tool_name, tool_args)
                     logger.info("MCP %s(%s) result: %s", tool_name, task_id, result)

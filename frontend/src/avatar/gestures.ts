@@ -77,11 +77,12 @@ export const GESTURE_SHAKE_HEAD: GestureDefinition = {
 
 export const GESTURE_TILT_HEAD: GestureDefinition = {
   name: "tiltHead",
-  duration: 0.6,
+  duration: 1.0,
   keyframes: [
     { bone: "head", rotation: { x: 0, y: 0, z: 0 }, time: 0 },
-    { bone: "head", rotation: { x: 0, y: 0, z: DEG(10) }, time: 0.3 },
-    { bone: "head", rotation: { x: 0, y: 0, z: 0 }, time: 0.6 },
+    { bone: "head", rotation: { x: 0.04, y: 0.03, z: DEG(18) }, time: 0.35 },
+    { bone: "head", rotation: { x: 0.04, y: 0.03, z: DEG(18) }, time: 0.65 },
+    { bone: "head", rotation: { x: 0, y: 0, z: 0 }, time: 1.0 },
   ],
 };
 

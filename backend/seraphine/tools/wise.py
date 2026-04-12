@@ -240,8 +240,11 @@ class WiseSendPixTool(Tool):
     description = (
         "Send a PIX payment through Wise. This orchestrates the FULL flow: "
         "create quote -> create/find recipient -> create transfer -> fund from balance. "
-        "IMPORTANT: This moves real money. Always confirm the amount and recipient "
-        "with the user before executing. "
+        "Supports sending from ANY currency to BRL via PIX (e.g. EUR→BRL, "
+        "USD→BRL). If source_currency is omitted, auto-detects from the "
+        "balance with highest funds. The amount is in the SOURCE currency. "
+        "IMPORTANT: This moves real money. Always confirm the amount and "
+        "recipient with the user before executing. "
         "Use when the user asks to send money via PIX, transfer via Wise, "
         "or 'manda um PIX', 'transfere', 'envia dinheiro'. "
         "Triggers: 'manda PIX', 'envia PIX', 'faz um PIX', 'transfere via Wise', "
@@ -271,6 +274,15 @@ class WiseSendPixTool(Tool):
                 "type": "string",
                 "description": "Optional reference/description for the transfer.",
             },
+            "source_currency": {
+                "type": "string",
+                "description": (
+                    "Source currency code (e.g. EUR, USD, GBP). "
+                    "Default: auto-detect from the Wise balance with "
+                    "highest available funds. For international→PIX, "
+                    "use the currency you hold (e.g. EUR)."
+                ),
+            },
         },
         "required": ["recipient_name", "pix_key", "pix_key_type", "amount"],
     }
@@ -286,6 +298,7 @@ class WiseSendPixTool(Tool):
         pix_key_type = args.get("pix_key_type")
         amount = args.get("amount")
         reference = args.get("reference", "")
+        source_currency = args.get("source_currency", "")
 
         if not all([recipient_name, pix_key, pix_key_type, amount]):
             return ToolResult(
@@ -294,20 +307,54 @@ class WiseSendPixTool(Tool):
             )
 
         try:
-            # Step 1: Create quote
+            # Auto-detect source currency from the balance with most funds
+            if not source_currency:
+                balances = await self._client.get_balances()
+                best = max(
+                    (b for b in balances if b.get("amount", {}).get("value", 0) > 0),
+                    key=lambda b: b.get("amount", {}).get("value", 0),
+                    default=None,
+                )
+                if best:
+                    source_currency = best.get("amount", {}).get("currency", "EUR")
+                    logger.info("Wise PIX: auto-detected source=%s (%.2f available)",
+                                source_currency, best["amount"]["value"])
+                else:
+                    return ToolResult(
+                        ok=False,
+                        error="No balance with funds found in your Wise account.",
+                    )
+
+            # Step 1: Create quote (source→BRL for PIX destination)
             quote = await self._client.create_quote(
-                source_currency="BRL",
+                source_currency=source_currency,
                 target_currency="BRL",
                 amount=amount,
             )
             quote_id = quote.get("id")
             logger.info("Wise PIX: quote created id=%s", quote_id)
 
-            # Step 2: Create recipient
+            # Step 2: Get account requirements (dynamic PIX fields)
+            try:
+                requirements = await self._client.get_account_requirements(quote_id)
+                # Find the PIX-compatible type from requirements
+                pix_type = "pix"
+                for req in requirements:
+                    req_type = req.get("type", "")
+                    if "pix" in req_type.lower():
+                        pix_type = req_type
+                        break
+                logger.info("Wise PIX: using recipient type=%s", pix_type)
+            except Exception as e:
+                logger.warning("Wise PIX: account-requirements failed (%s), using type=pix", e)
+                pix_type = "pix"
+
+            # Step 3: Create recipient
             recipient = await self._client.create_recipient(
                 name=recipient_name,
                 pix_key=pix_key,
                 pix_key_type=pix_key_type,
+                recipient_type=pix_type,
             )
             recipient_id = recipient.get("id")
             logger.info("Wise PIX: recipient created id=%s", recipient_id)

@@ -76,14 +76,19 @@ class ElevenLabsAdapter(TTSAdapter):
         await self._client.aclose()
 
     def _build_body(self, text: str) -> dict:
+        vs: dict = {
+            "stability": self.stability,
+            "similarity_boost": self.similarity_boost,
+        }
+        # v3 does NOT accept the speed parameter in voice_settings —
+        # it returns 400. For v3, speed is handled client-side via
+        # HTMLAudioElement.playbackRate in the frontend.
+        if "v3" not in self.model_id.lower():
+            vs["speed"] = self.speed
         return {
             "text": text,
             "model_id": self.model_id,
-            "voice_settings": {
-                "stability": self.stability,
-                "similarity_boost": self.similarity_boost,
-                "speed": self.speed,
-            },
+            "voice_settings": vs,
         }
 
     async def synthesize_stream(  # type: ignore[override]

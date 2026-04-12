@@ -115,8 +115,8 @@ class BrowserAgentClient:
         )
 
     async def page_info(self) -> dict[str, Any]:
-        """GET /page-info — get current URL and title."""
-        return await self._request("GET", "/page-info")
+        """GET /page — get current URL and title."""
+        return await self._request("GET", "/page")
 
     async def close(self) -> dict[str, Any]:
         """POST /close — close the browser page."""

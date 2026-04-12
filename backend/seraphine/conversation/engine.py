@@ -420,10 +420,15 @@ class ConversationEngine:
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
                 _raise_if_cancelled()
+                model_override = self._pick_model(
+                    think=think,
+                    has_images=bool(images),
+                    tool_iteration=_iteration,
+                )
                 if self.tools is not None:
-                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think)  # type: ignore[call-arg]
+                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think, model=model_override)  # type: ignore[call-arg]
                 else:
-                    stream = self.llm.chat(messages, think=think)
+                    stream = self.llm.chat(messages, think=think, model=model_override)
                 active_stream = stream
 
                 pending_tool_calls: list[dict[str, Any]] | None = None
@@ -618,6 +623,36 @@ class ConversationEngine:
             self._turn_counter += 1
             if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
                 asyncio.create_task(self._auto_reflect())
+
+    def _pick_model(
+        self,
+        *,
+        think: bool = False,
+        has_images: bool = False,
+        tool_iteration: int = 0,
+    ) -> str | None:
+        """Select model for this turn: escalate to smart model when needed.
+
+        Returns a model ID override, or None to use the adapter's default.
+        Only applies when anthropic_smart_model is configured.
+        """
+        from seraphine.config import settings
+
+        smart = settings.anthropic_smart_model
+        if not smart:
+            return None  # routing disabled — use default model
+
+        # Escalate to the stronger model for complex turns:
+        # 1. User requested thinking/reasoning
+        # 2. Images attached (vision tasks need stronger model)
+        # 3. Tool call iteration > 0 (multi-step tool chains)
+        if think or has_images or tool_iteration > 0:
+            logger.debug("smart routing → %s (think=%s, images=%s, iter=%d)",
+                         smart, think, has_images, tool_iteration)
+            return smart
+
+        # Default: fast model
+        return None
 
     async def _auto_reflect(self) -> None:
         if self.memory is None:

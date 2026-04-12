@@ -87,6 +87,8 @@ export function App(): JSX.Element {
           setMetrics((prev) => ({ ...prev, ttft: now - tsSendRef.current }));
         }
       } else if (type === 'turn_end') {
+        // Avatar: back to free look-around
+        try { avatarCtrlRef.current?.setSpeaking?.(false); } catch { /* */ }
         // Turn duration
         if (tsSendRef.current) {
           setMetrics((prev) => ({ ...prev, turnDuration: now - tsSendRef.current }));
@@ -95,14 +97,26 @@ export function App(): JSX.Element {
       } else if (type === 'tts_start') {
         tsTtsStartRef.current = now;
         tsTtsFirstChunkRef.current = false;
+        // Avatar: switch to forward-facing conversational nods
+        try { avatarCtrlRef.current?.setSpeaking?.(true); } catch { /* */ }
+        // Dynamic playback rate — v3 can't set speed server-side, so
+        // the backend sends the desired rate here for client-side
+        // HTMLAudioElement.playbackRate compensation.
+        const rate = (msg as { playback_rate?: number }).playback_rate;
+        if (rate && rate !== 1.0) {
+          playbackRef.current?.setPlaybackRate?.(rate);
+        } else {
+          playbackRef.current?.setPlaybackRate?.(1.0);
+        }
       } else if (type === 'tts_end') {
-        // Push the sentence's tail bytes into a queued segment so they
-        // actually play, but don't await drain — RealtimeController
-        // owns the real flush() on turn_end. A blocking flush here
-        // would race with that call and deadlock on flushResolve
-        // (single-slot promise that gets overwritten by the second
-        // caller), leaving the state stuck at botSpeaking.
-        playbackRef.current?.flushPending();
+        // Do NOT flushPending() here. With sentence-level TTS streaming,
+        // multiple tts_end events fire per turn. Flushing on each one
+        // forces a tiny WAV segment that needs its own HTMLAudioElement.
+        // On iOS/iPad, each new Audio element causes the audio session
+        // to briefly pause — heard as gaps between sentences.
+        // Instead, let chunks flow continuously through the accumulator.
+        // The real flush() on turn_end (RealtimeController or the
+        // back-pressure wait below) drains the final tail.
         tsTtsStartRef.current = 0;
       } else if (type === 'notification') {
         // Proactive notification from Supertasks MCP

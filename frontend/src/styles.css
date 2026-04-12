@@ -943,6 +943,35 @@ button:disabled {
   filter: brightness(1.1);
 }
 
+.mcp-approval__btn-complete {
+  background: var(--accent);
+  color: #fff;
+}
+
+.mcp-approval__btn-complete:hover {
+  filter: brightness(1.1);
+}
+
+.mcp-approval__btn-replan {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.mcp-approval__btn-replan:hover {
+  background: var(--bg-2);
+}
+
+.mcp-approval__badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent-dim);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
 .mcp-approval__resolved {
   margin-top: var(--space-2);
   font-size: 13px;
