@@ -335,7 +335,7 @@ export function App(): JSX.Element {
         <aside className="sidebar">
           <div className="avatar-stage">
             <VrmAvatar
-              avatarUrl="/avatars/seraphine.vrm"
+              avatarUrl={localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm'}
               onReady={handleAvatarReady}
             />
           </div>

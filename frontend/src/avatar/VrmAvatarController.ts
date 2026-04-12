@@ -1,15 +1,24 @@
 import {
   AmbientLight,
+  AnimationClip,
+  AnimationMixer,
   Clock,
   DirectionalLight,
   Euler,
+  KeyframeTrack,
+  LoopOnce,
+  LoopRepeat,
   MathUtils,
   PerspectiveCamera,
   Quaternion,
+  QuaternionKeyframeTrack,
   Scene,
+  VectorKeyframeTrack,
   WebGLRenderer,
+  type AnimationAction,
   type Object3D,
 } from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
@@ -23,6 +32,32 @@ const FALLBACK_EXPRESSIONS = [
   "happy", "angry", "sad", "relaxed", "surprised", "neutral", "blink",
   "aa", "ih", "ou", "ee", "oh",
 ];
+
+/** Map Mixamo bone names to VRM humanoid bone names for retargeting. */
+const MIXAMO_TO_VRM: Record<string, string> = {
+  mixamorigHips: "hips",
+  mixamorigSpine: "spine",
+  mixamorigSpine1: "chest",
+  mixamorigSpine2: "upperChest",
+  mixamorigNeck: "neck",
+  mixamorigHead: "head",
+  mixamorigLeftShoulder: "leftShoulder",
+  mixamorigLeftArm: "leftUpperArm",
+  mixamorigLeftForeArm: "leftLowerArm",
+  mixamorigLeftHand: "leftHand",
+  mixamorigRightShoulder: "rightShoulder",
+  mixamorigRightArm: "rightUpperArm",
+  mixamorigRightForeArm: "rightLowerArm",
+  mixamorigRightHand: "rightHand",
+  mixamorigLeftUpLeg: "leftUpperLeg",
+  mixamorigLeftLeg: "leftLowerLeg",
+  mixamorigLeftFoot: "leftFoot",
+  mixamorigLeftToeBase: "leftToes",
+  mixamorigRightUpLeg: "rightUpperLeg",
+  mixamorigRightLeg: "rightLowerLeg",
+  mixamorigRightFoot: "rightFoot",
+  mixamorigRightToeBase: "rightToes",
+};
 
 /** Tracked state for a single VRM expression being faded in/out. */
 interface ExpressionState {
@@ -52,6 +87,12 @@ export class VrmAvatarController implements AvatarAdapter {
   private audioAnalyser: AnalyserNode | null = null;
   private audioTimeData: Float32Array | null = null;
   private smoothedRms = 0;
+
+  // --- External animation system ---
+  private mixer: AnimationMixer | null = null;
+  private currentAction: AnimationAction | null = null;
+  private loadedClips = new Map<string, AnimationClip>();
+  private externalAnimPlaying = false;
 
   // --- Expression transition system ---
   private activeExpressions = new Map<string, ExpressionState>();
@@ -126,6 +167,9 @@ export class VrmAvatarController implements AvatarAdapter {
       // setNormalizedPose (arms in applyRestPose). Writing to raw
       // bones BEFORE update would be overwritten.
       this.applyGestureOffsets();
+      // External animation mixer runs last — it writes directly to
+      // raw bone transforms and must not be overwritten by idle/rest.
+      this.mixer?.update(delta);
       this.renderer.render(this.scene, this.camera);
     };
     this.rafId = requestAnimationFrame(loop);
@@ -155,98 +199,104 @@ export class VrmAvatarController implements AvatarAdapter {
     if (!vrm) return;
     const dt = delta ?? 0.016;
 
-    // Re-apply the rest pose every frame. vrm.update(delta) (called
-    // after this method in the loop) syncs normalized humanoid bones
-    // -> raw skeleton; if we only wrote once at load time the
-    // normalized tree would snap back to its bind pose. The VRM
-    // humanoid API expects rotations as per-bone quaternions in
-    // NORMALIZED space.
-    this.applyRestPose();
+    // When an external animation (Mixamo FBX/GLB) is playing, skip
+    // the rest-pose, breathing, head micro-movement and body sway —
+    // those would fight the animation clip. Expression transitions
+    // and blink still run below.
+    if (!this.externalAnimPlaying) {
+      // Re-apply the rest pose every frame. vrm.update(delta) (called
+      // after this method in the loop) syncs normalized humanoid bones
+      // -> raw skeleton; if we only wrote once at load time the
+      // normalized tree would snap back to its bind pose. The VRM
+      // humanoid API expects rotations as per-bone quaternions in
+      // NORMALIZED space.
+      this.applyRestPose();
 
-    const t = this.elapsed;
+      const t = this.elapsed;
 
-    // Breathing — chest rises gently on a ~4s cycle
-    const chest = vrm.humanoid?.getRawBoneNode("chest") as
-      | Object3D
-      | null
-      | undefined;
-    if (chest) {
-      const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
-      const idleRotX = breathPhase * 0.015;
-      const idleRotY = 0;
-      const idleRotZ = 0;
-      // Add gesture offset additively
-      const gestureOffset = this.gesturePlayer.getOffset("chest");
-      const idleQuat = new Quaternion().setFromEuler(
-        new Euler(idleRotX, idleRotY, idleRotZ),
-      );
-      idleQuat.multiply(gestureOffset);
-      chest.quaternion.copy(idleQuat);
-      // Subtle shoulder rise with breath
-      chest.position.y = breathPhase * 0.002;
+      // Breathing — chest rises gently on a ~4s cycle
+      const chest = vrm.humanoid?.getRawBoneNode("chest") as
+        | Object3D
+        | null
+        | undefined;
+      if (chest) {
+        const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
+        const idleRotX = breathPhase * 0.015;
+        const idleRotY = 0;
+        const idleRotZ = 0;
+        // Add gesture offset additively
+        const gestureOffset = this.gesturePlayer.getOffset("chest");
+        const idleQuat = new Quaternion().setFromEuler(
+          new Euler(idleRotX, idleRotY, idleRotZ),
+        );
+        idleQuat.multiply(gestureOffset);
+        chest.quaternion.copy(idleQuat);
+        // Subtle shoulder rise with breath
+        chest.position.y = breathPhase * 0.002;
+      }
+
+      // Subtle head micro-movement — slow drift on two axes, different periods
+      const head = vrm.humanoid?.getRawBoneNode("head") as
+        | Object3D
+        | null
+        | undefined;
+      if (head) {
+        // Lerp emotion head tilt toward target
+        const tiltLerpSpeed = 3.0; // per second
+        this.emotionHeadTilt.x = MathUtils.lerp(
+          this.emotionHeadTilt.x,
+          this.emotionHeadTiltTarget.x,
+          Math.min(1, tiltLerpSpeed * dt),
+        );
+        this.emotionHeadTilt.y = MathUtils.lerp(
+          this.emotionHeadTilt.y,
+          this.emotionHeadTiltTarget.y,
+          Math.min(1, tiltLerpSpeed * dt),
+        );
+        this.emotionHeadTilt.z = MathUtils.lerp(
+          this.emotionHeadTilt.z,
+          this.emotionHeadTiltTarget.z,
+          Math.min(1, tiltLerpSpeed * dt),
+        );
+
+        const idleRotX =
+          Math.sin(t * 0.7) * 0.01 +
+          Math.sin(t * 0.3) * 0.005 +
+          this.emotionHeadTilt.x;
+        const idleRotY =
+          Math.sin(t * 0.5) * 0.015 +
+          Math.cos(t * 0.2) * 0.008 +
+          this.emotionHeadTilt.y;
+        const idleRotZ = Math.sin(t * 0.4) * 0.005 + this.emotionHeadTilt.z;
+
+        // Add gesture offset additively
+        const gestureOffset = this.gesturePlayer.getOffset("head");
+        const idleQuat = new Quaternion().setFromEuler(
+          new Euler(idleRotX, idleRotY, idleRotZ),
+        );
+        idleQuat.multiply(gestureOffset);
+        head.quaternion.copy(idleQuat);
+      }
+
+      // Gentle body sway — spine bone, very slow and subtle
+      const spine = vrm.humanoid?.getRawBoneNode("spine") as
+        | Object3D
+        | null
+        | undefined;
+      if (spine) {
+        const idleRotX = Math.sin(t * 0.25) * 0.005;
+        const idleRotZ = Math.sin(t * 0.3) * 0.008;
+        const gestureOffset = this.gesturePlayer.getOffset("spine");
+        const idleQuat = new Quaternion().setFromEuler(
+          new Euler(idleRotX, 0, idleRotZ),
+        );
+        idleQuat.multiply(gestureOffset);
+        spine.quaternion.copy(idleQuat);
+      }
+
+      // Gesture arm/hand bones are applied in applyGestureOffsets()
+      // AFTER vrm.update() so setNormalizedPose doesn't overwrite them.
     }
-
-    // Subtle head micro-movement — slow drift on two axes, different periods
-    const head = vrm.humanoid?.getRawBoneNode("head") as
-      | Object3D
-      | null
-      | undefined;
-    if (head) {
-      // Lerp emotion head tilt toward target
-      const tiltLerpSpeed = 3.0; // per second
-      this.emotionHeadTilt.x = MathUtils.lerp(
-        this.emotionHeadTilt.x,
-        this.emotionHeadTiltTarget.x,
-        Math.min(1, tiltLerpSpeed * dt),
-      );
-      this.emotionHeadTilt.y = MathUtils.lerp(
-        this.emotionHeadTilt.y,
-        this.emotionHeadTiltTarget.y,
-        Math.min(1, tiltLerpSpeed * dt),
-      );
-      this.emotionHeadTilt.z = MathUtils.lerp(
-        this.emotionHeadTilt.z,
-        this.emotionHeadTiltTarget.z,
-        Math.min(1, tiltLerpSpeed * dt),
-      );
-
-      const idleRotX =
-        Math.sin(t * 0.7) * 0.01 +
-        Math.sin(t * 0.3) * 0.005 +
-        this.emotionHeadTilt.x;
-      const idleRotY =
-        Math.sin(t * 0.5) * 0.015 +
-        Math.cos(t * 0.2) * 0.008 +
-        this.emotionHeadTilt.y;
-      const idleRotZ = Math.sin(t * 0.4) * 0.005 + this.emotionHeadTilt.z;
-
-      // Add gesture offset additively
-      const gestureOffset = this.gesturePlayer.getOffset("head");
-      const idleQuat = new Quaternion().setFromEuler(
-        new Euler(idleRotX, idleRotY, idleRotZ),
-      );
-      idleQuat.multiply(gestureOffset);
-      head.quaternion.copy(idleQuat);
-    }
-
-    // Gentle body sway — spine bone, very slow and subtle
-    const spine = vrm.humanoid?.getRawBoneNode("spine") as
-      | Object3D
-      | null
-      | undefined;
-    if (spine) {
-      const idleRotX = Math.sin(t * 0.25) * 0.005;
-      const idleRotZ = Math.sin(t * 0.3) * 0.008;
-      const gestureOffset = this.gesturePlayer.getOffset("spine");
-      const idleQuat = new Quaternion().setFromEuler(
-        new Euler(idleRotX, 0, idleRotZ),
-      );
-      idleQuat.multiply(gestureOffset);
-      spine.quaternion.copy(idleQuat);
-    }
-
-    // Gesture arm/hand bones are applied in applyGestureOffsets()
-    // AFTER vrm.update() so setNormalizedPose doesn't overwrite them.
 
     // --- Expression transitions (per-frame lerp) ---
     const em = vrm.expressionManager;
@@ -411,7 +461,8 @@ export class VrmAvatarController implements AvatarAdapter {
     this.setExpression(label, 300, 0);
   }
 
-  /** Clear all active expressions back to neutral, cancel any running gesture. */
+  /** Clear all active expressions back to neutral, cancel any running gesture
+   *  and stop any external animation. */
   resetToIdle(): void {
     // Fade out all active expressions.
     for (const [, state] of this.activeExpressions) {
@@ -426,6 +477,7 @@ export class VrmAvatarController implements AvatarAdapter {
       this.holdTimer = null;
     }
     this.gesturePlayer.cancel();
+    this.stopAnimation(0.15);
   }
 
   /** Get the list of available expression/emotion names (for the lab UI). */
@@ -453,6 +505,16 @@ export class VrmAvatarController implements AvatarAdapter {
 
   /** Swap the loaded VRM avatar at runtime. Disposes the old one. */
   async swapAvatar(url: string): Promise<void> {
+    // Stop any external animation and clear cached clips (they reference
+    // the old skeleton's bone names).
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer = null;
+    }
+    this.currentAction = null;
+    this.externalAnimPlaying = false;
+    this.loadedClips.clear();
+
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);
@@ -475,6 +537,171 @@ export class VrmAvatarController implements AvatarAdapter {
       return Promise.reject(new Error(`Unknown gesture: ${name}`));
     }
     return this.gesturePlayer.play(def);
+  }
+
+  // -------------------------------------------------------------------------
+  // External animation system (Mixamo FBX / GLB)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Load an external animation file (FBX or GLB) and play it on the VRM.
+   * Retargets the clip's bone tracks to the VRM humanoid skeleton.
+   */
+  async playAnimation(
+    url: string,
+    options?: { loop?: boolean; fadeIn?: number },
+  ): Promise<void> {
+    const vrm = this.vrm;
+    if (!vrm) return;
+
+    const loop = options?.loop ?? false;
+    const fadeIn = options?.fadeIn ?? 0.3;
+
+    // Create mixer lazily, attached to the VRM scene root.
+    if (!this.mixer) {
+      this.mixer = new AnimationMixer(vrm.scene);
+    }
+
+    // Load or use cached clip.
+    let clip = this.loadedClips.get(url);
+    if (!clip) {
+      clip = await this.loadAndRetargetClip(url, vrm);
+      this.loadedClips.set(url, clip);
+    }
+
+    // Stop any currently playing external animation.
+    if (this.currentAction) {
+      this.currentAction.fadeOut(fadeIn);
+    }
+
+    const action = this.mixer.clipAction(clip);
+    action.reset();
+    action.setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1);
+    action.clampWhenFinished = !loop;
+    action.fadeIn(fadeIn).play();
+
+    this.currentAction = action;
+    this.externalAnimPlaying = true;
+
+    // For one-shot animations, return to idle when finished.
+    if (!loop) {
+      const onFinished = (): void => {
+        this.mixer?.removeEventListener("finished", onFinished);
+        if (this.currentAction === action) {
+          this.stopAnimation(fadeIn);
+        }
+      };
+      this.mixer.addEventListener("finished", onFinished);
+    }
+  }
+
+  /** Stop the currently playing external animation and return to idle. */
+  stopAnimation(fadeOut = 0.3): void {
+    if (this.currentAction) {
+      this.currentAction.fadeOut(fadeOut);
+      this.currentAction = null;
+    }
+    this.externalAnimPlaying = false;
+  }
+
+  /** Get list of pre-loaded animation URLs. */
+  getLoadedAnimations(): string[] {
+    return Array.from(this.loadedClips.keys());
+  }
+
+  /**
+   * Load a clip from FBX or GLB, retarget Mixamo bone names to VRM
+   * humanoid bone names, and return the retargeted AnimationClip.
+   */
+  private async loadAndRetargetClip(
+    url: string,
+    vrm: VRM,
+  ): Promise<AnimationClip> {
+    const ext = url.split(".").pop()?.toLowerCase();
+    let clips: AnimationClip[];
+
+    if (ext === "fbx") {
+      const fbxLoader = new FBXLoader();
+      const group = await fbxLoader.loadAsync(url);
+      clips = group.animations;
+    } else {
+      // GLB / GLTF
+      const gltfLoader = new GLTFLoader();
+      const gltf = await gltfLoader.loadAsync(url);
+      clips = gltf.animations;
+    }
+
+    if (!clips || clips.length === 0) {
+      throw new Error(`No animation clips found in ${url}`);
+    }
+
+    return this.retargetClip(clips[0], vrm);
+  }
+
+  /**
+   * Retarget a Mixamo AnimationClip to the VRM skeleton.
+   * Replaces track bone names from Mixamo convention to the actual
+   * bone object names in the VRM's raw skeleton.
+   */
+  private retargetClip(clip: AnimationClip, vrm: VRM): AnimationClip {
+    const retargetedTracks: KeyframeTrack[] = [];
+
+    for (const track of clip.tracks) {
+      // Track names are like "mixamorigHead.quaternion" or
+      // "mixamorigHead.position".
+      const dotIndex = track.name.indexOf(".");
+      if (dotIndex === -1) continue;
+
+      const boneName = track.name.substring(0, dotIndex);
+      const property = track.name.substring(dotIndex + 1);
+
+      const vrmBoneName = MIXAMO_TO_VRM[boneName];
+      if (!vrmBoneName) continue; // skip unmapped bones (fingers, etc.)
+
+      const boneNode = vrm.humanoid?.getRawBoneNode(
+        vrmBoneName as Parameters<typeof vrm.humanoid.getRawBoneNode>[0],
+      );
+      if (!boneNode) continue;
+
+      const newTrackName = `${boneNode.name}.${property}`;
+
+      // Create a new track with the corrected name.
+      if (
+        property === "quaternion" &&
+        track instanceof QuaternionKeyframeTrack
+      ) {
+        retargetedTracks.push(
+          new QuaternionKeyframeTrack(
+            newTrackName,
+            Array.from(track.times),
+            Array.from(track.values),
+          ),
+        );
+      } else if (
+        property === "position" &&
+        track instanceof VectorKeyframeTrack
+      ) {
+        // Scale position tracks — Mixamo uses cm, VRM uses meters
+        // (most Mixamo exports are ~100x larger).
+        const scaledValues = new Float32Array(track.values.length);
+        for (let i = 0; i < track.values.length; i++) {
+          scaledValues[i] = track.values[i] * 0.01;
+        }
+        retargetedTracks.push(
+          new VectorKeyframeTrack(
+            newTrackName,
+            Array.from(track.times),
+            Array.from(scaledValues),
+          ),
+        );
+      } else {
+        // Generic fallback (scale, etc.)
+        retargetedTracks.push(track.clone());
+        retargetedTracks[retargetedTracks.length - 1].name = newTrackName;
+      }
+    }
+
+    return new AnimationClip(clip.name || "retargeted", clip.duration, retargetedTracks);
   }
 
   // -------------------------------------------------------------------------
@@ -606,6 +833,13 @@ export class VrmAvatarController implements AvatarAdapter {
       this.holdTimer = null;
     }
     this.gesturePlayer.cancel();
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer = null;
+    }
+    this.currentAction = null;
+    this.externalAnimPlaying = false;
+    this.loadedClips.clear();
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VrmAvatarController } from '../avatar/VrmAvatarController';
+import { ANIMATION_LIBRARY, type AnimationEntry } from '../avatar/animations';
 
 /** Predefined emotion presets with Portuguese labels. */
 const PRESETS: { label: string; icon: string; emotion: string }[] = [
@@ -33,11 +34,11 @@ const FALLBACK_EXPRESSIONS = [
 /** Parse [tag] patterns from text. */
 const TAG_RE = /\[([a-zA-Z]+)\]/g;
 
-/** Known VRM avatars in /public/avatars/. */
+/** Known VRM avatars in /public/avatars/. Add entries as new .vrm
+ *  files are exported from VRoid Studio into frontend/public/avatars/. */
 const AVATARS: { label: string; url: string }[] = [
-  { label: 'Seraphine (original)', url: '/avatars/seraphine.vrm' },
-  // Add more .vrm files here as they become available:
-  // { label: 'Seraphine v2', url: '/avatars/seraphine-v2.vrm' },
+  { label: 'Seraphine (VRoid)', url: '/avatars/seraphine.vrm' },
+  { label: 'Seraphine v2', url: '/avatars/seraphine-v2.vrm' },
 ];
 
 /** Camera presets with Portuguese labels. */
@@ -55,10 +56,13 @@ interface AvatarLabProps {
 export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element {
   const [sliders, setSliders] = useState<Record<string, number>>({});
   const [playingGesture, setPlayingGesture] = useState<string | null>(null);
+  const [playingAnimation, setPlayingAnimation] = useState<string | null>(null);
   const [quickText, setQuickText] = useState('');
   const [quickRunning, setQuickRunning] = useState(false);
   const quickAbortRef = useRef(false);
-  const [currentAvatar, setCurrentAvatar] = useState(AVATARS[0]?.url ?? '');
+  const [currentAvatar, setCurrentAvatar] = useState(
+    () => localStorage.getItem('seraphine.avatarUrl') || AVATARS[0]?.url || '',
+  );
   const [swappingAvatar, setSwappingAvatar] = useState(false);
   const [activeCamera, setActiveCamera] = useState('bust');
 
@@ -113,6 +117,42 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     [controller, playingGesture],
   );
 
+  const handleAnimation = useCallback(
+    async (entry: AnimationEntry) => {
+      if (!controller) return;
+      // Toggle: if already playing this animation, stop it.
+      if (playingAnimation === entry.url) {
+        try {
+          controller.stopAnimation?.();
+        } catch {
+          // ignore
+        }
+        setPlayingAnimation(null);
+        return;
+      }
+      setPlayingAnimation(entry.url);
+      try {
+        await controller.playAnimation?.(entry.url, { loop: entry.loop });
+        // For one-shot animations, clear state when done.
+        if (!entry.loop) {
+          setPlayingAnimation(null);
+        }
+      } catch {
+        setPlayingAnimation(null);
+      }
+    },
+    [controller, playingAnimation],
+  );
+
+  const handleStopAnimation = useCallback(() => {
+    try {
+      controller?.stopAnimation?.();
+    } catch {
+      // ignore
+    }
+    setPlayingAnimation(null);
+  }, [controller]);
+
   const handleReset = useCallback(() => {
     setSliders((prev) => {
       const zeroed: Record<string, number> = {};
@@ -145,6 +185,7 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
       try {
         await controller.swapAvatar?.(url);
         setCurrentAvatar(url);
+        localStorage.setItem('seraphine.avatarUrl', url);
       } catch (err) {
         console.error('[lab] avatar swap failed:', err);
       } finally {
@@ -357,6 +398,38 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                   </button>
                 ))}
               </div>
+            </section>
+
+            {/* Animations */}
+            <section className="avatar-lab__section">
+              <h3 className="avatar-lab__section-title">Animacoes</h3>
+              {ANIMATION_LIBRARY.length > 0 ? (
+                <div className="avatar-lab__gestures">
+                  {ANIMATION_LIBRARY.map((entry) => (
+                    <button
+                      key={entry.name}
+                      type="button"
+                      className={`avatar-lab__gesture-btn${playingAnimation === entry.url ? ' avatar-lab__btn--active' : ''}`}
+                      onClick={() => void handleAnimation(entry)}
+                    >
+                      {entry.label}
+                    </button>
+                  ))}
+                  {playingAnimation && (
+                    <button
+                      type="button"
+                      className="avatar-lab__gesture-btn"
+                      onClick={handleStopAnimation}
+                    >
+                      Parar
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="avatar-lab__test-hint">
+                  Adicione arquivos .fbx de Mixamo em /public/animations/
+                </p>
+              )}
             </section>
 
             {/* Quick text test */}
