@@ -62,23 +62,24 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
   const [swappingAvatar, setSwappingAvatar] = useState(false);
   const [activeCamera, setActiveCamera] = useState('bust');
 
-  // Resolve available expressions from controller or fallback
-  const expressions = getExpressions(controller);
+  // Resolve available RAW blendshapes from the VRM model (not emotion presets)
+  const blendshapes = getBlendshapes(controller);
 
-  // Initialize sliders to 0 for each expression
+  // Initialize sliders to 0 for each blendshape
   useEffect(() => {
     const initial: Record<string, number> = {};
-    for (const expr of expressions) {
-      initial[expr] = 0;
+    for (const bs of blendshapes) {
+      initial[bs] = 0;
     }
     setSliders(initial);
-  }, [expressions.join(',')]);
+  }, [blendshapes.join(',')]);
 
   const handleSliderChange = useCallback(
-    (expr: string, value: number) => {
-      setSliders((prev) => ({ ...prev, [expr]: value }));
+    (name: string, value: number) => {
+      setSliders((prev) => ({ ...prev, [name]: value }));
       try {
-        controller?.setExpression?.(expr, 100);
+        // Use the raw blendshape setter — bypasses emotion map, sets exact weight
+        controller?.setRawBlendshape?.(name, value);
       } catch {
         // Controller method may not exist yet
       }
@@ -292,26 +293,26 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
               </section>
             )}
 
-            {/* Expression sliders */}
+            {/* Raw blendshape sliders */}
             <section className="avatar-lab__section">
-              <h3 className="avatar-lab__section-title">Expressoes</h3>
+              <h3 className="avatar-lab__section-title">Blendshapes</h3>
               <div className="avatar-lab__sliders">
-                {expressions.map((expr) => (
-                  <div key={expr} className="avatar-lab__slider">
-                    <label className="avatar-lab__slider-label">{expr}</label>
+                {blendshapes.map((bs) => (
+                  <div key={bs} className="avatar-lab__slider">
+                    <label className="avatar-lab__slider-label">{bs}</label>
                     <input
                       type="range"
                       min={0}
                       max={1}
                       step={0.01}
-                      value={sliders[expr] ?? 0}
+                      value={sliders[bs] ?? 0}
                       onChange={(e) =>
-                        handleSliderChange(expr, parseFloat(e.target.value))
+                        handleSliderChange(bs, parseFloat(e.target.value))
                       }
                       className="avatar-lab__slider-input"
                     />
                     <span className="avatar-lab__slider-value">
-                      {(sliders[expr] ?? 0).toFixed(2)}
+                      {(sliders[bs] ?? 0).toFixed(2)}
                     </span>
                   </div>
                 ))}
@@ -405,9 +406,9 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
 }
 
 /** Safely get available expressions from controller. */
-function getExpressions(controller: VrmAvatarController | null): string[] {
+function getBlendshapes(controller: VrmAvatarController | null): string[] {
   try {
-    const list = controller?.getAvailableExpressions?.();
+    const list = (controller as any)?.getAvailableBlendshapes?.();
     if (Array.isArray(list) && list.length > 0) return list;
   } catch {
     // method doesn't exist yet

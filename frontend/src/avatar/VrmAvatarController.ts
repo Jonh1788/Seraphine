@@ -19,6 +19,11 @@ import { GesturePlayer, GESTURE_LIBRARY } from "./gestures";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
 
+const FALLBACK_EXPRESSIONS = [
+  "happy", "angry", "sad", "relaxed", "surprised", "neutral", "blink",
+  "aa", "ih", "ou", "ee", "oh",
+];
+
 /** Tracked state for a single VRM expression being faded in/out. */
 interface ExpressionState {
   target: number;
@@ -116,6 +121,11 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateIdle(delta);
       this.updateLipsync();
       this.vrm?.update(delta);
+      // Gesture bone offsets MUST apply AFTER vrm.update() because
+      // update() syncs normalized→raw for bones set via
+      // setNormalizedPose (arms in applyRestPose). Writing to raw
+      // bones BEFORE update would be overwritten.
+      this.applyGestureOffsets();
       this.renderer.render(this.scene, this.camera);
     };
     this.rafId = requestAnimationFrame(loop);
@@ -235,30 +245,8 @@ export class VrmAvatarController implements AvatarAdapter {
       spine.quaternion.copy(idleQuat);
     }
 
-    // Gesture-only bones (no idle component): arms, hands
-    for (const boneName of [
-      "rightUpperArm",
-      "rightLowerArm",
-      "rightHand",
-      "leftUpperArm",
-      "leftLowerArm",
-      "leftHand",
-    ] as const) {
-      if (this.gesturePlayer.isPlaying) {
-        const offset = this.gesturePlayer.getOffset(boneName);
-        // Only apply if the gesture actually affects this bone (not identity).
-        if (offset.x !== 0 || offset.y !== 0 || offset.z !== 0 || offset.w !== 1) {
-          const boneNode = vrm.humanoid?.getRawBoneNode(boneName as string) as
-            | Object3D
-            | null
-            | undefined;
-          if (boneNode) {
-            // Compose on top of the rest pose rotation already applied.
-            boneNode.quaternion.multiply(offset);
-          }
-        }
-      }
-    }
+    // Gesture arm/hand bones are applied in applyGestureOffsets()
+    // AFTER vrm.update() so setNormalizedPose doesn't overwrite them.
 
     // --- Expression transitions (per-frame lerp) ---
     const em = vrm.expressionManager;
@@ -545,6 +533,65 @@ export class VrmAvatarController implements AvatarAdapter {
         this._currentEmotion = null;
       }, holdMs);
     }
+  }
+
+  /**
+   * Apply gesture bone offsets AFTER vrm.update() so they aren't
+   * overwritten by the normalized→raw sync. Handles arm and hand
+   * bones that the rest pose controls via setNormalizedPose().
+   * Head/chest/spine gestures blend inside updateIdle() since those
+   * bones aren't managed by setNormalizedPose.
+   */
+  private applyGestureOffsets(): void {
+    const vrm = this.vrm;
+    if (!vrm || !this.gesturePlayer.isPlaying) return;
+    for (const boneName of [
+      "rightUpperArm",
+      "rightLowerArm",
+      "rightHand",
+      "leftUpperArm",
+      "leftLowerArm",
+      "leftHand",
+    ]) {
+      const offset = this.gesturePlayer.getOffset(boneName);
+      if (offset.x !== 0 || offset.y !== 0 || offset.z !== 0 || offset.w !== 1) {
+        const boneNode = vrm.humanoid?.getRawBoneNode(boneName as any) as
+          | Object3D
+          | null
+          | undefined;
+        if (boneNode) {
+          boneNode.quaternion.multiply(offset);
+        }
+      }
+    }
+  }
+
+  /**
+   * Directly set a VRM blendshape weight (0..1) without going through
+   * the emotion mapping system. Used by the lab UI sliders for precise
+   * per-blendshape control. Bypasses transitions — sets instantly.
+   */
+  setRawBlendshape(name: string, weight: number): void {
+    const em = this.vrm?.expressionManager;
+    if (!em) return;
+    em.setValue(name, Math.max(0, Math.min(1, weight)));
+  }
+
+  /** Get the names of all VRM blendshapes available on the loaded model. */
+  getAvailableBlendshapes(): string[] {
+    const em = this.vrm?.expressionManager;
+    if (!em) return [];
+    // three-vrm stores expressions in a Map-like structure
+    const names: string[] = [];
+    // expressionManager.expressions is a Map<string, VRMExpression>
+    if (em.expressions) {
+      for (const expr of em.expressions) {
+        if (expr.expressionName) {
+          names.push(expr.expressionName);
+        }
+      }
+    }
+    return names.length > 0 ? names : FALLBACK_EXPRESSIONS;
   }
 
   dispose(): void {
