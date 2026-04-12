@@ -1,0 +1,122 @@
+diff --git a/node_modules/whatsapp-web.js/src/Client.js b/node_modules/whatsapp-web.js/src/Client.js
+index f68491f..81507ed 100644
+--- a/node_modules/whatsapp-web.js/src/Client.js
++++ b/node_modules/whatsapp-web.js/src/Client.js
+@@ -97,32 +97,77 @@ class Client extends EventEmitter {
+      */
+     async inject() {
+         if(this.options.authTimeoutMs === undefined || this.options.authTimeoutMs==0){
+-            this.options.authTimeoutMs = 30000;
++            this.options.authTimeoutMs = 90000;
+         }
+         let start = Date.now();
+         let timeout = this.options.authTimeoutMs;
+         let res = false;
+         while(start > (Date.now() - timeout)){
+-            res = await this.pupPage.evaluate('window.Debug?.VERSION != undefined');
++            try {
++                res = await this.pupPage.evaluate('window.Debug?.VERSION != undefined');
++            } catch(e) {
++                // Page may navigate during init — retry
++                res = false;
++            }
+             if(res){break;}
+-            await new Promise(r => setTimeout(r, 200));
++            await new Promise(r => setTimeout(r, 500));
+         }
+         if(!res){
+             throw 'auth timeout';
+         }
+-        await this.setDeviceName(this.options.deviceName, this.options.browserName);
++
++        // Retry post-auth setup — page may navigate and destroy context
++        let postAuthRetries = 0;
++        while (postAuthRetries < 5) {
++            try {
++                await this.setDeviceName(this.options.deviceName, this.options.browserName);
++                break;
++            } catch(e) {
++                postAuthRetries++;
++                await new Promise(r => setTimeout(r, 1000));
++                if (postAuthRetries >= 5) throw e;
++            }
++        }
++
+         const pairWithPhoneNumber = this.options.pairWithPhoneNumber;
+-        const version = await this.getWWebVersion();
++
++        let version;
++        let versionRetries = 0;
++        while (versionRetries < 5) {
++            try {
++                version = await this.getWWebVersion();
++                break;
++            } catch(e) {
++                versionRetries++;
++                await new Promise(r => setTimeout(r, 1000));
++                if (versionRetries >= 5) throw e;
++            }
++        }
++
+         const isCometOrAbove = parseInt(version.split('.')?.[1]) >= 3000;
+ 
+-        if (isCometOrAbove) {
+-            await this.pupPage.evaluate(ExposeAuthStore);
+-        } else {
+-            await this.pupPage.evaluate(ExposeLegacyAuthStore, moduleRaid.toString());
++        let storeRetries = 0;
++        while (storeRetries < 5) {
++            try {
++                if (isCometOrAbove) {
++                    await this.pupPage.evaluate(ExposeAuthStore);
++                } else {
++                    await this.pupPage.evaluate(ExposeLegacyAuthStore, moduleRaid.toString());
++                }
++                break;
++            } catch(e) {
++                storeRetries++;
++                await new Promise(r => setTimeout(r, 1000));
++                if (storeRetries >= 5) throw e;
++            }
+         }
+ 
+-        const needAuthentication = await this.pupPage.evaluate(async () => {
+-            let state = window.AuthStore.AppState.state;
++        let needAuthentication;
++        let authCheckRetries = 0;
++        while (authCheckRetries < 5) {
++            try {
++                needAuthentication = await this.pupPage.evaluate(async () => {
++                    let state = window.AuthStore.AppState.state;
+ 
+             if (state === 'OPENING' || state === 'UNLAUNCHED' || state === 'PAIRING') {
+                 // wait till state changes
+@@ -138,6 +183,13 @@ class Client extends EventEmitter {
+             state = window.AuthStore.AppState.state;
+             return state == 'UNPAIRED' || state == 'UNPAIRED_IDLE';
+         });
++                break;
++            } catch(e) {
++                authCheckRetries++;
++                await new Promise(r => setTimeout(r, 1000));
++                if (authCheckRetries >= 5) throw e;
++            }
++        }
+ 
+         if (needAuthentication) {
+             const { failed, failureEventPayload, restart } = await this.authStrategy.onAuthenticationNeeded();
+@@ -366,10 +418,13 @@ class Client extends EventEmitter {
+         
+         await page.goto(WhatsWebURL, {
+             waitUntil: 'load',
+-            timeout: 0,
++            timeout: 60000,
+             referer: 'https://whatsapp.com/'
+         });
+ 
++        // Wait for WhatsApp Web SPA to settle after navigation
++        await new Promise(r => setTimeout(r, 2000));
++
+         await this.inject();
+ 
+         this.pupPage.on('framenavigated', async (frame) => {

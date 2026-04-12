@@ -17,60 +17,99 @@ router.get("/messages/:chatId", async (req: Request, res: Response) => {
 
   try {
     const client = getClient();
-    const chat = await client.getChatById(chatId);
 
-    if (!chat) {
-      res.status(404).json({ error: "Chat not found" });
-      return;
-    }
+    // Do everything inside pupPage.evaluate for speed — no round-trips per message
+    const result = await (client as any).pupPage.evaluate(
+      async (cid: string, lim: number, bef: number | undefined) => {
+        const Store = (globalThis as any).Store;
+        if (!Store) return null;
 
-    const fetchOptions: { limit: number } = { limit };
-    const allMessages = await chat.fetchMessages(fetchOptions);
+        const chat = Store.Chat.get(cid);
+        if (!chat) return null;
 
-    // Filter by timestamp if `before` is provided
-    const filtered = before
-      ? allMessages.filter((m) => m.timestamp < before)
-      : allMessages;
-
-    const messages = await Promise.all(
-      filtered.slice(0, limit).map(async (msg) => {
-        const contact = await msg.getContact();
-        let quotedMsg: { body: string; author: string } | null = null;
-
-        if (msg.hasQuotedMsg) {
+        // Load earlier messages if we don't have enough
+        const maxLoads = Math.ceil(lim / 20) + 1;
+        for (let i = 0; i < maxLoads; i++) {
+          const count = chat.msgs.getModelsArray().length;
+          if (count >= lim + 5) break;
           try {
-            const quoted = await msg.getQuotedMessage();
-            const quotedContact = await quoted.getContact();
-            quotedMsg = {
-              body: quoted.body,
-              author:
-                quotedContact.pushname ??
-                quotedContact.name ??
-                quotedContact.number,
-            };
+            const loaded = await Store.ConversationMsgs?.loadEarlierMsgs?.(chat);
+            if (!loaded || loaded.length === 0) break;
           } catch {
-            // quoted message may no longer be available
+            // Try alternate method
+            try {
+              await chat.onEmptyMRM?.();
+            } catch { break; }
           }
         }
 
-        return {
-          id: msg.id._serialized,
-          body: msg.body,
-          timestamp: msg.timestamp,
-          fromMe: msg.fromMe,
-          author:
-            contact.pushname ?? contact.name ?? contact.number,
-          type: msg.type,
-          hasMedia: msg.hasMedia,
-          quotedMsg,
+        const allMsgs = chat.msgs.getModelsArray();
+
+        // Filter out system messages
+        let filtered = allMsgs.filter(
+          (m: any) =>
+            m.type !== "notification" &&
+            m.type !== "e2e_notification" &&
+            m.type !== "gp2" &&
+            m.type !== "protocol"
+        );
+
+        if (bef) {
+          filtered = filtered.filter((m: any) => m.t < bef);
+        }
+
+        // Sort descending by timestamp
+        filtered.sort((a: any, b: any) => b.t - a.t);
+        const sliced = filtered.slice(0, lim);
+
+        // Resolve author names from contacts store
+        const contactCache: Record<string, string> = {};
+        const resolveAuthor = (m: any): string => {
+          if (m.id?.fromMe) {
+            const me = Store.Contact?.getMeContact?.();
+            return me?.pushname || me?.name || "You";
+          }
+          const authorJid = m.author || m.from;
+          if (!authorJid) return "Unknown";
+          if (contactCache[authorJid]) return contactCache[authorJid];
+
+          try {
+            const contact = Store.Contact?.get?.(authorJid);
+            const name = contact?.pushname || contact?.name || contact?.shortName || authorJid;
+            contactCache[authorJid] = name;
+            return name;
+          } catch {
+            return authorJid;
+          }
         };
-      })
+
+        return {
+          chatName: chat.name || chat.formattedTitle || cid,
+          messages: sliced.map((m: any) => ({
+            id: m.id?._serialized || "",
+            body: m.body || "",
+            timestamp: m.t,
+            fromMe: !!m.id?.fromMe,
+            author: resolveAuthor(m),
+            type: m.type,
+            hasMedia: !!m.isMedia,
+          })),
+        };
+      },
+      chatId,
+      limit,
+      before
     );
 
+    if (!result) {
+      res.status(404).json({ error: "Chat not found or Store not ready" });
+      return;
+    }
+
     res.json({
-      chatId: chat.id._serialized,
-      chatName: chat.name,
-      messages,
+      chatId,
+      chatName: result.chatName,
+      messages: result.messages,
     });
   } catch (err) {
     console.error("[whatsapp-bridge] /api/messages error:", err);

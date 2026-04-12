@@ -1,4 +1,6 @@
 import { Client, LocalAuth } from "whatsapp-web.js";
+// @ts-ignore — no types available
+import qrcodeTerminal from "qrcode-terminal";
 import type { Config } from "./config";
 import { dispatchWebhook } from "./webhook";
 
@@ -44,9 +46,16 @@ export function getUptime(): number {
 export function initClient(config: Config): Client {
   client = new Client({
     authStrategy: new LocalAuth(),
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
     puppeteer: {
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      headless: "new" as any,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-features=ServiceWorker",
+      ],
     },
   });
 
@@ -55,6 +64,7 @@ export function initClient(config: Config): Client {
     currentQr = qr;
     qrTimestamp = Date.now();
     console.log("[whatsapp-bridge] QR available at GET /api/qr");
+    qrcodeTerminal.generate(qr, { small: true });
   });
 
   client.on("authenticated", () => {
