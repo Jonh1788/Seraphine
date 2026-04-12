@@ -456,17 +456,29 @@ async def _deliver_pending_notifications(ws: WebSocket) -> None:
 
     ids_to_mark: list[str] = []
     for notif in reversed(unread):  # oldest first
-        labels = {
-            "task.done": "concluída",
-            "task.failed": "falhou",
-            "task.awaiting_approval": "aguardando aprovação",
-        }
-        label = labels.get(notif["event"], notif["event"])
+        event = notif["event"]
         title = notif.get("title", "")
         summary = notif.get("summary", "")
-        message_text = f"[Enquanto você estava fora] Task \"{title}\" {label}."
-        if summary:
-            message_text += f" {summary[:300]}"
+
+        # Format based on notification type
+        if event == "whatsapp.task_detected":
+            message_text = (
+                f"📩 **[Enquanto você estava fora]**\n\n"
+                f"{title}\n{summary}\n\n"
+                f"Quer que eu cuide disso?"
+            )
+        elif event == "reminder.fired":
+            message_text = f"🔔 [Enquanto você estava fora] {summary or title}"
+        else:
+            labels = {
+                "task.done": "concluída",
+                "task.failed": "falhou",
+                "task.awaiting_approval": "aguardando aprovação",
+            }
+            label = labels.get(event, event)
+            message_text = f"[Enquanto você estava fora] Task \"{title}\" {label}."
+            if summary:
+                message_text += f" {summary[:300]}"
 
         turn_id = str(uuid.uuid4())
         try:

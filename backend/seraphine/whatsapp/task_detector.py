@@ -241,14 +241,19 @@ class WhatsAppTaskDetector:
             original_messages=combined_text,
         )
 
-    # ── notify user in frontend chat ──────────────────────────────
+    # ── notify user ─────────────────────────────────────────────────
 
     async def _notify_user(
         self, chat_name: str, author: str, analysis: TaskAnalysis,
         chat_id: str = "",
     ) -> None:
-        """Inject task suggestion into the frontend chat.
-        Auto-acknowledges on WhatsApp for media/alta urgency tasks."""
+        """Notify the user about a detected task.
+
+        1. Auto-acknowledge on WhatsApp for media/alta urgency
+        2. Persist notification in DB (survives disconnect)
+        3. Push to connected WS clients (chat bubble + browser notification)
+        4. Email fallback if no WS clients connected
+        """
         urgency_icon = {
             "alta": "🔴", "media": "🟡", "baixa": "🟢",
         }.get(analysis.urgency, "🟡")
@@ -273,15 +278,33 @@ class WhatsAppTaskDetector:
             f"Quer que eu cuide disso?"
         )
 
-        ws_clients: set = getattr(self._app_state, "ws_clients", set())
-        if not ws_clients:
-            logger.debug("No WS clients — task notification not delivered")
-            return
+        # 1. Persist notification in DB — survives disconnect
+        store = getattr(self._app_state, "store", None)
+        if store is not None:
+            try:
+                await store.add_notification(
+                    event="whatsapp.task_detected",
+                    task_id=chat_id,
+                    title=f"💬 WhatsApp — {author} ({chat_name})",
+                    summary=f"{urgency_icon} {analysis.summary or 'tarefa detectada'}",
+                    payload=json.dumps({
+                        "chat_id": chat_id, "chat_name": chat_name,
+                        "author": author, "urgency": analysis.urgency,
+                        "summary": analysis.summary,
+                        "auto_replied": auto_replied,
+                    }, ensure_ascii=False),
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist task notification: %s", exc)
 
-        turn_id = str(uuid.uuid4())
+        # 2. Push to connected WS clients
+        ws_clients: set = getattr(self._app_state, "ws_clients", set())
+        delivered_to_ws = False
         dead: list[Any] = []
         for ws in ws_clients:
             try:
+                # Chat bubble
+                turn_id = str(uuid.uuid4())
                 await ws.send_json({
                     "type": "token",
                     "conversation_id": "system",
@@ -293,7 +316,91 @@ class WhatsAppTaskDetector:
                     "conversation_id": "system",
                     "turn_id": turn_id,
                 })
+                # Browser notification for urgent tasks
+                if analysis.urgency in ("alta", "media"):
+                    await ws.send_json({
+                        "type": "notification",
+                        "source": "whatsapp",
+                        "event": "task_detected",
+                        "title": f"WhatsApp — {author}",
+                        "message": analysis.summary or "Tarefa detectada",
+                        "status": analysis.urgency,
+                    })
+                # TTS for alta urgency
+                if analysis.urgency == "alta":
+                    try:
+                        from seraphine.ws.routes import _enqueue_speech
+                        await _enqueue_speech(
+                            ws,
+                            f"Atenção! Mensagem urgente de {author}: {analysis.summary}",
+                            turn_id,
+                        )
+                    except Exception:
+                        pass
+                delivered_to_ws = True
             except Exception:
                 dead.append(ws)
         for ws in dead:
             ws_clients.discard(ws)
+
+        # 3. Email fallback if no WS client connected
+        if not delivered_to_ws:
+            logger.info("No WS clients — scheduling email fallback for task from %s", author)
+            asyncio.create_task(
+                self._email_fallback(author, chat_name, analysis)
+            )
+
+    async def _email_fallback(
+        self, author: str, chat_name: str, analysis: TaskAnalysis,
+    ) -> None:
+        """Wait 60s, then send email if still no WS client connected."""
+        await asyncio.sleep(60)
+
+        # Re-check: maybe a client reconnected
+        ws_clients: set = getattr(self._app_state, "ws_clients", set())
+        if ws_clients:
+            logger.info("WS client reconnected, skipping email fallback for task from %s", author)
+            return
+
+        google_client = getattr(self._app_state, "google_client", None)
+        if google_client is None:
+            return
+
+        try:
+            authed = await google_client.is_authed()
+            if not authed:
+                return
+        except Exception:
+            return
+
+        try:
+            from seraphine.google.client import GMAIL_API
+            import base64
+            from email.mime.text import MIMEText
+
+            profile = await google_client._authed_request("GET", f"{GMAIL_API}/users/me/profile")
+            user_email = profile.json().get("emailAddress", "")
+            if not user_email:
+                return
+
+            urgency_label = {"alta": "🔴 URGENTE", "media": "🟡 Média", "baixa": "🟢 Baixa"}.get(
+                analysis.urgency, analysis.urgency
+            )
+            mime = MIMEText(
+                f"💬 WhatsApp — {author} ({chat_name})\n\n"
+                f"Urgência: {urgency_label}\n"
+                f"Tarefa: {analysis.summary}\n\n"
+                f"Mensagens originais:\n{analysis.original_messages}\n\n"
+                f"(Este email foi enviado porque o frontend da Seraphine estava fechado.)",
+                _charset="utf-8",
+            )
+            mime["To"] = user_email
+            mime["Subject"] = f"💬 WhatsApp Task — {author}: {(analysis.summary or '')[:50]}"
+            raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("ascii")
+
+            await google_client._authed_request(
+                "POST", f"{GMAIL_API}/users/me/messages/send", json={"raw": raw},
+            )
+            logger.info("Task email fallback sent to %s for task from %s", user_email, author)
+        except Exception as exc:
+            logger.warning("Task email fallback failed: %s", exc)
