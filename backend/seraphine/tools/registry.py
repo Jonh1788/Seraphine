@@ -58,6 +58,7 @@ def build_default_registry(
     skills_dir: Path | None = None,
     store: Any = None,
     google_client: Any = None,
+    whatsapp_client: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -97,4 +98,18 @@ def build_default_registry(
         reg.register(CalendarDeleteEventTool(google_client))
         reg.register(CalendarBulkDeleteEventsTool(google_client))
         reg.register(GmailSendMessageTool(google_client, allowed_roots))
+    if whatsapp_client is not None:
+        from seraphine.tools.whatsapp import (
+            WhatsAppAuthStatusTool,
+            WhatsAppListChatsTool,
+            WhatsAppReadMessagesTool,
+            WhatsAppSearchMessagesTool,
+            WhatsAppSendMessageTool,
+        )
+
+        reg.register(WhatsAppAuthStatusTool(whatsapp_client))
+        reg.register(WhatsAppListChatsTool(whatsapp_client))
+        reg.register(WhatsAppReadMessagesTool(whatsapp_client))
+        reg.register(WhatsAppSendMessageTool(whatsapp_client))
+        reg.register(WhatsAppSearchMessagesTool(whatsapp_client))
     return reg

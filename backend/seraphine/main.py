@@ -83,11 +83,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Google client wired (token_path=%s)", settings.google_token_path
         )
 
+    # ------------------------------------------------------------------
+    # WhatsApp bridge integration — optional
+    # ------------------------------------------------------------------
+    whatsapp_client = None
+    if settings.whatsapp_bridge_url:
+        from seraphine.whatsapp.client import WhatsAppBridgeClient
+
+        whatsapp_client = WhatsAppBridgeClient(
+            base_url=settings.whatsapp_bridge_url,
+        )
+        logger.info(
+            "WhatsApp bridge client wired (url=%s)", settings.whatsapp_bridge_url
+        )
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
         store=store,
         google_client=google_client,
+        whatsapp_client=whatsapp_client,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -218,6 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_client = mcp_client
     app.state.mcp_event_listener = mcp_event_listener
     app.state.google_client = google_client
+    app.state.whatsapp_client = whatsapp_client
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -230,6 +246,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await llm.aclose()
         await embeddings.aclose()
         await tts.aclose()
+        if whatsapp_client is not None:
+            await whatsapp_client.aclose()
         if mcp_client is not None:
             await mcp_client.aclose()
 
@@ -253,6 +271,11 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(ws_router)
     app.include_router(google_router)
+
+    if settings.whatsapp_bridge_url:
+        from seraphine.whatsapp.routes import router as whatsapp_router
+
+        app.include_router(whatsapp_router)
 
     logger.info("Seraphine app initialized (model=%s)", settings.llm_model)
     return app

@@ -289,6 +289,40 @@ def _print_access_banner() -> None:
     print()
 
 
+def _check_whatsapp_bridge() -> None:
+    """Check WhatsApp bridge connectivity (optional — warning only)."""
+    if not settings.whatsapp_bridge_url:
+        return
+    url = f"{settings.whatsapp_bridge_url.rstrip('/')}/api/status"
+    try:
+        r = httpx.get(url, timeout=5.0)
+        if r.status_code >= 400:
+            _log(
+                f"WhatsApp bridge at {settings.whatsapp_bridge_url} returned "
+                f"HTTP {r.status_code} -- scan QR via /whatsapp/qr",
+                "\u26a0",
+            )
+            return
+        data = r.json()
+        st = data.get("status", "unknown")
+        if st == "ready":
+            name = data.get("name", "?")
+            phone = data.get("phone", "?")
+            _log(f"WhatsApp bridge ready as {name} ({phone})", "\u2713")
+        else:
+            _log(
+                f"WhatsApp bridge connected but not authenticated (status={st}) "
+                "-- scan QR via /whatsapp/qr",
+                "\u26a0",
+            )
+    except Exception as e:
+        _log(
+            f"WhatsApp bridge unreachable at {settings.whatsapp_bridge_url}: {e} "
+            "(WhatsApp features disabled)",
+            "\u26a0",
+        )
+
+
 def _check_ollama_embeddings() -> None:
     if _check_url(f"{settings.ollama_base_url}/api/tags"):
         _log(f"Ollama reachable ({settings.embedding_model} for memory)", "✓")
@@ -338,6 +372,9 @@ def bootstrap() -> None:
     # of which LLM backend is active.
     if settings.llm_backend != "ollama":
         _check_ollama_embeddings()
+
+    # ── WhatsApp bridge ──────────────────────────────────────────
+    _check_whatsapp_bridge()
 
     _start_caffeinate()
     _print_access_banner()

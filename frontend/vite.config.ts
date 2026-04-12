@@ -63,6 +63,12 @@ export default defineConfig({
       '/google': {
         target: 'http://127.0.0.1:8000',
       },
+      '/whatsapp': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/webhook': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
   test: {

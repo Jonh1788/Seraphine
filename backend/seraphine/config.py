@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # Falls back to non-streaming /v1/audio/voice-clone if unavailable.
     tts_streaming_port: int = 8013
 
+    # WhatsApp bridge — leave url empty to disable entirely
+    whatsapp_bridge_url: str = ""
+
     # MCP (Supertasks) integration — leave url empty to disable
     mcp_url: str = ""
     mcp_api_key: str = ""
