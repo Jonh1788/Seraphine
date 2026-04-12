@@ -12,6 +12,7 @@ import type { LatencyMetrics } from './metrics';
 import { CalendarModal, EmailInboxModal, GoogleAuthPanel } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
 import { AvatarLab } from './lab';
+import { FinanceDashboard } from './finance';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -46,6 +47,7 @@ export function App(): JSX.Element {
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [labOpen, setLabOpen] = useState<boolean>(false);
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
+  const [activeView, setActiveView] = useState<'chat' | 'finance'>('chat');
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -434,6 +436,16 @@ export function App(): JSX.Element {
               </span>
               <span className="sidebar-google-btn__label">WhatsApp</span>
             </button>
+            <button
+              type="button"
+              className={`sidebar-google-btn ${activeView === 'finance' ? 'sidebar-google-btn--active' : ''}`}
+              onClick={() => setActiveView(activeView === 'finance' ? 'chat' : 'finance')}
+              title="Finanças"
+              aria-label="Finanças"
+            >
+              <span className="sidebar-google-btn__icon" aria-hidden>&#128176;</span>
+              <span className="sidebar-google-btn__label">Finanças</span>
+            </button>
           </div>
 
           <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
@@ -445,7 +457,10 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="chat">
-          {wsRef.current && (
+          {activeView === 'finance' && (
+            <FinanceDashboard onBack={() => setActiveView('chat')} />
+          )}
+          {activeView === 'chat' && wsRef.current && (
             <ChatView
               ws={wsRef.current}
               status={status}
