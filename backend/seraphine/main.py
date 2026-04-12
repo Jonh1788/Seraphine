@@ -126,6 +126,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("WhatsApp task detector wired")
 
     # ------------------------------------------------------------------
+    # Finance module — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    from seraphine.finance.service import FinanceService
+
+    finance_service = FinanceService(db_path=settings.sqlite_path)
+    await finance_service.ensure_tables()
+    logger.info("Finance service wired (db=%s)", settings.sqlite_path)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -183,6 +192,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         browser_client=browser_client,
         wise_client=wise_client,
         reminder_scheduler=reminder_scheduler,
+        finance_service=finance_service,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -322,6 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.whatsapp_client = whatsapp_client
     app.state.browser_client = browser_client
     app.state.wise_client = wise_client
+    app.state.finance_service = finance_service
     app.state.reminder_scheduler = reminder_scheduler
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
@@ -351,6 +362,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await whatsapp_client.aclose()
         if browser_client is not None:
             await browser_client.aclose()
+        await finance_service.aclose()
         if wise_client is not None:
             await wise_client.aclose()
         if mcp_client is not None:
@@ -376,6 +388,10 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(ws_router)
     app.include_router(google_router)
+
+    from seraphine.finance.routes import router as finance_router
+
+    app.include_router(finance_router)
 
     if settings.whatsapp_bridge_url:
         from seraphine.whatsapp.routes import router as whatsapp_router

@@ -3104,3 +3104,103 @@ button:disabled {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.15); opacity: 0.85; }
 }
+}
+
+/* ── Finance: Pending review cards ── */
+
+.finance-pending-empty {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--text-dim);
+}
+
+.finance-pending-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.finance-pending-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.finance-pending-card__desc {
+  font-weight: 500;
+}
+
+.finance-pending-card__amount--income { color: #66bb6a; }
+.finance-pending-card__amount--expense { color: #ef5350; }
+
+.finance-pending-card__meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: var(--space-2);
+}
+
+.finance-pending-card__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.finance-pending-card__actions button {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.85rem;
+
+.finance-pending-card__actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-confirm {
+  background: rgba(102, 187, 106, 0.15);
+  color: #66bb6a;
+  border-color: rgba(102, 187, 106, 0.3);
+}
+.btn-confirm:hover:not(:disabled) { background: rgba(102, 187, 106, 0.25); }
+
+.btn-reject {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef5350;
+  border-color: rgba(239, 83, 80, 0.3);
+}
+.btn-reject:hover:not(:disabled) { background: rgba(239, 83, 80, 0.25); }
+
+/* Finance: Loading & empty states */
+
+.finance-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  color: var(--text-dim);
+}
+
+.finance-empty {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--text-dim);
+}
+
+/* Finance: Tab badge */
+
+.finance-tab-badge {
+  background: #ef5350;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 4px;
+}

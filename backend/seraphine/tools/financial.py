@@ -454,6 +454,8 @@ class ImportFinancialPdfTool(Tool):
     def __init__(self, service: Any) -> None:
         self._service = service
 
+    _MAX_TEXT_CHARS = 5000
+
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         file_path = args.get("file_path", "")
         if not file_path:
@@ -481,7 +483,7 @@ class ImportFinancialPdfTool(Tool):
                 for i, page in enumerate(pdf.pages):
                     page_text = page.extract_text()
                     if page_text:
-                        text_pages.append(f"--- Page {i + 1} ---\n{page_text}")
+                        text_pages.append(f"--- Pagina {i + 1} ---\n{page_text}")
 
             if not text_pages:
                 return ToolResult(
@@ -493,17 +495,39 @@ class ImportFinancialPdfTool(Tool):
         except Exception as e:
             return ToolResult(ok=False, error=f"Failed to read PDF: {e}")
 
+        page_count = len(text_pages)
+        truncated = len(full_text) > self._MAX_TEXT_CHARS
+        extracted_text = full_text[: self._MAX_TEXT_CHARS]
+        truncation_note = (
+            f"\n[... texto truncado, exibindo {self._MAX_TEXT_CHARS} de "
+            f"{len(full_text)} caracteres ...]"
+            if truncated
+            else ""
+        )
+
+        categories_str = ", ".join(ALL_CATEGORIES)
+
         instruction = (
-            "Below is the text extracted from a financial PDF. "
-            "Please identify each transaction (income or expense) and call "
-            "the `add_financial_entry` tool for each one found. "
-            "Infer the type (income/expense), amount, category, description, "
-            "and date from the text.\n\n"
-            f"{full_text}"
+            f"Extrato/documento financeiro importado ({page_count} paginas).\n\n"
+            f"Texto extraido:\n---\n{extracted_text}{truncation_note}\n---\n\n"
+            "INSTRUCAO: Analise o texto acima e para CADA transacao encontrada, "
+            "chame a tool `add_financial_entry` com:\n"
+            '- type: "income" ou "expense"\n'
+            "- amount: valor em reais (numero, sem R$)\n"
+            f"- category: uma das categorias validas: {categories_str}\n"
+            "- description: descricao curta da transacao\n"
+            "- date: data no formato YYYY-MM-DD\n"
+            '- status: SEMPRE usar "pending_review" '
+            "(o usuario vai revisar depois)\n\n"
+            "Se o documento for um extrato bancario, cada linha com debito "
+            'e "expense" e cada linha com credito e "income".\n'
+            'Se for uma nota fiscal, o total e uma "expense".\n'
+            "Infira a categoria pela descricao "
+            "(ex: \"supermercado\" -> alimentacao, \"aluguel\" -> moradia)."
         )
 
         return ToolResult(
             ok=True,
             output=instruction,
-            metadata={"page_count": len(text_pages), "source": file_path},
+            metadata={"page_count": page_count, "source": file_path},
         )

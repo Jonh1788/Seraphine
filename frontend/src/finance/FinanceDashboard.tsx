@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import { getMockDashboard } from './mockData';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { DashboardData, FinanceEntry } from './types';
 import { PieChart, buildPieData } from './PieChart';
 import { CategoryTable } from './CategoryTable';
 import { TransactionList } from './TransactionList';
+import { PendingReview } from './PendingReview';
 
-const TABS = ['Visao Geral', 'Categorias', 'Transacoes'] as const;
-type Tab = (typeof TABS)[number];
+const TAB_KEYS = ['Visao Geral', 'Categorias', 'Transacoes', 'Pendentes'] as const;
+type Tab = (typeof TAB_KEYS)[number];
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -25,18 +26,64 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [year, setYear] = useState(() => new Date().getFullYear());
 
-  // TODO: Replace with real API calls
-  const data = useMemo(() => getMockDashboard(), [month, year]);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingEntries, setPendingEntries] = useState<FinanceEntry[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const pieData = useMemo(() => buildPieData(data.by_category), [data.by_category]);
+  // Fetch summary + entries for the selected month
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetch(`/api/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
+      fetch(`/api/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
+    ])
+      .then(([summary, entriesRes]) => {
+        setData({ ...summary, entries: entriesRes.entries || [] });
+      })
+      .catch((err) => {
+        setError('Erro ao carregar dados financeiros');
+        console.error(err);
+      })
+      .finally(() => setLoading(false));
+  }, [month, year, refreshKey]);
+
+  // Fetch pending entries (not month-filtered)
+  useEffect(() => {
+    fetch('/api/finance/entries?status=pending_review')
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((res) => setPendingEntries(res.entries || []))
+      .catch(() => {});
+  }, [refreshKey]);
+
+  const refresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  const pieData = useMemo(
+    () => (data ? buildPieData(data.by_category) : []),
+    [data],
+  );
 
   const categoryRows = useMemo(() => {
+    if (!data) return [];
     const total = data.expenses || 1;
     return data.by_category.map((c) => ({
       ...c,
       percentage: (c.total / total) * 100,
     }));
-  }, [data.by_category, data.expenses]);
+  }, [data]);
 
   const prevMonth = (): void => {
     if (month === 0) {
@@ -55,6 +102,12 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
       setMonth((m) => m + 1);
     }
   };
+
+  const isEmpty =
+    data !== null &&
+    data.entries.length === 0 &&
+    data.income === 0 &&
+    data.expenses === 0;
 
   return (
     <div className="finance">
@@ -75,7 +128,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
       {/* Tabs */}
       <div className="finance__tabs">
-        {TABS.map((tab) => (
+        {TAB_KEYS.map((tab) => (
           <button
             key={tab}
             type="button"
@@ -83,13 +136,31 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
             onClick={() => setActiveTab(tab)}
           >
             {tab}
+            {tab === 'Pendentes' && pendingEntries.length > 0 && (
+              <span className="finance-tab-badge">{pendingEntries.length}</span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
       <div className="finance__content">
-        {activeTab === 'Visao Geral' && (
+        {loading && (
+          <div className="finance-loading">Carregando...</div>
+        )}
+
+        {!loading && error && (
+          <div className="finance-empty">{error}</div>
+        )}
+
+        {!loading && !error && isEmpty && activeTab !== 'Pendentes' && (
+          <div className="finance-empty">
+            Nenhum registro financeiro este mes.
+            Diga algo como &quot;Ganhei R$500 de freelance&quot; no chat!
+          </div>
+        )}
+
+        {!loading && !error && data && !isEmpty && activeTab === 'Visao Geral' && (
           <>
             <div className="finance__summary-cards">
               <div className="finance__card finance__card--income">
@@ -119,12 +190,16 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
           </>
         )}
 
-        {activeTab === 'Categorias' && (
+        {!loading && !error && data && !isEmpty && activeTab === 'Categorias' && (
           <CategoryTable data={categoryRows} totalExpenses={data.expenses} />
         )}
 
-        {activeTab === 'Transacoes' && (
+        {!loading && !error && data && !isEmpty && activeTab === 'Transacoes' && (
           <TransactionList entries={data.entries} />
+        )}
+
+        {!loading && activeTab === 'Pendentes' && (
+          <PendingReview entries={pendingEntries} onRefresh={refresh} />
         )}
       </div>
     </div>
