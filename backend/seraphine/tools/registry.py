@@ -152,4 +152,22 @@ def build_default_registry(
         reg.register(WiseRecipientsTool(wise_client))
         reg.register(WiseSendPixTool(wise_client))
         reg.register(WiseTransferStatusTool(wise_client))
+    # macOS screen tools — always registered (no client needed, uses subprocess)
+    import sys
+    if sys.platform == "darwin":
+        from seraphine.tools.screen import (
+            ScreenCaptureTool,
+            ScreenClickTool,
+            ScreenCopyToClipboardTool,
+            ScreenKeyTool,
+            ScreenReadClipboardTool,
+            ScreenTypeTool,
+        )
+
+        reg.register(ScreenCaptureTool())
+        reg.register(ScreenClickTool())
+        reg.register(ScreenTypeTool())
+        reg.register(ScreenKeyTool())
+        reg.register(ScreenCopyToClipboardTool())
+        reg.register(ScreenReadClipboardTool())
     return reg
