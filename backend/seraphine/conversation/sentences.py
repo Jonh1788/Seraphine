@@ -215,12 +215,21 @@ _RE_THINK = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 _RE_LEFTOVER_NOISE = re.compile(r"[`~]+")
 
 
-def strip_markdown_for_tts(text: str) -> str:
+_RE_AUDIO_TAG = re.compile(r"\[[a-zA-Z][a-zA-Z ]{0,29}\](?!\()")
+
+
+def strip_markdown_for_tts(text: str, *, strip_audio_tags: bool = False) -> str:
     """Return a TTS-friendly plain-text version of `text`.
 
     Intentionally small and regex-based — this is NOT a markdown
     parser, just a scrubber for the common constructs Gemma emits.
     Anything we miss will still be TTS'd, just with a bit of noise.
+
+    When *strip_audio_tags* is True, also remove ElevenLabs v3 audio
+    tags like ``[happy]``, ``[laughs]``, etc. Pass True when the TTS
+    model is NOT v3 (turbo, multilingual, flash) — otherwise the model
+    would say "happy" or "laughs" literally. When v3 IS active, leave
+    the tags in so ElevenLabs renders them as real emotional audio.
     """
     if not text:
         return text
@@ -280,6 +289,9 @@ def strip_markdown_for_tts(text: str) -> str:
     # Anything that LOOKS like markdown noise but slipped past the
     # structural passes (lone backticks/asterisks/etc.).
     s = _RE_LEFTOVER_NOISE.sub("", s)
+    # Strip ElevenLabs audio tags when the TTS model doesn't support them.
+    if strip_audio_tags:
+        s = _RE_AUDIO_TAG.sub("", s)
     # Collapse whitespace noise left behind by the substitutions.
     s = _RE_MULTI_WS.sub(" ", s)
     s = _RE_MULTI_NL.sub("\n\n", s)

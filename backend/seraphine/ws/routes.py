@@ -351,7 +351,7 @@ async def _setup_mcp_notifications(ws: WebSocket) -> Any:
         tts = getattr(ws.app.state, "tts", None)
         if tts is not None:
             try:
-                cleaned = strip_markdown_for_tts(message_text)
+                cleaned = strip_markdown_for_tts(message_text, strip_audio_tags=_strip_audio_tags)
                 if cleaned:
                     await _enqueue_speech(ws, cleaned, turn_id)
             except Exception as exc:
@@ -423,6 +423,14 @@ async def conversation_ws(ws: WebSocket) -> None:
     _speech_queues[id(ws)] = speech_queue
     speech_worker = asyncio.create_task(_speech_worker(ws, speech_queue))
     _speech_workers[id(ws)] = speech_worker
+
+    # Determine once whether to strip ElevenLabs audio tags before TTS.
+    # v3 renders tags as real emotion; other models would say them literally.
+    from seraphine.config import settings as _settings
+    _strip_audio_tags = not (
+        _settings.tts_backend == "elevenlabs"
+        and "v3" in _settings.elevenlabs_model_id.lower()
+    )
 
     mcp_callback: Any = None
     audio_buf = bytearray()
@@ -570,7 +578,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                             if speak:
                                 sentences, sentence_buf = split_sentences(sentence_buf)
                                 for sent in sentences:
-                                    cleaned = strip_markdown_for_tts(sent)
+                                    cleaned = strip_markdown_for_tts(sent, strip_audio_tags=_strip_audio_tags)
                                     if cleaned:
                                         speak_done = await _enqueue_speech(
                                             ws,
@@ -583,7 +591,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                             if speak and sentence_buf.strip():
                                 tail = flush_remainder(sentence_buf)
                                 if tail:
-                                    cleaned = strip_markdown_for_tts(tail)
+                                    cleaned = strip_markdown_for_tts(tail, strip_audio_tags=_strip_audio_tags)
                                     if cleaned:
                                         speak_done = await _enqueue_speech(
                                             ws,
@@ -716,7 +724,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                     if isinstance(event, AudioTurnEndEvent):
                         audio_final_turn_id = event.turn_id
                         if audio_sentence_buf.strip():
-                            cleaned = strip_markdown_for_tts(audio_sentence_buf)
+                            cleaned = strip_markdown_for_tts(audio_sentence_buf, strip_audio_tags=_strip_audio_tags)
                             if cleaned:
                                 audio_speak_done = await _enqueue_speech(
                                     ws, cleaned, audio_final_turn_id or ""
