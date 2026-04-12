@@ -184,6 +184,37 @@ def _convert_messages(
                     ],
                 }
             )
+
+            # Build the tool_result content. If the tool returned an
+            # image (e.g. browser_screenshot), include it as a vision
+            # content block so Claude can SEE the result.
+            tool_result_content: str | list[dict[str, Any]]
+            image_data_url: str | None = None
+            if isinstance(body, dict):
+                image_data_url = body.get("image")
+
+            if image_data_url and isinstance(image_data_url, str) and image_data_url.startswith("data:"):
+                # Parse "data:image/png;base64,AAAA..." into media_type + raw base64
+                try:
+                    header, raw_b64 = image_data_url.split(",", 1)
+                    media_type = header.split(":", 1)[1].split(";", 1)[0] or "image/png"
+                except ValueError:
+                    media_type = "image/png"
+                    raw_b64 = ""
+                tool_result_content = [
+                    {"type": "text", "text": tool_output},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": raw_b64,
+                        },
+                    },
+                ]
+            else:
+                tool_result_content = tool_output
+
             out.append(
                 {
                     "role": "user",
@@ -191,7 +222,7 @@ def _convert_messages(
                         {
                             "type": "tool_result",
                             "tool_use_id": tool_use_id,
-                            "content": tool_output,
+                            "content": tool_result_content,
                         }
                     ],
                 }

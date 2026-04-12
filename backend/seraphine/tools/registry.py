@@ -59,6 +59,7 @@ def build_default_registry(
     store: Any = None,
     google_client: Any = None,
     whatsapp_client: Any = None,
+    browser_client: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -112,4 +113,26 @@ def build_default_registry(
         reg.register(WhatsAppReadMessagesTool(whatsapp_client))
         reg.register(WhatsAppSendMessageTool(whatsapp_client))
         reg.register(WhatsAppSearchMessagesTool(whatsapp_client))
+    if browser_client is not None:
+        from seraphine.tools.browser_automation import (
+            BrowserClickTool,
+            BrowserConfirmPaymentTool,
+            BrowserKeyTool,
+            BrowserOpenTool,
+            BrowserPageInfoTool,
+            BrowserScreenshotTool,
+            BrowserScrollTool,
+            BrowserSubmitTool,
+            BrowserTypeTool,
+        )
+
+        reg.register(BrowserOpenTool(browser_client))
+        reg.register(BrowserScreenshotTool(browser_client))
+        reg.register(BrowserClickTool(browser_client))
+        reg.register(BrowserTypeTool(browser_client))
+        reg.register(BrowserScrollTool(browser_client))
+        reg.register(BrowserKeyTool(browser_client))
+        reg.register(BrowserPageInfoTool(browser_client))
+        reg.register(BrowserSubmitTool(browser_client))
+        reg.register(BrowserConfirmPaymentTool(browser_client))
     return reg

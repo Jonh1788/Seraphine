@@ -395,6 +395,20 @@ def _print_whatsapp_status(url: str) -> None:
         pass
 
 
+def _check_browser_agent() -> None:
+    """If browser_agent_url is configured, check /health. Warning only."""
+    if not settings.browser_agent_url:
+        return
+    url = settings.browser_agent_url.rstrip("/")
+    if _check_url(f"{url}/health"):
+        _log(f"Browser agent reachable at {url}", "\u2713")
+    else:
+        _log(
+            f"Browser agent at {url} unreachable \u2014 browser tools will fail",
+            "\u26a0",
+        )
+
+
 def _check_ollama_embeddings() -> None:
     if _check_url(f"{settings.ollama_base_url}/api/tags"):
         _log(f"Ollama reachable ({settings.embedding_model} for memory)", "✓")
@@ -447,6 +461,9 @@ def bootstrap() -> None:
     # of which LLM backend is active.
     if settings.llm_backend != "ollama":
         _check_ollama_embeddings()
+
+    # ── Browser agent (optional) ──────────────────────────────────
+    _check_browser_agent()
 
     # ── WhatsApp bridge (optional) ────────────────────────────────
     _start_whatsapp_bridge()

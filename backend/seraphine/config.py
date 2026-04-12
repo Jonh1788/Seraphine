@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # WhatsApp bridge — leave url empty to disable entirely
     whatsapp_bridge_url: str = ""
 
+    # Browser automation — leave url empty to disable
+    browser_agent_url: str = ""  # "http://localhost:3002"
+
     # MCP (Supertasks) integration — leave url empty to disable
     mcp_url: str = ""
     mcp_api_key: str = ""

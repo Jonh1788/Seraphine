@@ -40,10 +40,13 @@ DEFAULT_SYSTEM_PROMPT = (
 
 _EMOTION_TAGS_INSTRUCTION = (
     " "
-    "ElevenLabs v3 audio tags are active: you MAY sprinkle emotion and "
-    "delivery tags inline in your spoken reply and they will be rendered "
-    "as real acted audio (not read as text). Use them tastefully — one "
-    "or two per reply, not on every sentence. Tags must appear in "
+    "ElevenLabs v3 audio tags are active: you MUST include at least one "
+    "emotion or delivery tag per reply. They will be rendered as real "
+    "acted audio (not read as text). Use 1-3 tags per reply — enough "
+    "to sound expressive but not overloaded. "
+    "IMPORTANT: each tag must be a SINGLE word in its own brackets. "
+    "CORRECT: '[happy] Oi! [laughs] Que legal!'. "
+    "WRONG: '[warm, happy]' or '[happy/excited]' — these break the TTS. Tags must appear in "
     "square brackets on a single line, e.g. '[laughs] Nossa, isso é "
     "ótimo!', 'Tem certeza? [whispers] Isso fica entre a gente.', "
     "'[sighs] Vou tentar de novo...'. "
@@ -491,26 +494,30 @@ class ConversationEngine:
                         error=result.error,
                         metadata=result.metadata or {},
                     )
+                    tool_payload: dict[str, Any] = {
+                        "tool": tool_name,
+                        # Anthropic adapter needs the ORIGINAL
+                        # args to rebuild a synthetic tool_use
+                        # block before this tool_result. Empty
+                        # {} misled Claude into thinking the
+                        # call had been argless and it retried
+                        # the tool in a loop (up to
+                        # MAX_TOOL_ITERATIONS). See
+                        # llm/anthropic.py::_convert_messages.
+                        "args": tool_args,
+                        "ok": result.ok,
+                        "output": result.output,
+                        "error": result.error,
+                    }
+                    # If the tool result carries an image (e.g. browser
+                    # screenshot), include it so the Anthropic adapter can
+                    # inject a vision content block into the tool_result.
+                    if result.metadata and "image" in result.metadata:
+                        tool_payload["image"] = result.metadata["image"]
                     messages.append(
                         ChatMessage(
                             role="tool",
-                            content=json.dumps(
-                                {
-                                    "tool": tool_name,
-                                    # Anthropic adapter needs the ORIGINAL
-                                    # args to rebuild a synthetic tool_use
-                                    # block before this tool_result. Empty
-                                    # {} misled Claude into thinking the
-                                    # call had been argless and it retried
-                                    # the tool in a loop (up to
-                                    # MAX_TOOL_ITERATIONS). See
-                                    # llm/anthropic.py::_convert_messages.
-                                    "args": tool_args,
-                                    "ok": result.ok,
-                                    "output": result.output,
-                                    "error": result.error,
-                                }
-                            ),
+                            content=json.dumps(tool_payload),
                         )
                     )
         except TurnCancelled:

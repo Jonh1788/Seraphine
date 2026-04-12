@@ -113,20 +113,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "WhatsApp bridge client wired (url=%s)", settings.whatsapp_bridge_url
         )
 
+    # ------------------------------------------------------------------
+    # Browser automation integration — optional
+    # ------------------------------------------------------------------
+    browser_client = None
+    if settings.browser_agent_url:
+        from seraphine.browser.client import BrowserAgentClient
+
+        browser_client = BrowserAgentClient(
+            base_url=settings.browser_agent_url,
+        )
+        logger.info(
+            "Browser agent client wired (url=%s)", settings.browser_agent_url
+        )
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
         store=store,
         google_client=google_client,
         whatsapp_client=whatsapp_client,
+        browser_client=browser_client,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
     # ------------------------------------------------------------------
     mcp_client = None
+    mcp_tools_watcher = None
     if settings.mcp_url:
         from seraphine.tools.mcp_client import McpClient
-        from seraphine.tools.mcp_tools import register_mcp_tools
+        from seraphine.tools.mcp_tools import register_mcp_tools, start_tools_changed_watcher
 
         mcp_client = McpClient(
             base_url=settings.mcp_url,
@@ -135,6 +151,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             n = await register_mcp_tools(tools, mcp_client)
             logger.info("Registered %d MCP tools from %s", n, settings.mcp_url)
+            # Watch for tools/list_changed so new tools appear without restart
+            events_url = settings.mcp_url.rstrip("/").rsplit("/", 1)[0] + "/events"
+            mcp_tools_watcher = start_tools_changed_watcher(
+                tools, mcp_client, events_url, settings.mcp_api_key,
+            )
         except Exception as e:
             logger.warning("MCP tool registration failed (continuing without): %s", e)
             await mcp_client.aclose()
@@ -250,6 +271,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_event_listener = mcp_event_listener
     app.state.google_client = google_client
     app.state.whatsapp_client = whatsapp_client
+    app.state.browser_client = browser_client
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -257,6 +279,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if mcp_tools_watcher is not None:
+            mcp_tools_watcher.cancel()
+            try:
+                await mcp_tools_watcher
+            except BaseException:
+                pass
         if mcp_event_listener is not None:
             await mcp_event_listener.stop()
         await llm.aclose()
@@ -264,6 +292,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await tts.aclose()
         if whatsapp_client is not None:
             await whatsapp_client.aclose()
+        if browser_client is not None:
+            await browser_client.aclose()
         if mcp_client is not None:
             await mcp_client.aclose()
 
