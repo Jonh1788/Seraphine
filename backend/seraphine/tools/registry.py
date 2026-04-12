@@ -60,6 +60,7 @@ def build_default_registry(
     google_client: Any = None,
     whatsapp_client: Any = None,
     browser_client: Any = None,
+    wise_client: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -135,4 +136,20 @@ def build_default_registry(
         reg.register(BrowserPageInfoTool(browser_client))
         reg.register(BrowserSubmitTool(browser_client))
         reg.register(BrowserConfirmPaymentTool(browser_client))
+    if wise_client is not None:
+        from seraphine.tools.wise import (
+            WiseBalanceTool,
+            WiseQuoteTool,
+            WiseRecipientsTool,
+            WiseSendPixTool,
+            WiseTransactionsTool,
+            WiseTransferStatusTool,
+        )
+
+        reg.register(WiseBalanceTool(wise_client))
+        reg.register(WiseTransactionsTool(wise_client))
+        reg.register(WiseQuoteTool(wise_client))
+        reg.register(WiseRecipientsTool(wise_client))
+        reg.register(WiseSendPixTool(wise_client))
+        reg.register(WiseTransferStatusTool(wise_client))
     return reg

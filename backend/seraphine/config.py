@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     ]
     google_token_path: Path = Path.home() / ".seraphine" / "google_tokens.enc"
 
+    # ------------------------------------------------------------------
+    # Wise (TransferWise) — PIX transfers
+    # ------------------------------------------------------------------
+    # Leave wise_api_key empty to disable the integration entirely.
+    wise_api_key: str = ""
+    wise_profile_id: int = 0  # 0 = auto-detect
+    wise_sandbox: bool = False
+
     @field_validator("google_scopes", mode="before")
     @classmethod
     def _split_google_scopes(cls, v):  # type: ignore[no-untyped-def]

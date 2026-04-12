@@ -409,6 +409,35 @@ def _check_browser_agent() -> None:
         )
 
 
+def _check_wise() -> None:
+    """If wise_api_key is configured, validate it via GET /v1/profiles. Warning only."""
+    if not settings.wise_api_key:
+        return
+    from seraphine.wise.client import WISE_PRODUCTION_URL, WISE_SANDBOX_URL
+
+    base = WISE_SANDBOX_URL if settings.wise_sandbox else WISE_PRODUCTION_URL
+    try:
+        r = httpx.get(
+            f"{base}/v1/profiles",
+            headers={"Authorization": f"Bearer {settings.wise_api_key}"},
+            timeout=10.0,
+        )
+        if r.status_code == 200:
+            profiles = r.json()
+            if profiles:
+                name = profiles[0].get("fullName", profiles[0].get("id", "?"))
+                env = "sandbox" if settings.wise_sandbox else "production"
+                _log(f"Wise API valid ({env}, profile: {name})", "\u2713")
+            else:
+                _log("Wise API key valid but no profiles found", "\u26a0")
+        elif r.status_code == 401:
+            _log("Wise API key rejected (401) \u2014 check your token", "\u26a0")
+        else:
+            _log(f"Wise API returned HTTP {r.status_code}", "\u26a0")
+    except Exception as e:
+        _log(f"Wise API check failed: {e}", "\u26a0")
+
+
 def _check_ollama_embeddings() -> None:
     if _check_url(f"{settings.ollama_base_url}/api/tags"):
         _log(f"Ollama reachable ({settings.embedding_model} for memory)", "✓")
@@ -461,6 +490,9 @@ def bootstrap() -> None:
     # of which LLM backend is active.
     if settings.llm_backend != "ollama":
         _check_ollama_embeddings()
+
+    # ── Wise integration (optional) ──────────────────────────────
+    _check_wise()
 
     # ── Browser agent (optional) ──────────────────────────────────
     _check_browser_agent()

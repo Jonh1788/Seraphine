@@ -114,6 +114,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # ------------------------------------------------------------------
+    # Wise (TransferWise) integration — optional
+    # ------------------------------------------------------------------
+    wise_client = None
+    if settings.wise_api_key:
+        from seraphine.wise.client import WiseClient
+
+        wise_client = WiseClient(
+            api_key=settings.wise_api_key,
+            profile_id=settings.wise_profile_id,
+            sandbox=settings.wise_sandbox,
+        )
+        logger.info(
+            "Wise client wired (sandbox=%s, profile_id=%s)",
+            settings.wise_sandbox,
+            settings.wise_profile_id or "auto-detect",
+        )
+
+    # ------------------------------------------------------------------
     # Browser automation integration — optional
     # ------------------------------------------------------------------
     browser_client = None
@@ -134,6 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         google_client=google_client,
         whatsapp_client=whatsapp_client,
         browser_client=browser_client,
+        wise_client=wise_client,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
@@ -272,6 +291,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.google_client = google_client
     app.state.whatsapp_client = whatsapp_client
     app.state.browser_client = browser_client
+    app.state.wise_client = wise_client
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -294,6 +314,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await whatsapp_client.aclose()
         if browser_client is not None:
             await browser_client.aclose()
+        if wise_client is not None:
+            await wise_client.aclose()
         if mcp_client is not None:
             await mcp_client.aclose()
 
