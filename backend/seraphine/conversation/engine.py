@@ -38,12 +38,34 @@ DEFAULT_SYSTEM_PROMPT = (
     "shell, Supertasks MCP, request_skill (for missing capabilities)."
 )
 
+_EMOTION_TAGS_INSTRUCTION = (
+    " "
+    "ElevenLabs v3 audio tags are active: you MAY sprinkle emotion and "
+    "delivery tags inline in your spoken reply and they will be rendered "
+    "as real acted audio (not read as text). Use them tastefully — one "
+    "or two per reply, not on every sentence. Tags must appear in "
+    "square brackets on a single line, e.g. '[laughs] Nossa, isso é "
+    "ótimo!', 'Tem certeza? [whispers] Isso fica entre a gente.', "
+    "'[sighs] Vou tentar de novo...'. "
+    "Available action tags: [laughs], [giggles], [chuckles], [sighs], "
+    "[gasps], [whispers]. "
+    "Available delivery/emotion tags: [happy], [sad], [excited], "
+    "[sarcastic], [curious], [serious], [soft], [warm]. "
+    "Do NOT use tags inside tool arguments. Do NOT narrate the tag "
+    "('eu rio' is redundant if you already emitted [laughs]). The "
+    "chat UI strips the tags from the rendered text, so the user sees "
+    "the clean sentence and hears the expressive audio."
+)
+
+
 def _build_date_context() -> str:
     """Injected as a second system message on every turn so the model
     never hallucinates 'today'. Kept short (~70 tokens) and placed after
     the cached static prompt so prefix-cache hits the static portion."""
+    from seraphine.config import settings
+
     now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-    return (
+    base = (
         f"Current date: {now.strftime('%Y-%m-%d')} ({now.strftime('%A')}), "
         f"local time {now.strftime('%H:%M')} (Brasília, America/Sao_Paulo). "
         f"Resolve 'hoje'/'amanhã'/'semana que vem' from this reference. "
@@ -55,6 +77,16 @@ def _build_date_context() -> str:
         f"e 30' (or 'duas e meia da tarde'). Weekdays also by name: "
         f"'terça-feira', not 'ter'."
     )
+    # Teach audio tags only when ElevenLabs v3 is actually the active
+    # TTS backend. Other TTS models treat `[laughs]` as literal text
+    # and would read "colchetes laughs colchetes" — exactly what we
+    # don't want.
+    if (
+        settings.tts_backend == "elevenlabs"
+        and "v3" in settings.elevenlabs_model_id.lower()
+    ):
+        return base + _EMOTION_TAGS_INSTRUCTION
+    return base
 
 
 APPROVAL_TIMEOUT_SECONDS = 300

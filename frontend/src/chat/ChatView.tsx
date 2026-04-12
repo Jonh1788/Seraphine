@@ -28,6 +28,18 @@ interface Turn {
 }
 
 /**
+ * Strip ElevenLabs v3 audio tags from text before rendering in chat.
+ * Tags like [laughs], [whispers], [excited tone] are rendered as real
+ * emotion by the TTS server, but we don't want them to show up as
+ * "[laughs]" literal brackets in the chat bubble. Uses a negative
+ * lookahead on `(` so markdown links `[text](url)` are NOT touched.
+ */
+const AUDIO_TAG_RE = /\[[a-zà-ú][a-zà-ú ]{1,29}\](?!\()/gi;
+function stripAudioTags(text: string): string {
+  return text.replace(AUDIO_TAG_RE, '').replace(/ {2,}/g, ' ');
+}
+
+/**
  * Parse assistant content that may contain thinking blocks in either
  * `<think>…</think>` (standard) or `<|channel>thought\n…<channel|>`
  * (Gemma 4 native) format.
@@ -589,7 +601,9 @@ export function ChatView({
                     />
                   )}
                   {t.role === 'assistant' ? (
-                    <Markdown>{parsed ? parsed.response : t.content}</Markdown>
+                    <Markdown>
+                      {stripAudioTags(parsed ? parsed.response : t.content)}
+                    </Markdown>
                   ) : (
                     parsed ? parsed.response : t.content
                   )}

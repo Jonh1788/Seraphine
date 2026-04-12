@@ -105,12 +105,14 @@ class ElevenLabsAdapter(TTSAdapter):
         effective_voice = voice_id or self.voice_id
         body = self._build_body(full_text)
         url = f"/v1/text-to-speech/{effective_voice}/stream"
-        # ElevenLabs honors output_format and optimize_streaming_latency
-        # as query string params, not body.
-        params = {
-            "output_format": _OUTPUT_FORMAT,
-            "optimize_streaming_latency": str(self.optimize_streaming_latency),
-        }
+        # ElevenLabs honors output_format (and optimize_streaming_latency
+        # for non-v3 models) as query string params, not body. v3
+        # explicitly rejects optimize_streaming_latency with HTTP 400 —
+        # the model is quality-tuned, not latency-tuned, so the knob
+        # doesn't apply.
+        params: dict[str, str] = {"output_format": _OUTPUT_FORMAT}
+        if "v3" not in self.model_id.lower():
+            params["optimize_streaming_latency"] = str(self.optimize_streaming_latency)
 
         try:
             async with self._client.stream(
@@ -124,7 +126,22 @@ class ElevenLabsAdapter(TTSAdapter):
                     raise ElevenLabsUnavailableError(
                         "ElevenLabs rate limit exceeded (429)"
                     )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Read the response body so the actual ElevenLabs
+                    # error message (validation_error, unsupported_model,
+                    # etc.) reaches the user instead of the bare URL.
+                    err_bytes = b""
+                    try:
+                        async for chunk in resp.aiter_bytes():
+                            err_bytes += chunk
+                            if len(err_bytes) > 4096:
+                                break
+                    except Exception:
+                        pass
+                    detail = err_bytes.decode("utf-8", errors="replace")[:500]
+                    raise ElevenLabsUnavailableError(
+                        f"ElevenLabs HTTP {resp.status_code}: {detail}"
+                    )
                 async for chunk in resp.aiter_bytes():
                     if chunk:
                         yield chunk
