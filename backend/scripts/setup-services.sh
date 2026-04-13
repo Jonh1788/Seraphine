@@ -19,7 +19,6 @@ RESET="\033[0m"
 # Service definitions: key|label|description|default
 SERVICES=(
   "ollama|Ollama (Embeddings)|Modelo de embeddings para memória|true"
-  "vmlx|vMLX (Gemma Local)|LLM local via MLX — desative se usar Anthropic|false"
   "backend|Backend (FastAPI)|Servidor principal da Seraphine|true"
   "frontend|Frontend (Vite)|Interface web React|true"
   "whatsapp|WhatsApp Bridge|Ponte WhatsApp Web — mensagens e tarefas|true"
@@ -92,7 +91,6 @@ cat > "$CONFIG" << JSONEOF
 {
   "_comment": "Seraphine services config — edit manually or run setup-services.sh",
   "ollama": ${selected[ollama]},
-  "vmlx": ${selected[vmlx]},
   "backend": ${selected[backend]},
   "frontend": ${selected[frontend]},
   "whatsapp": ${selected[whatsapp]},

@@ -1,7 +1,6 @@
 {
-  "_comment": "Seraphine services config — edit to enable/disable services",
+  "_comment": "Seraphine services config — edit manually or run setup-services.sh",
   "ollama": true,
-  "vmlx": false,
   "backend": true,
   "frontend": true,
   "whatsapp": true,
