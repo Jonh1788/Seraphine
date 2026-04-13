@@ -436,6 +436,8 @@ button:disabled {
   overflow: hidden;
   opacity: 0;
   border-right: none;
+  height: 0 !important;
+  max-height: 0 !important;
 }
 
 .card {
