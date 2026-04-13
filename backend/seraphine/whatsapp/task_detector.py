@@ -249,33 +249,23 @@ class WhatsAppTaskDetector:
     ) -> None:
         """Notify the user about a detected task.
 
-        1. Auto-acknowledge on WhatsApp for media/alta urgency
-        2. Persist notification in DB (survives disconnect)
-        3. Push to connected WS clients (chat bubble + browser notification)
-        4. Email fallback if no WS clients connected
+        1. Persist notification in DB (survives disconnect)
+        2. Push to connected WS clients (chat bubble + browser notification)
+        3. Email fallback if no WS clients connected
+
+        Does NOT auto-reply on WhatsApp — the LLM decides how to respond
+        via whatsapp_send_message or whatsapp_send_voice tools.
         """
         urgency_icon = {
             "alta": "🔴", "media": "🟡", "baixa": "🟢",
         }.get(analysis.urgency, "🟡")
 
-        # Auto-acknowledge on WhatsApp for medium/high urgency
-        auto_replied = False
-        if analysis.urgency in ("alta", "media") and chat_id and self._wa_client:
-            try:
-                ack = "Oi! Vi sua mensagem, já vou verificar. 👍"
-                if analysis.urgency == "alta":
-                    ack = "Vi! Já estou cuidando disso. 🚀"
-                await self._wa_client.send_message(chat_id=chat_id, message=ack)
-                auto_replied = True
-                logger.info("Auto-acknowledged on WhatsApp to %s", author)
-            except Exception as exc:
-                logger.warning("Failed to auto-acknowledge on WhatsApp: %s", exc)
-
-        reply_note = " *(já respondi no WhatsApp)*" if auto_replied else ""
+        # Build message for the chat — include chat_id so the LLM can reply
         text = (
             f"💬 **WhatsApp — {author}** ({chat_name})\n\n"
-            f"{urgency_icon} **Tarefa detectada:** {analysis.summary}{reply_note}\n\n"
-            f"Quer que eu cuide disso?"
+            f"{urgency_icon} **Mensagem:** {analysis.summary}\n\n"
+            f"Chat ID: `{chat_id}`\n"
+            f"Quer que eu responda?"
         )
 
         # 1. Persist notification in DB — survives disconnect
@@ -291,7 +281,6 @@ class WhatsAppTaskDetector:
                         "chat_id": chat_id, "chat_name": chat_name,
                         "author": author, "urgency": analysis.urgency,
                         "summary": analysis.summary,
-                        "auto_replied": auto_replied,
                     }, ensure_ascii=False),
                 )
             except Exception as exc:
