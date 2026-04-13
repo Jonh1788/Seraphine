@@ -15,7 +15,12 @@
     <title>Seraphine</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="splash" style="display:flex;align-items:center;justify-content:center;height:100vh;background:#08080d;flex-direction:column;gap:16px">
+        <img src="/icon-192.png" width="80" height="80" alt="" style="border-radius:20px">
+        <div style="color:#a78bfa;font-size:18px;font-weight:700;font-family:-apple-system,system-ui,sans-serif">Seraphine</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {

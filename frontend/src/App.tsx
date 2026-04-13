@@ -64,6 +64,49 @@ export function App(): JSX.Element {
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
+
+  // PWA: handle ?view= and ?share= URL params from manifest shortcuts / share target
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    // Share target handling
+    if (params.get('share') === 'true') {
+      const text = params.get('text') || '';
+      const url = params.get('url') || '';
+      const title = params.get('title') || '';
+      const shared = [title, text, url].filter(Boolean).join('\n');
+      if (shared) {
+        sessionStorage.setItem('seraphine.shared', shared);
+      }
+      setActiveView('chat');
+      window.history.replaceState({}, '', '/');
+      return;
+    }
+
+    // Shortcut view routing
+    const view = params.get('view');
+    if (view === 'finance' || view === 'calendar' || view === 'whatsapp') {
+      setActiveView(view);
+    }
+
+    // Clean URL without reload
+    if (params.has('view') || params.has('share')) {
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
+
+  // PWA: Badging API — show unread count on app icon
+  useEffect(() => {
+    const total = whatsappUnread + unreadCount;
+    if ('setAppBadge' in navigator) {
+      if (total > 0) {
+        (navigator as any).setAppBadge(total).catch(() => {});
+      } else {
+        (navigator as any).clearAppBadge?.().catch(() => {});
+      }
+    }
+  }, [whatsappUnread, unreadCount]);
+
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);

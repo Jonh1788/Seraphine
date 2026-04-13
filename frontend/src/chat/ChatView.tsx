@@ -300,6 +300,16 @@ export function ChatView({
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
+
+  // PWA: inject shared content from share target into draft
+  useEffect(() => {
+    const shared = sessionStorage.getItem('seraphine.shared');
+    if (shared) {
+      setDraft(shared);
+      sessionStorage.removeItem('seraphine.shared');
+    }
+  }, []);
+
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const [pendingImages, setPendingImages] = useState<{name: string; dataUrl: string}[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);

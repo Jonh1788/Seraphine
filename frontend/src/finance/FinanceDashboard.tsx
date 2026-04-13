@@ -32,6 +32,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const [error, setError] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<FinanceEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // Fetch summary + entries for the selected month
   useEffect(() => {
@@ -71,6 +72,18 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const refresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
+
+  // Track online/offline status and auto-refresh on reconnect
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => { setIsOffline(false); refresh(); };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    return () => {
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online', goOnline);
+    };
+  }, [refresh]);
 
   const pieData = useMemo(
     () => (data ? buildPieData(data.by_category) : []),
@@ -112,6 +125,11 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   return (
     <div className="finance">
+      {isOffline && (
+        <div className="finance-offline-banner">
+          Modo offline — mostrando dados em cache
+        </div>
+      )}
       {/* Header */}
       <div className="finance__header">
         <button className="finance__back" onClick={onBack} type="button">
