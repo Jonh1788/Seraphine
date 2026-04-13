@@ -873,7 +873,7 @@ class ImportFinancialPdfTool(Tool):
         )
 
         body = {
-            "model": "claude-sonnet-4-6",
+            "model": "claude-opus-4-6",
             "max_tokens": 32000,
             "temperature": 0.7,
             "messages": [{
@@ -971,7 +971,7 @@ class ImportFinancialPdfTool(Tool):
         )
 
         body = {
-            "model": "claude-sonnet-4-6",
+            "model": "claude-opus-4-6",
             "max_tokens": 16000,
             "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
