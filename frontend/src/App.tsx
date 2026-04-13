@@ -519,23 +519,25 @@ export function App(): JSX.Element {
         />
       )}
 
-      {/* Mobile bottom nav sheet */}
-      {mobileMenuOpen && (
-        <div className="mobile-nav-sheet">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`mobile-nav-sheet__btn${item.active ? ' mobile-nav-sheet__btn--active' : ''}`}
-              onClick={() => { item.onClick(); setMobileMenuOpen(false); }}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-              {item.badge && <span className="nav-rail__badge" />}
-            </button>
-          ))}
+      {/* Mobile slide-in drawer from right */}
+      <div className={`mobile-drawer ${mobileMenuOpen ? 'mobile-drawer--open' : ''}`}>
+        <div className="mobile-drawer__header">
+          <span>Menu</span>
+          <button type="button" className="mobile-drawer__close" onClick={() => setMobileMenuOpen(false)}>&times;</button>
         </div>
-      )}
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`mobile-drawer__btn${item.active ? ' mobile-drawer__btn--active' : ''}`}
+            onClick={() => { item.onClick(); setMobileMenuOpen(false); }}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+            {item.badge && <span className="nav-rail__badge" />}
+          </button>
+        ))}
+      </div>
 
       <CalendarModal
         open={calendarOpen}

@@ -293,48 +293,77 @@ button:disabled {
 
 /* ---------- Mobile nav sheet (bottom) ---------- */
 
-.mobile-nav-sheet {
+/* ---------- Mobile drawer (slide from right) ---------- */
+
+.mobile-drawer {
   position: fixed;
-  bottom: 0;
-  left: 0;
+  top: 0;
   right: 0;
+  bottom: 0;
+  width: 260px;
+  max-width: 80vw;
   z-index: 110;
   background: var(--bg-1);
-  border-top: 1px solid var(--border);
-  padding: var(--space-3) var(--space-4);
+  border-left: 1px solid var(--border);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  animation: slideUp 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  border-radius: 16px 16px 0 0;
+  transform: translateX(100%);
+  transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: var(--shadow-lg);
 }
 
-@keyframes slideUp {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
+.mobile-drawer--open {
+  transform: translateX(0);
 }
 
-.mobile-nav-sheet__btn {
+.mobile-drawer__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-2);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mobile-drawer__close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.mobile-drawer__btn {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  padding: var(--space-3) var(--space-3);
+  background: transparent;
+  border: none;
   border-radius: var(--r-md);
   color: var(--text-dim);
   font-size: 14px;
   font-weight: 500;
   position: relative;
+  cursor: pointer;
   transition: all 200ms ease;
 }
 
-.mobile-nav-sheet__btn:hover,
-.mobile-nav-sheet__btn--active {
+.mobile-drawer__btn:hover,
+.mobile-drawer__btn--active {
   background: rgba(167, 139, 250, 0.12);
   color: var(--accent);
-  border-color: rgba(167, 139, 250, 0.2);
 }
 
 /* ---------- Mobile: hide nav rail + adapt layout (880px) ---------- */
@@ -583,11 +612,13 @@ button:disabled {
 
 .chat__messages {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   scroll-behavior: smooth;
+  min-width: 0;
 }
 
 .chat__messages::-webkit-scrollbar { width: 8px; }
@@ -634,6 +665,7 @@ button:disabled {
   display: flex;
   gap: var(--space-3);
   max-width: 78%;
+  min-width: 0;
   animation: fadeIn 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -694,6 +726,10 @@ button:disabled {
   padding: 14px 18px;
   border-radius: 16px;
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .bubble--user .bubble__content {
