@@ -137,6 +137,12 @@ class Settings(BaseSettings):
     wise_profile_id: int = 0  # 0 = auto-detect
     wise_sandbox: bool = False
 
+    # ------------------------------------------------------------------
+    # Web Push (VAPID) — leave empty to disable push notifications
+    # ------------------------------------------------------------------
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+
     @field_validator("google_scopes", mode="before")
     @classmethod
     def _split_google_scopes(cls, v):  # type: ignore[no-untyped-def]

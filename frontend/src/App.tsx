@@ -95,6 +95,41 @@ export function App(): JSX.Element {
     }
   }, []);
 
+  // PWA: Subscribe to Web Push notifications
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+
+        const resp = await fetch('/push/vapid-public-key');
+        const { key } = await resp.json();
+        if (!key) return;
+
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          const padding = '='.repeat((4 - key.length % 4) % 4);
+          const base64 = (key + padding).replace(/-/g, '+').replace(/_/g, '/');
+          const rawKey = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: rawKey,
+          });
+        }
+
+        await fetch('/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub.toJSON()),
+        });
+      } catch (e) {
+        console.warn('[Push] subscription failed:', e);
+      }
+    })();
+  }, []);
+
   // PWA: Badging API — show unread count on app icon
   useEffect(() => {
     const total = whatsappUnread + unreadCount;

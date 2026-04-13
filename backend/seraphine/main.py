@@ -167,6 +167,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # ------------------------------------------------------------------
+    # Web Push notifications — optional (VAPID keys in .env)
+    # ------------------------------------------------------------------
+    push_service = None
+    if settings.vapid_private_key and settings.vapid_public_key:
+        from seraphine.push.service import PushService
+
+        push_service = PushService(
+            vapid_private_key=settings.vapid_private_key,
+            vapid_public_key=settings.vapid_public_key,
+        )
+        logger.info("Web Push service wired (VAPID public key=%s...)", settings.vapid_public_key[:20])
+
+    # ------------------------------------------------------------------
     # Reminders scheduler — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     import asyncio as _asyncio
@@ -341,6 +354,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.wise_client = wise_client
     app.state.finance_service = finance_service
     app.state.reminder_scheduler = reminder_scheduler
+    app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -397,8 +411,10 @@ def create_app() -> FastAPI:
     app.include_router(google_router)
 
     from seraphine.finance.routes import router as finance_router
+    from seraphine.push.routes import router as push_router
 
     app.include_router(finance_router)
+    app.include_router(push_router)
 
     if settings.whatsapp_bridge_url:
         from seraphine.whatsapp.routes import router as whatsapp_router

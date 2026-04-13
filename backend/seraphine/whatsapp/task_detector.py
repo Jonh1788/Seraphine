@@ -332,7 +332,21 @@ class WhatsAppTaskDetector:
         for ws in dead:
             ws_clients.discard(ws)
 
-        # 3. Email fallback if no WS client connected
+        # 3. Web Push fallback if no WS client connected
+        if not delivered_to_ws:
+            push = getattr(self._app_state, "push_service", None)
+            if push:
+                try:
+                    await push.send_notification(
+                        title=f"WhatsApp — {author}",
+                        body=analysis.summary or "Tarefa detectada",
+                        url="/?view=whatsapp",
+                        tag=f"wa-task-{chat_id}",
+                    )
+                except Exception as exc:
+                    logger.warning("Web Push send failed: %s", exc)
+
+        # 4. Email fallback if no WS client connected
         if not delivered_to_ws:
             logger.info("No WS clients — scheduling email fallback for task from %s", author)
             asyncio.create_task(

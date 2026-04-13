@@ -83,7 +83,21 @@ async def notify_reminder(app_state: object, reminder_id: str, message: str) -> 
         except Exception as exc:
             logger.warning("Failed to persist reminder notification: %s", exc)
 
-    # 3. Email fallback — if nobody was connected, send via Gmail
+    # 3. Web Push fallback — if nobody was connected
+    if not delivered_to_ws:
+        push = getattr(app_state, "push_service", None)
+        if push:
+            try:
+                await push.send_notification(
+                    title="Lembrete",
+                    body=message,
+                    url="/?view=chat",
+                    tag=f"reminder-{reminder_id}",
+                )
+            except Exception as exc:
+                logger.warning("Web Push send for reminder failed: %s", exc)
+
+    # 4. Email fallback — if nobody was connected, send via Gmail
     if not delivered_to_ws:
         asyncio.create_task(_email_fallback(app_state, reminder_id, message, fired_at_human))
 

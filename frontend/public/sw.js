@@ -73,6 +73,57 @@ async function replayPendingActions() {
   }
 }
 
+// ── Push notifications ──
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  let data;
+  try {
+    data = event.data.json();
+  } catch {
+    data = { title: 'Seraphine', body: event.data.text() };
+  }
+
+  const options = {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: data.badge || '/icon-192.png',
+    tag: data.tag || 'seraphine',
+    renotify: true,
+    data: { url: data.url || '/' },
+    actions: [
+      { action: 'open', title: 'Abrir' },
+      { action: 'dismiss', title: 'Dispensar' },
+    ],
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Seraphine', options)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  if (event.action === 'dismiss') return;
+
+  const url = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin)) {
+          client.focus();
+          client.navigate(url);
+          return;
+        }
+      }
+      return clients.openWindow(url);
+    })
+  );
+});
+
 // ── Lifecycle events ──
 
 // Install: cache app shell
@@ -195,7 +246,8 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/google') ||
     url.pathname.startsWith('/whatsapp') ||
     url.pathname.startsWith('/memory') ||
-    url.pathname.startsWith('/health')
+    url.pathname.startsWith('/health') ||
+    url.pathname.startsWith('/push')
   ) {
     return;
   }
