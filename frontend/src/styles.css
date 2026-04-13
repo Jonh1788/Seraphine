@@ -400,18 +400,20 @@ button:disabled {
   }
 
   .controls {
-    flex-direction: row;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
+    flex-direction: row !important;
+    gap: var(--space-2) !important;
+    padding: var(--space-2) var(--space-3) !important;
     background: var(--bg-1);
     border-bottom: 1px solid var(--border);
     justify-content: center;
   }
 
   .controls .toggle {
-    padding: var(--space-1) var(--space-3);
+    padding: var(--space-1) var(--space-2);
     font-size: 11px;
     white-space: nowrap;
+    flex: 1;
+    justify-content: center;
   }
 }
 
