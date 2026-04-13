@@ -44,3 +44,23 @@ services/moss-tts-openai/
 
 # Voxtral TTS Rust port — binary release + 8GB model weights, fetched at setup
 services/voxtral-tts/
+
+# Runtime artifacts / generated state (NOT code)
+services/browser-agent/user-data/
+backend/.wwebjs_auth/
+services/whatsapp-bridge/.wwebjs_auth/
+
+# Third-party binaries / proxies
+services/claude-stream-proxy/
+services/cli-proxy-src/
+services/cli-proxy/cli-proxy-api
+
+# VRM backups
+*.vrm.bak
+
+# Screenshots / temp images
+Captura de Tela*.png
+Gemini_Generated_Image*.png
+Semana-compromissos*.png
+Calendário-Mês*.png
+filtros-de-oquemostrar*.png

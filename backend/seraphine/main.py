@@ -103,98 +103,101 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # WhatsApp bridge integration — optional
     # ------------------------------------------------------------------
     whatsapp_client = None
-    if settings.whatsapp_bridge_url:
-        from seraphine.whatsapp.client import WhatsAppBridgeClient
-
-        whatsapp_client = WhatsAppBridgeClient(
-            base_url=settings.whatsapp_bridge_url,
-        )
-        logger.info(
-            "WhatsApp bridge client wired (url=%s)", settings.whatsapp_bridge_url
-        )
-
-    # WhatsApp task detector — wired after LLM is available
     whatsapp_task_detector = None
-    if whatsapp_client is not None:
-        from seraphine.whatsapp.task_detector import WhatsAppTaskDetector
+    if settings.whatsapp_bridge_url:
+        try:
+            from seraphine.whatsapp.client import WhatsAppBridgeClient
 
-        whatsapp_task_detector = WhatsAppTaskDetector(
-            app_state=None,  # patched after app.state is ready
-            whatsapp_client=whatsapp_client,
-            llm_client=llm,
-        )
-        logger.info("WhatsApp task detector wired")
+            whatsapp_client = WhatsAppBridgeClient(
+                base_url=settings.whatsapp_bridge_url,
+            )
+            logger.info("WhatsApp bridge client wired (url=%s)", settings.whatsapp_bridge_url)
+
+            from seraphine.whatsapp.task_detector import WhatsAppTaskDetector
+            whatsapp_task_detector = WhatsAppTaskDetector(
+                app_state=None,
+                whatsapp_client=whatsapp_client,
+                llm_client=llm,
+            )
+            logger.info("WhatsApp task detector wired")
+        except Exception as e:
+            logger.warning("WhatsApp integration failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Finance module — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
-    from seraphine.finance.service import FinanceService
-
-    finance_service = FinanceService(db_path=settings.sqlite_path)
-    await finance_service.ensure_tables()
-    logger.info("Finance service wired (db=%s)", settings.sqlite_path)
+    finance_service = None
+    try:
+        from seraphine.finance.service import FinanceService
+        finance_service = FinanceService(db_path=settings.sqlite_path)
+        await finance_service.ensure_tables()
+        logger.info("Finance service wired (db=%s)", settings.sqlite_path)
+    except Exception as e:
+        logger.warning("Finance service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
     if settings.wise_api_key:
-        from seraphine.wise.client import WiseClient
-
-        wise_client = WiseClient(
-            api_key=settings.wise_api_key,
-            profile_id=settings.wise_profile_id,
-            sandbox=settings.wise_sandbox,
-        )
-        logger.info(
-            "Wise client wired (sandbox=%s, profile_id=%s)",
-            settings.wise_sandbox,
-            settings.wise_profile_id or "auto-detect",
-        )
+        try:
+            from seraphine.wise.client import WiseClient
+            wise_client = WiseClient(
+                api_key=settings.wise_api_key,
+                profile_id=settings.wise_profile_id,
+                sandbox=settings.wise_sandbox,
+            )
+            logger.info("Wise client wired (sandbox=%s, profile_id=%s)", settings.wise_sandbox, settings.wise_profile_id or "auto-detect")
+        except Exception as e:
+            logger.warning("Wise integration failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Browser automation integration — optional
     # ------------------------------------------------------------------
     browser_client = None
     if settings.browser_agent_url:
-        from seraphine.browser.client import BrowserAgentClient
-
-        browser_client = BrowserAgentClient(
-            base_url=settings.browser_agent_url,
-        )
-        logger.info(
-            "Browser agent client wired (url=%s)", settings.browser_agent_url
-        )
+        try:
+            from seraphine.browser.client import BrowserAgentClient
+            browser_client = BrowserAgentClient(base_url=settings.browser_agent_url)
+            logger.info("Browser agent client wired (url=%s)", settings.browser_agent_url)
+        except Exception as e:
+            logger.warning("Browser agent failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Web Push notifications — optional (VAPID keys in .env)
     # ------------------------------------------------------------------
     push_service = None
     if settings.vapid_private_key and settings.vapid_public_key:
-        from seraphine.push.service import PushService
-
-        push_service = PushService(
-            vapid_private_key=settings.vapid_private_key,
-            vapid_public_key=settings.vapid_public_key,
-        )
-        logger.info("Web Push service wired (VAPID public key=%s...)", settings.vapid_public_key[:20])
+        try:
+            from seraphine.push.service import PushService
+            push_service = PushService(
+                vapid_private_key=settings.vapid_private_key,
+                vapid_public_key=settings.vapid_public_key,
+            )
+            logger.info("Web Push service wired (VAPID public key=%s...)", settings.vapid_public_key[:20])
+        except Exception as e:
+            logger.warning("Web Push failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Reminders scheduler — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
-    import asyncio as _asyncio
-    from seraphine.reminders.scheduler import ReminderScheduler
-    from seraphine.reminders.notify import notify_reminder
+    reminder_scheduler = None
+    try:
+        import asyncio as _asyncio
+        from seraphine.reminders.scheduler import ReminderScheduler
+        from seraphine.reminders.notify import notify_reminder
 
-    _reminders_db = str(settings.sqlite_path).replace("seraphine.sqlite", "reminders.sqlite")
-    reminder_scheduler = ReminderScheduler(
-        sqlite_path=_reminders_db,
-        on_fire=lambda rid, msg: _asyncio.create_task(
-            notify_reminder(app.state, rid, msg)
-        ),
-    )
-    await reminder_scheduler.start()
-    logger.info("Reminder scheduler started (db=%s)", _reminders_db)
+        _reminders_db = str(settings.sqlite_path).replace("seraphine.sqlite", "reminders.sqlite")
+        reminder_scheduler = ReminderScheduler(
+            sqlite_path=_reminders_db,
+            on_fire=lambda rid, msg: _asyncio.create_task(
+                notify_reminder(app.state, rid, msg)
+            ),
+        )
+        await reminder_scheduler.start()
+        logger.info("Reminder scheduler started (db=%s)", _reminders_db)
+    except Exception as e:
+        logger.warning("Reminder scheduler failed (non-critical): %s", e)
 
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
@@ -375,7 +378,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 pass
         if mcp_event_listener is not None:
             await mcp_event_listener.stop()
-        await reminder_scheduler.stop()
+        if reminder_scheduler is not None:
+            await reminder_scheduler.stop()
         await llm.aclose()
         await embeddings.aclose()
         await tts.aclose()
@@ -383,7 +387,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await whatsapp_client.aclose()
         if browser_client is not None:
             await browser_client.aclose()
-        await finance_service.aclose()
+        if finance_service is not None:
+            await finance_service.aclose()
         if wise_client is not None:
             await wise_client.aclose()
         if mcp_client is not None:
