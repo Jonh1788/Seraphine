@@ -221,6 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mcp_client = None
 
     engine = ConversationEngine(llm, store, memory=memory, tools=tools)
+
     if settings.tts_backend == "elevenlabs":
         from seraphine.tts.elevenlabs import ElevenLabsAdapter
 
@@ -264,6 +265,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.tts_base_url,
             settings.tts_voice,
         )
+    # Late-register WhatsApp voice tool — needs both whatsapp_client and tts
+    if whatsapp_client is not None:
+        from seraphine.tools.whatsapp import WhatsAppSendVoiceTool
+
+        tools.register(WhatsAppSendVoiceTool(whatsapp_client, tts))
+
     # STT backend: local MLX Whisper on Apple Silicon or remote HTTP
     # service on the RTX box (spec 007). Toggle via SERAPHINE_STT_BACKEND.
     stt: Any

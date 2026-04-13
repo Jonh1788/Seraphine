@@ -10,15 +10,18 @@ Read tools (``requires_confirmation=False``):
 Write tools (``requires_confirmation=True``, approval gate):
 
 - ``whatsapp_send_message`` -- send a text message
+- ``whatsapp_send_voice`` -- send a voice note (TTS -> ogg/opus)
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tts.base import TTSAdapter
 from seraphine.whatsapp.client import WhatsAppBridgeClient, WhatsAppBridgeError
 
 logger = logging.getLogger(__name__)
@@ -402,4 +405,87 @@ class WhatsAppSearchMessagesTool(Tool):
             ok=True,
             output="\n".join(lines),
             metadata={"count": len(results), "results": results},
+        )
+
+
+class WhatsAppSendVoiceTool(Tool):
+    name = "whatsapp_send_voice"
+    description = (
+        "Send a voice message on WhatsApp. Generates speech audio from text "
+        "using text-to-speech and sends it as a voice note. Use when the user "
+        "wants to send an audio/voice message on WhatsApp instead of text. "
+        "Triggers: 'manda um audio', 'envia uma mensagem de voz', "
+        "'fala pra ele por audio'."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "chat_id": {
+                "type": "string",
+                "description": "Chat ID from whatsapp_list_chats.",
+            },
+            "text": {
+                "type": "string",
+                "description": "Text to convert to speech and send as voice message.",
+            },
+            "quote_msg_id": {
+                "type": "string",
+                "description": "Optional message ID to reply to (thread reply).",
+            },
+        },
+        "required": ["chat_id", "text"],
+    }
+    requires_confirmation = True
+    category = "network"
+
+    def __init__(
+        self, client: WhatsAppBridgeClient, tts: TTSAdapter
+    ) -> None:
+        self._client = client
+        self._tts = tts
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        status = await _check_connected(self._client)
+        if status is None:
+            return _not_connected_result()
+
+        chat_id = args.get("chat_id")
+        text = args.get("text")
+        if not chat_id or not text:
+            return ToolResult(ok=False, error="chat_id and text are required")
+
+        quote_msg_id = args.get("quote_msg_id") or None
+
+        # 1. Synthesize speech as ogg/opus
+        try:
+            ogg_bytes = await self._tts.synthesize_ogg(str(text))
+        except NotImplementedError:
+            return ToolResult(
+                ok=False,
+                error="O backend de TTS atual nao suporta geracao de audio ogg/opus.",
+            )
+        except Exception as e:
+            logger.exception("TTS synthesize_ogg failed")
+            return ToolResult(ok=False, error=f"TTS failed: {e}")
+
+        if not ogg_bytes:
+            return ToolResult(ok=False, error="TTS returned empty audio")
+
+        # 2. Base64-encode and send via bridge
+        audio_b64 = base64.b64encode(ogg_bytes).decode("ascii")
+
+        try:
+            result = await self._client.send_voice(
+                str(chat_id), audio_b64, quote_msg_id=quote_msg_id
+            )
+        except WhatsAppBridgeError as e:
+            return ToolResult(ok=False, error=f"send voice failed: {e}")
+        except Exception as e:
+            return ToolResult(ok=False, error=f"bridge error: {e}")
+
+        mid = result.get("messageId", "")
+        return ToolResult(
+            ok=True,
+            output=f"Audio enviado (id={mid})",
+            metadata={"messageId": mid, "chatId": chat_id},
         )

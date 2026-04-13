@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { MessageMedia } from "whatsapp-web.js";
 import { getClient, getStatus } from "../client";
 
 const router = Router();
@@ -9,14 +10,15 @@ router.post("/send", async (req: Request, res: Response) => {
     return;
   }
 
-  const { chatId, message, quoteMsgId } = req.body as {
+  const { chatId, message, quoteMsgId, audio } = req.body as {
     chatId?: string;
     message?: string;
     quoteMsgId?: string | null;
+    audio?: string; // base64 encoded audio (ogg/opus format)
   };
 
-  if (!chatId || !message) {
-    res.status(400).json({ error: "chatId and message are required" });
+  if (!chatId || (!message && !audio)) {
+    res.status(400).json({ error: "chatId and at least one of message/audio are required" });
     return;
   }
 
@@ -43,12 +45,29 @@ router.post("/send", async (req: Request, res: Response) => {
       options.quotedMessageId = quoteMsgId;
     }
 
-    const sent = await chat.sendMessage(message, options);
+    const sentIds: string[] = [];
+
+    // Send text message first (if both text and audio provided)
+    if (message) {
+      const sent = await chat.sendMessage(message, options);
+      sentIds.push(sent.id._serialized);
+    }
+
+    // Send voice note
+    if (audio) {
+      const media = new MessageMedia("audio/ogg; codecs=opus", audio);
+      const sent = await chat.sendMessage(media, {
+        sendAudioAsVoice: true,
+        ...(quoteMsgId && !message ? { quotedMessageId: quoteMsgId } : {}),
+      });
+      sentIds.push(sent.id._serialized);
+    }
 
     res.json({
       ok: true,
-      messageId: sent.id._serialized,
-      timestamp: sent.timestamp,
+      messageId: sentIds[sentIds.length - 1],
+      messageIds: sentIds,
+      timestamp: Math.floor(Date.now() / 1000),
     });
   } catch (err) {
     console.error("[whatsapp-bridge] /api/send error:", err);

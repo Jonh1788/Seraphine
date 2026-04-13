@@ -64,6 +64,7 @@ def build_default_registry(
     wise_client: Any = None,
     reminder_scheduler: Any = None,
     finance_service: Any = None,
+    tts: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -112,6 +113,7 @@ def build_default_registry(
             WhatsAppReadMessagesTool,
             WhatsAppSearchMessagesTool,
             WhatsAppSendMessageTool,
+            WhatsAppSendVoiceTool,
         )
 
         reg.register(WhatsAppAuthStatusTool(whatsapp_client))
@@ -119,6 +121,8 @@ def build_default_registry(
         reg.register(WhatsAppReadMessagesTool(whatsapp_client))
         reg.register(WhatsAppSendMessageTool(whatsapp_client))
         reg.register(WhatsAppSearchMessagesTool(whatsapp_client))
+        if tts is not None:
+            reg.register(WhatsAppSendVoiceTool(whatsapp_client, tts))
     if browser_client is not None:
         from seraphine.tools.browser_automation import (
             BrowserClickTool,

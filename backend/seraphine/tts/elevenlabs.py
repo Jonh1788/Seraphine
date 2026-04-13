@@ -91,6 +91,50 @@ class ElevenLabsAdapter(TTSAdapter):
             "voice_settings": vs,
         }
 
+    async def synthesize_ogg(
+        self,
+        text: str,
+        *,
+        voice_id: str | None = None,
+    ) -> bytes:
+        """Non-streaming synthesis returning ogg/opus bytes.
+
+        Used for WhatsApp voice notes. Requests ``ogg_opus`` output format
+        from ElevenLabs so no local conversion is needed.
+        """
+        if not text.strip():
+            return b""
+
+        effective_voice = voice_id or self.voice_id
+        body = self._build_body(text)
+        url = f"/v1/text-to-speech/{effective_voice}"
+        params: dict[str, str] = {"output_format": "ogg_opus"}
+        if "v3" not in self.model_id.lower():
+            params["optimize_streaming_latency"] = str(
+                self.optimize_streaming_latency
+            )
+
+        try:
+            resp = await self._client.request(
+                "POST",
+                url,
+                json=body,
+                params=params,
+                headers={
+                    "xi-api-key": self.api_key,
+                    "content-type": "application/json",
+                    "accept": "audio/ogg",
+                },
+            )
+            if resp.status_code >= 400:
+                detail = resp.text[:500]
+                raise ElevenLabsUnavailableError(
+                    f"ElevenLabs HTTP {resp.status_code}: {detail}"
+                )
+            return resp.content
+        except httpx.HTTPError as e:
+            raise ElevenLabsUnavailableError(str(e)) from e
+
     async def synthesize_stream(  # type: ignore[override]
         self,
         text: str | AsyncIterator[str],

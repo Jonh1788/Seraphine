@@ -101,6 +101,19 @@ class WhatsAppBridgeClient:
         resp = await self._request("GET", "/api/search", params=params)
         return resp.json().get("results", [])
 
+    async def send_voice(
+        self,
+        chat_id: str,
+        audio_base64: str,
+        quote_msg_id: str | None = None,
+    ) -> dict:
+        """POST /api/send — send a voice note (base64 ogg/opus audio)."""
+        body: dict[str, Any] = {"chatId": chat_id, "audio": audio_base64}
+        if quote_msg_id:
+            body["quoteMsgId"] = quote_msg_id
+        resp = await self._request("POST", "/api/send", json=body)
+        return resp.json()
+
     async def contacts(self, query: str | None = None) -> list[dict]:
         """GET /api/contacts — list contacts, optionally filtered by name."""
         params: dict[str, Any] = {}
