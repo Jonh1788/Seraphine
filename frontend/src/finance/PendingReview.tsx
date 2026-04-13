@@ -19,15 +19,29 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: 'Manual',
 };
 
+interface PendingTask {
+  id: number;
+  type: string;
+  title: string;
+  description: string;
+  source: string;
+  payload: string;
+  created_at: string;
+}
+
 interface PendingReviewProps {
   entries: FinanceEntry[];
+  tasks?: PendingTask[];
   onRefresh: () => void;
 }
 
-export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.Element {
+export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps): JSX.Element {
   const [actioningId, setActioningId] = useState<number | null>(null);
 
-  if (entries.length === 0) {
+  const hasTasks = tasks && tasks.length > 0;
+  const hasEntries = entries.length > 0;
+
+  if (!hasTasks && !hasEntries) {
     return (
       <div className="finance-pending-empty">
         Nenhum item pendente de revisao
@@ -67,8 +81,93 @@ export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.E
     }
   };
 
+  const handleExecuteTask = async (taskId: number): Promise<void> => {
+    setActioningId(taskId);
+    try {
+      const res = await fetch(`/tasks/${taskId}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error('Failed');
+      onRefresh();
+    } catch (err) {
+      console.error('Task execute error:', err);
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleRejectTask = async (taskId: number): Promise<void> => {
+    setActioningId(taskId);
+    try {
+      const res = await fetch(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'rejected' }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      onRefresh();
+    } catch (err) {
+      console.error('Task reject error:', err);
+    } finally {
+      setActioningId(null);
+    }
+  };
+
   return (
     <div className="finance-pending-list">
+      {/* Seraphine Tasks / Suggestions */}
+      {hasTasks && (
+        <div className="finance-pending-section">
+          <h3 className="finance-pending-section__title">Sugestoes da Seraphine</h3>
+          {tasks.map((task) => {
+            let payload: Record<string, any> = {};
+            try { payload = JSON.parse(task.payload || '{}'); } catch { /* ignore */ }
+            const busy = actioningId === task.id;
+
+            return (
+              <div key={`task-${task.id}`} className="finance-pending-card finance-pending-card--task">
+                <div className="finance-pending-card__header">
+                  <span className="finance-pending-card__desc">{task.title}</span>
+                  <span className="finance-pending-card__source-badge">{task.source}</span>
+                </div>
+                <p className="finance-pending-card__detail">{task.description}</p>
+                {task.type === 'finance_import' && payload.filename && (
+                  <p className="finance-pending-card__file">
+                    Arquivo: {payload.filename}
+                  </p>
+                )}
+                <div className="finance-pending-card__actions">
+                  <button
+                    type="button"
+                    className="btn-confirm"
+                    disabled={busy}
+                    onClick={() => handleExecuteTask(task.id)}
+                  >
+                    {busy ? '...' : <><CheckIcon size={14} /> Importar</>}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-reject"
+                    disabled={busy}
+                    onClick={() => handleRejectTask(task.id)}
+                  >
+                    {busy ? '...' : <><XIcon size={14} /> Ignorar</>}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Divider if both tasks and entries exist */}
+      {hasTasks && hasEntries && (
+        <div className="finance-pending-divider" />
+      )}
+
+      {/* Existing entry cards */}
       {entries.map((entry) => {
         const isIncome = entry.type === 'income';
         const color = CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.outros;

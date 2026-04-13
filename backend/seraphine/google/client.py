@@ -419,6 +419,14 @@ class GoogleClient:
         results = await asyncio.gather(*(_fetch(i) for i in ids))
         return [r for r in results if r is not None]
 
+    async def download_attachment(self, message_id: str, attachment_id: str) -> bytes:
+        """Download a Gmail attachment by ID. Returns raw bytes."""
+        url = f"{GMAIL_API}/users/me/messages/{message_id}/attachments/{attachment_id}"
+        resp = await self._authed_request("GET", url)
+        data = resp.json()
+        # Gmail returns base64url-encoded data
+        return base64.urlsafe_b64decode(data["data"] + "==")
+
     async def get_message(self, message_id: str, *, format: str = "full") -> dict:
         url = f"{GMAIL_API}/users/me/messages/{message_id}"
         resp = await self._authed_request("GET", url, params={"format": format})

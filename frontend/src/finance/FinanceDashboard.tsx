@@ -31,6 +31,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<FinanceEntry[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -66,6 +67,14 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
         return r.json();
       })
       .then((res) => setPendingEntries(res.entries || []))
+      .catch(() => {});
+  }, [refreshKey]);
+
+  // Fetch pending tasks from task system
+  useEffect(() => {
+    fetch('/tasks?status=pending')
+      .then((r) => (r.ok ? r.json() : { tasks: [] }))
+      .then((res) => setPendingTasks(res.tasks || []))
       .catch(() => {});
   }, [refreshKey]);
 
@@ -166,8 +175,8 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
             onClick={() => setActiveTab(tab)}
           >
             {tab}
-            {tab === 'Pendentes' && pendingEntries.length > 0 && (
-              <span className="finance-tab-badge">{pendingEntries.length}</span>
+            {tab === 'Pendentes' && (pendingEntries.length + pendingTasks.length) > 0 && (
+              <span className="finance-tab-badge">{pendingEntries.length + pendingTasks.length}</span>
             )}
           </button>
         ))}
@@ -238,7 +247,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
         )}
 
         {!loading && activeTab === 'Pendentes' && (
-          <PendingReview entries={pendingEntries} onRefresh={refresh} />
+          <PendingReview entries={pendingEntries} tasks={pendingTasks} onRefresh={refresh} />
         )}
       </div>
     </div>

@@ -136,6 +136,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Finance service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Internal task system — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    task_service = None
+    email_scanner = None
+    try:
+        from seraphine.tasks.service import TaskService
+        task_service = TaskService(db_path=settings.sqlite_path)
+        await task_service.ensure_tables()
+        logger.info("Task service wired (db=%s)", settings.sqlite_path)
+
+        # Email scanner (if Google client available)
+        if google_client:
+            from seraphine.tasks.email_scanner import EmailScanner
+            email_scanner = EmailScanner(google_client, task_service, llm_client=llm)
+            logger.info("Email scanner wired")
+    except Exception as e:
+        logger.warning("Task service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -356,6 +375,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.browser_client = browser_client
     app.state.wise_client = wise_client
     app.state.finance_service = finance_service
+    app.state.task_service = task_service
+    app.state.email_scanner = email_scanner
     app.state.reminder_scheduler = reminder_scheduler
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
@@ -389,6 +410,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await browser_client.aclose()
         if finance_service is not None:
             await finance_service.aclose()
+        if task_service is not None:
+            await task_service.aclose()
         if wise_client is not None:
             await wise_client.aclose()
         if mcp_client is not None:
@@ -417,9 +440,12 @@ def create_app() -> FastAPI:
 
     from seraphine.finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router
+    from seraphine.tasks.routes import router as tasks_router
 
     app.include_router(finance_router)
     app.include_router(push_router)
+    app.include_router(tasks_router)
+    # NOTE: frontend vite proxy needs /tasks added
 
     if settings.whatsapp_bridge_url:
         from seraphine.whatsapp.routes import router as whatsapp_router

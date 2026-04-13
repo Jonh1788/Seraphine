@@ -508,6 +508,32 @@ async def _deliver_pending_notifications(ws: WebSocket) -> None:
         except Exception:
             pass
 
+    # Also deliver pending internal tasks
+    task_service = getattr(ws.app.state, "task_service", None)
+    if task_service:
+        try:
+            pending_tasks = await task_service.list_tasks(status="pending", limit=5)
+            for task in pending_tasks:
+                turn_id = str(uuid.uuid4())
+                task_text = (
+                    f"\U0001f4cb **Tarefa pendente:** {task.title}\n\n"
+                    f"{task.description}\n\n"
+                    f"Quer que eu execute?"
+                )
+                await ws.send_json({
+                    "type": "token",
+                    "conversation_id": "system",
+                    "turn_id": turn_id,
+                    "text": task_text,
+                })
+                await ws.send_json({
+                    "type": "turn_end",
+                    "conversation_id": "system",
+                    "turn_id": turn_id,
+                })
+        except Exception:
+            pass
+
 
 @router.websocket("/ws/conversation")
 async def conversation_ws(ws: WebSocket) -> None:
