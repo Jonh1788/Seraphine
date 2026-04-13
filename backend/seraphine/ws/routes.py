@@ -513,6 +513,19 @@ async def _deliver_pending_notifications(ws: WebSocket) -> None:
     if task_service:
         try:
             pending_tasks = await task_service.list_tasks(status="pending", limit=5)
+            # Lightweight summary event for the frontend to update its
+            # task tray without re-fetching.
+            if pending_tasks:
+                try:
+                    await ws.send_json({
+                        "type": "task_pending",
+                        "tasks": [
+                            {"id": t.id, "title": t.title, "type": t.type}
+                            for t in pending_tasks
+                        ],
+                    })
+                except Exception:
+                    pass
             for task in pending_tasks:
                 turn_id = str(uuid.uuid4())
                 task_text = (

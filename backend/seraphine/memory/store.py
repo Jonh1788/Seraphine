@@ -45,6 +45,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _row_to_task(row: tuple[Any, ...]) -> dict[str, Any]:
+    """Convert a seraphine_tasks row into a dict, parsing payload JSON."""
+    raw_payload = row[6]
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = {}
+    return {
+        "id": row[0],
+        "type": row[1],
+        "status": row[2],
+        "title": row[3],
+        "description": row[4],
+        "source": row[5],
+        "payload": payload,
+        "created_at": row[7],
+        "updated_at": row[8],
+    }
+
+
 def _row_to_event(row: tuple[Any, ...]) -> dict[str, Any]:
     """Convert an event_timeline row into a dict, parsing metadata JSON."""
     raw_meta = row[4]
@@ -155,6 +175,21 @@ class MemoryStore:
                       ON event_timeline(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_event_timeline_source
                       ON event_timeline(source, created_at DESC);
+                    CREATE TABLE IF NOT EXISTS seraphine_tasks (
+                      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                      type          TEXT NOT NULL,
+                      status        TEXT NOT NULL DEFAULT 'pending',
+                      title         TEXT NOT NULL,
+                      description   TEXT NOT NULL,
+                      source        TEXT NOT NULL,
+                      payload       TEXT NOT NULL,
+                      created_at    TEXT NOT NULL,
+                      updated_at    TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_status
+                      ON seraphine_tasks(status);
+                    CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
+                      ON seraphine_tasks(type);
                     """
                 )
 
@@ -614,6 +649,111 @@ class MemoryStore:
                     (since,),
                 ).fetchall()
             return [_row_to_event(r) for r in rows]
+
+        return await asyncio.to_thread(_work)
+
+    # ---------- seraphine internal tasks ----------
+
+    async def add_task(
+        self,
+        *,
+        type: str,
+        status: str,
+        title: str,
+        description: str,
+        source: str,
+        payload: dict[str, Any],
+    ) -> int:
+        """Insert a new internal task and return its autoincrement id."""
+        ts = _now()
+        payload_json = json.dumps(payload or {}, ensure_ascii=False)
+
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT INTO seraphine_tasks"
+                    "(type, status, title, description, source, payload,"
+                    " created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (type, status, title, description, source,
+                     payload_json, ts, ts),
+                )
+                return int(cur.lastrowid or 0)
+
+        return await asyncio.to_thread(_work)
+
+    async def get_tasks(
+        self,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return tasks ordered newest-first, with optional filters."""
+        def _work() -> list[dict[str, Any]]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if status is not None:
+                clauses.append("status = ?")
+                params.append(status)
+            if type is not None:
+                clauses.append("type = ?")
+                params.append(type)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
+
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, type, status, title, description, source,"
+                    " payload, created_at, updated_at"
+                    f" FROM seraphine_tasks{where}"
+                    " ORDER BY created_at DESC, id DESC LIMIT ?",
+                    params,
+                ).fetchall()
+
+            return [_row_to_task(r) for r in rows]
+
+        return await asyncio.to_thread(_work)
+
+    async def get_task(self, task_id: int) -> dict[str, Any] | None:
+        def _work() -> dict[str, Any] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id, type, status, title, description, source,"
+                    " payload, created_at, updated_at"
+                    " FROM seraphine_tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return _row_to_task(row)
+
+        return await asyncio.to_thread(_work)
+
+    async def update_task_status(self, task_id: int, status: str) -> int:
+        """Update a task's status; returns number of rows affected (0 or 1)."""
+        ts = _now()
+
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
+                    " WHERE id = ?",
+                    (status, ts, task_id),
+                )
+                return cur.rowcount or 0
+
+        return await asyncio.to_thread(_work)
+
+    async def delete_task(self, task_id: int) -> int:
+        """Delete a task by id; returns number of rows affected (0 or 1)."""
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM seraphine_tasks WHERE id = ?",
+                    (task_id,),
+                )
+                return cur.rowcount or 0
 
         return await asyncio.to_thread(_work)
 

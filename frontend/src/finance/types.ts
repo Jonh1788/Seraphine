@@ -23,6 +23,28 @@ export interface DashboardData {
   entries: FinanceEntry[];
 }
 
+export interface FinanceImportPayload {
+  email_id?: string;
+  attachment_id?: string;
+  filename?: string;
+  needs_password?: boolean;
+  from?: string;
+  subject?: string;
+}
+
+export interface SeraphineTask {
+  id: number;
+  type: string;
+  status: string;
+  title: string;
+  description: string;
+  source: string;
+  // Backend may send payload as a JSON string or already-parsed object
+  payload: string | Record<string, any>;
+  created_at: string;
+  updated_at?: string;
+}
+
 export const CATEGORY_COLORS: Record<string, string> = {
   moradia: '#5c6bc0',
   alimentacao: '#ff7043',

@@ -136,20 +136,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Finance service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
-    # Internal task system — always enabled (SQLite-backed)
+    # Internal task system — always enabled (MemoryStore-backed)
     # ------------------------------------------------------------------
     task_service = None
     email_scanner = None
     try:
         from seraphine.tasks.service import TaskService
-        task_service = TaskService(db_path=settings.sqlite_path)
-        await task_service.ensure_tables()
-        logger.info("Task service wired (db=%s)", settings.sqlite_path)
+        task_service = TaskService(
+            store,
+            google_client=google_client,
+            llm_client=llm,
+            app_state=app.state,
+        )
+        logger.info("Task service wired (shared memory store)")
 
         # Email scanner (if Google client available)
         if google_client:
             from seraphine.tasks.email_scanner import EmailScanner
-            email_scanner = EmailScanner(google_client, task_service, llm_client=llm)
+            email_scanner = EmailScanner(
+                google_client, task_service, llm_client=llm, store=store,
+            )
             logger.info("Email scanner wired")
     except Exception as e:
         logger.warning("Task service failed (non-critical): %s", e)

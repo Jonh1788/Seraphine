@@ -1,188 +1,224 @@
+"""TaskService — thin async service on top of :class:`MemoryStore`.
+
+The service owns the lifecycle of Seraphine's proactive internal tasks
+(creation, status updates, execution dispatch). Persistence lives in the
+shared ``MemoryStore`` (``seraphine_tasks`` table), not in a separate
+SQLite file, so tasks share the same DB as the rest of memory.
+
+Optional collaborators (``google_client``, ``llm_client``, ``app_state``)
+are injected at construction time so ``execute_task`` can dispatch to
+concrete integrations (e.g. Gmail download + finance PDF import) without
+the service itself having to know the whole app wiring.
+"""
+
 from __future__ import annotations
 
-import asyncio
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
+import logging
+import os
+import tempfile
+from typing import Any
 
-from .models import SeraphineTask
+from seraphine.memory.store import MemoryStore
+from seraphine.tasks.models import SeraphineTask
+
+logger = logging.getLogger(__name__)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _to_task(row: dict[str, Any]) -> SeraphineTask:
+    return SeraphineTask(
+        id=row["id"],
+        type=row["type"],
+        status=row["status"],
+        title=row["title"],
+        description=row["description"],
+        source=row["source"],
+        payload=row.get("payload") or {},
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
 
 
 class TaskService:
-    def __init__(self, db_path: str | Path) -> None:
-        self.path = Path(db_path)
-        self._conn: sqlite3.Connection | None = None
-
-    def _connect(self) -> sqlite3.Connection:
-        if self._conn is not None:
-            return self._conn
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON")
-        self._conn = conn
-        return conn
-
-    async def aclose(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+    def __init__(
+        self,
+        store: MemoryStore,
+        *,
+        google_client: Any = None,
+        llm_client: Any = None,
+        app_state: Any = None,
+    ) -> None:
+        self._store = store
+        self._google = google_client
+        self._llm = llm_client
+        self._app_state = app_state
 
     # ------------------------------------------------------------------
-    # Schema
+    # Lifecycle (kept for symmetry with other services that need aclose)
     # ------------------------------------------------------------------
 
-    async def ensure_tables(self) -> None:
-        def _work() -> None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self._connect() as conn:
-                conn.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS seraphine_tasks (
-                      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                      type        TEXT NOT NULL,
-                      status      TEXT NOT NULL DEFAULT 'pending',
-                      title       TEXT NOT NULL,
-                      description TEXT NOT NULL DEFAULT '',
-                      source      TEXT NOT NULL DEFAULT 'system',
-                      payload     TEXT NOT NULL DEFAULT '{}',
-                      created_at  TEXT NOT NULL,
-                      updated_at  TEXT NOT NULL
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_tasks_status
-                      ON seraphine_tasks(status);
-                    CREATE INDEX IF NOT EXISTS idx_tasks_type
-                      ON seraphine_tasks(type);
-                    """
-                )
-
-        await asyncio.to_thread(_work)
+    async def aclose(self) -> None:  # pragma: no cover - trivial
+        return None
 
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
 
-    async def create_task(self, task: SeraphineTask) -> int:
-        ts = _now()
-
-        def _work() -> int:
-            with self._connect() as conn:
-                cur = conn.execute(
-                    "INSERT INTO seraphine_tasks"
-                    "(type, status, title, description, source, payload,"
-                    " created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        task.type,
-                        task.status,
-                        task.title,
-                        task.description,
-                        task.source,
-                        task.payload,
-                        ts,
-                        ts,
-                    ),
-                )
-                return cur.lastrowid  # type: ignore[return-value]
-
-        return await asyncio.to_thread(_work)
+    async def create_task(
+        self,
+        *,
+        type: str,
+        title: str,
+        description: str = "",
+        source: str = "system",
+        payload: dict[str, Any] | None = None,
+        status: str = "pending",
+    ) -> int:
+        return await self._store.add_task(
+            type=type,
+            status=status,
+            title=title,
+            description=description,
+            source=source,
+            payload=payload or {},
+        )
 
     async def list_tasks(
         self,
         *,
         status: str | None = None,
         type: str | None = None,
-        limit: int = 50,
+        limit: int = 100,
     ) -> list[SeraphineTask]:
-        def _work() -> list[SeraphineTask]:
-            clauses: list[str] = []
-            params: list[object] = []
-
-            if status is not None:
-                clauses.append("status = ?")
-                params.append(status)
-            if type is not None:
-                clauses.append("type = ?")
-                params.append(type)
-
-            where = ""
-            if clauses:
-                where = " WHERE " + " AND ".join(clauses)
-
-            params.append(limit)
-
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT id, type, status, title, description,"
-                    " source, payload, created_at, updated_at"
-                    f" FROM seraphine_tasks{where}"
-                    " ORDER BY created_at DESC LIMIT ?",
-                    params,
-                ).fetchall()
-
-            return [
-                SeraphineTask(
-                    id=r[0],
-                    type=r[1],
-                    status=r[2],
-                    title=r[3],
-                    description=r[4],
-                    source=r[5],
-                    payload=r[6],
-                    created_at=r[7],
-                    updated_at=r[8],
-                )
-                for r in rows
-            ]
-
-        return await asyncio.to_thread(_work)
+        rows = await self._store.get_tasks(
+            status=status, type=type, limit=limit
+        )
+        return [_to_task(r) for r in rows]
 
     async def get_task(self, task_id: int) -> SeraphineTask | None:
-        def _work() -> SeraphineTask | None:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT id, type, status, title, description,"
-                    " source, payload, created_at, updated_at"
-                    " FROM seraphine_tasks WHERE id = ?",
-                    (task_id,),
-                ).fetchone()
-            if row is None:
-                return None
-            return SeraphineTask(
-                id=row[0],
-                type=row[1],
-                status=row[2],
-                title=row[3],
-                description=row[4],
-                source=row[5],
-                payload=row[6],
-                created_at=row[7],
-                updated_at=row[8],
+        row = await self._store.get_task(task_id)
+        if row is None:
+            return None
+        return _to_task(row)
+
+    async def update_status(self, task_id: int, status: str) -> int:
+        """Update a task's status; returns number of rows affected."""
+        return await self._store.update_task_status(task_id, status)
+
+    async def delete_task(self, task_id: int) -> int:
+        """Delete a task by id; returns number of rows affected."""
+        return await self._store.delete_task(task_id)
+
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
+
+    async def execute_task(
+        self, task_id: int, params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch execution of a task by type.
+
+        Always updates the stored status to ``completed`` on success or
+        ``failed`` on error. Returns a summary dict describing what the
+        handler did. Unknown types raise ``NotImplementedError``.
+        """
+        params = params or {}
+        task = await self.get_task(task_id)
+        if task is None:
+            raise ValueError(f"task {task_id} not found")
+
+        try:
+            if task.type == "finance_import":
+                result = await self._execute_finance_import(task, params)
+            else:
+                raise NotImplementedError(
+                    f"execute_task: type '{task.type}' is not implemented yet"
+                )
+        except Exception as exc:
+            logger.exception(
+                "task %d (%s) execution failed: %s", task_id, task.type, exc,
+            )
+            try:
+                await self.update_status(task_id, "failed")
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("failed to mark task %d as failed", task_id)
+            raise
+
+        try:
+            await self.update_status(task_id, "completed")
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("failed to mark task %d as completed", task_id)
+        return result
+
+    async def _execute_finance_import(
+        self, task: SeraphineTask, params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._google is None:
+            raise RuntimeError("google client not available for finance_import")
+
+        payload = task.payload or {}
+        email_id = payload.get("email_id")
+        attachment_id = payload.get("attachment_id")
+        filename = payload.get("filename") or "attachment.pdf"
+        if not email_id or not attachment_id:
+            raise ValueError(
+                "finance_import payload missing email_id or attachment_id"
             )
 
-        return await asyncio.to_thread(_work)
+        # 1. Download attachment from Gmail
+        pdf_bytes = await self._google.download_attachment(email_id, attachment_id)
 
-    async def update_status(self, task_id: int, status: str) -> None:
-        ts = _now()
+        # 2. Resolve the PDF import tool up front — if it isn't wired, fail
+        #    loudly so execute_task marks the task ``failed`` rather than
+        #    silently completing without actually importing anything.
+        tools = getattr(self._app_state, "tools", None) if self._app_state else None
+        if tools is None:
+            raise RuntimeError(
+                "finance_import: tool registry not available (app_state.tools is None)"
+            )
+        try:
+            tool = tools.get("import_financial_pdf")
+        except Exception:
+            tool = None
+        if tool is None:
+            raise RuntimeError(
+                "finance_import: 'import_financial_pdf' tool is not registered"
+            )
 
-        def _work() -> None:
-            with self._connect() as conn:
-                conn.execute(
-                    "UPDATE seraphine_tasks SET status = ?, updated_at = ? WHERE id = ?",
-                    (status, ts, task_id),
-                )
+        # 3. Persist to a temp file — the PDF import tool expects a path.
+        #    The file is always unlinked after the tool finishes (or raises)
+        #    to avoid leaking decrypted PDF bytes on disk.
+        suffix = os.path.splitext(filename)[1] or ".pdf"
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="seraphine_task_")
+        try:
+            os.write(fd, pdf_bytes)
+        finally:
+            os.close(fd)
 
-        await asyncio.to_thread(_work)
+        password = params.get("password") or payload.get("password")
+        try:
+            args: dict[str, Any] = {"file_path": tmp_path}
+            if password:
+                args["password"] = password
+            try:
+                result = await tool.execute(args)
+            except Exception as exc:
+                logger.exception("import_financial_pdf tool raised: %s", exc)
+                raise
+            # ToolResult is a pydantic BaseModel — serialize to dict
+            try:
+                tool_summary = result.model_dump()
+            except AttributeError:
+                tool_summary = {"ok": True, "output": str(result)}
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("failed to unlink temp file %s", tmp_path)
 
-    async def delete_task(self, task_id: int) -> None:
-        def _work() -> None:
-            with self._connect() as conn:
-                conn.execute(
-                    "DELETE FROM seraphine_tasks WHERE id = ?",
-                    (task_id,),
-                )
-
-        await asyncio.to_thread(_work)
+        return {
+            "filename": filename,
+            "imported": True,
+            "result": tool_summary,
+        }

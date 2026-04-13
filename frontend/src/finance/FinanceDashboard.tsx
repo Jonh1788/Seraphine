@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DashboardData, FinanceEntry } from './types';
+import type { DashboardData, FinanceEntry, SeraphineTask } from './types';
 import { PieChart, buildPieData } from './PieChart';
 import { CategoryTable } from './CategoryTable';
 import { TransactionList } from './TransactionList';
@@ -31,7 +31,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<FinanceEntry[]>([]);
-  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<SeraphineTask[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [overallBalance, setOverallBalance] = useState<number | null>(null);
@@ -71,9 +71,9 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
       .catch(() => {});
   }, [refreshKey]);
 
-  // Fetch pending tasks from task system
+  // Fetch pending tasks from task system (finance imports only)
   useEffect(() => {
-    fetch('/tasks?status=pending')
+    fetch('/tasks?status=pending&type=finance_import')
       .then((r) => (r.ok ? r.json() : { tasks: [] }))
       .then((res) => setPendingTasks(res.tasks || []))
       .catch(() => {});
