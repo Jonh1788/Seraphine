@@ -814,13 +814,14 @@ class ImportFinancialPdfTool(Tool):
         return ToolResult(
             ok=True,
             output=(
-                f"Extrato importado ({page_count} paginas, metodo: {method}): "
-                f"{created} transacoes.\n\n"
-                f"Receitas do periodo: {_format_brl(income)}\n"
-                f"Despesas do periodo: {_format_brl(expenses)}\n"
-                f"Diferenca do periodo: {_format_brl(income - expenses)}\n"
-                f"(Nota: este valor nao inclui o saldo anterior da conta)\n\n"
-                f"Todas as {created} entries como 'pending_review'."
+                f"SUCESSO: {created} transacoes JA FORAM REGISTRADAS no banco de dados.\n"
+                f"NAO e necessario registrar novamente. O trabalho esta COMPLETO.\n\n"
+                f"Resumo do extrato importado ({page_count} paginas):\n"
+                f"- {created} transacoes extraidas e salvas\n"
+                f"- Receitas: {_format_brl(income)}\n"
+                f"- Despesas: {_format_brl(expenses)}\n"
+                f"- Diferenca: {_format_brl(income - expenses)}\n\n"
+                f"As entries estao disponiveis na aba Financas > Pendentes para revisao."
             ),
             metadata={
                 "page_count": page_count, "transactions": created,
