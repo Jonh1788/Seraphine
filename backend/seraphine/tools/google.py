@@ -438,7 +438,7 @@ class GmailDownloadAttachmentTool(Tool):
         },
         "required": ["message_id", "attachment_id"],
     }
-    requires_confirmation = True
+    requires_confirmation = False
     category: Any = "network"
 
     def __init__(self, google_client: "GoogleClient") -> None:

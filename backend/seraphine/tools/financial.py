@@ -260,7 +260,7 @@ class AddFinancialEntryTool(Tool):
         },
         "required": ["type", "amount", "category", "description"],
     }
-    requires_confirmation = True
+    requires_confirmation = False
     category: Any = "other"
 
     def __init__(self, service: Any) -> None:
@@ -281,13 +281,19 @@ class AddFinancialEntryTool(Tool):
             )
 
         try:
-            entry = await self._service.add_entry(
+            from seraphine.finance.models import FinancialEntry
+            entry_obj = FinancialEntry(
+                id=None,
                 type=entry_type,
-                amount=amount,
+                amount=float(amount),
+                currency="BRL",
                 category=cat,
                 description=description,
                 date=entry_date,
+                source="chat",
+                status=str(args.get("status", "confirmed")),
             )
+            entry_id = await self._service.add_entry(entry_obj)
         except Exception as e:
             return ToolResult(ok=False, error=f"Failed to add entry: {e}")
 
@@ -311,7 +317,7 @@ class AddFinancialEntryTool(Tool):
                         f"Entrada registrada ({entry_type}): {_format_brl(amount)} - {description}. "
                         f"Aviso: falha ao criar regra recorrente ({e})."
                     ),
-                    metadata={"entry": entry} if isinstance(entry, dict) else {},
+                    metadata={"entry_id": entry_id},
                 )
 
         recurring_note = ""
@@ -331,7 +337,7 @@ class AddFinancialEntryTool(Tool):
                 f"{type_pt} registrada: {_format_brl(amount)} - {description} "
                 f"[{cat}] em {entry_date}{recurring_note}."
             ),
-            metadata={"entry": entry} if isinstance(entry, dict) else {},
+            metadata={"entry_id": entry_id},
         )
 
 
@@ -453,7 +459,7 @@ class ImportFinancialPdfTool(Tool):
         },
         "required": ["file_path"],
     }
-    requires_confirmation = True
+    requires_confirmation = False
     category: Any = "other"
 
     def __init__(self, service: Any) -> None:
