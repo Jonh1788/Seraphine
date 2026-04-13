@@ -245,12 +245,14 @@ class GmailListImportantTool(Tool):
     name = "gmail_list_important"
     description = (
         "List the user's Gmail messages with optional filters. "
+        "Searches ALL emails (read and unread) by default. "
         "Use this when the user asks about emails. "
         "IMPORTANT: When the user asks for 'emails de hoje' or 'emails do dia', "
-        "always include 'after:YYYY/MM/DD' with today's date in the query. "
-        "When asking for recent emails, use 'newer_than:1d' or 'after:' filter. "
-        "Examples: query='is:unread newer_than:1d' for today's unread emails, "
-        "query='is:important is:unread' for important unread (no date filter)."
+        "always include 'newer_than:1d' in the query. "
+        "For attachments: use 'has:attachment newer_than:1d'. "
+        "Examples: query='newer_than:1d' for today's emails (read+unread), "
+        "query='is:unread' for unread only, "
+        "query='has:attachment newer_than:1d' for today's with attachments."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -258,10 +260,11 @@ class GmailListImportantTool(Tool):
             "query": {
                 "type": "string",
                 "description": (
-                    "Gmail search query. Default: 'is:important is:unread'. "
-                    "Use Gmail operators: 'newer_than:1d' (today), 'after:2026/04/13', "
-                    "'from:someone', 'subject:keyword', 'is:unread', 'is:important'. "
-                    "Combine: 'is:unread newer_than:1d' for today's unread."
+                    "Gmail search query. Default: 'newer_than:1d' (today, read+unread). "
+                    "Use Gmail operators: 'newer_than:1d', 'after:2026/04/13', "
+                    "'from:someone', 'subject:keyword', 'is:unread', 'is:important', "
+                    "'has:attachment'. Do NOT add 'is:unread' unless user specifically "
+                    "asks for unread only."
                 ),
             },
             "max_results": {
@@ -286,7 +289,7 @@ class GmailListImportantTool(Tool):
         max_results = int(args.get("max_results") or 20)
         max_results = max(1, min(max_results, 50))
 
-        query = str(args.get("query") or "is:important is:unread")
+        query = str(args.get("query") or "newer_than:1d")
 
         try:
             msgs = await self._client.list_messages(q=query, max_results=max_results)
