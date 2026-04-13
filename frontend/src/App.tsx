@@ -437,7 +437,7 @@ export function App(): JSX.Element {
           </button>
         </nav>
 
-        <aside className="sidebar">
+        <aside className={`sidebar${activeView !== 'chat' ? ' sidebar--hidden' : ''}`}>
           <div className="avatar-stage">
             <VrmAvatar
               avatarUrl={localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm'}
