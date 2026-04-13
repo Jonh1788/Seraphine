@@ -306,7 +306,7 @@ class GmailListImportantTool(Tool):
             )
 
         lines: list[str] = []
-        for m in msgs:
+        for i, m in enumerate(msgs, 1):
             msg_id = m.get("id") or ""
             subject = m.get("subject") or "(sem assunto)"
             frm = m.get("from") or ""
@@ -314,11 +314,22 @@ class GmailListImportantTool(Tool):
             snippet = (m.get("snippet") or "").strip()
             if len(snippet) > 120:
                 snippet = snippet[:120] + "…"
-            lines.append(f"- [{msg_id}] {subject} — {frm} ({date})\n  {snippet}")
+            has_attach = " 📎" if m.get("attachments") else ""
+            lines.append(
+                f"{i}. {subject}{has_attach}\n"
+                f"   De: {frm}\n"
+                f"   Data: {date}\n"
+                f"   message_id: {msg_id}\n"
+                f"   {snippet}"
+            )
 
         return ToolResult(
             ok=True,
-            output="\n".join(lines),
+            output=(
+                f"{len(msgs)} email(s) encontrado(s):\n\n"
+                + "\n\n".join(lines)
+                + "\n\nPara ler um email completo, use gmail_read_message com o message_id acima."
+            ),
             metadata={"count": len(msgs), "messages": msgs},
         )
 
