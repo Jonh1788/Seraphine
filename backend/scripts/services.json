@@ -1,0 +1,9 @@
+{
+  "_comment": "Seraphine services config — edit to enable/disable services",
+  "ollama": true,
+  "vmlx": false,
+  "backend": true,
+  "frontend": true,
+  "whatsapp": true,
+  "tunnel": true
+}
