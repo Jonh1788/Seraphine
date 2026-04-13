@@ -38,11 +38,11 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
     setLoading(true);
     setError(null);
     Promise.all([
-      fetch(`/api/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
+      fetch(`/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
-      fetch(`/api/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
+      fetch(`/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
@@ -59,7 +59,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   // Fetch pending entries (not month-filtered)
   useEffect(() => {
-    fetch('/api/finance/entries?status=pending_review')
+    fetch('/finance/entries?status=pending_review')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

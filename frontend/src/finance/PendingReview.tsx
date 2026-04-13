@@ -38,7 +38,7 @@ export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.E
   const handleConfirm = async (id: number): Promise<void> => {
     setActioningId(id);
     try {
-      const res = await fetch(`/api/finance/entries/${id}/status`, {
+      const res = await fetch(`/finance/entries/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'confirmed' }),
@@ -55,7 +55,7 @@ export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.E
   const handleReject = async (id: number): Promise<void> => {
     setActioningId(id);
     try {
-      const res = await fetch(`/api/finance/entries/${id}`, {
+      const res = await fetch(`/finance/entries/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Falha ao rejeitar');
