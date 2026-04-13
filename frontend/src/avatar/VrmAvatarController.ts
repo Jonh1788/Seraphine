@@ -1155,27 +1155,15 @@ export class VrmAvatarController implements AvatarAdapter {
     return names.length > 0 ? names : FALLBACK_EXPRESSIONS;
   }
 
-  dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
-    if (this.holdTimer !== null) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = null;
-    }
-    this.gesturePlayer.cancel();
   // ── Spring bone physics control ──────────────────────────────
+
+  private _springStiffnessMultiplier = 1.0;
+  private _springBaseSettings: Map<any, { stiffness: number; gravityPower: number; dragForce: number }> = new Map();
 
   /** Get current spring bone physics multiplier (1.0 = default). */
   getSpringBoneStiffnessMultiplier(): number {
     return this._springStiffnessMultiplier ?? 1.0;
   }
-
-  private _springStiffnessMultiplier = 1.0;
-  private _springBaseSettings: Map<any, { stiffness: number; gravityPower: number; dragForce: number }> = new Map();
 
   /** Set spring bone stiffness multiplier (0.1 = very soft, 2.0 = rigid).
    *  Affects hair, skirt, and all spring bones proportionally. */
@@ -1194,6 +1182,20 @@ export class VrmAvatarController implements AvatarAdapter {
     }
   }
 
+  // ── Cleanup ────────────────────────────────────────────────────
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.holdTimer !== null) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+    this.gesturePlayer.cancel();
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;
@@ -1202,6 +1204,7 @@ export class VrmAvatarController implements AvatarAdapter {
     this.externalAnimPlaying = false;
     this.loadedClips.clear();
     this.springBoneManager = null;
+    this._springBaseSettings.clear();
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);
