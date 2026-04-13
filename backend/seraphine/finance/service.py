@@ -233,13 +233,14 @@ class FinanceService:
                 income = row[0]
                 expenses = row[1]
 
-                # by category
+                # by category (expenses only — income shown separately)
                 cat_rows = conn.execute(
                     "SELECT category,"
                     " SUM(amount) AS total,"
                     " COUNT(*) AS cnt"
                     " FROM financial_entries"
                     " WHERE substr(date, 1, 7) = ? AND status = 'confirmed'"
+                    " AND type = 'expense'"
                     " GROUP BY category ORDER BY total DESC",
                     (prefix,),
                 ).fetchall()

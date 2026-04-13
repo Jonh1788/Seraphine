@@ -817,11 +817,22 @@ class ImportFinancialPdfTool(Tool):
         if not isinstance(llm, AnthropicClient):
             return []
 
-        # Split into chunks of ~10K chars to avoid proxy timeout
+        # Split into chunks of ~10K chars on line boundaries to avoid
+        # cutting a transaction in half
         CHUNK_SIZE = 10_000
-        chunks = []
-        for i in range(0, len(text), CHUNK_SIZE):
-            chunks.append(text[i:i + CHUNK_SIZE])
+        chunks: list[str] = []
+        lines = text.split('\n')
+        current_chunk: list[str] = []
+        current_len = 0
+        for line in lines:
+            if current_len + len(line) > CHUNK_SIZE and current_chunk:
+                chunks.append('\n'.join(current_chunk))
+                current_chunk = []
+                current_len = 0
+            current_chunk.append(line)
+            current_len += len(line) + 1
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
 
         all_transactions: list[dict] = []
         for idx, chunk in enumerate(chunks):
