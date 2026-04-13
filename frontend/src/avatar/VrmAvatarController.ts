@@ -356,15 +356,28 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateCamera(delta);
       this.updateIdle(delta);
       this.updateLipsync();
-      // Mixer (Mixamo animations) runs BEFORE vrm.update() so that
-      // spring bones can react to the bone positions set by animations.
-      // If mixer runs after, it overwrites spring bone results.
       this.mixer?.update(delta);
-      this.vrm?.update(delta);
-      // Head + gesture bone writes MUST apply AFTER vrm.update() because
-      // update() syncs normalized→raw and also runs lookAt/humanoid
-      // which overwrites raw bones. Writing before would be lost.
+
+      // Step 1: VRM humanoid sync + expressions (but NOT spring bones yet)
+      // We need to apply head rotation BEFORE spring bones so hair reacts.
+      if (this.vrm) {
+        // Update humanoid (normalized→raw sync), expressions, lookAt
+        this.vrm.humanoid?.update();
+        this.vrm.expressionManager?.update();
+        if (this.vrm.lookAt?.autoUpdate) this.vrm.lookAt.update(delta);
+      }
+
+      // Step 2: Apply head rotation + gesture bones
       this.applyPostUpdate();
+
+      // Step 3: NOW run spring bones — they see the final head position
+      if (this.vrm) {
+        const sbm = (this.vrm as any).springBoneManager;
+        if (sbm) {
+          sbm.update(delta);
+        }
+      }
+
       this.renderer.render(this.scene, this.camera);
     };
     this.rafId = requestAnimationFrame(loop);
