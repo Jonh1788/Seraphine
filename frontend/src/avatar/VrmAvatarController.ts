@@ -659,10 +659,37 @@ export class VrmAvatarController implements AvatarAdapter {
         sbm._colliderGroups?.length ?? sbm.colliderGroups?.length ?? '?',
         'collider groups',
       );
-      // Re-initialize spring bone state now that the scene is rotated
-      // (rotateVRM0 applied 180deg Y). Without this, _currentTail and
-      // _prevTail are in pre-rotation world space which causes the
-      // first few frames to jerk.
+      // Override spring bone settings at runtime for all joints
+      // The VRM file may have stiffness=1-3 (rigid) — force natural values
+      const sortedJoints = sbm._sortedJoints || [];
+      for (const j of sortedJoints) {
+        const name = (j.bone?.name || '').toLowerCase();
+        if (/hair|ahoge|ponytail|sailor|longhair/.test(name)) {
+          j.settings.stiffness = 0.08;
+          j.settings.gravityPower = 0.06;
+          j.settings.dragForce = 0.25;
+          j.settings.gravityDir = { x: 0, y: -1, z: 0 };
+        } else if (/skirt/.test(name)) {
+          j.settings.stiffness = 0.15;
+          j.settings.gravityPower = 0.05;
+          j.settings.dragForce = 0.3;
+          j.settings.gravityDir = { x: 0, y: -1, z: 0 };
+        } else if (/breast/.test(name)) {
+          j.settings.stiffness = 0.4;
+          j.settings.gravityPower = 0.02;
+          j.settings.dragForce = 0.5;
+          j.settings.gravityDir = { x: 0, y: -1, z: 0 };
+        } else {
+          j.settings.stiffness = 0.2;
+          j.settings.gravityPower = 0.04;
+          j.settings.dragForce = 0.3;
+          j.settings.gravityDir = { x: 0, y: -1, z: 0 };
+        }
+      }
+      console.log('[VRM] Patched spring bone settings for', sortedJoints.length, 'joints');
+
+      // Re-initialize spring bone state now that settings are patched
+      // and the scene is rotated (rotateVRM0 applied 180deg Y).
       loadedVrm.scene.updateMatrixWorld(true);
       sbm.setInitState();
     } else {
