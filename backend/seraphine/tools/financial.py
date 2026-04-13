@@ -40,10 +40,15 @@ def build_dashboard_html(
     entries: list[dict[str, Any]],
 ) -> str:
     """Build an inline-styled HTML dashboard card."""
-    total_income = summary.get("total_income", 0.0)
-    total_expense = summary.get("total_expense", 0.0)
+    total_income = summary.get("income", 0.0) or summary.get("total_income", 0.0)
+    total_expense = summary.get("expenses", 0.0) or summary.get("total_expense", 0.0)
     balance = total_income - total_expense
-    categories = summary.get("by_category", {})
+    # by_category is a list of dicts, convert to dict for HTML builder
+    raw_cats = summary.get("by_category", [])
+    if isinstance(raw_cats, list):
+        categories = {c["category"]: c["total"] for c in raw_cats}
+    else:
+        categories = raw_cats
 
     # Card styles (matching weather.py pattern)
     card = (
@@ -198,8 +203,8 @@ class FinancialDashboardTool(Tool):
         except Exception as e:
             return ToolResult(ok=False, error=f"Failed to render dashboard: {e}")
 
-        total_income = summary.get("total_income", 0.0)
-        total_expense = summary.get("total_expense", 0.0)
+        total_income = summary.get("income", 0.0)
+        total_expense = summary.get("expenses", 0.0)
         balance = total_income - total_expense
         text_summary = (
             f"Financeiro {month:02d}/{year}: "
@@ -489,7 +494,7 @@ class ListFinancialEntriesTool(Tool):
                 month=month,
                 year=year,
                 category=category,
-                entry_type=entry_type,
+                type=entry_type,
                 limit=50,
             )
         except Exception as e:
