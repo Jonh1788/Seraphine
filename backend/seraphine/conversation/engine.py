@@ -136,7 +136,7 @@ def _build_date_context() -> str:
 
 
 APPROVAL_TIMEOUT_SECONDS = 300
-MAX_TOOL_ITERATIONS = 15
+MAX_TOOL_ITERATIONS = 25
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
 # Context compaction: estimated token threshold (~4 chars/token)
 # Bumped from 8000 → 24000 after vMLX chunked-prefill patch lifted the

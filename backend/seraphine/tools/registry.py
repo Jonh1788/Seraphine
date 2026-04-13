@@ -176,6 +176,7 @@ def build_default_registry(
     if finance_service is not None:
         from seraphine.tools.financial import (
             AddFinancialEntryTool,
+            BulkAddFinancialEntriesTool,
             FinancialDashboardTool,
             ImportFinancialPdfTool,
             ListFinancialEntriesTool,
@@ -183,6 +184,7 @@ def build_default_registry(
 
         reg.register(FinancialDashboardTool(finance_service))
         reg.register(AddFinancialEntryTool(finance_service))
+        reg.register(BulkAddFinancialEntriesTool(finance_service))
         reg.register(ListFinancialEntriesTool(finance_service))
         reg.register(ImportFinancialPdfTool(finance_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)

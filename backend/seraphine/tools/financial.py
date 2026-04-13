@@ -342,6 +342,94 @@ class AddFinancialEntryTool(Tool):
 
 
 # ---------------------------------------------------------------------------
+# Tool 2b: Bulk Add Financial Entries
+# ---------------------------------------------------------------------------
+
+
+class BulkAddFinancialEntriesTool(Tool):
+    name = "bulk_add_financial_entries"
+    description = (
+        "Register MULTIPLE financial entries at once. Use this instead of "
+        "calling add_financial_entry repeatedly — much faster and avoids "
+        "hitting iteration limits. ALWAYS use this when importing from "
+        "PDFs or bank statements with multiple transactions."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "entries": {
+                "type": "array",
+                "description": "List of entries to add.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["income", "expense"]},
+                        "amount": {"type": "number"},
+                        "category": {"type": "string", "enum": ALL_CATEGORIES},
+                        "description": {"type": "string"},
+                        "date": {"type": "string", "description": "ISO YYYY-MM-DD"},
+                    },
+                    "required": ["type", "amount", "category", "description", "date"],
+                },
+            },
+            "status": {
+                "type": "string",
+                "enum": ["confirmed", "pending_review"],
+                "description": "Status for all entries. Use 'pending_review' for PDF imports.",
+            },
+        },
+        "required": ["entries"],
+    }
+    requires_confirmation = False
+    category: Any = "other"
+
+    def __init__(self, service: Any) -> None:
+        self._service = service
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        entries_data = args.get("entries") or []
+        status = args.get("status", "pending_review")
+
+        if not entries_data:
+            return ToolResult(ok=False, error="entries list is empty.")
+
+        from seraphine.finance.models import FinancialEntry
+
+        created = 0
+        skipped = 0
+        errors = 0
+
+        for e in entries_data:
+            try:
+                entry_obj = FinancialEntry(
+                    id=None,
+                    type=e["type"],
+                    amount=float(e["amount"]),
+                    currency="BRL",
+                    category=e.get("category", "outros"),
+                    description=e.get("description", ""),
+                    date=e.get("date", date.today().isoformat()),
+                    source="pdf",
+                    status=status,
+                )
+                entry_id = await self._service.add_entry(entry_obj)
+                # Dedup returns existing ID without inserting
+                created += 1
+            except Exception:
+                errors += 1
+
+        return ToolResult(
+            ok=True,
+            output=(
+                f"Importacao concluida: {created} entries registradas"
+                f"{f', {errors} erros' if errors else ''}. "
+                f"Status: {status}."
+            ),
+            metadata={"created": created, "skipped": skipped, "errors": errors},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tool 3: List Financial Entries
 # ---------------------------------------------------------------------------
 
@@ -532,15 +620,16 @@ class ImportFinancialPdfTool(Tool):
         instruction = (
             f"Extrato/documento financeiro importado ({page_count} paginas).\n\n"
             f"Texto extraido:\n---\n{extracted_text}{truncation_note}\n---\n\n"
-            "INSTRUCAO: Analise o texto acima e para CADA transacao encontrada, "
-            "chame a tool `add_financial_entry` com:\n"
+            "INSTRUCAO: Analise o texto acima e extraia TODAS as transacoes.\n"
+            "IMPORTANTE: Use a tool `bulk_add_financial_entries` com um array de entries.\n"
+            "NAO chame add_financial_entry individualmente — use bulk para todas de uma vez.\n\n"
+            "Cada entry deve ter:\n"
             '- type: "income" ou "expense"\n'
             "- amount: valor em reais (numero, sem R$)\n"
             f"- category: uma das categorias validas: {categories_str}\n"
             "- description: descricao curta da transacao\n"
-            "- date: data no formato YYYY-MM-DD\n"
-            '- status: SEMPRE usar "pending_review" '
-            "(o usuario vai revisar depois)\n\n"
+            "- date: data no formato YYYY-MM-DD\n\n"
+            'Use status: "pending_review" (o usuario vai revisar depois).\n\n'
             "Se o documento for um extrato bancario, cada linha com debito "
             'e "expense" e cada linha com credito e "income".\n'
             'Se for uma nota fiscal, o total e uma "expense".\n'
