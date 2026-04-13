@@ -465,7 +465,7 @@ export function App(): JSX.Element {
             </label>
           </div>
 
-          <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
+          <div className="sidebar__panels">
             <ApprovalPanel ws={wsRef.current} />
           </div>
         </aside>
