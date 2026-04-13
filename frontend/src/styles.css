@@ -268,19 +268,20 @@ button:disabled {
 /* Tooltip */
 .nav-rail__btn[title]::after {
   content: attr(title);
-  position: absolute;
-  left: calc(100% + 8px);
+  position: fixed;
+  left: 68px;
   background: var(--bg-3);
   color: var(--text);
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: 6px;
   font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity 150ms;
   box-shadow: var(--shadow-md);
-  z-index: 100;
+  z-index: 9999;
 }
 
 .nav-rail__btn:hover[title]::after {
