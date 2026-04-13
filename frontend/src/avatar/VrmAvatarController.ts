@@ -389,21 +389,42 @@ export class VrmAvatarController implements AvatarAdapter {
         }
       }
 
-      // Temporary debug — log spring bone joint quaternion for first 5 frames.
-      // Spring bones modify bone.quaternion, NOT bone.position.
-      if (this._springDebugCount < 5 && this.springBoneManager) {
-        const joints = this.springBoneManager._sortedJoints;
+      // Detailed spring bone debug for first 10 frames
+      if (this._springDebugCount < 10 && this.springBoneManager) {
+        const joints = (this.springBoneManager as any)._sortedJoints;
         if (joints?.length > 0) {
           const j = joints[0];
+          if (this._springDebugCount === 0) {
+            // First frame: dump full joint config
+            console.log('[SpringBone] Joint 0 config:', {
+              boneName: j.bone?.name,
+              childName: j.child?.name,
+              stiffness: j.settings?.stiffness,
+              dragForce: j.settings?.dragForce,
+              gravityPower: j.settings?.gravityPower,
+              gravityDir: j.settings?.gravityDir ? `${j.settings.gravityDir.x},${j.settings.gravityDir.y},${j.settings.gravityDir.z}` : null,
+              hitRadius: j.settings?.hitRadius,
+              boneAxis: j._boneAxis ? `${j._boneAxis.x.toFixed(4)},${j._boneAxis.y.toFixed(4)},${j._boneAxis.z.toFixed(4)}` : null,
+              initialChildPos: j._initialLocalChildPosition ? `${j._initialLocalChildPosition.x.toFixed(4)},${j._initialLocalChildPosition.y.toFixed(4)},${j._initialLocalChildPosition.z.toFixed(4)}` : null,
+              worldBoneLen: j._worldSpaceBoneLength,
+              boneMatrixAutoUpdate: j.bone?.matrixAutoUpdate,
+              parentName: j.bone?.parent?.name,
+            });
+            // Also check: is the parent matrix actually changing?
+            console.log('[SpringBone] Parent matrixWorld element[12-14] (position):',
+              j.bone?.parent?.matrixWorld?.elements[12]?.toFixed(4),
+              j.bone?.parent?.matrixWorld?.elements[13]?.toFixed(4),
+              j.bone?.parent?.matrixWorld?.elements[14]?.toFixed(4),
+            );
+          }
           const bone = j.bone;
           if (bone) {
             console.log(
-              `[SpringBone] frame ${this._springDebugCount} joint0 quat:`,
-              bone.quaternion.x.toFixed(6),
-              bone.quaternion.y.toFixed(6),
-              bone.quaternion.z.toFixed(6),
-              bone.quaternion.w.toFixed(6),
-              `tail: ${j._currentTail.x.toFixed(4)} ${j._currentTail.y.toFixed(4)} ${j._currentTail.z.toFixed(4)}`,
+              `[SpringBone] frame ${this._springDebugCount}`,
+              `quat: ${bone.quaternion.x.toFixed(6)} ${bone.quaternion.y.toFixed(6)} ${bone.quaternion.z.toFixed(6)} ${bone.quaternion.w.toFixed(6)}`,
+              `tail: ${j._currentTail?.x?.toFixed(4)} ${j._currentTail?.y?.toFixed(4)} ${j._currentTail?.z?.toFixed(4)}`,
+              `prev: ${j._prevTail?.x?.toFixed(4)} ${j._prevTail?.y?.toFixed(4)} ${j._prevTail?.z?.toFixed(4)}`,
+              `delta: ${delta.toFixed(4)}`,
             );
           }
         }
