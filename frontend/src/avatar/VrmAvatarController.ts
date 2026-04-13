@@ -389,18 +389,21 @@ export class VrmAvatarController implements AvatarAdapter {
         }
       }
 
-      // Temporary debug — log spring bone joint positions for first 5 frames
+      // Temporary debug — log spring bone joint quaternion for first 5 frames.
+      // Spring bones modify bone.quaternion, NOT bone.position.
       if (this._springDebugCount < 5 && this.springBoneManager) {
         const joints = this.springBoneManager._sortedJoints;
         if (joints?.length > 0) {
           const j = joints[0];
-          const bone = j.bone || j._bone || j.node;
+          const bone = j.bone;
           if (bone) {
             console.log(
-              `[SpringBone] frame ${this._springDebugCount} joint0 pos:`,
-              bone.position.x.toFixed(4),
-              bone.position.y.toFixed(4),
-              bone.position.z.toFixed(4),
+              `[SpringBone] frame ${this._springDebugCount} joint0 quat:`,
+              bone.quaternion.x.toFixed(6),
+              bone.quaternion.y.toFixed(6),
+              bone.quaternion.z.toFixed(6),
+              bone.quaternion.w.toFixed(6),
+              `tail: ${j._currentTail.x.toFixed(4)} ${j._currentTail.y.toFixed(4)} ${j._currentTail.z.toFixed(4)}`,
             );
           }
         }
