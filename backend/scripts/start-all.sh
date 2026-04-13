@@ -72,7 +72,25 @@ pnpm dev &
 FRONT_PID=$!
 
 # ------------------------------------------------------------------
-# 5. Cloudflare Tunnel (sera.jonhdev.io)
+# 5. WhatsApp Bridge
+# ------------------------------------------------------------------
+echo ""
+echo "=== Starting WhatsApp Bridge ==="
+WA_DIR="$DIR/../../services/whatsapp-bridge"
+if lsof -ti:3001 >/dev/null 2>&1; then
+  echo "  WhatsApp bridge already running on :3001"
+  WA_PID=""
+else
+  cd "$WA_DIR"
+  rm -f .wwebjs_auth/session/SingletonLock 2>/dev/null
+  node dist/index.js &
+  WA_PID=$!
+  echo "  WhatsApp bridge starting (PID $WA_PID)..."
+  sleep 5
+fi
+
+# ------------------------------------------------------------------
+# 6. Cloudflare Tunnel (sera.jonhdev.io)
 # ------------------------------------------------------------------
 TUNNEL_PID=""
 if pgrep -f "cloudflared tunnel run" >/dev/null 2>&1; then
@@ -95,6 +113,7 @@ echo "  Ollama:   http://127.0.0.1:11434 (nomic-embed-text)"
 echo "  vMLX:     http://127.0.0.1:1234  (PID $VMLX_PID)"
 echo "  Backend:  http://0.0.0.0:8000    (PID $BACK_PID)"
 echo "  Frontend: http://0.0.0.0:5173    (PID $FRONT_PID)"
+echo "  WhatsApp: http://127.0.0.1:3001  (PID ${WA_PID:-already})"
 echo "  Tunnel:   https://sera.jonhdev.io"
 for ip in $(ifconfig 2>/dev/null | grep 'inet ' | awk '{print $2}' | grep -v '127.0.0.1'); do
   echo "  Rede:     http://$ip:5173"
@@ -103,5 +122,5 @@ echo "=================================="
 echo ""
 echo "Press Ctrl+C to stop all."
 
-trap "kill $VMLX_PID $BACK_PID $FRONT_PID $TUNNEL_PID 2>/dev/null; exit" INT TERM
+trap "kill $VMLX_PID $BACK_PID $FRONT_PID $WA_PID $TUNNEL_PID 2>/dev/null; exit" INT TERM
 wait
