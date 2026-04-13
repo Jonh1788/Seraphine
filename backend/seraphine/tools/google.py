@@ -374,6 +374,84 @@ class GmailReadMessageTool(Tool):
         return ToolResult(ok=True, output=output, metadata={"message": msg})
 
 
+class GmailDownloadAttachmentTool(Tool):
+    """Download a Gmail attachment and save to a temp file for processing."""
+
+    name = "gmail_download_attachment"
+    description = (
+        "Download a PDF or file attachment from a Gmail message and save it locally. "
+        "Use AFTER gmail_read_message when you see attachments and need to process them "
+        "(e.g., import a bank statement PDF into the financial system). "
+        "Returns the local file path that can be passed to import_financial_pdf. "
+        "Triggers: 'baixa o anexo', 'importa o PDF do email', 'pega o extrato do email'."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "message_id": {
+                "type": "string",
+                "description": "Gmail message ID (from gmail_list_important or gmail_read_message metadata).",
+            },
+            "attachment_id": {
+                "type": "string",
+                "description": "Attachment ID from the message's attachments list.",
+            },
+            "filename": {
+                "type": "string",
+                "description": "Original filename of the attachment (for the temp file extension).",
+            },
+        },
+        "required": ["message_id", "attachment_id"],
+    }
+    requires_confirmation = True
+    category: Any = "network"
+
+    def __init__(self, google_client: "GoogleClient") -> None:
+        self._client = google_client
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            if not await self._client.is_authed():
+                return _not_authed_result()
+        except Exception as e:
+            return ToolResult(ok=False, error=f"auth check failed: {e}")
+
+        message_id = args.get("message_id", "")
+        attachment_id = args.get("attachment_id", "")
+        filename = args.get("filename", "attachment.pdf")
+
+        if not message_id or not attachment_id:
+            return ToolResult(ok=False, error="message_id and attachment_id are required.")
+
+        try:
+            data = await self._client.download_attachment(message_id, attachment_id)
+        except Exception as e:
+            return ToolResult(ok=False, error=f"Failed to download attachment: {e}")
+
+        # Save to temp file
+        import os
+        import tempfile
+
+        ext = os.path.splitext(filename)[1] or ".pdf"
+        fd, tmp_path = tempfile.mkstemp(suffix=ext)
+        os.write(fd, data)
+        os.close(fd)
+
+        return ToolResult(
+            ok=True,
+            output=(
+                f"Attachment '{filename}' downloaded ({len(data)} bytes) → {tmp_path}\n\n"
+                f"Para importar como extrato financeiro, use a tool import_financial_pdf "
+                f"com file_path='{tmp_path}'. Se o PDF tiver senha, pergunte ao usuario."
+            ),
+            metadata={
+                "file_path": tmp_path,
+                "filename": filename,
+                "size": len(data),
+            },
+        )
+
+
 # ----------------------------------------------------------------------
 # Phase B — write tools (behind the approval gate)
 # ----------------------------------------------------------------------

@@ -93,6 +93,7 @@ def build_default_registry(
             GmailListImportantTool,
             GmailReadMessageTool,
             GmailSendMessageTool,
+            GmailDownloadAttachmentTool,
             GoogleAuthStatusTool,
         )
 
@@ -100,6 +101,7 @@ def build_default_registry(
         reg.register(CalendarListEventsTool(google_client))
         reg.register(GmailListImportantTool(google_client))
         reg.register(GmailReadMessageTool(google_client))
+        reg.register(GmailDownloadAttachmentTool(google_client))
         # Phase B — write tools (approval-gated)
         reg.register(CalendarCreateEventTool(google_client))
         reg.register(CalendarUpdateEventTool(google_client))
