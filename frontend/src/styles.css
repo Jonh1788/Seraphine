@@ -211,6 +211,8 @@ button:disabled {
   gap: 8px;
   background: var(--bg-0);
   border-right: 1px solid var(--border);
+  position: relative;
+  z-index: 15;
 }
 
 .nav-rail__btn {
@@ -266,10 +268,16 @@ button:disabled {
 }
 
 /* Tooltip */
+.nav-rail__btn {
+  z-index: 20;
+}
+
 .nav-rail__btn[title]::after {
   content: attr(title);
-  position: fixed;
-  left: 68px;
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
   background: var(--bg-3);
   color: var(--text);
   padding: 6px 12px;
