@@ -807,10 +807,14 @@ class ImportFinancialPdfTool(Tool):
                 except (ValueError, TypeError):
                     continue
 
+                # confident=true → confirmed, confident=false → pending_review
+                confident = t.get('confident', True)
+                status = 'confirmed' if confident else 'pending_review'
+
                 entry = FinancialEntry(
                     id=None, type=entry_type, amount=amount, currency='BRL',
                     category=cat, description=str(t.get('description', ''))[:100],
-                    date=entry_date, source='pdf', status='pending_review',
+                    date=entry_date, source='pdf', status=status,
                 )
                 await self._service.add_entry(entry)
                 created += 1
@@ -854,12 +858,18 @@ class ImportFinancialPdfTool(Tool):
         prompt = (
             "Extraia TODAS as transacoes deste extrato bancario como JSON array.\n"
             "Retorne SOMENTE o JSON array, nada mais.\n\n"
-            '  Formato: [{"type":"expense","amount":100.0,"category":"outros","description":"desc","date":"2026-01-14"}]\n\n'
+            "Formato:\n"
+            '[{"type":"expense","amount":100.0,"category":"outros",'
+            '"description":"desc","date":"2026-01-14","confident":true}]\n\n'
             f"Categorias validas (EXATAMENTE estes valores): {categories}\n\n"
-            "Ignore saldos, totais, cabecalhos, resumos de periodo.\n"
-            "Debito/saida = expense. Credito/entrada = income.\n"
-            "Amount SEMPRE positivo. DD/MM → YYYY-MM-DD (ano 2026).\n"
-            "NAO invente transacoes. Extraia TODAS."
+            "Regras:\n"
+            "- Debito/saida/pagamento/PIX enviado = expense\n"
+            "- Credito/entrada/recebimento/PIX recebido = income\n"
+            "- Amount SEMPRE positivo. DD/MM → YYYY-MM-DD (ano 2026)\n"
+            "- IGNORE: saldos, totais, cabecalhos, resumos de periodo\n"
+            "- NAO invente transacoes\n"
+            '- "confident": true se tem certeza do type/amount/date, false se ha duvida\n'
+            "- Extraia TODAS as transacoes reais"
         )
 
         body = {
@@ -951,11 +961,12 @@ class ImportFinancialPdfTool(Tool):
         prompt = (
             "Extraia todas as transacoes do extrato bancario abaixo como JSON array.\n"
             "Retorne SOMENTE o JSON array, nada mais.\n\n"
-            '  Formato: [{"type":"expense","amount":100.0,"category":"outros","description":"desc","date":"2026-01-14"}]\n\n'
-            f"Categorias validas (use EXATAMENTE): {categories}\n\n"
-            "Ignore saldos, totais, cabecalhos e resumos de periodo.\n"
-            "Debito/saida = expense. Credito/entrada = income. Amount sempre positivo.\n"
-            "DD/MM → YYYY-MM-DD (ano 2026 se nao especificado).\n\n"
+            '[{"type":"expense","amount":100.0,"category":"outros",'
+            '"description":"desc","date":"2026-01-14","confident":true}]\n\n'
+            f"Categorias validas (EXATAMENTE): {categories}\n\n"
+            "Ignore saldos, totais, cabecalhos. Debito = expense, Credito = income.\n"
+            "Amount positivo. DD/MM → YYYY-MM-DD (ano 2026).\n"
+            '"confident": true se certeza, false se duvida.\n\n'
             f"EXTRATO (parte {part}/{total}):\n{text}"
         )
 
