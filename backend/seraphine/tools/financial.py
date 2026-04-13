@@ -810,41 +810,50 @@ class ImportFinancialPdfTool(Tool):
         )
 
     async def _llm_extract(self, text: str, categories: str) -> list[dict]:
-        """Use Sonnet/Opus to extract transactions from statement text."""
-        import json as _json
-
+        """Use Sonnet to extract transactions, chunking if text is large."""
         from seraphine.llm.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):
             return []
 
+        # Split into chunks of ~10K chars to avoid proxy timeout
+        CHUNK_SIZE = 10_000
+        chunks = []
+        for i in range(0, len(text), CHUNK_SIZE):
+            chunks.append(text[i:i + CHUNK_SIZE])
+
+        all_transactions: list[dict] = []
+        for idx, chunk in enumerate(chunks):
+            try:
+                result = await self._llm_extract_chunk(llm, chunk, categories, idx + 1, len(chunks))
+                all_transactions.extend(result)
+            except Exception as exc:
+                logger.warning("LLM chunk %d/%d failed: %s", idx + 1, len(chunks), exc)
+
+        return all_transactions
+
+    async def _llm_extract_chunk(
+        self, llm: Any, text: str, categories: str, part: int, total: int,
+    ) -> list[dict]:
+        """Extract transactions from a single text chunk."""
+        import json as _json
+        import re
+
         prompt = (
-            "Voce e um parser de extratos bancarios. Extraia TODAS as transacoes.\n\n"
-            "FORMATO DE SAIDA: JSON array puro, sem markdown, sem ```json, sem explicacao.\n"
-            "Comece com [ e termine com ]\n\n"
-            "Cada objeto:\n"
-            '{"type":"income ou expense","amount":NUMERO_POSITIVO,'
-            '"category":"EXATAMENTE_UMA_DESTAS","description":"texto curto","date":"YYYY-MM-DD"}\n\n'
-            f"CATEGORIAS VALIDAS (use EXATAMENTE estes valores, sem acento, minusculo):\n"
-            f"{categories}\n\n"
-            "REGRAS:\n"
-            "- Debito/saida/pagamento/compra/PIX enviado/transferencia enviada → expense\n"
-            "- Credito/entrada/recebimento/salario/PIX recebido → income\n"
-            "- amount SEMPRE positivo (type indica direcao)\n"
-            "- IGNORE: saldos, totais, cabecalhos, IOF zero, linhas sem valor monetario\n"
-            "- IGNORE: linhas que sao resumo tipo 'Total de entradas: R$ X'\n"
-            "- category DEVE ser exatamente um dos valores listados acima\n"
-            "- Se nao souber a categoria, use \"outros\"\n"
-            "- Converter DD/MM/YYYY → YYYY-MM-DD\n"
-            "- NAO invente transacoes que nao existem no texto\n"
-            "- Extraia TODAS, nao pule nenhuma transacao real\n\n"
-            f"EXTRATO ({len(text)} chars):\n{text}"
+            "Extraia todas as transacoes do extrato bancario abaixo como JSON array.\n"
+            "Retorne SOMENTE o JSON array, nada mais.\n\n"
+            '  Formato: [{"type":"expense","amount":100.0,"category":"outros","description":"desc","date":"2026-01-14"}]\n\n'
+            f"Categorias validas (use EXATAMENTE): {categories}\n\n"
+            "Ignore saldos, totais, cabecalhos e resumos de periodo.\n"
+            "Debito/saida = expense. Credito/entrada = income. Amount sempre positivo.\n"
+            "DD/MM → YYYY-MM-DD (ano 2026 se nao especificado).\n\n"
+            f"EXTRATO (parte {part}/{total}):\n{text}"
         )
 
         body = {
             "model": "claude-sonnet-4-6",
-            "max_tokens": 32000,
+            "max_tokens": 16000,
             "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
@@ -854,21 +863,18 @@ class ImportFinancialPdfTool(Tool):
         resp.raise_for_status()
         data = resp.json()
 
-        # Extract text from response
         raw = ""
         for block in data.get("content", []):
             if block.get("type") == "text":
                 raw += block.get("text", "")
 
-        # Clean markdown fences if present
         raw = raw.strip()
         if raw.startswith("```"):
-            import re
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
 
-        result = _json.loads(raw)
-        if not isinstance(result, list):
+        if not raw:
             return []
 
-        return result
+        result = _json.loads(raw)
+        return result if isinstance(result, list) else []
