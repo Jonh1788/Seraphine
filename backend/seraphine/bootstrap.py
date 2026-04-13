@@ -245,7 +245,8 @@ def _check_remote_whisper() -> None:
                 f"Remote whisper {url} returned HTTP {r.status_code}",
                 "✗",
             )
-            sys.exit(1)
+            # Non-fatal: STT is optional
+            return
         data = r.json()
         warm = data.get("warm", False)
         device = data.get("device", "?")
@@ -269,7 +270,7 @@ def _check_remote_whisper() -> None:
             f"SERAPHINE_STT_BACKEND=local in .env.",
             "✗",
         )
-        sys.exit(1)
+        # Non-fatal: STT is optional, app continues without voice input
 
 
 def _start_caffeinate() -> None:
