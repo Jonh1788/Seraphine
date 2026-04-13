@@ -412,10 +412,16 @@ class WhatsAppSendVoiceTool(Tool):
     name = "whatsapp_send_voice"
     description = (
         "Send a voice message on WhatsApp. Generates speech audio from text "
-        "using text-to-speech and sends it as a voice note. Use when the user "
-        "wants to send an audio/voice message on WhatsApp instead of text. "
+        "using text-to-speech (ElevenLabs v3) and sends it as a voice note. "
+        "Use when the user wants to send an audio/voice message on WhatsApp. "
         "Triggers: 'manda um audio', 'envia uma mensagem de voz', "
-        "'fala pra ele por audio'."
+        "'fala pra ele por audio'.\n\n"
+        "IMPORTANT: Include ElevenLabs v3 emotion tags in the text to make "
+        "the voice expressive and natural. Available tags:\n"
+        "  [laughs] [sighs] [gasps] [clears throat] [sniffs]\n"
+        "  [excited] [sad] [angry] [whispers] [shouting]\n"
+        "Example: '[excited] Oi! Que bom falar com voce! [laughs]'\n"
+        "Use tags sparingly and naturally — match the emotion to the context."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -426,7 +432,11 @@ class WhatsAppSendVoiceTool(Tool):
             },
             "text": {
                 "type": "string",
-                "description": "Text to convert to speech and send as voice message.",
+                "description": (
+                    "Text to convert to speech. Include ElevenLabs v3 emotion "
+                    "tags like [laughs], [excited], [sighs] for natural, "
+                    "expressive voice. Example: '[excited] Oi! Tudo pronto! [laughs]'"
+                ),
             },
             "quote_msg_id": {
                 "type": "string",
