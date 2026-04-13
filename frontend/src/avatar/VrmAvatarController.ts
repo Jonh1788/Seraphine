@@ -358,20 +358,16 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateLipsync();
       this.mixer?.update(delta);
 
-      // Step 1: VRM humanoid sync + expressions (but NOT spring bones yet)
-      // We need to apply head rotation BEFORE spring bones so hair reacts.
-      if (this.vrm) {
-        // Update humanoid (normalized→raw sync), expressions, lookAt
-        this.vrm.humanoid?.update();
-        this.vrm.expressionManager?.update();
-        if (this.vrm.lookAt?.autoUpdate) this.vrm.lookAt.update(delta);
-      }
+      // Step 1: Full VRM update (humanoid sync + expressions + spring bones)
+      this.vrm?.update(delta);
 
-      // Step 2: Apply head rotation + gesture bones
+      // Step 2: Apply head rotation + gesture bones AFTER humanoid sync
       this.applyPostUpdate();
 
-      // Step 3: NOW run spring bones — they see the final head position
+      // Step 3: Re-run spring bones so they react to the head position
+      // set in applyPostUpdate(). Without this, hair doesn't follow head.
       if (this.vrm) {
+        this.vrm.scene.updateMatrixWorld(true);
         const sbm = (this.vrm as any).springBoneManager;
         if (sbm) {
           sbm.update(delta);
