@@ -671,104 +671,50 @@ class ImportFinancialPdfTool(Tool):
                 ),
             )
 
-        import base64
         import os
 
         if not os.path.isfile(file_path):
             return ToolResult(ok=False, error=f"File not found: {file_path}")
 
-        # Read raw PDF bytes
-        pdf_bytes = open(file_path, "rb").read()
-
-        # If password-protected, decrypt with pdfplumber and re-save
-        if password:
-            try:
-                import io
-                with pdfplumber.open(file_path, password=password) as pdf:
-                    # pdfplumber decrypts — export pages as new clean PDF
-                    # Actually pdfplumber doesn't re-export, so we use pikepdf
-                    pass
-            except Exception:
-                pass
-            # Use pikepdf to remove password (if available), else use pdfplumber text fallback
-            try:
-                import pikepdf
-                with pikepdf.open(file_path, password=password) as pk:
-                    clean_path = file_path + ".clean.pdf"
-                    pk.save(clean_path)
-                    pdf_bytes = open(clean_path, "rb").read()
-                    os.unlink(clean_path)
-            except ImportError:
-                # No pikepdf — fall back to pdfplumber text extraction
-                try:
-                    text_pages: list[str] = []
-                    with pdfplumber.open(file_path, password=password) as pdf:
-                        for i, page in enumerate(pdf.pages):
-                            t = page.extract_text()
-                            if t:
-                                text_pages.append(t)
-                    if not text_pages:
-                        return ToolResult(ok=False, error="Could not extract text from password-protected PDF.")
-                    full_text = "\n\n".join(text_pages)
-                    # Use text-based extraction
-                    categories_str = ", ".join(ALL_CATEGORIES)
-                    transactions = await self._llm_extract(full_text, categories_str) if self._llm else self._extract_transactions(full_text)
-                    extraction_method = "llm-text" if self._llm and transactions else "regex"
-                    # Jump to insert
-                    return await self._insert_and_report(transactions, extraction_method, len(text_pages), file_path)
-                except Exception as e:
-                    err_str = str(e).lower()
-                    if "password" in err_str or "encrypted" in err_str:
-                        return ToolResult(ok=False, error="Este PDF é protegido por senha. Pergunte a senha ao usuario.")
-                    return ToolResult(ok=False, error=f"Failed to read PDF: {e}")
+        # Extract text with pdfplumber (handles password)
+        try:
+            text_pages: list[str] = []
+            with pdfplumber.open(file_path, password=password) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        text_pages.append(t)
+            if not text_pages:
+                return ToolResult(ok=False, error="Nao consegui extrair texto do PDF.")
+            full_text = "\n\n".join(text_pages)
+            page_count = len(text_pages)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "password" in err_str or "encrypted" in err_str or "decrypt" in err_str:
+                return ToolResult(ok=False, error="Este PDF e protegido por senha. Pergunte a senha ao usuario.")
+            return ToolResult(ok=False, error=f"Falha ao ler PDF: {e}")
 
         categories_str = ", ".join(ALL_CATEGORIES)
         transactions: list[dict] = []
         extraction_method = "none"
 
-        # --- Strategy 1: Send PDF directly to Sonnet (native document understanding) ---
+        # --- Strategy 1: Full text → LLM (single call, no chunking) ---
         if self._llm is not None:
             try:
-                transactions = await self._llm_extract_pdf(pdf_bytes, categories_str)
-                extraction_method = "llm-pdf"
-                logger.info("LLM (PDF native) extracted %d transactions", len(transactions))
+                transactions = await self._llm_extract_full(full_text, categories_str)
+                extraction_method = "llm"
+                logger.info("LLM extracted %d transactions from %d pages", len(transactions), page_count)
             except Exception as exc:
-                logger.warning("LLM PDF extraction failed: %s — trying text fallback", exc)
+                logger.warning("LLM extraction failed: %s — falling back to regex", exc)
 
-        # --- Strategy 2: Text extraction + LLM ---
-        if not transactions and self._llm is not None:
-            try:
-                text_pages = []
-                with pdfplumber.open(file_path, password=password) as pdf:
-                    for page in pdf.pages:
-                        t = page.extract_text()
-                        if t:
-                            text_pages.append(t)
-                if text_pages:
-                    full_text = "\n\n".join(text_pages)
-                    transactions = await self._llm_extract(full_text, categories_str)
-                    extraction_method = "llm-text"
-            except Exception as exc:
-                logger.warning("LLM text extraction failed: %s", exc)
-
-        # --- Strategy 3: Regex fallback ---
+        # --- Strategy 2: Regex fallback ---
         if not transactions:
-            try:
-                text_pages = []
-                with pdfplumber.open(file_path, password=password) as pdf:
-                    for page in pdf.pages:
-                        t = page.extract_text()
-                        if t:
-                            text_pages.append(t)
-                if text_pages:
-                    transactions = self._extract_transactions("\n\n".join(text_pages))
-                    if transactions:
-                        extraction_method = "regex"
-            except Exception:
-                pass
+            transactions = self._extract_transactions(full_text)
+            if transactions:
+                extraction_method = "regex"
 
         # --- Insert and report ---
-        return await self._insert_and_report(transactions, extraction_method, 0, file_path)
+        return await self._insert_and_report(transactions, extraction_method, page_count, file_path)
 
     async def _insert_and_report(
         self, transactions: list[dict], method: str, page_count: int, source: str,
@@ -841,6 +787,62 @@ class ImportFinancialPdfTool(Tool):
                 "extraction_method": method, "source": source,
             },
         )
+
+    async def _llm_extract_full(self, text: str, categories: str) -> list[dict]:
+        """Send full extracted text to LLM in a single call (no chunking)."""
+        import json as _json
+        import re
+
+        from seraphine.llm.anthropic import AnthropicClient
+
+        llm = self._llm
+        if not isinstance(llm, AnthropicClient):
+            return []
+
+        prompt = (
+            "Extraia TODAS as transacoes deste extrato bancario como JSON array.\n"
+            "Retorne SOMENTE o JSON array, nada mais.\n\n"
+            '  Formato: [{"type":"expense","amount":100.0,"category":"outros",'
+            '"description":"desc","date":"2026-01-14","confident":true}]\n\n'
+            f"Categorias validas (EXATAMENTE): {categories}\n\n"
+            "Regras:\n"
+            "- Debito/saida/pagamento/PIX enviado = expense\n"
+            "- Credito/entrada/recebimento/PIX recebido = income\n"
+            "- Amount SEMPRE positivo. DD/MM → YYYY-MM-DD (ano 2026)\n"
+            "- IGNORE: saldos, totais, cabecalhos, resumos de periodo\n"
+            "- NAO invente transacoes\n"
+            '- "confident": true se certeza, false se duvida\n'
+            "- Extraia TODAS as transacoes reais\n\n"
+            f"EXTRATO ({len(text)} chars):\n{text}"
+        )
+
+        body = {
+            "model": "claude-sonnet-4-5-20250929",
+            "max_tokens": 64000,
+            "temperature": 0.7,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+
+        resp = await llm._client.post("/v1/messages", json=body, timeout=300.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        raw = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                raw += block.get("text", "")
+
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+
+        if not raw:
+            return []
+
+        result = _json.loads(raw)
+        return result if isinstance(result, list) else []
 
     async def _llm_extract_pdf(self, pdf_bytes: bytes, categories: str) -> list[dict]:
         """Send raw PDF to Sonnet as a document for native extraction."""
