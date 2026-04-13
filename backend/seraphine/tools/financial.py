@@ -660,6 +660,14 @@ class ImportFinancialPdfTool(Tool):
 
         password = args.get("password") or None
 
+        logger.info(
+            "[import_pdf] llm=%s, type=%s, file=%s, password=%s",
+            self._llm is not None,
+            type(self._llm).__name__ if self._llm else "None",
+            file_path,
+            "***" if password else "none",
+        )
+
         try:
             import pdfplumber
         except ImportError:
