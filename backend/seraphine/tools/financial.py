@@ -553,7 +553,7 @@ class ImportFinancialPdfTool(Tool):
     def __init__(self, service: Any) -> None:
         self._service = service
 
-    _MAX_TEXT_CHARS = 5000
+    _MAX_TEXT_CHARS = 50_000
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         file_path = args.get("file_path", "")
