@@ -310,12 +310,15 @@ button:disabled {
   flex-direction: column;
   gap: var(--space-2);
   transform: translateX(100%);
-  transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  visibility: hidden;
+  transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0ms 250ms;
   box-shadow: var(--shadow-lg);
 }
 
 .mobile-drawer--open {
   transform: translateX(0);
+  visibility: visible;
+  transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0ms;
 }
 
 .mobile-drawer__header {
@@ -575,6 +578,7 @@ button:disabled {
 .chat {
   display: grid;
   grid-template-rows: 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   background: rgba(17, 17, 26, 0.5);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -2041,8 +2045,13 @@ button:disabled {
 
 @media (max-width: 768px) {
   /* --- App shell --- */
+  html, body, #root {
+    overflow-x: hidden;
+  }
+
   .app {
     grid-template-rows: 48px 1fr;
+    overflow-x: hidden;
   }
 
   /* --- Topbar --- */
@@ -2124,26 +2133,7 @@ button:disabled {
 
   /* --- Sidebar panels: slide-in drawer from right --- */
   .sidebar__panels {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    position: fixed;
-    top: 48px;
-    right: 0;
-    bottom: 0;
-    width: 300px;
-    max-width: 85vw;
-    background: var(--bg-1);
-    border-left: 1px solid var(--border);
-    padding: var(--space-4);
-    overflow-y: auto;
-    z-index: 100;
-    transform: translateX(100%);
-    transition: transform 250ms ease;
-  }
-
-  .sidebar__panels--open {
-    transform: translateX(0);
+    display: none;
   }
 
   /* --- Chat: fill remaining space --- */
@@ -2155,30 +2145,59 @@ button:disabled {
     overflow: hidden;
     min-width: 0;
     max-width: 100vw;
+    width: 100%;
   }
 
   .chat__messages {
     padding: var(--space-3);
     gap: var(--space-3);
     max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   /* --- Composer: sticky at bottom --- */
   .chat__composer {
-    padding: var(--space-2) var(--space-3);
-    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2);
+    width: 100%;
+    box-sizing: border-box;
+    gap: var(--space-1);
     position: sticky;
     bottom: 0;
     z-index: 10;
     background: var(--bg-1);
     border-top: 1px solid var(--border);
-    max-width: 100%;
-    box-sizing: border-box;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
 
   .chat__input {
     padding: 10px 12px;
     font-size: 16px; /* prevents iOS zoom on focus */
+    min-width: 0;
+    flex: 1;
+  }
+
+  /* Shrink buttons on mobile */
+  .btn-attach,
+  .btn-realtime,
+  .btn-mic {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+  }
+
+  .btn-attach svg,
+  .btn-realtime svg,
+  .btn-mic svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .chat__composer .btn {
+    padding: 8px 12px;
+    font-size: 12px;
+    flex-shrink: 0;
   }
 
   /* --- Attach button: match mic size on mobile --- */
@@ -2263,9 +2282,6 @@ button:disabled {
     font-size: 10px;
   }
 
-  .sidebar__panels {
-    width: 260px;
-  }
 }
 
 /* ---------- Google Workspace ---------- */
