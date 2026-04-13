@@ -31,27 +31,34 @@ curl -s -X POST http://127.0.0.1:11434/api/generate -d '{"model":"nomic-embed-te
 echo "  Ollama ready (nomic-embed-text loaded)."
 
 # ------------------------------------------------------------------
-# 2. vMLX (LLM — Gemma 4 26B)
+# 2. vMLX (LLM — Gemma 4 26B) — only if not using Anthropic
 # ------------------------------------------------------------------
-echo ""
-echo "=== Starting vMLX (Gemma 4 26B) ==="
-"$DIR/start-vmlx.sh" &
-VMLX_PID=$!
+VMLX_PID=""
+LLM_BACKEND=$(grep '^SERAPHINE_LLM_BACKEND=' "$DIR/../.env" 2>/dev/null | cut -d= -f2 | tr -d ' "')
+if [ "$LLM_BACKEND" = "anthropic" ] || [ "$LLM_BACKEND" = "claude_max" ]; then
+  echo ""
+  echo "=== Skipping vMLX (LLM backend=$LLM_BACKEND, using cloud API) ==="
+else
+  echo ""
+  echo "=== Starting vMLX (Gemma 4 26B) ==="
+  "$DIR/start-vmlx.sh" &
+  VMLX_PID=$!
 
-echo "  Waiting for vMLX to load model (~30s)..."
-for i in $(seq 1 60); do
-  if curl -s http://127.0.0.1:1234/health >/dev/null 2>&1; then
-    echo "  vMLX ready!"
-    break
-  fi
-  sleep 1
-  printf "."
-done
-echo ""
+  echo "  Waiting for vMLX to load model (~30s)..."
+  for i in $(seq 1 60); do
+    if curl -s http://127.0.0.1:1234/health >/dev/null 2>&1; then
+      echo "  vMLX ready!"
+      break
+    fi
+    sleep 1
+    printf "."
+  done
+  echo ""
 
-# Unload gemma4:e4b from Ollama if loaded (free ~11GB RAM for vMLX)
-echo "  Unloading gemma4:e4b from Ollama (if loaded)..."
-curl -s -X POST http://127.0.0.1:11434/api/generate -d '{"model":"gemma4:e4b","keep_alive":0}' >/dev/null 2>&1 || true
+  # Unload gemma4:e4b from Ollama if loaded (free ~11GB RAM for vMLX)
+  echo "  Unloading gemma4:e4b from Ollama (if loaded)..."
+  curl -s -X POST http://127.0.0.1:11434/api/generate -d '{"model":"gemma4:e4b","keep_alive":0}' >/dev/null 2>&1 || true
+fi
 
 # ------------------------------------------------------------------
 # 3. Seraphine Backend
@@ -122,5 +129,5 @@ echo "=================================="
 echo ""
 echo "Press Ctrl+C to stop all."
 
-trap "kill $VMLX_PID $BACK_PID $FRONT_PID $WA_PID $TUNNEL_PID 2>/dev/null; exit" INT TERM
+trap "kill $VMLX_PID $BACK_PID $FRONT_PID $WA_PID $TUNNEL_PID 2>/dev/null; exit" INT TERM 2>/dev/null
 wait
