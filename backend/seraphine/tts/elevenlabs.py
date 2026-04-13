@@ -97,10 +97,10 @@ class ElevenLabsAdapter(TTSAdapter):
         *,
         voice_id: str | None = None,
     ) -> bytes:
-        """Non-streaming synthesis returning ogg/opus bytes.
+        """Non-streaming synthesis returning opus bytes for WhatsApp voice notes.
 
-        Used for WhatsApp voice notes. Requests ``ogg_opus`` output format
-        from ElevenLabs so no local conversion is needed.
+        Uses ``opus_48000_128`` output format (48kHz, 128kbps).
+        WhatsApp accepts opus data sent via MessageMedia with audio/ogg mime.
         """
         if not text.strip():
             return b""
@@ -108,7 +108,7 @@ class ElevenLabsAdapter(TTSAdapter):
         effective_voice = voice_id or self.voice_id
         body = self._build_body(text)
         url = f"/v1/text-to-speech/{effective_voice}"
-        params: dict[str, str] = {"output_format": "ogg_opus"}
+        params: dict[str, str] = {"output_format": "opus_48000_128"}
         if "v3" not in self.model_id.lower():
             params["optimize_streaming_latency"] = str(
                 self.optimize_streaming_latency
@@ -123,7 +123,7 @@ class ElevenLabsAdapter(TTSAdapter):
                 headers={
                     "xi-api-key": self.api_key,
                     "content-type": "application/json",
-                    "accept": "audio/ogg",
+                    "accept": "audio/opus",
                 },
             )
             if resp.status_code >= 400:
