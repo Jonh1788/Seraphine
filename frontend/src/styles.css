@@ -2172,53 +2172,47 @@ button:disabled {
   }
 
   .chat__input {
-    padding: 10px 12px;
+    padding: 8px 12px;
     font-size: 16px; /* prevents iOS zoom on focus */
     min-width: 0;
     flex: 1;
   }
 
-  /* Shrink buttons on mobile */
+  .chat__input::placeholder {
+    font-size: 13px;
+  }
+
+  /* Uniform compact buttons on mobile */
   .btn-attach,
   .btn-realtime,
   .btn-mic {
-    width: 36px;
-    height: 36px;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
     flex-shrink: 0;
   }
 
   .btn-attach svg,
   .btn-realtime svg,
   .btn-mic svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
   }
 
+  /* Send button compact */
   .chat__composer .btn {
-    padding: 8px 12px;
+    padding: 7px 14px;
     font-size: 12px;
+    font-weight: 600;
     flex-shrink: 0;
-  }
-
-  /* --- Attach button: match mic size on mobile --- */
-  .btn-attach {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
+    height: 34px;
+    border-radius: 8px;
   }
 
   /* --- Image preview strip compact --- */
   .image-preview-strip {
     padding: var(--space-2) var(--space-3);
-  }
-
-  /* --- Mic button: slightly larger for touch --- */
-  .btn-mic {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
   }
 
   /* --- Bubbles: wider on mobile --- */
