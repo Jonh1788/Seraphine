@@ -94,13 +94,16 @@ class FinanceService:
 
         def _work() -> int:
             with self._connect() as conn:
-                # Dedup check: same date + amount + type + similar description
+                # Dedup check: same date + amount + type + currency + description
+                # Must include description to allow multiple different
+                # transactions with the same amount on the same day
+                # (e.g., two R$50 PIX to different people)
                 existing = conn.execute(
                     "SELECT id FROM financial_entries"
                     " WHERE date = ? AND amount = ? AND type = ?"
-                    " AND currency = ?"
+                    " AND currency = ? AND description = ?"
                     " LIMIT 1",
-                    (entry.date, entry.amount, entry.type, entry.currency),
+                    (entry.date, entry.amount, entry.type, entry.currency, entry.description),
                 ).fetchone()
                 if existing:
                     return existing[0]
