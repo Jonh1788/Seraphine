@@ -322,33 +322,34 @@ export class VrmAvatarController implements AvatarAdapter {
    *  tiny head tilts, like someone actively talking to you. Never
    *  looks away, stays engaged with the "camera" (the user). */
   private scheduleConversationalNod(): void {
+    const m = this._nodIntensity;
     const r = Math.random();
     if (r < 0.40) {
-      // Slight nod down (emphasis while talking)
+      // Nod down (emphasis while talking)
       this.idleLookTarget = {
-        x: 0.02 + Math.random() * 0.03,
-        y: (Math.random() - 0.5) * 0.02,
+        x: (0.02 + Math.random() * 0.03) * m,
+        y: (Math.random() - 0.5) * 0.02 * m,
         z: 0,
       };
     } else if (r < 0.65) {
-      // Tiny tilt to one side (expressive)
+      // Tilt to one side (expressive)
       this.idleLookTarget = {
-        x: Math.random() * 0.02,
-        y: (Math.random() - 0.5) * 0.02,
-        z: (Math.random() > 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.025),
+        x: Math.random() * 0.02 * m,
+        y: (Math.random() - 0.5) * 0.02 * m,
+        z: (Math.random() > 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.025) * m,
       };
     } else if (r < 0.85) {
       // Return to center (neutral forward)
       this.idleLookTarget = {
-        x: (Math.random() - 0.5) * 0.015,
-        y: (Math.random() - 0.5) * 0.015,
+        x: (Math.random() - 0.5) * 0.015 * m,
+        y: (Math.random() - 0.5) * 0.015 * m,
         z: 0,
       };
     } else {
-      // Slight up movement (like finishing a thought)
+      // Up movement (like finishing a thought)
       this.idleLookTarget = {
-        x: -(0.01 + Math.random() * 0.02),
-        y: (Math.random() - 0.5) * 0.02,
+        x: -(0.01 + Math.random() * 0.02) * m,
+        y: (Math.random() - 0.5) * 0.02 * m,
         z: 0,
       };
     }
@@ -687,6 +688,12 @@ export class VrmAvatarController implements AvatarAdapter {
         }
       }
       console.log('[VRM] Patched spring bone settings for', sortedJoints.length, 'joints');
+
+      // Apply saved lab settings from localStorage
+      const savedPhysics = localStorage.getItem('seraphine.lab.physics');
+      if (savedPhysics) this.setSpringBoneStiffnessMultiplier(parseFloat(savedPhysics));
+      const savedNods = localStorage.getItem('seraphine.lab.nods');
+      if (savedNods) this._nodIntensity = parseFloat(savedNods);
 
       // Re-initialize spring bone state now that settings are patched
       // and the scene is rotated (rotateVRM0 applied 180deg Y).
@@ -1159,10 +1166,21 @@ export class VrmAvatarController implements AvatarAdapter {
 
   private _springStiffnessMultiplier = 1.0;
   private _springBaseSettings: Map<any, { stiffness: number; gravityPower: number; dragForce: number }> = new Map();
+  private _nodIntensity = 1.0;
 
   /** Get current spring bone physics multiplier (1.0 = default). */
   getSpringBoneStiffnessMultiplier(): number {
     return this._springStiffnessMultiplier ?? 1.0;
+  }
+
+  /** Get current nod intensity multiplier. */
+  getNodIntensity(): number {
+    return this._nodIntensity;
+  }
+
+  /** Set conversational nod intensity (0.5 = subtle, 3.0 = exaggerated). */
+  setNodIntensity(multiplier: number): void {
+    this._nodIntensity = multiplier;
   }
 
   /** Set spring bone stiffness multiplier (0.1 = very soft, 2.0 = rigid).

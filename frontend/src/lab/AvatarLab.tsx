@@ -65,9 +65,18 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
   );
   const [swappingAvatar, setSwappingAvatar] = useState(false);
   const [activeCamera, setActiveCamera] = useState('bust');
-  const [physicsMultiplier, setPhysicsMultiplier] = useState(
-    () => controller?.getSpringBoneStiffnessMultiplier() ?? 1.0,
-  );
+  const [physicsMultiplier, setPhysicsMultiplier] = useState(() => {
+    const saved = localStorage.getItem('seraphine.lab.physics');
+    const v = saved ? parseFloat(saved) : (controller?.getSpringBoneStiffnessMultiplier() ?? 1.0);
+    if (saved && controller) controller.setSpringBoneStiffnessMultiplier(v);
+    return v;
+  });
+  const [nodIntensity, setNodIntensity] = useState(() => {
+    const saved = localStorage.getItem('seraphine.lab.nods');
+    const v = saved ? parseFloat(saved) : (controller?.getNodIntensity() ?? 1.0);
+    if (saved && controller) controller.setNodIntensity(v);
+    return v;
+  });
 
   // Resolve available RAW blendshapes from the VRM model (not emotion presets)
   const blendshapes = getBlendshapes(controller);
@@ -335,12 +344,37 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                     const v = parseFloat(e.target.value);
                     setPhysicsMultiplier(v);
                     controller?.setSpringBoneStiffnessMultiplier(v);
+                    localStorage.setItem('seraphine.lab.physics', String(v));
                   }}
                   className="avatar-lab__slider"
                 />
                 <div className="avatar-lab__slider-hints">
                   <span>Solto</span>
                   <span>Rigido</span>
+                </div>
+              </div>
+              <div className="avatar-lab__slider-row">
+                <label className="avatar-lab__slider-label">
+                  Nods conversacionais
+                  <span className="avatar-lab__slider-value">{nodIntensity.toFixed(1)}x</span>
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="5.0"
+                  step="0.1"
+                  value={nodIntensity}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setNodIntensity(v);
+                    controller?.setNodIntensity(v);
+                    localStorage.setItem('seraphine.lab.nods', String(v));
+                  }}
+                  className="avatar-lab__slider"
+                />
+                <div className="avatar-lab__slider-hints">
+                  <span>Sutil</span>
+                  <span>Expressivo</span>
                 </div>
               </div>
             </section>
