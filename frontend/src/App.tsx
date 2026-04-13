@@ -11,6 +11,7 @@ import { CalendarModal, EmailInboxModal } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
+import { CalendarView } from './calendar';
 import {
   ChatIcon,
   CalendarIcon,
@@ -21,7 +22,7 @@ import {
   FlaskIcon,
 } from './icons/Icons';
 
-type ActiveView = 'chat' | 'finance';
+type ActiveView = 'chat' | 'finance' | 'calendar';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -354,7 +355,8 @@ export function App(): JSX.Element {
       id: 'calendar',
       icon: <CalendarIcon size={22} />,
       label: 'Calendario',
-      onClick: () => setCalendarOpen(true),
+      onClick: () => setActiveView(activeView === 'calendar' ? 'chat' : 'calendar'),
+      active: activeView === 'calendar',
     },
     {
       id: 'inbox',
@@ -473,6 +475,9 @@ export function App(): JSX.Element {
         <section className="chat">
           {activeView === 'finance' && (
             <FinanceDashboard onBack={() => setActiveView('chat')} />
+          )}
+          {activeView === 'calendar' && (
+            <CalendarView onBack={() => setActiveView('chat')} />
           )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView
