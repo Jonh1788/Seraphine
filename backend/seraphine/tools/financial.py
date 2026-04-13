@@ -794,27 +794,41 @@ class ImportFinancialPdfTool(Tool):
             return []
 
         prompt = (
-            "Voce e um parser de extratos bancarios. Extraia TODAS as transacoes "
-            "do texto abaixo e retorne APENAS um JSON array.\n\n"
-            "Cada objeto deve ter:\n"
-            '- "type": "income" ou "expense"\n'
-            '- "amount": numero (float, sem R$)\n'
-            f'- "category": uma de [{categories}]\n'
-            '- "description": descricao curta\n'
-            '- "date": "YYYY-MM-DD"\n\n'
-            "Regras:\n"
-            "- Debitos/saidas/pagamentos = expense\n"
-            "- Creditos/entradas/recebimentos = income\n"
-            "- Infira categoria pela descricao\n"
-            "- Ignore saldos, totais, cabecalhos\n"
-            "- Retorne APENAS o JSON array, sem markdown, sem explicacao\n\n"
-            f"TEXTO DO EXTRATO:\n{text}"
+            "Voce e um parser especialista de extratos bancarios brasileiros. "
+            "Extraia TODAS as transacoes do texto abaixo.\n\n"
+            "Retorne APENAS um JSON array valido. Sem markdown, sem explicacao, sem texto extra.\n\n"
+            "Cada objeto DEVE ter exatamente estes campos:\n"
+            '{\n'
+            '  "type": "income" ou "expense",\n'
+            '  "amount": numero positivo (float, ex: 150.50),\n'
+            f'  "category": uma de [{categories}],\n'
+            '  "description": descricao curta da transacao (max 80 chars),\n'
+            '  "date": "YYYY-MM-DD"\n'
+            '}\n\n'
+            "REGRAS IMPORTANTES:\n"
+            "1. Debitos, saidas, pagamentos, compras, transferencias enviadas, PIX enviado = expense\n"
+            "2. Creditos, entradas, recebimentos, salarios, transferencias recebidas, PIX recebido = income\n"
+            "3. IGNORE completamente: saldos, totais parciais, cabecalhos, datas sem valor, taxas de IOF zeradas\n"
+            "4. O amount DEVE ser positivo sempre (o type indica se eh income ou expense)\n"
+            "5. Categorize com cuidado:\n"
+            "   - PIX/transferencia sem contexto = outros\n"
+            "   - Mercado/supermercado/restaurante/ifood = alimentacao\n"
+            "   - Aluguel/condominio/IPTU = moradia\n"
+            "   - Uber/99/combustivel/estacionamento = transporte\n"
+            "   - Netflix/Spotify/jogos/lazer = lazer\n"
+            "   - Farmacia/medico/plano saude = saude\n"
+            "   - Salario/pagamento mensal = salario\n"
+            "   - Curso/escola/livro = educacao\n"
+            "   - CDB/poupanca/tesouro = investimento\n"
+            "6. Extraia TODAS as transacoes, nao pule nenhuma\n"
+            "7. Formato de data: converter DD/MM/YYYY ou DD/MM/YY para YYYY-MM-DD\n\n"
+            f"TEXTO DO EXTRATO ({len(text)} caracteres):\n{text}"
         )
 
         body = {
             "model": "claude-sonnet-4-20250514",
-            "max_tokens": 16000,
-            "temperature": 0.1,
+            "max_tokens": 32000,
+            "temperature": 0.0,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
         }
