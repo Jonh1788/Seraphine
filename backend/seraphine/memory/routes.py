@@ -10,9 +10,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+
+from seraphine.memory.profile import UserProfile
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -129,6 +131,26 @@ async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory
     memories = await memory.recall(body.query, k=body.k)
     return [m.model_dump() for m in memories]
+
+
+@router.get("/timeline")
+async def get_timeline(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=500),
+    source: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Return recent events from the timeline, optionally filtered by source."""
+    store = request.app.state.store
+    events = await store.get_recent_events(limit=limit, source=source or None)
+    return {"events": events}
+
+
+@router.get("/profile")
+async def get_profile(request: Request) -> dict[str, Any]:
+    """Return the dynamic user profile built from facts + events."""
+    store = request.app.state.store
+    profile = await UserProfile(store).build_profile()
+    return {"profile": profile}
 
 
 @router.get("/notifications")

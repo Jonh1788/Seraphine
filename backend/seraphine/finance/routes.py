@@ -219,6 +219,18 @@ async def finance_bulk_create(
             )
             entry_id = await svc.add_entry(entry)
             ids.append(entry_id)
+        # Log bulk import as a timeline event (best-effort).
+        store = getattr(request.app.state, "store", None)
+        if store is not None and ids:
+            try:
+                await store.add_event(
+                    event_type="finance_import",
+                    summary=f"Imported {len(ids)} finance entries",
+                    source="finance",
+                    metadata={"count": len(ids)},
+                )
+            except Exception as exc:
+                logger.debug("add_event for finance_import failed: %s", exc)
         return {"ids": ids, "count": len(ids)}
     except Exception as e:
         logger.exception("finance bulk create failed")

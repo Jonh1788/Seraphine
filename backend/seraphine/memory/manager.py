@@ -19,6 +19,22 @@ logger = logging.getLogger("seraphine.memory")
 REFLECTION_SIM_THRESHOLD = 0.92
 REFLECTION_MIN_TURNS = 5
 REFLECTION_TURN_WINDOW = 100
+# Facts with extraction confidence below this threshold are skipped.
+REFLECTION_CONFIDENCE_THRESHOLD = 0.7
+# Minimum character length for a turn to be considered signal-bearing.
+_MIN_TURN_CHARS = 12
+
+# Greetings / acks that the LLM should never try to extract facts from.
+# Matched as full-message substrings after lowercasing + stripping punctuation.
+_SKIP_SHORT_PHRASES = {
+    "ok", "okay", "sim", "nao", "não", "yes", "no",
+    "valeu", "obrigado", "obrigada", "tmj", "blz",
+    "bom dia", "boa tarde", "boa noite",
+    "oi", "olá", "ola", "hey", "hi", "hello", "eai", "eae",
+    "kkk", "rs", "rsrs", "haha", "hehe",
+    "show", "top", "massa", "legal", "beleza",
+}
+_PUNCT_STRIP = ".,!?;:()[]{}\"'`"
 
 
 class _LLMLike(Protocol):
@@ -41,12 +57,43 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 _FACTS_PROMPT = (
-    "You are extracting durable facts about the user from recent conversation"
-    " excerpts. Return STRICT JSON of the form {\"facts\": [\"<fact 1>\", ...]}."
-    " A durable fact is something likely to remain true across sessions"
-    " (preferences, identity, habits, ongoing projects). Skip transient"
-    " content. If nothing qualifies, return {\"facts\": []}."
+    "Extract ONLY information worth remembering long-term about the user from"
+    " the conversation excerpts below.\n\n"
+    "DO extract:\n"
+    "- User preferences (language, style, tools they like)\n"
+    "- Personal info (name, location, job, relationships)\n"
+    "- Important decisions made\n"
+    "- Recurring patterns (always asks X at Y time)\n"
+    "- Financial habits (regular expenses, income sources)\n"
+    "- Contact relationships (who is Jefferson, who is Pedro)\n\n"
+    "DO NOT extract: greetings, acknowledgments, tool outputs, temporary state,"
+    " one-off questions, or anything transient.\n\n"
+    "For each fact, estimate a confidence score in [0,1] reflecting how"
+    " durable and well-supported it is. Return STRICT JSON:\n"
+    '{"facts": [{"text": "<fact>", "confidence": 0.85}, ...]}\n'
+    "If nothing qualifies, return {\"facts\": []}."
 )
+
+
+def _is_signal_turn(role: str, content: str) -> bool:
+    """Filter heuristics: decide whether a turn is worth sending to the LLM.
+
+    Skips tool-role messages, very short/greeting messages, and the
+    assistant's own replies (we only mine the user side for facts).
+    """
+    if role != "user":
+        return False
+    text = (content or "").strip()
+    if len(text) < _MIN_TURN_CHARS:
+        return False
+    normalized = text.lower().strip(_PUNCT_STRIP).strip()
+    if normalized in _SKIP_SHORT_PHRASES:
+        return False
+    # Collapse internal whitespace for multi-word greetings like "bom dia!!"
+    collapsed = " ".join(normalized.split())
+    if collapsed in _SKIP_SHORT_PHRASES:
+        return False
+    return True
 
 
 class Memory(BaseModel):
@@ -186,7 +233,12 @@ class MemoryManager:
         if len(recent) < REFLECTION_MIN_TURNS:
             return 0
 
-        excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in recent)
+        # Filter down to signal-bearing user turns before spending tokens.
+        signal_turns = [t for t in recent if _is_signal_turn(t.role, t.content)]
+        if len(signal_turns) < 2:
+            return 0
+
+        excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in signal_turns)
         messages = [
             ChatMessage(role="system", content=_FACTS_PROMPT),
             ChatMessage(role="user", content=excerpts),
@@ -202,6 +254,13 @@ class MemoryManager:
 
         raw = "".join(accumulated).strip()
         candidates = _parse_facts_json(raw)
+        if not candidates:
+            return 0
+
+        # Apply confidence threshold — drop low-signal extractions early.
+        candidates = [
+            c for c in candidates if c[1] >= REFLECTION_CONFIDENCE_THRESHOLD
+        ]
         if not candidates:
             return 0
 
@@ -225,13 +284,13 @@ class MemoryManager:
         ]
 
         try:
-            cand_vecs = await self.embeddings.embed(candidates)
+            cand_vecs = await self.embeddings.embed([c[0] for c in candidates])
         except Exception as e:
             logger.warning("reflect: embed candidates failed: %s", e)
             return 0
 
         inserted = 0
-        for text, vec in zip(candidates, cand_vecs):
+        for (text, confidence), vec in zip(candidates, cand_vecs):
             duplicate = False
             for ev in existing_vecs:
                 if _cosine(vec, ev) >= REFLECTION_SIM_THRESHOLD:
@@ -240,7 +299,7 @@ class MemoryManager:
             if duplicate:
                 continue
             fact = await self.store.add_fact(
-                text=text, source="reflection", confidence=0.7
+                text=text, source="reflection", confidence=confidence,
             )
             self._fact_embedding_cache[fact.id] = vec
             existing_vecs.append(vec)
@@ -251,9 +310,15 @@ class MemoryManager:
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def _parse_facts_json(raw: str) -> list[str]:
-    """Tolerant extractor: pulls the first JSON object from the text and
-    returns its `facts` array as a list of stripped non-empty strings."""
+def _parse_facts_json(raw: str) -> list[tuple[str, float]]:
+    """Tolerant extractor: pulls the first JSON object from ``raw`` and
+    returns its ``facts`` array as ``[(text, confidence), ...]``.
+
+    Accepts both the legacy string shape (``["fact", ...]``, defaulting
+    to confidence 0.7) and the richer object shape
+    (``[{"text": "...", "confidence": 0.85}, ...]``). Malformed entries
+    are dropped silently.
+    """
     if not raw:
         return []
     match = _JSON_OBJ_RE.search(raw)
@@ -266,10 +331,25 @@ def _parse_facts_json(raw: str) -> list[str]:
     facts = data.get("facts") if isinstance(data, dict) else None
     if not isinstance(facts, list):
         return []
-    out: list[str] = []
+    out: list[tuple[str, float]] = []
     for f in facts:
         if isinstance(f, str):
             s = f.strip()
             if s:
-                out.append(s)
+                out.append((s, 0.7))
+            continue
+        if isinstance(f, dict):
+            text = f.get("text")
+            if not isinstance(text, str):
+                continue
+            s = text.strip()
+            if not s:
+                continue
+            raw_conf = f.get("confidence", 0.7)
+            try:
+                conf = float(raw_conf)
+            except (TypeError, ValueError):
+                conf = 0.7
+            conf = max(0.0, min(1.0, conf))
+            out.append((s, conf))
     return out

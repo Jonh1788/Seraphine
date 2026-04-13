@@ -286,6 +286,22 @@ class WhatsAppTaskDetector:
             except Exception as exc:
                 logger.warning("Failed to persist task notification: %s", exc)
 
+            # Also log to the memory timeline (lightweight).
+            try:
+                await store.add_event(
+                    event_type="whatsapp_task",
+                    summary=(analysis.summary or "WhatsApp task detected")[:200],
+                    source="whatsapp",
+                    metadata={
+                        "author": author,
+                        "chat_name": chat_name,
+                        "chat_id": chat_id,
+                        "urgency": analysis.urgency,
+                    },
+                )
+            except Exception as exc:
+                logger.debug("add_event for whatsapp_task failed: %s", exc)
+
         # 2. Push to connected WS clients
         ws_clients: set = getattr(self._app_state, "ws_clients", set())
         delivered_to_ws = False

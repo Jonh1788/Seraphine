@@ -83,6 +83,17 @@ async def notify_reminder(app_state: object, reminder_id: str, message: str) -> 
         except Exception as exc:
             logger.warning("Failed to persist reminder notification: %s", exc)
 
+        # Timeline event — best-effort.
+        try:
+            await store.add_event(
+                event_type="reminder_fired",
+                summary=message[:200],
+                source="system",
+                metadata={"reminder_id": reminder_id, "fired_at": fired_at},
+            )
+        except Exception as exc:
+            logger.debug("add_event for reminder_fired failed: %s", exc)
+
     # 3. Web Push fallback — if nobody was connected
     if not delivered_to_ws:
         push = getattr(app_state, "push_service", None)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -42,6 +43,23 @@ class Fact(BaseModel):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _row_to_event(row: tuple[Any, ...]) -> dict[str, Any]:
+    """Convert an event_timeline row into a dict, parsing metadata JSON."""
+    raw_meta = row[4]
+    try:
+        metadata = json.loads(raw_meta) if raw_meta else {}
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
+    return {
+        "id": row[0],
+        "event_type": row[1],
+        "summary": row[2],
+        "source": row[3],
+        "metadata": metadata,
+        "created_at": row[5],
+    }
 
 
 class MemoryStore:
@@ -125,6 +143,18 @@ class MemoryStore:
                       error          TEXT,
                       created_at     TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS event_timeline (
+                      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                      event_type  TEXT NOT NULL,
+                      summary     TEXT NOT NULL,
+                      source      TEXT NOT NULL,
+                      metadata    TEXT NOT NULL DEFAULT '{}',
+                      created_at  TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_event_timeline_created
+                      ON event_timeline(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_event_timeline_source
+                      ON event_timeline(source, created_at DESC);
                     """
                 )
 
@@ -518,6 +548,72 @@ class MemoryStore:
                 )
                 for r in rows
             ]
+
+        return await asyncio.to_thread(_work)
+
+    # ---------- event timeline ----------
+
+    async def add_event(
+        self,
+        event_type: str,
+        summary: str,
+        source: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        """Append a lightweight event to the timeline. Returns the row id."""
+        meta_json = json.dumps(metadata or {}, ensure_ascii=False)
+        created_at = _now()
+
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT INTO event_timeline(event_type, summary, source, metadata, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (event_type, summary, source, meta_json, created_at),
+                )
+                return int(cur.lastrowid or 0)
+
+        return await asyncio.to_thread(_work)
+
+    async def get_recent_events(
+        self, limit: int = 20, source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return recent events ordered from newest to oldest.
+
+        If ``source`` is provided, filters to that source only.
+        """
+
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                if source is None:
+                    rows = conn.execute(
+                        "SELECT id, event_type, summary, source, metadata, created_at"
+                        " FROM event_timeline ORDER BY created_at DESC, id DESC LIMIT ?",
+                        (limit,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT id, event_type, summary, source, metadata, created_at"
+                        " FROM event_timeline WHERE source = ?"
+                        " ORDER BY created_at DESC, id DESC LIMIT ?",
+                        (source, limit),
+                    ).fetchall()
+            return [_row_to_event(r) for r in rows]
+
+        return await asyncio.to_thread(_work)
+
+    async def get_events_since(self, since: str) -> list[dict[str, Any]]:
+        """Return events with created_at >= ``since`` (ISO datetime string)."""
+
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, event_type, summary, source, metadata, created_at"
+                    " FROM event_timeline WHERE created_at >= ?"
+                    " ORDER BY created_at DESC, id DESC",
+                    (since,),
+                ).fetchall()
+            return [_row_to_event(r) for r in rows]
 
         return await asyncio.to_thread(_work)
 

@@ -14,6 +14,7 @@ import { FinanceDashboard } from './finance';
 import { CalendarView } from './calendar';
 import { WhatsAppPanel } from './whatsapp';
 import type { WhatsAppMessage } from './whatsapp';
+import { MemoryView } from './memory';
 import {
   ChatIcon,
   CalendarIcon,
@@ -22,9 +23,10 @@ import {
   FinanceIcon,
   SettingsIcon,
   FlaskIcon,
+  BrainIcon,
 } from './icons/Icons';
 
-type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp';
+type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -85,7 +87,7 @@ export function App(): JSX.Element {
 
     // Shortcut view routing
     const view = params.get('view');
-    if (view === 'finance' || view === 'calendar' || view === 'whatsapp') {
+    if (view === 'finance' || view === 'calendar' || view === 'whatsapp' || view === 'memory') {
       setActiveView(view);
     }
 
@@ -470,6 +472,13 @@ export function App(): JSX.Element {
       onClick: () => setActiveView(activeView === 'finance' ? 'chat' : 'finance'),
       active: activeView === 'finance',
     },
+    {
+      id: 'memory',
+      icon: <BrainIcon size={22} />,
+      label: 'Memoria',
+      onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'),
+      active: activeView === 'memory',
+    },
   ];
 
   return (
@@ -576,6 +585,9 @@ export function App(): JSX.Element {
               onBack={() => setActiveView('chat')}
               onNavigate={(view) => setActiveView(view)}
             />
+          )}
+          {activeView === 'memory' && (
+            <MemoryView onBack={() => setActiveView('chat')} />
           )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView

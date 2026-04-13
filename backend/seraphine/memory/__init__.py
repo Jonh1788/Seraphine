@@ -7,6 +7,7 @@ from seraphine.memory.embeddings import (
     OllamaEmbeddings,
 )
 from seraphine.memory.manager import Memory, MemoryManager
+from seraphine.memory.profile import UserProfile
 from seraphine.memory.store import Fact, MemoryStore, Turn
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "MemoryStore",
     "OllamaEmbeddings",
     "Turn",
+    "UserProfile",
 ]

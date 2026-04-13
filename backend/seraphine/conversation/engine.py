@@ -541,6 +541,20 @@ class ConversationEngine:
                         output_excerpt=output_excerpt,
                         error=result.error,
                     )
+                    # Lightweight timeline event — fire-and-forget, don't
+                    # block the response stream if it fails.
+                    try:
+                        await self.store.add_event(
+                            event_type="tool_used",
+                            summary=f"Used {tool_name}",
+                            source="chat",
+                            metadata={
+                                "tool": tool_name,
+                                "ok": bool(result.ok),
+                            },
+                        )
+                    except Exception as exc:  # pragma: no cover - best-effort
+                        logger.debug("add_event for tool_used failed: %s", exc)
                     yield ToolResultEvent(
                         request_id=request_id,
                         ok=result.ok,
