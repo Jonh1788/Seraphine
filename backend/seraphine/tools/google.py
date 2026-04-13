@@ -244,18 +244,30 @@ class CalendarListEventsTool(Tool):
 class GmailListImportantTool(Tool):
     name = "gmail_list_important"
     description = (
-        "List the user's important unread Gmail messages (equivalent to "
-        "Gmail's 'is:important is:unread' filter). Use this when the user "
-        "asks 'tem algum email novo importante?' or wants a triage of "
-        "their inbox. Returns subject, sender, snippet, and date per row."
+        "List the user's Gmail messages with optional filters. "
+        "Use this when the user asks about emails. "
+        "IMPORTANT: When the user asks for 'emails de hoje' or 'emails do dia', "
+        "always include 'after:YYYY/MM/DD' with today's date in the query. "
+        "When asking for recent emails, use 'newer_than:1d' or 'after:' filter. "
+        "Examples: query='is:unread newer_than:1d' for today's unread emails, "
+        "query='is:important is:unread' for important unread (no date filter)."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Gmail search query. Default: 'is:important is:unread'. "
+                    "Use Gmail operators: 'newer_than:1d' (today), 'after:2026/04/13', "
+                    "'from:someone', 'subject:keyword', 'is:unread', 'is:important'. "
+                    "Combine: 'is:unread newer_than:1d' for today's unread."
+                ),
+            },
             "max_results": {
                 "type": "integer",
                 "description": "Max messages to return (default 20, max 50).",
-            }
+            },
         },
     }
     requires_confirmation = False
@@ -274,8 +286,10 @@ class GmailListImportantTool(Tool):
         max_results = int(args.get("max_results") or 20)
         max_results = max(1, min(max_results, 50))
 
+        query = str(args.get("query") or "is:important is:unread")
+
         try:
-            msgs = await self._client.list_important_unread(max_results=max_results)
+            msgs = await self._client.list_messages(q=query, max_results=max_results)
         except GoogleAuthError:
             return _not_authed_result()
         except Exception as e:
