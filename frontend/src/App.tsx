@@ -12,6 +12,8 @@ import { getAuthStatus, listImportantEmails } from './google/api';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
 import { CalendarView } from './calendar';
+import { WhatsAppPanel } from './whatsapp';
+import type { WhatsAppMessage } from './whatsapp';
 import {
   ChatIcon,
   CalendarIcon,
@@ -22,7 +24,7 @@ import {
   FlaskIcon,
 } from './icons/Icons';
 
-type ActiveView = 'chat' | 'finance' | 'calendar';
+type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -60,6 +62,7 @@ export function App(): JSX.Element {
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [labOpen, setLabOpen] = useState<boolean>(false);
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
+  const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
@@ -137,9 +140,18 @@ export function App(): JSX.Element {
           void Notification.requestPermission();
         }
       } else if (type === 'whatsapp_notification') {
-        const wa = msg as { fromMe?: boolean; author?: string; body?: string; chatName?: string; important?: boolean };
+        const wa = msg as { fromMe?: boolean; author?: string; body?: string; chatName?: string; chatId?: string; important?: boolean; timestamp?: number };
         if (!wa.fromMe) {
           setWhatsappUnread((prev) => prev + 1);
+          setWhatsappMessages((prev) => [{
+            chatId: wa.chatId || 'unknown',
+            chatName: wa.chatName || 'Desconhecido',
+            author: wa.author || wa.chatName || 'Desconhecido',
+            body: wa.body || '',
+            timestamp: wa.timestamp || Date.now() / 1000,
+            fromMe: false,
+            important: wa.important || false,
+          }, ...prev].slice(0, 100));
           // Important messages also trigger a browser notification
           if (wa.important) {
             const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
@@ -369,7 +381,8 @@ export function App(): JSX.Element {
       id: 'whatsapp',
       icon: <WhatsAppIcon size={22} />,
       label: 'WhatsApp',
-      onClick: () => setWhatsappUnread(0),
+      onClick: () => { setActiveView(activeView === 'whatsapp' ? 'chat' : 'whatsapp'); setWhatsappUnread(0); },
+      active: activeView === 'whatsapp',
       badge: whatsappUnread > 0,
     },
     {
@@ -478,6 +491,13 @@ export function App(): JSX.Element {
           )}
           {activeView === 'calendar' && (
             <CalendarView onBack={() => setActiveView('chat')} />
+          )}
+          {activeView === 'whatsapp' && (
+            <WhatsAppPanel
+              messages={whatsappMessages}
+              onBack={() => setActiveView('chat')}
+              onNavigate={(view) => setActiveView(view)}
+            />
           )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView
