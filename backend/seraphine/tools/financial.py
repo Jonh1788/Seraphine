@@ -821,17 +821,32 @@ class ImportFinancialPdfTool(Tool):
             "max_tokens": 64000,
             "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
+            "stream": True,
         }
 
-        resp = await llm._client.post("/v1/messages", json=body, timeout=300.0)
-        resp.raise_for_status()
-        data = resp.json()
-
+        # Use streaming to avoid proxy EOF on large responses
+        # (CLIProxy FallbackHandler buffers non-streaming responses
+        # and times out on large payloads — see GitHub issue #613)
         raw = ""
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                raw += block.get("text", "")
+        async with llm._client.stream(
+            "POST", "/v1/messages", json=body, timeout=300.0,
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                chunk = line[6:]
+                if chunk == "[DONE]":
+                    break
+                try:
+                    event = _json.loads(chunk)
+                    etype = event.get("type", "")
+                    if etype == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            raw += delta.get("text", "")
+                except _json.JSONDecodeError:
+                    continue
 
         raw = raw.strip()
         if raw.startswith("```"):
