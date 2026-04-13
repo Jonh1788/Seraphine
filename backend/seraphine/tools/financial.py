@@ -555,6 +555,103 @@ class ImportFinancialPdfTool(Tool):
 
     _MAX_TEXT_CHARS = 50_000
 
+    @staticmethod
+    def _extract_transactions(text: str) -> list[dict]:
+        """Extract transactions from bank statement text using regex.
+
+        Handles common Brazilian bank statement formats:
+        - DD/MM/YYYY  DESCRIPTION  -R$ 123,45  or  R$ 123,45
+        - DD/MM  DESCRIPTION  123,45 D/C
+        """
+        import re
+        transactions = []
+
+        # Pattern 1: DD/MM/YYYY or DD/MM followed by description and amount
+        # Matches: "21/01/2026  RECARGA CELULAR  -40,00" or "21/01  PIX RECEBIDO  1.500,00"
+        pattern = re.compile(
+            r'(\d{2}/\d{2}(?:/\d{2,4})?)\s+'  # date
+            r'(.+?)\s+'                         # description
+            r'(-?\s?)R?\$?\s?'                  # optional minus and R$
+            r'([\d.,]+(?:\.\d{3})*,\d{2})'     # amount (BR format)
+            r'\s*([DC])?',                      # optional D(ebit)/C(redit)
+            re.MULTILINE
+        )
+
+        for m in pattern.finditer(text):
+            date_str = m.group(1).strip()
+            desc = m.group(2).strip()
+            sign = m.group(3).strip()
+            amount_str = m.group(4).strip()
+            dc = (m.group(5) or '').upper()
+
+            # Skip headers/noise
+            if len(desc) < 3 or any(kw in desc.upper() for kw in ['SALDO', 'DATA', 'DESCRI', 'VALOR', 'LANÇAMENTO']):
+                continue
+
+            # Parse amount (BR format: 1.234,56 → 1234.56)
+            try:
+                amount = float(amount_str.replace('.', '').replace(',', '.'))
+            except ValueError:
+                continue
+
+            if amount <= 0.01:
+                continue
+
+            # Determine type
+            is_expense = sign == '-' or dc == 'D'
+            if not sign and not dc:
+                # Heuristic: keywords
+                expense_kw = ['pagamento', 'compra', 'debito', 'saque', 'tarifa', 'taxa',
+                              'transferencia enviada', 'pix enviado', 'recarga']
+                is_expense = any(kw in desc.lower() for kw in expense_kw)
+
+            # Normalize date (DD/MM → DD/MM/current_year, DD/MM/YY → DD/MM/20YY)
+            parts = date_str.split('/')
+            if len(parts) == 2:
+                date_str += f'/{date.today().year}'
+                parts.append(str(date.today().year))
+            if len(parts) == 3 and len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            try:
+                iso_date = f'{parts[2]}-{parts[1]}-{parts[0]}'
+                # Validate
+                date.fromisoformat(iso_date)
+            except (ValueError, IndexError):
+                continue
+
+            # Infer category
+            dl = desc.lower()
+            if any(k in dl for k in ['aluguel', 'condomin', 'iptu']):
+                cat = 'moradia'
+            elif any(k in dl for k in ['mercado', 'supermercado', 'restaurante', 'ifood', 'almoço', 'padaria', 'lanche']):
+                cat = 'alimentacao'
+            elif any(k in dl for k in ['uber', 'combustivel', 'gasolina', 'estacionamento', 'passagem', '99']):
+                cat = 'transporte'
+            elif any(k in dl for k in ['farmacia', 'drogaria', 'medico', 'hospital', 'saude', 'plano']):
+                cat = 'saude'
+            elif any(k in dl for k in ['netflix', 'spotify', 'cinema', 'jogo', 'bar', 'festa', 'show']):
+                cat = 'lazer'
+            elif any(k in dl for k in ['curso', 'faculdade', 'escola', 'livro', 'udemy']):
+                cat = 'educacao'
+            elif any(k in dl for k in ['salario', 'salário']):
+                cat = 'salario'
+            elif any(k in dl for k in ['freelance', 'freela']):
+                cat = 'freelance'
+            elif any(k in dl for k in ['investimento', 'poupanca', 'cdb', 'tesouro']):
+                cat = 'investimento'
+            else:
+                cat = 'outros'
+
+            transactions.append({
+                'type': 'expense' if is_expense else 'income',
+                'amount': amount,
+                'category': cat,
+                'description': desc[:100],
+                'date': iso_date,
+            })
+
+        return transactions
+
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         file_path = args.get("file_path", "")
         if not file_path:
@@ -606,6 +703,56 @@ class ImportFinancialPdfTool(Tool):
             return ToolResult(ok=False, error=f"Failed to read PDF: {e}")
 
         page_count = len(text_pages)
+
+        # Auto-extract transactions using regex parser
+        transactions = self._extract_transactions(full_text)
+
+        if transactions and self._service:
+            # Insert all directly as pending_review
+            from seraphine.finance.models import FinancialEntry
+            created = 0
+            for t in transactions:
+                try:
+                    entry = FinancialEntry(
+                        id=None,
+                        type=t['type'],
+                        amount=t['amount'],
+                        currency='BRL',
+                        category=t['category'],
+                        description=t['description'],
+                        date=t['date'],
+                        source='pdf',
+                        status='pending_review',
+                    )
+                    await self._service.add_entry(entry)
+                    created += 1
+                except Exception:
+                    pass
+
+            income = sum(t['amount'] for t in transactions if t['type'] == 'income')
+            expenses = sum(t['amount'] for t in transactions if t['type'] == 'expense')
+
+            return ToolResult(
+                ok=True,
+                output=(
+                    f"Extrato importado ({page_count} paginas): "
+                    f"{created} transacoes extraidas automaticamente.\n\n"
+                    f"Receitas: {_format_brl(income)}\n"
+                    f"Despesas: {_format_brl(expenses)}\n"
+                    f"Saldo: {_format_brl(income - expenses)}\n\n"
+                    f"Todas as {created} entries foram criadas como 'pending_review'. "
+                    f"O usuario pode revisar na aba Pendentes do painel financeiro."
+                ),
+                metadata={
+                    "page_count": page_count,
+                    "transactions": created,
+                    "income": income,
+                    "expenses": expenses,
+                    "source": file_path,
+                },
+            )
+
+        # Fallback: if no transactions found by regex, return text for LLM
         truncated = len(full_text) > self._MAX_TEXT_CHARS
         extracted_text = full_text[: self._MAX_TEXT_CHARS]
         truncation_note = (
@@ -617,28 +764,14 @@ class ImportFinancialPdfTool(Tool):
 
         categories_str = ", ".join(ALL_CATEGORIES)
 
-        instruction = (
-            f"Extrato/documento financeiro importado ({page_count} paginas).\n\n"
-            f"Texto extraido:\n---\n{extracted_text}{truncation_note}\n---\n\n"
-            "INSTRUCAO: Analise o texto acima e extraia TODAS as transacoes.\n"
-            "IMPORTANTE: Use a tool `bulk_add_financial_entries` com um array de entries.\n"
-            "NAO chame add_financial_entry individualmente — use bulk para todas de uma vez.\n\n"
-            "Cada entry deve ter:\n"
-            '- type: "income" ou "expense"\n'
-            "- amount: valor em reais (numero, sem R$)\n"
-            f"- category: uma das categorias validas: {categories_str}\n"
-            "- description: descricao curta da transacao\n"
-            "- date: data no formato YYYY-MM-DD\n\n"
-            'Use status: "pending_review" (o usuario vai revisar depois).\n\n'
-            "Se o documento for um extrato bancario, cada linha com debito "
-            'e "expense" e cada linha com credito e "income".\n'
-            'Se for uma nota fiscal, o total e uma "expense".\n'
-            "Infira a categoria pela descricao "
-            "(ex: \"supermercado\" -> alimentacao, \"aluguel\" -> moradia)."
-        )
-
         return ToolResult(
             ok=True,
-            output=instruction,
+            output=(
+                f"Extrato importado ({page_count} paginas) mas nao consegui "
+                f"extrair transacoes automaticamente.\n\n"
+                f"Texto extraido:\n---\n{extracted_text}{truncation_note}\n---\n\n"
+                "Use a tool bulk_add_financial_entries para registrar as transacoes "
+                "que voce identificar no texto acima."
+            ),
             metadata={"page_count": page_count, "source": file_path},
         )
