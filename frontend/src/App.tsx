@@ -7,7 +7,7 @@ import { MicCapture, PCMPlayback } from './audio';
 import { warmSharedAudioContext } from './audio/sharedContext';
 import { ApprovalPanel } from './tools';
 import type { LatencyMetrics } from './metrics';
-import { CalendarModal, EmailInboxModal, GoogleAuthPanel } from './google';
+import { CalendarModal, EmailInboxModal } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
@@ -467,7 +467,6 @@ export function App(): JSX.Element {
 
           <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
             <ApprovalPanel ws={wsRef.current} />
-            <GoogleAuthPanel />
           </div>
         </aside>
 

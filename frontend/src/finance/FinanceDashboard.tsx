@@ -162,13 +162,22 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
         )}
 
         {!loading && error && (
-          <div className="finance-empty">{error}</div>
+          <div className="finance-empty">
+            <div className="finance-empty__icon">
+              <FinanceIcon size={48} />
+            </div>
+            <strong>Sem conexao com o servidor</strong>
+            <p>Verifique se o backend esta rodando e tente novamente.</p>
+          </div>
         )}
 
         {!loading && !error && isEmpty && activeTab !== 'Pendentes' && (
           <div className="finance-empty">
-            Nenhum registro financeiro este mes.
-            Diga algo como &quot;Ganhei R$500 de freelance&quot; no chat!
+            <div className="finance-empty__icon">
+              <FinanceIcon size={48} />
+            </div>
+            <strong>Nenhum registro este mes</strong>
+            <p>Diga algo como &quot;Ganhei R$500 de freelance&quot; no chat e a Seraphine registra pra voce.</p>
           </div>
         )}
 
