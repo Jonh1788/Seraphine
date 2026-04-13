@@ -78,6 +78,12 @@ function detectSuggestedActions(summary: string): SuggestedAction[] {
     });
   }
 
+  actions.push({
+    type: 'reply',
+    label: 'Responder',
+    icon: <ChatIcon size={14} />,
+  });
+
   return actions;
 }
 
