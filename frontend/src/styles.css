@@ -3527,6 +3527,102 @@ button:disabled {
   50% { transform: scale(1.15); opacity: 0.85; }
 }
 
+/* ── Finance: Pie chart ── */
+
+.finance-pie {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-4);
+}
+
+.finance-pie__chart {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.finance-pie__center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.finance-pie__center-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.finance-pie__center-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.finance-pie__legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.finance-pie__legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--r-sm);
+  transition: background 150ms;
+}
+
+.finance-pie__legend-item:hover {
+  background: var(--bg-3);
+}
+
+.finance-pie__legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.finance-pie__legend-label {
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finance-pie__legend-amount {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.finance-pie__legend-pct {
+  font-size: 11px;
+  color: var(--text-faint);
+  min-width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+  .finance-pie {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
 /* ── Finance: Pending review cards ── */
 
 .finance-pending-empty {
