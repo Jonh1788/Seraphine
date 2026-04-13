@@ -7,6 +7,10 @@ auth-dir: "~/.cli-proxy-api"
 api-keys:
   - "seraphine-local"
 
+# Keep non-streaming connections alive during long PDF/document extraction
+# Sends blank lines every 15s to prevent idle timeout on large requests
+nonstream-keepalive-interval: 15
+
 # Disable commercial middleware for lower per-request overhead
 commercial-mode: true
 
