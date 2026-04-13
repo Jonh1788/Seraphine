@@ -859,7 +859,7 @@ class ImportFinancialPdfTool(Tool):
         )
 
         body = {
-            "model": "claude-sonnet-4-5-20250929",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 64000,
             "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
@@ -916,23 +916,38 @@ class ImportFinancialPdfTool(Tool):
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
 
         prompt = (
-            "Extraia TODAS as transacoes deste extrato bancario como JSON array.\n"
+            "Extraia TODAS as transacoes deste extrato bancario brasileiro como JSON array.\n"
             "Retorne SOMENTE o JSON array, nada mais.\n\n"
-            '[{"type":"expense","amount":100.0,"category":"outros",'
-            '"description":"desc","date":"2026-01-14","confident":true}]\n\n'
-            f"Categorias validas (EXATAMENTE): {categories}\n\n"
-            "Regras:\n"
-            "- Debito/saida/pagamento/PIX enviado = expense\n"
-            "- Credito/entrada/recebimento/PIX recebido = income\n"
-            "- Amount SEMPRE positivo. DD/MM -> YYYY-MM-DD (ano 2026)\n"
-            "- IGNORE: saldos, totais, cabecalhos, resumos de periodo\n"
-            "- NAO invente transacoes\n"
-            '- "confident": true se certeza, false se duvida\n'
-            "- Extraia TODAS as transacoes reais, nao pule nenhuma"
+            '[{"type":"expense","amount":100.0,"category":"alimentacao",'
+            '"description":"IFOOD.COM","date":"2026-01-14","confident":true}]\n\n'
+            f"CATEGORIAS (use EXATAMENTE um destes valores): {categories}\n\n"
+            "REGRAS CRITICAS:\n"
+            "1. CADA TRANSACAO APARECE UMA UNICA VEZ. O extrato tem duas colunas de data "
+            "(data lancamento e data contabil) na MESMA LINHA — NAO duplique a transacao.\n"
+            "2. Use a PRIMEIRA data (data lancamento) como date.\n"
+            "3. Debito/saida/PIX enviado/pagamento/compra = expense\n"
+            "4. Credito/entrada/PIX recebido = income\n"
+            "5. Amount SEMPRE positivo. Converter DD/MM para YYYY-MM-DD (ano 2026)\n"
+            "6. IGNORE: linhas de 'Saldo do dia', totais de periodo, cabecalhos\n"
+            "7. NAO invente transacoes que nao existem no extrato\n"
+            "8. Para description: use apenas o nome do destinatario/estabelecimento, "
+            "sem prefixos como 'Pix enviado para' ou 'PIX Pix enviado para'\n\n"
+            "CATEGORIZACAO (seja especifico, evite 'outros'):\n"
+            "- IFOOD, restaurante, mercado, supermercado, padaria, acougue, hortifruti = alimentacao\n"
+            "- Aluguel, condominio, IPTU, energia, COELBA, NEOENERGIA, agua, gas, internet, TELEFONICA = moradia\n"
+            "- 99, Uber, combustivel, gasolina, posto, estacionamento = transporte\n"
+            "- Farmacia, drogaria, VIAPHARMA, hospital, medico, plano saude, DOCTORALIA = saude\n"
+            "- Netflix, Spotify, jogo, Steam, academia, FTW EMPREENDIMENTOS, cinema, bar = lazer\n"
+            "- Curso, escola, faculdade, livro, Udemy, TRAMPAR DE CASA = educacao\n"
+            "- Salario recebido de empresa propria/empregador = salario\n"
+            "- Pagamento recebido de cliente/empresa parceira = freelance\n"
+            "- CDB, poupanca, tesouro direto, investimento = investimento\n"
+            "- Recarga celular, PGTO FAT CARTAO, transferencia pessoal, outros = outros\n\n"
+            '9. "confident": true se certeza absoluta, false se duvida no type/amount/date'
         )
 
         body = {
-            "model": "claude-sonnet-4-5-20250929",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 64000,
             "temperature": 0.7,
             "messages": [{
@@ -1006,7 +1021,7 @@ class ImportFinancialPdfTool(Tool):
         )
 
         body = {
-            "model": "claude-sonnet-4-5-20250929",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 64000,
             "temperature": 0.7,
             "messages": [{
