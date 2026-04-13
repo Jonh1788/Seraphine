@@ -184,11 +184,16 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
       {/* Tab content */}
       <div className="finance__content">
-        {loading && (
+        {/* Pendentes renders independently — no loading gate */}
+        {activeTab === 'Pendentes' && (
+          <PendingReview entries={pendingEntries} tasks={pendingTasks} onRefresh={refresh} />
+        )}
+
+        {activeTab !== 'Pendentes' && loading && (
           <div className="finance-loading">Carregando...</div>
         )}
 
-        {!loading && error && (
+        {activeTab !== 'Pendentes' && !loading && error && (
           <div className="finance-empty">
             <div className="finance-empty__icon">
               <FinanceIcon size={48} />
@@ -246,9 +251,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
           <TransactionList entries={data.entries} />
         )}
 
-        {!loading && activeTab === 'Pendentes' && (
-          <PendingReview entries={pendingEntries} tasks={pendingTasks} onRefresh={refresh} />
-        )}
+        {/* Pendentes rendered at top of content, outside loading gate */}
       </div>
     </div>
   );
