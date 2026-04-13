@@ -1167,6 +1167,33 @@ export class VrmAvatarController implements AvatarAdapter {
       this.holdTimer = null;
     }
     this.gesturePlayer.cancel();
+  // ── Spring bone physics control ──────────────────────────────
+
+  /** Get current spring bone physics multiplier (1.0 = default). */
+  getSpringBoneStiffnessMultiplier(): number {
+    return this._springStiffnessMultiplier ?? 1.0;
+  }
+
+  private _springStiffnessMultiplier = 1.0;
+  private _springBaseSettings: Map<any, { stiffness: number; gravityPower: number; dragForce: number }> = new Map();
+
+  /** Set spring bone stiffness multiplier (0.1 = very soft, 2.0 = rigid).
+   *  Affects hair, skirt, and all spring bones proportionally. */
+  setSpringBoneStiffnessMultiplier(multiplier: number): void {
+    this._springStiffnessMultiplier = multiplier;
+    if (!this.springBoneManager) return;
+    const joints = this.springBoneManager._sortedJoints || [];
+    for (const j of joints) {
+      let base = this._springBaseSettings.get(j);
+      if (!base) {
+        base = { stiffness: j.settings.stiffness, gravityPower: j.settings.gravityPower, dragForce: j.settings.dragForce };
+        this._springBaseSettings.set(j, base);
+      }
+      j.settings.stiffness = base.stiffness * multiplier;
+      j.settings.gravityPower = base.gravityPower * multiplier;
+    }
+  }
+
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;

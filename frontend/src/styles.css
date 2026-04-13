@@ -3176,6 +3176,54 @@ button:disabled {
 
 /* --- Sliders --- */
 
+.avatar-lab__slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.avatar-lab__slider-row .avatar-lab__slider-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.avatar-lab__slider-row .avatar-lab__slider-value {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.avatar-lab__slider-row .avatar-lab__slider {
+  display: block;
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  outline: none;
+  cursor: pointer;
+}
+
+.avatar-lab__slider-row .avatar-lab__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.4);
+}
+
+.avatar-lab__slider-hints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
 .avatar-lab__sliders {
   display: flex;
   flex-direction: column;

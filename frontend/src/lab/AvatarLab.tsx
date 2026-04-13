@@ -65,6 +65,9 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
   );
   const [swappingAvatar, setSwappingAvatar] = useState(false);
   const [activeCamera, setActiveCamera] = useState('bust');
+  const [physicsMultiplier, setPhysicsMultiplier] = useState(
+    () => controller?.getSpringBoneStiffnessMultiplier() ?? 1.0,
+  );
 
   // Resolve available RAW blendshapes from the VRM model (not emotion presets)
   const blendshapes = getBlendshapes(controller);
@@ -311,6 +314,34 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                     {cam.label}
                   </button>
                 ))}
+              </div>
+            </section>
+
+            {/* Spring bone physics */}
+            <section className="avatar-lab__section">
+              <h3 className="avatar-lab__section-title">Fisica (Cabelo/Roupa)</h3>
+              <div className="avatar-lab__slider-row">
+                <label className="avatar-lab__slider-label">
+                  Rigidez
+                  <span className="avatar-lab__slider-value">{physicsMultiplier.toFixed(1)}x</span>
+                </label>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="3.0"
+                  step="0.1"
+                  value={physicsMultiplier}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setPhysicsMultiplier(v);
+                    controller?.setSpringBoneStiffnessMultiplier(v);
+                  }}
+                  className="avatar-lab__slider"
+                />
+                <div className="avatar-lab__slider-hints">
+                  <span>Solto</span>
+                  <span>Rigido</span>
+                </div>
               </div>
             </section>
 
