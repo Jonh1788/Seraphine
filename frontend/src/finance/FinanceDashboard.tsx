@@ -4,6 +4,7 @@ import { PieChart, buildPieData } from './PieChart';
 import { CategoryTable } from './CategoryTable';
 import { TransactionList } from './TransactionList';
 import { PendingReview } from './PendingReview';
+import { ArrowLeftIcon, FinanceIcon } from '../icons/Icons';
 
 const TAB_KEYS = ['Visao Geral', 'Categorias', 'Transacoes', 'Pendentes'] as const;
 type Tab = (typeof TAB_KEYS)[number];
@@ -114,15 +115,26 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
       {/* Header */}
       <div className="finance__header">
         <button className="finance__back" onClick={onBack} type="button">
-          ← Voltar
+          <ArrowLeftIcon size={18} />
+          <span>Voltar</span>
         </button>
-        <h2 className="finance__title">Painel Financeiro</h2>
+        <div className="finance__header-center">
+          <div className="finance__header-icon">
+            <FinanceIcon size={28} />
+          </div>
+          <h2 className="finance__title">Financas</h2>
+          <p className="finance__subtitle">Controle suas receitas e despesas</p>
+        </div>
         <div className="finance__month-nav">
-          <button className="finance__month-btn" onClick={prevMonth} type="button">‹</button>
+          <button className="finance__month-btn" onClick={prevMonth} type="button">
+            <ArrowLeftIcon size={16} />
+          </button>
           <span className="finance__month-label">
             {MONTH_NAMES[month]} {year}
           </span>
-          <button className="finance__month-btn" onClick={nextMonth} type="button">›</button>
+          <button className="finance__month-btn finance__month-btn--next" onClick={nextMonth} type="button">
+            <ArrowLeftIcon size={16} />
+          </button>
         </div>
       </div>
 

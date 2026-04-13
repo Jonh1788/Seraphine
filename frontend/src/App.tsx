@@ -5,14 +5,23 @@ import { VrmAvatar } from './avatar/VrmAvatar';
 import type { VrmAvatarController } from './avatar/VrmAvatarController';
 import { MicCapture, PCMPlayback } from './audio';
 import { warmSharedAudioContext } from './audio/sharedContext';
-import { MemoryPanel } from './memory';
 import { ApprovalPanel } from './tools';
-import { MetricsBar } from './metrics';
 import type { LatencyMetrics } from './metrics';
 import { CalendarModal, EmailInboxModal, GoogleAuthPanel } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
+import {
+  ChatIcon,
+  CalendarIcon,
+  InboxIcon,
+  WhatsAppIcon,
+  FinanceIcon,
+  SettingsIcon,
+  FlaskIcon,
+} from './icons/Icons';
+
+type ActiveView = 'chat' | 'finance';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -39,7 +48,10 @@ export function App(): JSX.Element {
   }, [manualMute]);
   const [talking, setTalking] = useState<boolean>(false);
   const [realtimeActive, setRealtimeActive] = useState<boolean>(false);
-  const [metrics, setMetrics] = useState<LatencyMetrics>({});
+  // metrics state is set by WS message handlers for latency tracking.
+  // Currently not rendered (MetricsBar removed from sidebar) but kept
+  // for future settings panel or devtools.
+  const [, setMetrics] = useState<LatencyMetrics>({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [googleAuthed, setGoogleAuthed] = useState<boolean>(false);
   const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
@@ -47,7 +59,7 @@ export function App(): JSX.Element {
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [labOpen, setLabOpen] = useState<boolean>(false);
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
-  const [activeView, setActiveView] = useState<'chat' | 'finance'>('chat');
+  const [activeView, setActiveView] = useState<ActiveView>('chat');
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -112,14 +124,6 @@ export function App(): JSX.Element {
           playbackRef.current?.setPlaybackRate?.(1.0);
         }
       } else if (type === 'tts_end') {
-        // Do NOT flushPending() here. With sentence-level TTS streaming,
-        // multiple tts_end events fire per turn. Flushing on each one
-        // forces a tiny WAV segment that needs its own HTMLAudioElement.
-        // On iOS/iPad, each new Audio element causes the audio session
-        // to briefly pause — heard as gaps between sentences.
-        // Instead, let chunks flow continuously through the accumulator.
-        // The real flush() on turn_end (RealtimeController or the
-        // back-pressure wait below) drains the final tail.
         tsTtsStartRef.current = 0;
       } else if (type === 'notification') {
         // Proactive notification from Supertasks MCP
@@ -238,8 +242,6 @@ export function App(): JSX.Element {
 
   // Attach the playback's AnalyserNode into the avatar controller so
   // the RAF loop can drive lipsync visemes from the running audio.
-  // The analyser may not exist yet (AudioContext deferred until user
-  // gesture), so we use the callback form to attach when ready.
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
     avatarCtrlRef.current = controller;
     const pb = playbackRef.current;
@@ -332,6 +334,51 @@ export function App(): JSX.Element {
 
   const connected = status === 'connected';
 
+  // Nav rail items
+  const navItems: {
+    id: string;
+    icon: JSX.Element;
+    label: string;
+    onClick: () => void;
+    active?: boolean;
+    badge?: boolean;
+  }[] = [
+    {
+      id: 'chat',
+      icon: <ChatIcon size={22} />,
+      label: 'Chat',
+      onClick: () => setActiveView('chat'),
+      active: activeView === 'chat',
+    },
+    {
+      id: 'calendar',
+      icon: <CalendarIcon size={22} />,
+      label: 'Calendario',
+      onClick: () => setCalendarOpen(true),
+    },
+    {
+      id: 'inbox',
+      icon: <InboxIcon size={22} />,
+      label: 'Inbox',
+      onClick: () => setInboxOpen(true),
+      badge: unreadCount > 0,
+    },
+    {
+      id: 'whatsapp',
+      icon: <WhatsAppIcon size={22} />,
+      label: 'WhatsApp',
+      onClick: () => setWhatsappUnread(0),
+      badge: whatsappUnread > 0,
+    },
+    {
+      id: 'finance',
+      icon: <FinanceIcon size={22} />,
+      label: 'Financas',
+      onClick: () => setActiveView(activeView === 'finance' ? 'chat' : 'finance'),
+      active: activeView === 'finance',
+    },
+  ];
+
   return (
     <div className="app" onClick={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }} onTouchStart={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }}>
       <header className="topbar">
@@ -344,11 +391,11 @@ export function App(): JSX.Element {
             title="Avatar Laboratory (Ctrl+L)"
             onClick={() => setLabOpen((v) => !v)}
           >
-            &#x1F9EA;
+            <FlaskIcon size={18} />
           </button>
           <div className={`status ${connected ? 'status--connected' : ''}`}>
             <span className="status__dot" />
-            {connected ? 'online' : 'reconectando…'}
+            {connected ? 'online' : 'reconectando...'}
           </div>
           <button
             className="mobile-menu-btn"
@@ -363,6 +410,33 @@ export function App(): JSX.Element {
       </header>
 
       <div className="layout">
+        {/* Navigation Rail */}
+        <nav className="nav-rail">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-rail__btn${item.active ? ' nav-rail__btn--active' : ''}`}
+              title={item.label}
+              aria-label={item.label}
+              onClick={item.onClick}
+            >
+              {item.icon}
+              {item.badge && <span className="nav-rail__badge" />}
+            </button>
+          ))}
+          <div className="nav-rail__spacer" />
+          <button
+            type="button"
+            className="nav-rail__btn"
+            title="Configuracoes"
+            aria-label="Configuracoes"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+          >
+            <SettingsIcon size={22} />
+          </button>
+        </nav>
+
         <aside className="sidebar">
           <div className="avatar-stage">
             <VrmAvatar
@@ -373,7 +447,7 @@ export function App(): JSX.Element {
 
           <div className="controls">
             <label className="toggle">
-              <span>Responder com áudio</span>
+              <span>Responder com audio</span>
               <input
                 type="checkbox"
                 checked={speak}
@@ -391,68 +465,9 @@ export function App(): JSX.Element {
             </label>
           </div>
 
-          <div className="sidebar-google-buttons">
-            <button
-              type="button"
-              className="sidebar-google-btn"
-              onClick={() => setCalendarOpen(true)}
-              disabled={!googleAuthed}
-              title="Calendario"
-              aria-label="Calendario"
-            >
-              <span className="sidebar-google-btn__icon" aria-hidden>&#128197;</span>
-              <span className="sidebar-google-btn__label">Calendario</span>
-            </button>
-            <button
-              type="button"
-              className="sidebar-google-btn"
-              onClick={() => setInboxOpen(true)}
-              disabled={!googleAuthed}
-              title="Inbox"
-              aria-label="Inbox"
-            >
-              <span className="sidebar-google-btn__icon" aria-hidden>&#9993;</span>
-              <span className="sidebar-google-btn__label">Inbox</span>
-              {unreadCount > 0 && (
-                <span className="sidebar-google-btn--badge">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              className="sidebar-google-btn"
-              onClick={() => setWhatsappUnread(0)}
-              title="WhatsApp"
-              aria-label="WhatsApp"
-            >
-              <span className="sidebar-google-btn__icon" aria-hidden style={{ position: 'relative' }}>
-                &#128172;
-                {whatsappUnread > 0 && (
-                  <span className="whatsapp-badge">
-                    {whatsappUnread > 99 ? '99+' : whatsappUnread}
-                  </span>
-                )}
-              </span>
-              <span className="sidebar-google-btn__label">WhatsApp</span>
-            </button>
-            <button
-              type="button"
-              className={`sidebar-google-btn ${activeView === 'finance' ? 'sidebar-google-btn--active' : ''}`}
-              onClick={() => setActiveView(activeView === 'finance' ? 'chat' : 'finance')}
-              title="Finanças"
-              aria-label="Finanças"
-            >
-              <span className="sidebar-google-btn__icon" aria-hidden>&#128176;</span>
-              <span className="sidebar-google-btn__label">Finanças</span>
-            </button>
-          </div>
-
           <div className={`sidebar__panels ${mobileMenuOpen ? 'sidebar__panels--open' : ''}`}>
             <ApprovalPanel ws={wsRef.current} />
             <GoogleAuthPanel />
-            <MemoryPanel />
-            <MetricsBar metrics={metrics} />
           </div>
         </aside>
 
@@ -497,11 +512,30 @@ export function App(): JSX.Element {
         </section>
       </div>
 
+      {/* Mobile nav overlay */}
       {mobileMenuOpen && (
         <div
           className="mobile-overlay"
           onClick={() => setMobileMenuOpen(false)}
         />
+      )}
+
+      {/* Mobile bottom nav sheet */}
+      {mobileMenuOpen && (
+        <div className="mobile-nav-sheet">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`mobile-nav-sheet__btn${item.active ? ' mobile-nav-sheet__btn--active' : ''}`}
+              onClick={() => { item.onClick(); setMobileMenuOpen(false); }}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+              {item.badge && <span className="nav-rail__badge" />}
+            </button>
+          ))}
+        </div>
       )}
 
       <CalendarModal

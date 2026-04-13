@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FinanceEntry } from './types';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from './types';
+import { CheckIcon, XIcon } from '../icons/Icons';
 
 function fmtBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -12,10 +13,10 @@ function fmtDate(iso: string): string {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  pdf: '📋 PDF',
-  email: '📧 Email',
-  chat: '💬 Chat',
-  manual: '✏️ Manual',
+  pdf: 'PDF',
+  email: 'Email',
+  chat: 'Chat',
+  manual: 'Manual',
 };
 
 interface PendingReviewProps {
@@ -112,7 +113,7 @@ export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.E
                 disabled={busy}
                 onClick={() => handleConfirm(entry.id)}
               >
-                {busy ? '...' : '✓ Confirmar'}
+                {busy ? '...' : <><CheckIcon size={14} /> Confirmar</>}
               </button>
               <button
                 type="button"
@@ -120,7 +121,7 @@ export function PendingReview({ entries, onRefresh }: PendingReviewProps): JSX.E
                 disabled={busy}
                 onClick={() => handleReject(entry.id)}
               >
-                {busy ? '...' : '✗ Rejeitar'}
+                {busy ? '...' : <><XIcon size={14} /> Rejeitar</>}
               </button>
             </div>
           </div>
