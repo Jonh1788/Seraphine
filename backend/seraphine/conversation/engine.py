@@ -139,10 +139,11 @@ APPROVAL_TIMEOUT_SECONDS = 300
 MAX_TOOL_ITERATIONS = 25
 AUDIT_OUTPUT_EXCERPT = 4 * 1024
 # Context compaction: estimated token threshold (~4 chars/token)
-# Bumped from 8000 → 24000 after vMLX chunked-prefill patch lifted the
+# Bumped from 24000 → 100000 — Anthropic supports 200K context via CLIProxy.
+# Compaction only kicks in for very long conversations now.
 # Metal OOM ceiling. Real ceiling is now ~35-40k tokens; we keep 24k to
 # leave headroom for the system prompt + tools (~4-6k) + user message.
-COMPACTION_TOKEN_THRESHOLD = 24000
+COMPACTION_TOKEN_THRESHOLD = 100_000
 COMPACTION_CHAR_THRESHOLD = COMPACTION_TOKEN_THRESHOLD * 4
 COMPACTION_KEEP_RECENT = 20
 # Run reflect() automatically every N assistant turns to let Seraphine
