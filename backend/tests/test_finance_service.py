@@ -210,3 +210,73 @@ async def test_deactivate_recurring(svc: FinanceService):
     rules = await svc.list_recurring(active_only=False)
     assert len(rules) == 1
     assert rules[0].active is False
+
+
+# ------------------------------------------------------------------
+# Deduplication
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dedup_same_date_amount_type(svc: FinanceService):
+    """Adding an entry with same date+amount+type+currency returns existing ID."""
+    entry = FinancialEntry(
+        id=None, type="expense", amount=150.0, currency="BRL",
+        category="alimentacao", description="Supermercado",
+        date="2026-04-10", source="pdf",
+    )
+    id1 = await svc.add_entry(entry)
+
+    # Same date, amount, type, currency but different description/source
+    dup = FinancialEntry(
+        id=None, type="expense", amount=150.0, currency="BRL",
+        category="outros", description="Compra supermercado",
+        date="2026-04-10", source="email",
+    )
+    id2 = await svc.add_entry(dup)
+
+    assert id1 == id2, "Duplicate entry should return existing ID"
+    entries = await svc.list_entries()
+    assert len(entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_dedup_different_amount_passes(svc: FinanceService):
+    """Different amounts on same date are NOT duplicates."""
+    e1 = FinancialEntry(
+        id=None, type="expense", amount=150.0, currency="BRL",
+        category="alimentacao", description="Compra A",
+        date="2026-04-10", source="pdf",
+    )
+    e2 = FinancialEntry(
+        id=None, type="expense", amount=200.0, currency="BRL",
+        category="alimentacao", description="Compra B",
+        date="2026-04-10", source="pdf",
+    )
+    id1 = await svc.add_entry(e1)
+    id2 = await svc.add_entry(e2)
+
+    assert id1 != id2
+    entries = await svc.list_entries()
+    assert len(entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_dedup_different_date_passes(svc: FinanceService):
+    """Same amount on different dates are NOT duplicates."""
+    e1 = FinancialEntry(
+        id=None, type="expense", amount=150.0, currency="BRL",
+        category="alimentacao", description="Compra",
+        date="2026-04-10", source="pdf",
+    )
+    e2 = FinancialEntry(
+        id=None, type="expense", amount=150.0, currency="BRL",
+        category="alimentacao", description="Compra",
+        date="2026-04-11", source="pdf",
+    )
+    id1 = await svc.add_entry(e1)
+    id2 = await svc.add_entry(e2)
+
+    assert id1 != id2
+    entries = await svc.list_entries()
+    assert len(entries) == 2

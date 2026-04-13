@@ -84,10 +84,27 @@ class FinanceService:
     # ------------------------------------------------------------------
 
     async def add_entry(self, entry: FinancialEntry) -> int:
+        """Insert a financial entry. Returns the entry ID.
+
+        Deduplication: if an entry with the same date, amount, type,
+        and similar description already exists, returns the existing ID
+        instead of creating a duplicate.
+        """
         ts = _now()
 
         def _work() -> int:
             with self._connect() as conn:
+                # Dedup check: same date + amount + type + similar description
+                existing = conn.execute(
+                    "SELECT id FROM financial_entries"
+                    " WHERE date = ? AND amount = ? AND type = ?"
+                    " AND currency = ?"
+                    " LIMIT 1",
+                    (entry.date, entry.amount, entry.type, entry.currency),
+                ).fetchone()
+                if existing:
+                    return existing[0]
+
                 cur = conn.execute(
                     "INSERT INTO financial_entries"
                     "(type, amount, currency, category, description, date,"
