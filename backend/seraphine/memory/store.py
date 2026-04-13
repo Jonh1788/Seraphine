@@ -143,6 +143,16 @@ class MemoryStore:
         await asyncio.to_thread(_work)
         return conv_id
 
+    async def ensure_conversation(self, conv_id: str) -> None:
+        """Create conversation if it doesn't exist (INSERT OR IGNORE)."""
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO conversations(id, created_at) VALUES (?, ?)",
+                    (conv_id, _now()),
+                )
+        await asyncio.to_thread(_work)
+
     async def add_turn(
         self,
         conversation_id: str,

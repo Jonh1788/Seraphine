@@ -385,6 +385,11 @@ class ConversationEngine:
 
         prior = await self.store.get_turns(conversation_id)
 
+        # If conversation_id was provided but doesn't exist in DB
+        # (e.g. stale localStorage), create it so FK constraint passes
+        if not prior:
+            await self.store.ensure_conversation(conversation_id)
+
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
         messages.append(ChatMessage(role="system", content=_build_date_context()))
         recall_block = await self._build_recall_block(content)
