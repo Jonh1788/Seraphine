@@ -150,6 +150,8 @@ export class VrmAvatarController implements AvatarAdapter {
   private readonly renderer: WebGLRenderer;
   private readonly clock: Clock;
   private vrm: VRM | null = null;
+  /** Spring bone manager detached from VRM so we control when it updates. */
+  private springBoneManager: any = null;
   private rafId: number | null = null;
   private disposed = false;
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
@@ -200,6 +202,14 @@ export class VrmAvatarController implements AvatarAdapter {
   private nextIdleLookAt = 0; // elapsed time to pick next target
   private idleLookSpeed = 1.2; // radians per second (lerp factor)
   private _isSpeaking = false;
+
+  // --- Idle body motion (applied in applyPostUpdate, after humanoid sync) ---
+  private _idleBreathPhase = 0;
+  private _idleSpineRotX = 0;
+  private _idleSpineRotZ = 0;
+
+  // --- Spring bone debug counter ---
+  private _springDebugCount = 0;
 
   // Camera presets — smooth transition via lerp in the RAF loop
   private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
@@ -358,20 +368,43 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateLipsync();
       this.mixer?.update(delta);
 
-      // Step 1: Full VRM update (humanoid sync + expressions + spring bones)
+      // Step 1: VRM update — humanoid sync + expressions (spring bones
+      // are detached, see loadAvatar). We must run humanoid.update()
+      // first so normalized→raw bone sync happens before we overlay
+      // our custom rotations.
       this.vrm?.update(delta);
 
-      // Step 2: Apply head rotation + gesture bones AFTER humanoid sync
+      // Step 2: Apply chest/spine/head rotation + gesture bones AFTER
+      // humanoid sync so our values are the final word on those bones.
       this.applyPostUpdate();
 
-      // Step 3: Re-run spring bones so they react to the head position
-      // set in applyPostUpdate(). Without this, hair doesn't follow head.
+      // Step 3: Propagate all world matrices, then run spring bones
+      // exactly ONCE with the final bone state. This ensures hair/cloth
+      // physics see the actual head/chest position, not the humanoid
+      // rest pose.
       if (this.vrm) {
         this.vrm.scene.updateMatrixWorld(true);
-        const sbm = (this.vrm as any).springBoneManager;
-        if (sbm) {
-          sbm.update(delta);
+        if (this.springBoneManager) {
+          this.springBoneManager.update(delta);
         }
+      }
+
+      // Temporary debug — log spring bone joint positions for first 5 frames
+      if (this._springDebugCount < 5 && this.springBoneManager) {
+        const joints = this.springBoneManager._sortedJoints;
+        if (joints?.length > 0) {
+          const j = joints[0];
+          const bone = j.bone || j._bone || j.node;
+          if (bone) {
+            console.log(
+              `[SpringBone] frame ${this._springDebugCount} joint0 pos:`,
+              bone.position.x.toFixed(4),
+              bone.position.y.toFixed(4),
+              bone.position.z.toFixed(4),
+            );
+          }
+        }
+        this._springDebugCount++;
       }
 
       this.renderer.render(this.scene, this.camera);
@@ -418,21 +451,12 @@ export class VrmAvatarController implements AvatarAdapter {
 
       const t = this.elapsed;
 
-      // Breathing — chest rises gently on a ~4s cycle
-      const chest = vrm.humanoid?.getRawBoneNode("chest") as
-        | Object3D
-        | null
-        | undefined;
-      if (chest) {
-        const breathPhase = Math.sin((t * 2 * Math.PI) / 4);
-        const gestureOffset = this.gesturePlayer.getOffset("chest");
-        const idleQuat = new Quaternion().setFromEuler(
-          new Euler(breathPhase * 0.015, 0, 0),
-        );
-        idleQuat.multiply(gestureOffset);
-        chest.quaternion.copy(idleQuat);
-        chest.position.y = breathPhase * 0.002;
-      }
+      // Compute breathing & sway values. These are applied in
+      // applyPostUpdate() AFTER humanoid.update() so they don't get
+      // overwritten by the normalized→raw sync.
+      this._idleBreathPhase = Math.sin((t * 2 * Math.PI) / 4);
+      this._idleSpineRotX = Math.sin(t * 0.25) * 0.006 + Math.sin(t * 0.13) * 0.003;
+      this._idleSpineRotZ = Math.sin(t * 0.18) * 0.012 + Math.cos(t * 0.11) * 0.006;
 
       // --- Head look-around + emotion tilt ---
       // Values are computed here but applied in applyPostUpdate()
@@ -468,23 +492,7 @@ export class VrmAvatarController implements AvatarAdapter {
         Math.min(1, tiltLerpSpeed * dt),
       );
 
-      // Body sway — spine bone, slow weight-shift
-      const spine = vrm.humanoid?.getRawBoneNode("spine") as
-        | Object3D
-        | null
-        | undefined;
-      if (spine) {
-        const idleRotX = Math.sin(t * 0.25) * 0.006 + Math.sin(t * 0.13) * 0.003;
-        const idleRotZ = Math.sin(t * 0.18) * 0.012 + Math.cos(t * 0.11) * 0.006;
-        const gestureOffset = this.gesturePlayer.getOffset("spine");
-        const idleQuat = new Quaternion().setFromEuler(
-          new Euler(idleRotX, 0, idleRotZ),
-        );
-        idleQuat.multiply(gestureOffset);
-        spine.quaternion.copy(idleQuat);
-      }
-
-      // Head + arm/hand bones are applied in applyPostUpdate()
+      // Chest/spine/head/arms are all applied in applyPostUpdate()
       // AFTER vrm.update() so the humanoid sync doesn't overwrite them.
     }
 
@@ -627,21 +635,31 @@ export class VrmAvatarController implements AvatarAdapter {
     }
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
-    // Debug: log spring bone status
+
+    // Detach the spring bone manager from VRM so vrm.update() doesn't
+    // run spring physics. We manage it ourselves in the render loop,
+    // calling it exactly once AFTER all bone manipulation (head
+    // rotation, chest breathing, spine sway) so hair/cloth physics
+    // see the final bone state.
     const sbm = (loadedVrm as any).springBoneManager;
-    console.log('[VRM] springBoneManager:', sbm ? Object.keys(sbm) : 'null');
     if (sbm) {
-      console.log('[VRM] joints:', sbm.joints?.length, 'colliderGroups:', sbm.colliderGroups?.length, 'colliders:', sbm.colliders?.length);
-      // Try all possible property names
-      for (const key of Object.keys(sbm)) {
-        const val = sbm[key];
-        if (Array.isArray(val)) console.log(`[VRM]   sbm.${key}: Array(${val.length})`);
-        else if (val && typeof val === 'object') console.log(`[VRM]   sbm.${key}: ${typeof val}`);
-      }
+      this.springBoneManager = sbm;
+      (loadedVrm as any).springBoneManager = null;
+      console.log(
+        '[VRM] Spring bone manager detached:',
+        sbm._sortedJoints?.length ?? sbm._joints?.length ?? '?',
+        'joints,',
+        sbm._colliderGroups?.length ?? sbm.colliderGroups?.length ?? '?',
+        'collider groups',
+      );
+      // Re-initialize spring bone state now that the scene is rotated
+      // (rotateVRM0 applied 180deg Y). Without this, _currentTail and
+      // _prevTail are in pre-rotation world space which causes the
+      // first few frames to jerk.
+      loadedVrm.scene.updateMatrixWorld(true);
+      sbm.setInitState();
     } else {
-      console.warn('[VRM] No spring bone manager — checking raw userData');
-      console.log('[VRM] userData keys:', Object.keys(gltf.userData));
-      console.log('[VRM] VRM keys:', Object.keys(loadedVrm));
+      console.warn('[VRM] No spring bone manager found');
     }
     // Rest pose is applied every frame by updateIdle() via
     // applyRestPose(); no one-shot needed here.
@@ -739,6 +757,7 @@ export class VrmAvatarController implements AvatarAdapter {
     this.externalAnimPlaying = false;
     this.loadedClips.clear();
 
+    this.springBoneManager = null;
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);
@@ -981,15 +1000,45 @@ export class VrmAvatarController implements AvatarAdapter {
   }
 
   /**
-   * Apply head rotation + gesture bone offsets AFTER vrm.update().
-   * vrm.update() syncs normalized→raw AND runs lookAt/humanoid which
-   * overwrites raw bone rotations. Anything we write in updateIdle()
-   * to raw bones gets clobbered. So we write here, AFTER update(),
-   * and our values are the final word before render().
+   * Apply chest/spine/head rotation + gesture bone offsets AFTER
+   * vrm.update(). humanoid.update() syncs normalized→raw which
+   * overwrites raw bone rotations set before it. We write here so
+   * our values are the final word before spring bone simulation and
+   * render.
    */
   private applyPostUpdate(): void {
     const vrm = this.vrm;
     if (!vrm) return;
+
+    // --- Chest breathing + spine sway (must be after humanoid sync) ---
+    if (!this.externalAnimPlaying) {
+      const chest = vrm.humanoid?.getRawBoneNode("chest") as
+        | Object3D
+        | null
+        | undefined;
+      if (chest) {
+        const gestureOffset = this.gesturePlayer.getOffset("chest");
+        const idleQuat = new Quaternion().setFromEuler(
+          new Euler(this._idleBreathPhase * 0.015, 0, 0),
+        );
+        idleQuat.multiply(gestureOffset);
+        chest.quaternion.copy(idleQuat);
+        chest.position.y = this._idleBreathPhase * 0.002;
+      }
+
+      const spine = vrm.humanoid?.getRawBoneNode("spine") as
+        | Object3D
+        | null
+        | undefined;
+      if (spine) {
+        const gestureOffset = this.gesturePlayer.getOffset("spine");
+        const idleQuat = new Quaternion().setFromEuler(
+          new Euler(this._idleSpineRotX, 0, this._idleSpineRotZ),
+        );
+        idleQuat.multiply(gestureOffset);
+        spine.quaternion.copy(idleQuat);
+      }
+    }
 
     // --- Head: look-around + emotion tilt + micro-drift + gesture ---
     if (!this.externalAnimPlaying) {
@@ -1091,6 +1140,7 @@ export class VrmAvatarController implements AvatarAdapter {
     this.currentAction = null;
     this.externalAnimPlaying = false;
     this.loadedClips.clear();
+    this.springBoneManager = null;
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
       VRMUtils.deepDispose(this.vrm.scene);
