@@ -194,12 +194,7 @@ button:disabled {
   overflow: hidden;
 }
 
-@media (max-width: 880px) {
-  .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-}
+/* Mobile 880px breakpoint moved after component definitions — see end of nav-rail section */
 
 /* ---------- Navigation Rail ---------- */
 
@@ -340,6 +335,52 @@ button:disabled {
   background: rgba(167, 139, 250, 0.12);
   color: var(--accent);
   border-color: rgba(167, 139, 250, 0.2);
+}
+
+/* ---------- Mobile: hide nav rail + adapt layout (880px) ---------- */
+@media (max-width: 880px) {
+  .nav-rail {
+    display: none !important;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .sidebar {
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .avatar-stage {
+    max-height: 180px;
+    border-radius: 0;
+    padding: var(--space-2);
+  }
+
+  .avatar-stage canvas {
+    max-width: 200px;
+    max-height: 160px;
+  }
+
+  .controls {
+    flex-direction: row;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    justify-content: center;
+  }
+
+  .controls .toggle {
+    padding: var(--space-1) var(--space-3);
+    font-size: 11px;
+    white-space: nowrap;
+  }
 }
 
 /* ---------- Sidebar ---------- */
@@ -2029,58 +2070,7 @@ button:disabled {
     z-index: 90;
   }
 
-  /* --- Nav rail: hidden on mobile (use bottom sheet) --- */
-  .nav-rail {
-    display: none;
-  }
-
-  /* --- Layout: vertical stack --- */
-  .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-    gap: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  /* --- Sidebar: horizontal compact strip on mobile --- */
-  .sidebar {
-    flex-direction: column;
-    gap: 0;
-    padding: 0;
-    overflow: visible;
-  }
-
-  /* --- Avatar: prominent bust shot at top --- */
-  .avatar-stage {
-    border-radius: 0;
-    padding: var(--space-2);
-    max-height: 220px;
-    overflow: hidden;
-  }
-
-  .avatar-stage canvas {
-    max-width: 240px;
-    max-height: 200px;
-  }
-
-  /* --- Controls: compact inline row --- */
-  .controls {
-    flex-direction: row;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-  }
-
-  .controls .toggle {
-    padding: var(--space-2) var(--space-3);
-    font-size: 11px;
-    white-space: nowrap;
-    min-width: 0;
-    flex-shrink: 0;
-  }
+  /* Nav rail, layout, sidebar, avatar, controls already handled by 880px breakpoint */
 
   .controls .toggle input {
     width: 28px;
