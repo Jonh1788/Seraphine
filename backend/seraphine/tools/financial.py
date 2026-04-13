@@ -803,7 +803,7 @@ class ImportFinancialPdfTool(Tool):
                     category=cat, description=str(t.get('description', ''))[:100],
                     date=entry_date, source='pdf', status=status,
                 )
-                await self._service.add_entry(entry)
+                await self._service.add_entry(entry, skip_dedup=True)
                 created += 1
             except Exception:
                 pass

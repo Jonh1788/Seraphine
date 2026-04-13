@@ -83,30 +83,30 @@ class FinanceService:
     # Entries CRUD
     # ------------------------------------------------------------------
 
-    async def add_entry(self, entry: FinancialEntry) -> int:
+    async def add_entry(self, entry: FinancialEntry, *, skip_dedup: bool = False) -> int:
         """Insert a financial entry. Returns the entry ID.
 
-        Deduplication: if an entry with the same date, amount, type,
-        and similar description already exists, returns the existing ID
-        instead of creating a duplicate.
+        Deduplication (unless skip_dedup=True): if an entry with the
+        same date, amount, type, currency and description already exists,
+        returns the existing ID instead of creating a duplicate.
+
+        Use skip_dedup=True for PDF imports where multiple identical
+        transactions (same amount, same day, same merchant) are legitimate.
         """
         ts = _now()
 
         def _work() -> int:
             with self._connect() as conn:
-                # Dedup check: same date + amount + type + currency + description
-                # Must include description to allow multiple different
-                # transactions with the same amount on the same day
-                # (e.g., two R$50 PIX to different people)
-                existing = conn.execute(
-                    "SELECT id FROM financial_entries"
-                    " WHERE date = ? AND amount = ? AND type = ?"
-                    " AND currency = ? AND description = ?"
-                    " LIMIT 1",
-                    (entry.date, entry.amount, entry.type, entry.currency, entry.description),
-                ).fetchone()
-                if existing:
-                    return existing[0]
+                if not skip_dedup:
+                    existing = conn.execute(
+                        "SELECT id FROM financial_entries"
+                        " WHERE date = ? AND amount = ? AND type = ?"
+                        " AND currency = ? AND description = ?"
+                        " LIMIT 1",
+                        (entry.date, entry.amount, entry.type, entry.currency, entry.description),
+                    ).fetchone()
+                    if existing:
+                        return existing[0]
 
                 cur = conn.execute(
                     "INSERT INTO financial_entries"
