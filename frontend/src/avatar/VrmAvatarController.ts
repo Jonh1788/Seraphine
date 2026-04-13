@@ -201,6 +201,11 @@ export class VrmAvatarController implements AvatarAdapter {
   private idleLookCurrent = { x: 0, y: 0, z: 0 };
   private nextIdleLookAt = 0; // elapsed time to pick next target
   private idleLookSpeed = 1.2; // radians per second (lerp factor)
+  // Eyes lead the head — they snap to the target faster, creating
+  // the natural "eyes move first, head follows" saccade effect.
+  private eyeLookCurrent = { x: 0, y: 0, z: 0 };
+  private readonly EYE_LEAD_MULTIPLIER = 3.5; // eyes lerp Nx faster than head
+  private readonly EYE_OVERSHOOT = 1.4; // eyes overshoot target slightly
   private _isSpeaking = false;
 
   // --- Idle body motion (applied in applyPostUpdate, after humanoid sync) ---
@@ -481,6 +486,13 @@ export class VrmAvatarController implements AvatarAdapter {
       this.idleLookCurrent.x += (this.idleLookTarget.x - this.idleLookCurrent.x) * lookLerp;
       this.idleLookCurrent.y += (this.idleLookTarget.y - this.idleLookCurrent.y) * lookLerp;
       this.idleLookCurrent.z += (this.idleLookTarget.z - this.idleLookCurrent.z) * lookLerp;
+
+      // Eyes lead the head — faster lerp + slight overshoot
+      const eyeLerp = Math.min(1, this.idleLookSpeed * this.EYE_LEAD_MULTIPLIER * dt);
+      const eyeTargetX = this.idleLookTarget.x * this.EYE_OVERSHOOT;
+      const eyeTargetY = this.idleLookTarget.y * this.EYE_OVERSHOOT;
+      this.eyeLookCurrent.x += (eyeTargetX - this.eyeLookCurrent.x) * eyeLerp;
+      this.eyeLookCurrent.y += (eyeTargetY - this.eyeLookCurrent.y) * eyeLerp;
 
       // Lerp emotion head tilt toward target
       const tiltLerpSpeed = 3.0;
@@ -1107,6 +1119,23 @@ export class VrmAvatarController implements AvatarAdapter {
         );
         q.multiply(gestureOffset);
         head.quaternion.copy(q);
+      }
+
+      // --- Eyes: lead the head for natural saccade effect ---
+      // The eye rotation is relative to the head, so we compute the
+      // DIFFERENCE between where the eyes want to look and where the
+      // head currently is. This makes eyes "lead" then settle as
+      // the head catches up.
+      const eyeOffsetX = this.eyeLookCurrent.x - this.idleLookCurrent.x;
+      const eyeOffsetY = this.eyeLookCurrent.y - this.idleLookCurrent.y;
+
+      const leftEye = vrm.humanoid?.getRawBoneNode("leftEye") as Object3D | null | undefined;
+      const rightEye = vrm.humanoid?.getRawBoneNode("rightEye") as Object3D | null | undefined;
+      if (leftEye) {
+        leftEye.quaternion.setFromEuler(new Euler(eyeOffsetX * 0.6, eyeOffsetY * 0.8, 0));
+      }
+      if (rightEye) {
+        rightEye.quaternion.setFromEuler(new Euler(eyeOffsetX * 0.6, eyeOffsetY * 0.8, 0));
       }
     }
 
