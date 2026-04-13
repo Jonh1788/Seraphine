@@ -228,6 +228,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         wise_client=wise_client,
         reminder_scheduler=reminder_scheduler,
         finance_service=finance_service,
+        llm=llm,
     )
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional

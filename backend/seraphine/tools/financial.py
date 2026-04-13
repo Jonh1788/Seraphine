@@ -550,8 +550,9 @@ class ImportFinancialPdfTool(Tool):
     requires_confirmation = False
     category: Any = "other"
 
-    def __init__(self, service: Any) -> None:
+    def __init__(self, service: Any, llm: Any = None) -> None:
         self._service = service
+        self._llm = llm  # AnthropicClient for smart extraction
 
     _MAX_TEXT_CHARS = 50_000
 
@@ -703,24 +704,41 @@ class ImportFinancialPdfTool(Tool):
             return ToolResult(ok=False, error=f"Failed to read PDF: {e}")
 
         page_count = len(text_pages)
+        categories_str = ", ".join(ALL_CATEGORIES)
 
-        # Auto-extract transactions using regex parser
-        transactions = self._extract_transactions(full_text)
+        # --- Strategy 1: LLM extraction (Sonnet/Opus via CLIProxy) ---
+        transactions: list[dict] = []
+        extraction_method = "none"
 
+        if self._llm is not None:
+            try:
+                transactions = await self._llm_extract(full_text, categories_str)
+                extraction_method = "llm"
+                logger.info("LLM extracted %d transactions from PDF", len(transactions))
+            except Exception as exc:
+                logger.warning("LLM extraction failed, falling back to regex: %s", exc)
+
+        # --- Strategy 2: Regex fallback ---
+        if not transactions:
+            transactions = self._extract_transactions(full_text)
+            if transactions:
+                extraction_method = "regex"
+                logger.info("Regex extracted %d transactions from PDF", len(transactions))
+
+        # --- Insert extracted transactions ---
         if transactions and self._service:
-            # Insert all directly as pending_review
             from seraphine.finance.models import FinancialEntry
             created = 0
             for t in transactions:
                 try:
                     entry = FinancialEntry(
                         id=None,
-                        type=t['type'],
-                        amount=t['amount'],
+                        type=t.get('type', 'expense'),
+                        amount=float(t.get('amount', 0)),
                         currency='BRL',
-                        category=t['category'],
-                        description=t['description'],
-                        date=t['date'],
+                        category=t.get('category', 'outros'),
+                        description=str(t.get('description', ''))[:100],
+                        date=t.get('date', date.today().isoformat()),
                         source='pdf',
                         status='pending_review',
                     )
@@ -729,14 +747,14 @@ class ImportFinancialPdfTool(Tool):
                 except Exception:
                     pass
 
-            income = sum(t['amount'] for t in transactions if t['type'] == 'income')
-            expenses = sum(t['amount'] for t in transactions if t['type'] == 'expense')
+            income = sum(float(t.get('amount', 0)) for t in transactions if t.get('type') == 'income')
+            expenses = sum(float(t.get('amount', 0)) for t in transactions if t.get('type') == 'expense')
 
             return ToolResult(
                 ok=True,
                 output=(
-                    f"Extrato importado ({page_count} paginas): "
-                    f"{created} transacoes extraidas automaticamente.\n\n"
+                    f"Extrato importado ({page_count} paginas, metodo: {extraction_method}): "
+                    f"{created} transacoes extraidas.\n\n"
                     f"Receitas: {_format_brl(income)}\n"
                     f"Despesas: {_format_brl(expenses)}\n"
                     f"Saldo: {_format_brl(income - expenses)}\n\n"
@@ -748,30 +766,78 @@ class ImportFinancialPdfTool(Tool):
                     "transactions": created,
                     "income": income,
                     "expenses": expenses,
+                    "extraction_method": extraction_method,
                     "source": file_path,
                 },
             )
 
-        # Fallback: if no transactions found by regex, return text for LLM
-        truncated = len(full_text) > self._MAX_TEXT_CHARS
+        # --- Fallback: return raw text for conversation LLM ---
         extracted_text = full_text[: self._MAX_TEXT_CHARS]
-        truncation_note = (
-            f"\n[... texto truncado, exibindo {self._MAX_TEXT_CHARS} de "
-            f"{len(full_text)} caracteres ...]"
-            if truncated
-            else ""
-        )
-
-        categories_str = ", ".join(ALL_CATEGORIES)
-
         return ToolResult(
             ok=True,
             output=(
                 f"Extrato importado ({page_count} paginas) mas nao consegui "
                 f"extrair transacoes automaticamente.\n\n"
-                f"Texto extraido:\n---\n{extracted_text}{truncation_note}\n---\n\n"
-                "Use a tool bulk_add_financial_entries para registrar as transacoes "
-                "que voce identificar no texto acima."
+                "Use bulk_add_financial_entries para registrar manualmente."
             ),
             metadata={"page_count": page_count, "source": file_path},
         )
+
+    async def _llm_extract(self, text: str, categories: str) -> list[dict]:
+        """Use Sonnet/Opus to extract transactions from statement text."""
+        import json as _json
+
+        from seraphine.llm.anthropic import AnthropicClient
+
+        llm = self._llm
+        if not isinstance(llm, AnthropicClient):
+            return []
+
+        prompt = (
+            "Voce e um parser de extratos bancarios. Extraia TODAS as transacoes "
+            "do texto abaixo e retorne APENAS um JSON array.\n\n"
+            "Cada objeto deve ter:\n"
+            '- "type": "income" ou "expense"\n'
+            '- "amount": numero (float, sem R$)\n'
+            f'- "category": uma de [{categories}]\n'
+            '- "description": descricao curta\n'
+            '- "date": "YYYY-MM-DD"\n\n'
+            "Regras:\n"
+            "- Debitos/saidas/pagamentos = expense\n"
+            "- Creditos/entradas/recebimentos = income\n"
+            "- Infira categoria pela descricao\n"
+            "- Ignore saldos, totais, cabecalhos\n"
+            "- Retorne APENAS o JSON array, sem markdown, sem explicacao\n\n"
+            f"TEXTO DO EXTRATO:\n{text}"
+        )
+
+        body = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 16000,
+            "temperature": 0.1,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+
+        resp = await llm._client.post("/v1/messages", json=body, timeout=120.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Extract text from response
+        raw = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                raw += block.get("text", "")
+
+        # Clean markdown fences if present
+        raw = raw.strip()
+        if raw.startswith("```"):
+            import re
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+
+        result = _json.loads(raw)
+        if not isinstance(result, list):
+            return []
+
+        return result

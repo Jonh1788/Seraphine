@@ -65,6 +65,7 @@ def build_default_registry(
     reminder_scheduler: Any = None,
     finance_service: Any = None,
     tts: Any = None,
+    llm: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -186,7 +187,7 @@ def build_default_registry(
         reg.register(AddFinancialEntryTool(finance_service))
         reg.register(BulkAddFinancialEntriesTool(finance_service))
         reg.register(ListFinancialEntriesTool(finance_service))
-        reg.register(ImportFinancialPdfTool(finance_service))
+        reg.register(ImportFinancialPdfTool(finance_service, llm=llm))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":
