@@ -436,6 +436,7 @@ class ImportFinancialPdfTool(Tool):
         "Import financial data from a PDF file (bank statement, invoice, etc). "
         "Extracts text from the PDF and asks the LLM to identify transactions. "
         "Use when the user uploads or mentions a PDF with financial data. "
+        "Supports password-protected PDFs — ask the user for the password if needed. "
         "Triggers: 'importar extrato', 'PDF do banco', 'fatura do cartao'."
     )
     json_schema: dict[str, Any] = {
@@ -444,6 +445,10 @@ class ImportFinancialPdfTool(Tool):
             "file_path": {
                 "type": "string",
                 "description": "Absolute path to the PDF file.",
+            },
+            "password": {
+                "type": "string",
+                "description": "PDF password if the file is password-protected. Ask the user if you get a 'password required' error.",
             },
         },
         "required": ["file_path"],
@@ -460,6 +465,8 @@ class ImportFinancialPdfTool(Tool):
         file_path = args.get("file_path", "")
         if not file_path:
             return ToolResult(ok=False, error="file_path is required.")
+
+        password = args.get("password") or None
 
         try:
             import pdfplumber
@@ -479,7 +486,7 @@ class ImportFinancialPdfTool(Tool):
 
         try:
             text_pages: list[str] = []
-            with pdfplumber.open(file_path) as pdf:
+            with pdfplumber.open(file_path, password=password) as pdf:
                 for i, page in enumerate(pdf.pages):
                     page_text = page.extract_text()
                     if page_text:
@@ -493,6 +500,15 @@ class ImportFinancialPdfTool(Tool):
 
             full_text = "\n\n".join(text_pages)
         except Exception as e:
+            err_str = str(e).lower()
+            if "password" in err_str or "encrypted" in err_str or "decrypt" in err_str:
+                return ToolResult(
+                    ok=False,
+                    error=(
+                        "Este PDF é protegido por senha. "
+                        "Pergunte a senha ao usuario e chame novamente com o parametro 'password'."
+                    ),
+                )
             return ToolResult(ok=False, error=f"Failed to read PDF: {e}")
 
         page_count = len(text_pages)
