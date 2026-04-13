@@ -178,11 +178,16 @@ async def _speech_worker(
                 current_turn_id = turn_id
 
             # Stream this sentence's chunks into the open stream.
+            logger.info("[TTS] streaming %d chars: %s", len(text), text[:120])
+            chunk_count = 0
             async for chunk in tts.synthesize_stream(text):
                 if cancel_event is not None and cancel_event.is_set():
+                    logger.info("[TTS] cancelled after %d chunks", chunk_count)
                     break
                 if chunk:
                     await ws.send_bytes(chunk)
+                    chunk_count += 1
+            logger.info("[TTS] done, %d chunks sent", chunk_count)
 
         except WebSocketDisconnect:
             done.set()
@@ -692,7 +697,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                                     _pending_sentences.clear()
                                     cleaned = strip_markdown_for_tts(batch, strip_audio_tags=_strip_audio_tags)
                                     if cleaned:
-                                        # Prefix [no accent] for ElevenLabs v3
+                                        logger.debug("[TTS-batch] sending %d chars (4-sentence batch)", len(cleaned))
                                         tts_input = _tts_prefix + cleaned
                                         speak_done = await _enqueue_speech(
                                             ws,
