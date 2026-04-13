@@ -381,12 +381,31 @@ class GmailReadMessageTool(Tool):
         frm = msg.get("from") or ""
         date = msg.get("date") or ""
         body = msg.get("body") or ""
+        attachments = msg.get("attachments") or []
+
         output = (
             f"De: {frm}\n"
             f"Assunto: {subject}\n"
             f"Data: {date}\n"
-            f"\n{body}"
+            f"message_id: {message_id}\n"
         )
+
+        if attachments:
+            output += f"\nAnexos ({len(attachments)}):\n"
+            for att in attachments:
+                output += (
+                    f"  - {att.get('filename', '?')} "
+                    f"({att.get('mimeType', '?')}, {att.get('size', 0)} bytes)\n"
+                    f"    attachment_id: {att.get('attachmentId', '')}\n"
+                )
+            output += (
+                "\nPara baixar um anexo, use gmail_download_attachment "
+                f"com message_id='{message_id}' e o attachment_id acima.\n"
+            )
+        else:
+            output += "\nSem anexos.\n"
+
+        output += f"\n{body}"
         return ToolResult(ok=True, output=output, metadata={"message": msg})
 
 
