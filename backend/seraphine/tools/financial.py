@@ -729,16 +729,42 @@ class ImportFinancialPdfTool(Tool):
         if transactions and self._service:
             from seraphine.finance.models import FinancialEntry
             created = 0
+            _valid_cats = set(ALL_CATEGORIES)
             for t in transactions:
                 try:
+                    # Normalize category to valid value
+                    raw_cat = str(t.get('category', 'outros')).lower().strip()
+                    # Remove accents for matching
+                    import unicodedata
+                    normalized = unicodedata.normalize('NFD', raw_cat)
+                    normalized = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+                    cat = normalized if normalized in _valid_cats else 'outros'
+
+                    # Validate type
+                    entry_type = t.get('type', 'expense')
+                    if entry_type not in ('income', 'expense'):
+                        entry_type = 'expense'
+
+                    # Validate amount
+                    amount = float(t.get('amount', 0))
+                    if amount <= 0:
+                        continue
+
+                    # Validate date
+                    entry_date = t.get('date', '')
+                    try:
+                        date.fromisoformat(entry_date)
+                    except (ValueError, TypeError):
+                        continue
+
                     entry = FinancialEntry(
                         id=None,
-                        type=t.get('type', 'expense'),
-                        amount=float(t.get('amount', 0)),
+                        type=entry_type,
+                        amount=amount,
                         currency='BRL',
-                        category=t.get('category', 'outros'),
+                        category=cat,
                         description=str(t.get('description', ''))[:100],
-                        date=t.get('date', date.today().isoformat()),
+                        date=entry_date,
                         source='pdf',
                         status='pending_review',
                     )
@@ -794,41 +820,32 @@ class ImportFinancialPdfTool(Tool):
             return []
 
         prompt = (
-            "Voce e um parser especialista de extratos bancarios brasileiros. "
-            "Extraia TODAS as transacoes do texto abaixo.\n\n"
-            "Retorne APENAS um JSON array valido. Sem markdown, sem explicacao, sem texto extra.\n\n"
-            "Cada objeto DEVE ter exatamente estes campos:\n"
-            '{\n'
-            '  "type": "income" ou "expense",\n'
-            '  "amount": numero positivo (float, ex: 150.50),\n'
-            f'  "category": uma de [{categories}],\n'
-            '  "description": descricao curta da transacao (max 80 chars),\n'
-            '  "date": "YYYY-MM-DD"\n'
-            '}\n\n'
-            "REGRAS IMPORTANTES:\n"
-            "1. Debitos, saidas, pagamentos, compras, transferencias enviadas, PIX enviado = expense\n"
-            "2. Creditos, entradas, recebimentos, salarios, transferencias recebidas, PIX recebido = income\n"
-            "3. IGNORE completamente: saldos, totais parciais, cabecalhos, datas sem valor, taxas de IOF zeradas\n"
-            "4. O amount DEVE ser positivo sempre (o type indica se eh income ou expense)\n"
-            "5. Categorize com cuidado:\n"
-            "   - PIX/transferencia sem contexto = outros\n"
-            "   - Mercado/supermercado/restaurante/ifood = alimentacao\n"
-            "   - Aluguel/condominio/IPTU = moradia\n"
-            "   - Uber/99/combustivel/estacionamento = transporte\n"
-            "   - Netflix/Spotify/jogos/lazer = lazer\n"
-            "   - Farmacia/medico/plano saude = saude\n"
-            "   - Salario/pagamento mensal = salario\n"
-            "   - Curso/escola/livro = educacao\n"
-            "   - CDB/poupanca/tesouro = investimento\n"
-            "6. Extraia TODAS as transacoes, nao pule nenhuma\n"
-            "7. Formato de data: converter DD/MM/YYYY ou DD/MM/YY para YYYY-MM-DD\n\n"
-            f"TEXTO DO EXTRATO ({len(text)} caracteres):\n{text}"
+            "Voce e um parser de extratos bancarios. Extraia TODAS as transacoes.\n\n"
+            "FORMATO DE SAIDA: JSON array puro, sem markdown, sem ```json, sem explicacao.\n"
+            "Comece com [ e termine com ]\n\n"
+            "Cada objeto:\n"
+            '{"type":"income ou expense","amount":NUMERO_POSITIVO,'
+            '"category":"EXATAMENTE_UMA_DESTAS","description":"texto curto","date":"YYYY-MM-DD"}\n\n'
+            f"CATEGORIAS VALIDAS (use EXATAMENTE estes valores, sem acento, minusculo):\n"
+            f"{categories}\n\n"
+            "REGRAS:\n"
+            "- Debito/saida/pagamento/compra/PIX enviado/transferencia enviada → expense\n"
+            "- Credito/entrada/recebimento/salario/PIX recebido → income\n"
+            "- amount SEMPRE positivo (type indica direcao)\n"
+            "- IGNORE: saldos, totais, cabecalhos, IOF zero, linhas sem valor monetario\n"
+            "- IGNORE: linhas que sao resumo tipo 'Total de entradas: R$ X'\n"
+            "- category DEVE ser exatamente um dos valores listados acima\n"
+            "- Se nao souber a categoria, use \"outros\"\n"
+            "- Converter DD/MM/YYYY → YYYY-MM-DD\n"
+            "- NAO invente transacoes que nao existem no texto\n"
+            "- Extraia TODAS, nao pule nenhuma transacao real\n\n"
+            f"EXTRATO ({len(text)} chars):\n{text}"
         )
 
         body = {
             "model": "claude-sonnet-4-6",
             "max_tokens": 32000,
-            "temperature": 0.0,
+            "temperature": 0.7,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
         }
