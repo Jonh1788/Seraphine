@@ -415,6 +415,11 @@ button:disabled {
     flex: 1;
     justify-content: center;
   }
+
+  /* Mobile: hide sidebar completely on non-chat views */
+  .sidebar--hidden {
+    display: none !important;
+  }
 }
 
 /* ---------- Sidebar ---------- */
@@ -429,16 +434,8 @@ button:disabled {
   transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms ease, opacity 200ms ease;
 }
 
-.sidebar--hidden {
-  width: 0 !important;
-  min-width: 0 !important;
-  padding: 0 !important;
-  overflow: hidden;
-  opacity: 0;
-  border-right: none;
-  height: 0 !important;
-  max-height: 0 !important;
-}
+/* Desktop: sidebar stays visible (avatar always shown) */
+/* Mobile: collapse completely via 880px media query */
 
 .card {
   background: rgba(17, 17, 26, 0.6);
