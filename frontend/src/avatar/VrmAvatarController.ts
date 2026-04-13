@@ -1121,21 +1121,25 @@ export class VrmAvatarController implements AvatarAdapter {
         head.quaternion.copy(q);
       }
 
-      // --- Eyes: lead the head for natural saccade effect ---
-      // The eye rotation is relative to the head, so we compute the
-      // DIFFERENCE between where the eyes want to look and where the
-      // head currently is. This makes eyes "lead" then settle as
-      // the head catches up.
+      // --- Eyes: lead the head via lookAt blendshapes ---
+      // Compute the difference between where eyes want to look and
+      // where the head currently is. Positive = eyes leading ahead.
       const eyeOffsetX = this.eyeLookCurrent.x - this.idleLookCurrent.x;
       const eyeOffsetY = this.eyeLookCurrent.y - this.idleLookCurrent.y;
 
-      const leftEye = vrm.humanoid?.getRawBoneNode("leftEye") as Object3D | null | undefined;
-      const rightEye = vrm.humanoid?.getRawBoneNode("rightEye") as Object3D | null | undefined;
-      if (leftEye) {
-        leftEye.quaternion.setFromEuler(new Euler(eyeOffsetX * 0.6, eyeOffsetY * 0.8, 0));
-      }
-      if (rightEye) {
-        rightEye.quaternion.setFromEuler(new Euler(eyeOffsetX * 0.6, eyeOffsetY * 0.8, 0));
+      const em = vrm.expressionManager;
+      if (em) {
+        // X axis: positive = looking down, negative = looking up
+        const lookUpVal = Math.max(0, -eyeOffsetX * 8);
+        const lookDownVal = Math.max(0, eyeOffsetX * 8);
+        // Y axis: positive = looking right, negative = looking left
+        const lookLeftVal = Math.max(0, -eyeOffsetY * 8);
+        const lookRightVal = Math.max(0, eyeOffsetY * 8);
+
+        em.setValue("lookUp", Math.min(1, lookUpVal));
+        em.setValue("lookDown", Math.min(1, lookDownVal));
+        em.setValue("lookLeft", Math.min(1, lookLeftVal));
+        em.setValue("lookRight", Math.min(1, lookRightVal));
       }
     }
 
