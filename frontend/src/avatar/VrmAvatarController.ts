@@ -206,6 +206,11 @@ export class VrmAvatarController implements AvatarAdapter {
   private eyeLookCurrent = { x: 0, y: 0, z: 0 };
   private readonly EYE_LEAD_MULTIPLIER = 3.5; // eyes lerp Nx faster than head
   private readonly EYE_OVERSHOOT = 1.4; // eyes overshoot target slightly
+  // Conversational micro-saccades — small autonomous eye movements
+  // while speaking (glancing aside briefly, thinking, etc.)
+  private _eyeMicroTarget = { x: 0, y: 0 };
+  private _eyeMicroCurrent = { x: 0, y: 0 };
+  private _nextEyeMicro = 0;
   private _isSpeaking = false;
 
   // --- Idle body motion (applied in applyPostUpdate, after humanoid sync) ---
@@ -493,6 +498,40 @@ export class VrmAvatarController implements AvatarAdapter {
       const eyeTargetY = this.idleLookTarget.y * this.EYE_OVERSHOOT;
       this.eyeLookCurrent.x += (eyeTargetX - this.eyeLookCurrent.x) * eyeLerp;
       this.eyeLookCurrent.y += (eyeTargetY - this.eyeLookCurrent.y) * eyeLerp;
+
+      // Conversational micro-saccades — autonomous eye movements while speaking
+      if (this._isSpeaking) {
+        if (this.elapsed >= this._nextEyeMicro) {
+          const r = Math.random();
+          if (r < 0.3) {
+            // Quick glance to the side (thinking)
+            this._eyeMicroTarget = {
+              x: (Math.random() - 0.5) * 0.04,
+              y: (Math.random() > 0.5 ? 1 : -1) * (0.02 + Math.random() * 0.04),
+            };
+          } else if (r < 0.5) {
+            // Brief look up (recalling)
+            this._eyeMicroTarget = {
+              x: -(0.02 + Math.random() * 0.03),
+              y: (Math.random() - 0.5) * 0.02,
+            };
+          } else {
+            // Return to center (re-engage with user)
+            this._eyeMicroTarget = { x: 0, y: 0 };
+          }
+          // Quick intervals: 0.3-1.2s between micro-saccades
+          this._nextEyeMicro = this.elapsed + 0.3 + Math.random() * 0.9;
+        }
+        // Fast lerp for snappy eye movement
+        const microLerp = Math.min(1, 8 * dt);
+        this._eyeMicroCurrent.x += (this._eyeMicroTarget.x - this._eyeMicroCurrent.x) * microLerp;
+        this._eyeMicroCurrent.y += (this._eyeMicroTarget.y - this._eyeMicroCurrent.y) * microLerp;
+      } else {
+        // Not speaking — fade micro-saccades to zero
+        const fadeLerp = Math.min(1, 3 * dt);
+        this._eyeMicroCurrent.x *= (1 - fadeLerp);
+        this._eyeMicroCurrent.y *= (1 - fadeLerp);
+      }
 
       // Lerp emotion head tilt toward target
       const tiltLerpSpeed = 3.0;
@@ -1121,11 +1160,10 @@ export class VrmAvatarController implements AvatarAdapter {
         head.quaternion.copy(q);
       }
 
-      // --- Eyes: lead the head via lookAt blendshapes ---
-      // Compute the difference between where eyes want to look and
-      // where the head currently is. Positive = eyes leading ahead.
-      const eyeOffsetX = this.eyeLookCurrent.x - this.idleLookCurrent.x;
-      const eyeOffsetY = this.eyeLookCurrent.y - this.idleLookCurrent.y;
+      // --- Eyes: lead head + conversational micro-saccades ---
+      // Combine: (1) lead offset (eyes ahead of head) + (2) micro-saccades
+      const eyeOffsetX = (this.eyeLookCurrent.x - this.idleLookCurrent.x) + this._eyeMicroCurrent.x;
+      const eyeOffsetY = (this.eyeLookCurrent.y - this.idleLookCurrent.y) + this._eyeMicroCurrent.y;
 
       const em = vrm.expressionManager;
       if (em) {
