@@ -312,6 +312,8 @@ export function ChatView({
 
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const [pendingImages, setPendingImages] = useState<{name: string; dataUrl: string}[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
@@ -621,6 +623,55 @@ export function ChatView({
     }
   };
 
+  /** Drag & drop — show drop zone overlay and handle dropped files. */
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragging(false);
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            const ext = file.name.split('.').pop() || 'png';
+            const name = file.name || `arquivo-${Date.now()}.${ext}`;
+            setPendingImages((prev) => [...prev, { name, dataUrl: reader.result as string }]);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }, []);
+
   const handleMcpApproval = useCallback(
     (taskId: string, action: McpAction) => {
       ws.send({
@@ -696,7 +747,13 @@ export function ChatView({
   };
 
   return (
-    <>
+    <div
+      className="chat__wrapper"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       {turns.length > 0 && (
         <div className="chat__toolbar">
           <button type="button" className="btn-new-chat" aria-label="Nova conversa" onClick={handleNewConversation}>
@@ -820,6 +877,20 @@ export function ChatView({
           manualMute={manualMute}
           onManualMuteToggle={onManualMuteToggle}
         />
+      )}
+
+      {/* Drop zone overlay */}
+      {isDragging && (
+        <div className="chat__dropzone">
+          <div className="chat__dropzone-content">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>Solte o arquivo aqui</span>
+          </div>
+        </div>
       )}
 
       <div className="chat__composer">
@@ -962,6 +1033,6 @@ export function ChatView({
           <img src={lightboxSrc} alt="Imagem ampliada" className="lightbox__img" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -600,6 +600,49 @@ button:disabled {
   -webkit-backdrop-filter: blur(8px);
   overflow: hidden;
   min-height: 0;
+  position: relative;
+}
+
+/* Wrapper inside .chat for drag & drop events */
+.chat__wrapper {
+  display: contents;
+}
+
+/* Drop zone overlay — appears above composer when dragging files */
+.chat__dropzone {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(167, 139, 250, 0.08);
+  border: 2px dashed var(--accent);
+  border-radius: var(--r-lg);
+  margin: var(--space-2) var(--space-3);
+  animation: dropzoneFadeIn 150ms ease;
+  pointer-events: none;
+}
+
+.chat__dropzone-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chat__dropzone-content svg {
+  opacity: 0.8;
+}
+
+@keyframes dropzoneFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .chat__toolbar {
