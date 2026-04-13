@@ -356,14 +356,15 @@ export class VrmAvatarController implements AvatarAdapter {
       this.updateCamera(delta);
       this.updateIdle(delta);
       this.updateLipsync();
+      // Mixer (Mixamo animations) runs BEFORE vrm.update() so that
+      // spring bones can react to the bone positions set by animations.
+      // If mixer runs after, it overwrites spring bone results.
+      this.mixer?.update(delta);
       this.vrm?.update(delta);
       // Head + gesture bone writes MUST apply AFTER vrm.update() because
       // update() syncs normalized→raw and also runs lookAt/humanoid
       // which overwrites raw bones. Writing before would be lost.
       this.applyPostUpdate();
-      // External animation mixer runs last — it writes directly to
-      // raw bone transforms and must not be overwritten by idle/rest.
-      this.mixer?.update(delta);
       this.renderer.render(this.scene, this.camera);
     };
     this.rafId = requestAnimationFrame(loop);
@@ -617,6 +618,14 @@ export class VrmAvatarController implements AvatarAdapter {
     }
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
+    // Debug: log spring bone status
+    const sbm = (loadedVrm as any).springBoneManager;
+    if (sbm) {
+      const joints = sbm.joints?.length ?? sbm.springBones?.length ?? 0;
+      console.log(`[VRM] Spring bones loaded: ${joints} joints`);
+    } else {
+      console.warn('[VRM] No spring bone manager found — hair/cloth physics disabled');
+    }
     // Rest pose is applied every frame by updateIdle() via
     // applyRestPose(); no one-shot needed here.
   }
