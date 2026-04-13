@@ -829,9 +829,10 @@ class ImportFinancialPdfTool(Tool):
             output=(
                 f"Extrato importado ({page_count} paginas, metodo: {method}): "
                 f"{created} transacoes.\n\n"
-                f"Receitas: {_format_brl(income)}\n"
-                f"Despesas: {_format_brl(expenses)}\n"
-                f"Saldo: {_format_brl(income - expenses)}\n\n"
+                f"Receitas do periodo: {_format_brl(income)}\n"
+                f"Despesas do periodo: {_format_brl(expenses)}\n"
+                f"Diferenca do periodo: {_format_brl(income - expenses)}\n"
+                f"(Nota: este valor nao inclui o saldo anterior da conta)\n\n"
                 f"Todas as {created} entries como 'pending_review'."
             ),
             metadata={
