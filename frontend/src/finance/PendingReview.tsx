@@ -37,9 +37,14 @@ interface PendingReviewProps {
 
 export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps): JSX.Element {
   const [actioningId, setActioningId] = useState<number | null>(null);
+  // Track dismissed items locally for instant removal animation
+  const [dismissedEntries, setDismissedEntries] = useState<Set<number>>(new Set());
+  const [dismissedTasks, setDismissedTasks] = useState<Set<number>>(new Set());
 
-  const hasTasks = tasks && tasks.length > 0;
-  const hasEntries = entries.length > 0;
+  const visibleEntries = entries.filter(e => !dismissedEntries.has(e.id));
+  const visibleTasks = (tasks || []).filter(t => !dismissedTasks.has(t.id));
+  const hasTasks = visibleTasks.length > 0;
+  const hasEntries = visibleEntries.length > 0;
 
   if (!hasTasks && !hasEntries) {
     return (
@@ -48,6 +53,17 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
       </div>
     );
   }
+
+  const dismissEntry = (id: number) => {
+    setDismissedEntries(prev => new Set(prev).add(id));
+    // Background refresh to sync parent state (no loading flash)
+    setTimeout(() => onRefresh(), 500);
+  };
+
+  const dismissTask = (id: number) => {
+    setDismissedTasks(prev => new Set(prev).add(id));
+    setTimeout(() => onRefresh(), 500);
+  };
 
   const handleConfirm = async (id: number): Promise<void> => {
     setActioningId(id);
@@ -58,7 +74,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
         body: JSON.stringify({ status: 'confirmed' }),
       });
       if (!res.ok) throw new Error('Falha ao confirmar');
-      onRefresh();
+      dismissEntry(id);
     } catch (err) {
       console.error('Erro ao confirmar entrada:', err);
     } finally {
@@ -73,7 +89,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Falha ao rejeitar');
-      onRefresh();
+      dismissEntry(id);
     } catch (err) {
       console.error('Erro ao rejeitar entrada:', err);
     } finally {
@@ -90,7 +106,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
         body: JSON.stringify({}),
       });
       if (!res.ok) throw new Error('Failed');
-      onRefresh();
+      dismissTask(taskId);
     } catch (err) {
       console.error('Task execute error:', err);
     } finally {
@@ -107,7 +123,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
         body: JSON.stringify({ status: 'rejected' }),
       });
       if (!res.ok) throw new Error('Failed');
-      onRefresh();
+      dismissTask(taskId);
     } catch (err) {
       console.error('Task reject error:', err);
     } finally {
@@ -121,7 +137,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
       {hasTasks && (
         <div className="finance-pending-section">
           <h3 className="finance-pending-section__title">Sugestoes da Seraphine</h3>
-          {tasks.map((task) => {
+          {visibleTasks.map((task) => {
             let payload: Record<string, any> = {};
             try { payload = JSON.parse(task.payload || '{}'); } catch { /* ignore */ }
             const busy = actioningId === task.id;
@@ -168,7 +184,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
       )}
 
       {/* Existing entry cards */}
-      {entries.map((entry) => {
+      {visibleEntries.map((entry) => {
         const isIncome = entry.type === 'income';
         const color = CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.outros;
         const catLabel = CATEGORY_LABELS[entry.category] ?? entry.category;
