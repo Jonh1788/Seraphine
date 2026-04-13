@@ -307,12 +307,14 @@ class GmailListImportantTool(Tool):
 
         lines: list[str] = []
         for m in msgs:
+            msg_id = m.get("id") or ""
             subject = m.get("subject") or "(sem assunto)"
             frm = m.get("from") or ""
+            date = m.get("date") or ""
             snippet = (m.get("snippet") or "").strip()
             if len(snippet) > 120:
                 snippet = snippet[:120] + "…"
-            lines.append(f"- {subject} — {frm}\n  {snippet}")
+            lines.append(f"- [{msg_id}] {subject} — {frm} ({date})\n  {snippet}")
 
         return ToolResult(
             ok=True,
