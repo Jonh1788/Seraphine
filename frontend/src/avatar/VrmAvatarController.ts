@@ -620,11 +620,19 @@ export class VrmAvatarController implements AvatarAdapter {
     this.scene.add(loadedVrm.scene);
     // Debug: log spring bone status
     const sbm = (loadedVrm as any).springBoneManager;
+    console.log('[VRM] springBoneManager:', sbm ? Object.keys(sbm) : 'null');
     if (sbm) {
-      const joints = sbm.joints?.length ?? sbm.springBones?.length ?? 0;
-      console.log(`[VRM] Spring bones loaded: ${joints} joints`);
+      console.log('[VRM] joints:', sbm.joints?.length, 'colliderGroups:', sbm.colliderGroups?.length, 'colliders:', sbm.colliders?.length);
+      // Try all possible property names
+      for (const key of Object.keys(sbm)) {
+        const val = sbm[key];
+        if (Array.isArray(val)) console.log(`[VRM]   sbm.${key}: Array(${val.length})`);
+        else if (val && typeof val === 'object') console.log(`[VRM]   sbm.${key}: ${typeof val}`);
+      }
     } else {
-      console.warn('[VRM] No spring bone manager found — hair/cloth physics disabled');
+      console.warn('[VRM] No spring bone manager — checking raw userData');
+      console.log('[VRM] userData keys:', Object.keys(gltf.userData));
+      console.log('[VRM] VRM keys:', Object.keys(loadedVrm));
     }
     // Rest pose is applied every frame by updateIdle() via
     // applyRestPose(); no one-shot needed here.
