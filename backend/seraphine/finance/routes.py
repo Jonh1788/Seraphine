@@ -87,6 +87,17 @@ async def finance_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/finance/balance")
+async def finance_balance(request: Request) -> dict[str, Any]:
+    """Overall balance across all confirmed entries."""
+    svc = _service_or_503(request)
+    try:
+        return await svc.get_overall_balance()
+    except Exception as e:
+        logger.exception("finance balance failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/finance/entries")
 async def finance_list_entries(
     request: Request,

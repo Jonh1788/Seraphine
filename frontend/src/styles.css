@@ -3844,6 +3844,41 @@ button:disabled {
   overflow-y: auto;
 }
 
+/* Balance hero card */
+.finance__balance-hero {
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.finance__balance-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-2);
+}
+
+.finance__balance-value {
+  display: block;
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance__balance-hero--positive .finance__balance-value {
+  color: #4ade80;
+}
+
+.finance__balance-hero--negative .finance__balance-value {
+  color: #ef5350;
+}
+
 .finance__summary-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

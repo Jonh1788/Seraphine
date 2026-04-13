@@ -260,6 +260,36 @@ class FinanceService:
 
         return await asyncio.to_thread(_work)
 
+    async def get_overall_balance(self) -> dict:
+        """Calculate total balance across all confirmed entries."""
+        def _work() -> dict:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT"
+                    " COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0),"
+                    " COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0)"
+                    " FROM financial_entries"
+                    " WHERE status = 'confirmed'",
+                ).fetchone()
+                income = row[0]
+                expenses = row[1]
+
+                # Get initial balance adjustment (stored as a special entry)
+                adj_row = conn.execute(
+                    "SELECT COALESCE(SUM(amount), 0) FROM financial_entries"
+                    " WHERE source = 'adjustment' AND status = 'confirmed'",
+                ).fetchone()
+                adjustment = adj_row[0]
+
+            return {
+                "total_income": income,
+                "total_expenses": expenses,
+                "adjustment": adjustment,
+                "balance": income - expenses,
+            }
+
+        return await asyncio.to_thread(_work)
+
     # ------------------------------------------------------------------
     # Recurring rules
     # ------------------------------------------------------------------

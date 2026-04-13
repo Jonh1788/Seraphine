@@ -34,6 +34,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [overallBalance, setOverallBalance] = useState<number | null>(null);
 
   // Fetch summary + entries for the selected month
   useEffect(() => {
@@ -75,6 +76,14 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
     fetch('/tasks?status=pending')
       .then((r) => (r.ok ? r.json() : { tasks: [] }))
       .then((res) => setPendingTasks(res.tasks || []))
+      .catch(() => {});
+  }, [refreshKey]);
+
+  // Fetch overall balance
+  useEffect(() => {
+    fetch('/finance/balance')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => { if (res) setOverallBalance(res.balance); })
       .catch(() => {});
   }, [refreshKey]);
 
@@ -215,17 +224,24 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
         {!loading && !error && data && !isEmpty && activeTab === 'Visao Geral' && (
           <>
+            {overallBalance !== null && (
+              <div className={`finance__balance-hero ${overallBalance >= 0 ? 'finance__balance-hero--positive' : 'finance__balance-hero--negative'}`}>
+                <span className="finance__balance-label">Saldo Atual</span>
+                <span className="finance__balance-value">{fmtBRL(overallBalance)}</span>
+              </div>
+            )}
+
             <div className="finance__summary-cards">
               <div className="finance__card finance__card--income">
-                <span className="finance__card-label">Receitas</span>
+                <span className="finance__card-label">Receitas do mes</span>
                 <span className="finance__card-value">{fmtBRL(data.income)}</span>
               </div>
               <div className="finance__card finance__card--expense">
-                <span className="finance__card-label">Despesas</span>
+                <span className="finance__card-label">Despesas do mes</span>
                 <span className="finance__card-value">{fmtBRL(data.expenses)}</span>
               </div>
               <div className={`finance__card ${data.balance >= 0 ? 'finance__card--positive' : 'finance__card--negative'}`}>
-                <span className="finance__card-label">Saldo</span>
+                <span className="finance__card-label">Balanco do mes</span>
                 <span className="finance__card-value">{fmtBRL(data.balance)}</span>
               </div>
             </div>
