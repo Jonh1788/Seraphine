@@ -8,6 +8,7 @@ import {
   type ChatMessage,
 } from "../api/chat";
 import { ConversationsSidebar } from "../components/ConversationsSidebar";
+import { Markdown } from "../components/Markdown";
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -272,12 +273,7 @@ function Bubble({
   }
   return (
     <div className="self-start max-w-[85%]">
-      <div className="text-ink-primary text-[15px] leading-relaxed whitespace-pre-wrap">
-        {message.content}
-        {streaming && (
-          <span className="inline-block w-[2px] h-[1em] align-[-2px] ml-0.5 bg-accent-purple animate-pulse" />
-        )}
-      </div>
+      <Markdown text={message.content} streaming={streaming} />
     </div>
   );
 }
