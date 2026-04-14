@@ -4,6 +4,9 @@ import type { InlineTask } from "../api/chat";
 interface Props {
   tasks: InlineTask[];
   onOpen?: (taskId: string) => void;
+  /** Click on the circle icon. Caller should PATCH the status and
+   *  update the task in place so the card re-renders. */
+  onToggleStatus?: (taskId: string, current: InlineTask["status"]) => void;
 }
 
 function isoToday(): string {
@@ -37,7 +40,7 @@ function groupByDate(tasks: InlineTask[]): [string, InlineTask[]][] {
   return Array.from(groups.entries());
 }
 
-export function TasksBlock({ tasks, onOpen }: Props) {
+export function TasksBlock({ tasks, onOpen, onToggleStatus }: Props) {
   if (tasks.length === 0) return null;
   const groups = groupByDate(tasks);
 
@@ -67,7 +70,12 @@ export function TasksBlock({ tasks, onOpen }: Props) {
                 {label}
               </div>
               {items.map((t) => (
-                <Card key={t.id} t={t} onOpen={onOpen} />
+                <Card
+                  key={t.id}
+                  t={t}
+                  onOpen={onOpen}
+                  onToggleStatus={onToggleStatus}
+                />
               ))}
             </div>
           );
@@ -77,18 +85,48 @@ export function TasksBlock({ tasks, onOpen }: Props) {
   );
 }
 
-function Card({ t, onOpen }: { t: InlineTask; onOpen?: (id: string) => void }) {
+function Card({
+  t,
+  onOpen,
+  onToggleStatus,
+}: {
+  t: InlineTask;
+  onOpen?: (id: string) => void;
+  onToggleStatus?: (id: string, current: InlineTask["status"]) => void;
+}) {
   const isDone = t.status === "completed";
   // Static class names so Tailwind's JIT can include them in the build.
   const Icon = isDone ? CheckCircle2 : Circle;
   const iconFg = isDone ? "text-emerald-400" : "text-cyan-300";
+  const iconHover = isDone ? "hover:text-emerald-300" : "hover:text-cyan-200";
   const titleCls = isDone
     ? "text-[15px] font-medium text-ink-dim line-through"
     : "text-[15px] font-medium text-ink-primary";
 
+  const handleToggle = (e: React.MouseEvent) => {
+    // Don't bubble into the surrounding button (which would open the modal).
+    e.stopPropagation();
+    e.preventDefault();
+    onToggleStatus?.(String(t.id), t.status);
+  };
+
+  const iconNode = onToggleStatus ? (
+    <button
+      type="button"
+      onClick={handleToggle}
+      className={`mt-0.5 shrink-0 transition-colors ${iconFg} ${iconHover}`}
+      aria-label={isDone ? "Reabrir tarefa" : "Marcar como concluída"}
+      title={isDone ? "Reabrir tarefa" : "Marcar como concluída"}
+    >
+      <Icon className="h-5 w-5" />
+    </button>
+  ) : (
+    <Icon className={`h-5 w-5 mt-0.5 shrink-0 ${iconFg}`} />
+  );
+
   const inner = (
     <>
-      <Icon className={`h-5 w-5 mt-0.5 shrink-0 ${iconFg}`} />
+      {iconNode}
       <div className="flex-1 min-w-0">
         <div className={titleCls}>{t.title}</div>
         {t.due_time ? (

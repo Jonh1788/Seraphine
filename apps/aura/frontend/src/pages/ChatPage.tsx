@@ -16,6 +16,7 @@ import { TransactionsBlock } from "../components/TransactionCard";
 import { TasksBlock } from "../components/TaskCard";
 import { TaskEditorModal } from "../components/TaskEditorModal";
 import { RecurringBlock } from "../components/RecurringCard";
+import * as tasksApi from "../api/tasks";
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -281,6 +282,65 @@ export function ChatPage() {
     }
   };
 
+  // Click the circle on a TaskCard → toggle status. Optimistically updates
+  // both the streaming buffer and any persisted message metadata so the
+  // strikethrough animates immediately. PATCHes the backend; reverts on
+  // failure.
+  const handleToggleTaskStatus = async (
+    taskId: string,
+    current: InlineTask["status"],
+  ) => {
+    const next: InlineTask["status"] = current === "completed" ? "pending" : "completed";
+
+    const updateTaskInList = (list: InlineTask[]): InlineTask[] =>
+      list.map((t) => (String(t.id) === taskId ? { ...t, status: next } : t));
+    const containsTask = (list: InlineTask[] | undefined) =>
+      Array.isArray(list) && list.some((t) => String(t.id) === taskId);
+
+    // Streaming buffer (live turn).
+    if (containsTask(streamingTasksRef.current)) {
+      streamingTasksRef.current = updateTaskInList(streamingTasksRef.current);
+      setStreamingTasks(streamingTasksRef.current);
+    }
+    // Persisted message metadata (history bubbles).
+    setMessages((prev) =>
+      prev.map((m) => {
+        const tks = m.metadata?.tasks;
+        if (!containsTask(tks)) return m;
+        return {
+          ...m,
+          metadata: { ...m.metadata, tasks: updateTaskInList(tks!) },
+        };
+      }),
+    );
+
+    try {
+      // InlineTask.status is `string` (LLM-friendly) but tasksApi expects
+      // the strict TaskStatus enum. The toggle only ever produces
+      // "completed" or "pending", both valid.
+      await tasksApi.updateTaskStatus(taskId, next as "completed" | "pending");
+    } catch {
+      // Revert.
+      const revertList = (list: InlineTask[]): InlineTask[] =>
+        list.map((t) => (String(t.id) === taskId ? { ...t, status: current } : t));
+      if (containsTask(streamingTasksRef.current)) {
+        streamingTasksRef.current = revertList(streamingTasksRef.current);
+        setStreamingTasks(streamingTasksRef.current);
+      }
+      setMessages((prev) =>
+        prev.map((m) => {
+          const tks = m.metadata?.tasks;
+          if (!containsTask(tks)) return m;
+          return {
+            ...m,
+            metadata: { ...m.metadata, tasks: revertList(tks!) },
+          };
+        }),
+      );
+      setError("Falha ao atualizar tarefa");
+    }
+  };
+
   const showEmpty =
     !loadingHistory &&
     messages.length === 0 &&
@@ -311,7 +371,12 @@ export function ChatPage() {
           ) : (
             <div className="max-w-3xl mx-auto flex flex-col gap-5">
               {messages.map((m, i) => (
-                <Bubble key={i} message={m} onOpenTask={setEditingTaskId} />
+                <Bubble
+                  key={i}
+                  message={m}
+                  onOpenTask={setEditingTaskId}
+                  onToggleTask={handleToggleTaskStatus}
+                />
               ))}
               {streaming !== null && (
                 <div className="self-start max-w-[85%] flex flex-col gap-1">
@@ -322,7 +387,11 @@ export function ChatPage() {
                     <RecurringBlock rules={streamingRecurring} />
                   )}
                   {streamingTasks.length > 0 && (
-                    <TasksBlock tasks={streamingTasks} onOpen={setEditingTaskId} />
+                    <TasksBlock
+                      tasks={streamingTasks}
+                      onOpen={setEditingTaskId}
+                      onToggleStatus={handleToggleTaskStatus}
+                    />
                   )}
                   {streaming.length > 0 ? (
                     <Markdown text={streaming} streaming />
@@ -421,10 +490,12 @@ function Bubble({
   message,
   streaming = false,
   onOpenTask,
+  onToggleTask,
 }: {
   message: ChatMessage;
   streaming?: boolean;
   onOpenTask?: (id: string) => void;
+  onToggleTask?: (id: string, current: InlineTask["status"]) => void;
 }) {
   const isUser = message.role === "user";
   if (isUser) {
@@ -443,7 +514,13 @@ function Bubble({
     <div className="self-start max-w-[85%] flex flex-col gap-1">
       {txs.length > 0 && <TransactionsBlock transactions={txs} />}
       {recs.length > 0 && <RecurringBlock rules={recs} />}
-      {tks.length > 0 && <TasksBlock tasks={tks} onOpen={onOpenTask} />}
+      {tks.length > 0 && (
+        <TasksBlock
+          tasks={tks}
+          onOpen={onOpenTask}
+          onToggleStatus={onToggleTask}
+        />
+      )}
       <Markdown text={message.content} streaming={streaming} />
     </div>
   );
