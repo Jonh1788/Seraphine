@@ -3127,6 +3127,28 @@ button:disabled {
 
 /* ---------- Avatar Lab button (topbar) ---------- */
 
+.btn-push {
+  position: relative;
+}
+.btn-push--subscribed {
+  color: #22c55e;
+}
+.btn-push--error, .btn-push--denied {
+  color: #ef4444;
+}
+.btn-push--subscribing {
+  opacity: 0.6;
+}
+.btn-push__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
 .btn-lab {
   padding: 6px;
   border-radius: var(--r-sm);

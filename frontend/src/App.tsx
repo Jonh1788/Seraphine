@@ -26,6 +26,7 @@ import {
   FlaskIcon,
   BrainIcon,
   TasksIcon,
+  BellIcon,
 } from './icons/Icons';
 
 type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
@@ -69,6 +70,61 @@ export function App(): JSX.Element {
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
   const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
+  const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'subscribed' | 'error' | 'denied' | 'unsupported'>('idle');
+  const [pushMsg, setPushMsg] = useState<string | null>(null);
+
+  // Subscribe to Web Push — exposed so a UI button can trigger it manually.
+  const subscribeToPush = useCallback(async (): Promise<void> => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setPushStatus('unsupported');
+      setPushMsg('Seu navegador nao suporta Web Push.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setPushStatus('denied');
+      setPushMsg('Permissao negada. Reabilite nas configuracoes do site.');
+      return;
+    }
+    setPushStatus('subscribing');
+    setPushMsg(null);
+    try {
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          setPushStatus('denied');
+          setPushMsg('Permissao nao concedida.');
+          return;
+        }
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const resp = await fetch('/push/vapid-public-key');
+      const { key } = await resp.json();
+      if (!key) throw new Error('VAPID public key nao configurada no servidor');
+
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        const padding = '='.repeat((4 - key.length % 4) % 4);
+        const base64 = (key + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawKey = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: rawKey,
+        });
+      }
+      const res = await fetch('/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub.toJSON()),
+      });
+      if (!res.ok) throw new Error(`/push/subscribe HTTP ${res.status}`);
+      setPushStatus('subscribed');
+      setPushMsg('Notificacoes ativadas.');
+    } catch (e) {
+      setPushStatus('error');
+      setPushMsg(e instanceof Error ? e.message : String(e));
+      console.warn('[Push] subscription failed:', e);
+    }
+  }, []);
 
   // PWA: handle ?view= and ?share= URL params from manifest shortcuts / share target
   useEffect(() => {
@@ -540,6 +596,17 @@ export function App(): JSX.Element {
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">
+          <button
+            type="button"
+            className={`btn-lab btn-push btn-push--${pushStatus}`}
+            aria-label="Ativar notificacoes"
+            title={pushMsg ?? 'Ativar notificacoes'}
+            onClick={() => void subscribeToPush()}
+            disabled={pushStatus === 'subscribing'}
+          >
+            <BellIcon size={18} />
+            {pushStatus === 'subscribed' && <span className="btn-push__dot" aria-hidden />}
+          </button>
           <button
             type="button"
             className="btn-lab"
