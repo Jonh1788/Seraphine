@@ -12,7 +12,7 @@ import { EquilibrioBars } from "../components/EquilibrioBars";
 import { InsightsCard } from "../components/InsightsCard";
 import * as financeApi from "../api/finance";
 import * as tasksApi from "../api/tasks";
-import type { FinanceSummary, Task } from "../types/api";
+import type { FinanceSummary, FinancialEntry, Task } from "../types/api";
 
 const MONTH_NAMES = [
   "Janeiro",
@@ -60,19 +60,22 @@ export function DashboardPage() {
   );
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [entries, setEntries] = useState<FinancialEntry[]>([]);
   const todayIso = isoDate(now);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [s, t] = await Promise.all([
+        const [s, t, e] = await Promise.all([
           financeApi.getSummary({ month, year }),
           tasksApi.listTasks({ limit: 200 }),
+          financeApi.listEntries({ month, year, limit: 500 }),
         ]);
         if (!cancelled) {
           setSummary(s);
           setTasks(t);
+          setEntries(e);
         }
       } catch {
         // ignore — dashboard is non-blocking
@@ -83,30 +86,46 @@ export function DashboardPage() {
     };
   }, [month, year]);
 
-  const events = useMemo<CalendarEvent[]>(
-    () =>
-      tasks
-        .filter((t) => t.due_date)
-        .map((t) => ({
-          date: (t.due_date ?? "").slice(0, 10),
-          color:
-            t.status === "completed"
-              ? "green"
-              : t.status === "approved"
-                ? "purple"
-                : "blue",
-        })),
-    [tasks],
-  );
+  const events = useMemo<CalendarEvent[]>(() => {
+    const taskEvents: CalendarEvent[] = tasks
+      .filter((t) => t.due_date)
+      .map((t) => ({
+        date: (t.due_date ?? "").slice(0, 10),
+        color:
+          t.status === "completed"
+            ? "green"
+            : t.status === "approved"
+              ? "purple"
+              : "blue",
+      }));
+    const financeEvents: CalendarEvent[] = entries.map((e) => ({
+      date: (e.date ?? "").slice(0, 10),
+      // green for income, red for expense — same palette as the
+      // transaction cards in chat.
+      color: e.type === "income" ? "green" : "red",
+    }));
+    return [...taskEvents, ...financeEvents];
+  }, [tasks, entries]);
 
   const selectedEvents = useMemo(() => {
-    return tasks
+    const taskItems = tasks
       .filter((t) => (t.due_date ?? "").slice(0, 10) === selected)
-      .map((t) => ({
-        id: t.id,
-        title: t.title,
-      }));
-  }, [tasks, selected]);
+      .map((t) => ({ id: `task-${t.id}`, title: t.title }));
+    const entryItems = entries
+      .filter((e) => (e.date ?? "").slice(0, 10) === selected)
+      .map((e) => {
+        const sign = e.type === "income" ? "+" : "-";
+        const amt = e.amount.toLocaleString("pt-BR", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        return {
+          id: `entry-${e.id}`,
+          title: `${e.description} · ${sign}R$ ${amt}`,
+        };
+      });
+    return [...entryItems, ...taskItems];
+  }, [tasks, entries, selected]);
 
   const pendingTasks = tasks.filter((t) => t.status === "pending").length;
   const completedTasks = tasks.filter((t) => t.status === "completed").length;
