@@ -4,12 +4,11 @@
 # them locally.
 
 [tool.uv.workspace]
-# Seraphine backend moves into apps/seraphine/backend in Phase 2 and
-# Aura backend arrives in Phase 12 — until then only the shared
-# packages are workspace members. The workspace file gains more entries
-# as each phase completes.
+# Aura backend arrives in Phase 12 — until then only Seraphine +
+# shared packages are workspace members.
 members = [
     "packages/*",
+    "apps/seraphine/backend",
 ]
 
 # No project table at the root — this is a workspace-only file. All

@@ -48,7 +48,11 @@ services/voxtral-tts/
 # Runtime artifacts / generated state (NOT code)
 services/browser-agent/user-data/
 backend/.wwebjs_auth/
+apps/seraphine/backend/.wwebjs_auth/
+apps/*/data/
+apps/*/backend/.wwebjs_auth/
 services/whatsapp-bridge/.wwebjs_auth/
+**/.wwebjs_auth/
 
 # Third-party binaries / proxies
 services/claude-stream-proxy/
