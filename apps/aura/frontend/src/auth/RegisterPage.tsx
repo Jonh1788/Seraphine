@@ -18,8 +18,8 @@ export function RegisterPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) {
-      setError("Senha deve ter ao menos 6 caracteres");
+    if (password.length < 8) {
+      setError("Senha deve ter ao menos 8 caracteres");
       return;
     }
     setLoading(true);
@@ -59,10 +59,10 @@ export function RegisterPage() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={6}
+            minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="mínimo 6 caracteres"
+            placeholder="mínimo 8 caracteres"
           />
           {error ? (
             <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2">

@@ -80,10 +80,21 @@ export async function request<T>(
   }
 
   if (!res.ok) {
-    const msg =
-      (data && typeof data === "object" && "detail" in data
-        ? String((data as { detail: unknown }).detail)
-        : res.statusText) || "Erro na requisição";
+    let msg = res.statusText || "Erro na requisição";
+    if (data && typeof data === "object" && "detail" in data) {
+      const detail = (data as { detail: unknown }).detail;
+      if (typeof detail === "string") {
+        msg = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        // FastAPI 422 ValidationError shape: [{loc, msg, type}, ...].
+        // Surface the first message so the user sees something useful.
+        const first = detail[0] as { msg?: unknown; loc?: unknown };
+        if (first && typeof first.msg === "string") {
+          const loc = Array.isArray(first.loc) ? first.loc.join(".") : "";
+          msg = loc ? `${loc}: ${first.msg}` : first.msg;
+        }
+      }
+    }
     throw new ApiError(res.status, msg, data);
   }
   return data as T;
