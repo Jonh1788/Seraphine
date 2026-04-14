@@ -39,6 +39,7 @@ from aura.chat.routes import router as chat_router
 from aura.chat import schema as chat_schema
 from aura.chat.service import ConversationService
 from aura.config import settings
+from aura.google.routes import router as google_router
 from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
@@ -165,6 +166,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(finance_router)
     app.include_router(recurring_router)
+    app.include_router(google_router)
 
     @app.get("/health")
     async def health() -> dict:

@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight, Columns3, LayoutGrid, Rows3 } from "lucide-react";
+import { GoogleCalendarChip } from "./GoogleCalendarChip";
 
 export type CalendarView = "week" | "month" | "cards";
 
@@ -51,6 +52,7 @@ export function CalendarToolbar({
       </div>
 
       <div className="flex items-center gap-2">
+        <GoogleCalendarChip />
         <button
           type="button"
           onClick={onToday}
