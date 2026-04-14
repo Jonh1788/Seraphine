@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,15 +54,19 @@ async def lifespan(app: FastAPI):
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
     llm: AnthropicClient | None = None
-    if settings.anthropic_api_key:
-        llm = AnthropicClient(
-            api_key=settings.anthropic_api_key,
-            model=settings.anthropic_model,
+    key = settings.anthropic_api_key.strip()
+    if key:
+        llm = AnthropicClient(api_key=key, model=settings.anthropic_model)
+        logger.info(
+            "Anthropic client wired (model=%s, key=%s...%s, len=%d)",
+            settings.anthropic_model, key[:6], key[-4:], len(key),
         )
-        logger.info("Anthropic client wired (model=%s)", settings.anthropic_model)
     else:
         logger.warning(
-            "ANTHROPIC_API_KEY not set — LLM-dependent flows will fail",
+            "AURA_ANTHROPIC_API_KEY not set — chat will return 503. "
+            "Looked at .env: %s (exists=%s)",
+            (Path(__file__).resolve().parent / ".env"),
+            (Path(__file__).resolve().parent / ".env").exists(),
         )
 
     # ---- Domain services
