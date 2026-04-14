@@ -1,44 +1,45 @@
 """Encrypted OAuth token persistence for the Google integration.
 
-Tokens live at ``settings.google_token_path`` (default
-``~/.seraphine/google_tokens.enc``). We encrypt the JSON payload with
-``cryptography.fernet.Fernet``, deriving the key via PBKDF2HMAC from a
-fixed salt combined with ``socket.gethostname()``.
+Two implementations live in this package:
 
-**This is light obfuscation, not real security.** The threat model is
-"another script on the same Mac shouldn't casually grep plaintext
-OAuth tokens". A determined attacker with code exec on the box can
-trivially recover the key — the hostname is public and the salt is in
-this file.
+- :class:`FileTokenStore` (this module) — single-tenant, on-disk.
+  Used by Seraphine (one user per box). Tokens live at
+  ``settings.google_token_path`` (default
+  ``~/.seraphine/google_tokens.enc``), encrypted with Fernet and keyed
+  off the hostname.
+- :class:`~google_integration.db_token_store.DBTokenStore` — multi-tenant,
+  SQLite-backed. Used by Aura. Same encryption + key derivation; the
+  ciphertext is stored per-user in a SQL row.
 
-The dir is chmod 0700 and the token file chmod 0600 after every write.
+Both implement :class:`TokenStoreProtocol` so callers (``GoogleClient``,
+``OAuthFlow``) can swap between them. ``TokenStore`` remains exported
+as a back-compat alias for ``FileTokenStore``.
+
+**Threat model (file store):** Light obfuscation, not real security.
+"Another script on the same Mac shouldn't casually grep plaintext OAuth
+tokens." A determined attacker with code exec on the box can trivially
+recover the key — the hostname is public and the salt is in
+``_crypto.py``. The dir is chmod 0700 and the token file chmod 0600
+after every write.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
-import socket
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from pydantic import BaseModel
 
-
-# Fixed salt — this is intentional, see module docstring for the
-# threat model. Changing this value invalidates every existing token
-# file (users will have to re-auth).
-_FIXED_SALT = b"seraphine.google.v1.salt.\x12\x34\x56\x78"
-_PBKDF2_ITERS = 200_000
+from google_integration._crypto import derive_key
 
 
 class TokenBundle(BaseModel):
-    """OAuth token bundle persisted by :class:`TokenStore`."""
+    """OAuth token bundle persisted by a :class:`TokenStoreProtocol`."""
 
     access_token: str
     refresh_token: str
@@ -46,20 +47,18 @@ class TokenBundle(BaseModel):
     scopes: list[str]
 
 
-def _derive_key() -> bytes:
-    """Derive a Fernet key from the machine hostname + fixed salt."""
-    hostname = socket.gethostname().encode("utf-8")
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=_FIXED_SALT,
-        iterations=_PBKDF2_ITERS,
-    )
-    raw = kdf.derive(hostname)
-    return base64.urlsafe_b64encode(raw)
+class TokenStoreProtocol(Protocol):
+    """Contract every token store implementation honors.
+
+    Async-first; callers should never block the event loop.
+    """
+
+    async def load(self) -> TokenBundle | None: ...
+    async def save(self, bundle: TokenBundle) -> None: ...
+    async def clear(self) -> None: ...
 
 
-class TokenStore:
+class FileTokenStore:
     """Persist OAuth tokens encrypted at rest under ``~/.seraphine/``.
 
     All methods are async so callers can stay in the event loop; the
@@ -70,7 +69,7 @@ class TokenStore:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._lock = asyncio.Lock()
-        self._fernet = Fernet(_derive_key())
+        self._fernet = Fernet(derive_key())
 
     @property
     def path(self) -> Path:
@@ -133,3 +132,7 @@ class TokenStore:
                 self._path.unlink()
             except FileNotFoundError:
                 pass
+
+
+# Back-compat alias — Seraphine and older call sites import ``TokenStore``.
+TokenStore = FileTokenStore

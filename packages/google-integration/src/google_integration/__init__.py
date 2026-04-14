@@ -3,14 +3,17 @@
 Public surface:
 - ``client.GoogleClient``: HTTP client wrapping Gmail + Calendar APIs
 - ``client.GoogleAuthError`` / ``GoogleAPIError``: typed exceptions
-- ``token_store.TokenStore``: encrypted file persistence for OAuth tokens
-- ``token_store.TokenBundle``: the persisted shape (access/refresh/scopes)
-- ``oauth.OAuthFlow``: one-shot consent flow with local callback server
-- ``routes.router``: FastAPI router for /google/* endpoints
-
-Aura will add a DB-backed multi-tenant TokenStore alongside the
-file-backed default. The routes are app-agnostic — they read
-``request.app.state.google_client``.
+- ``token_store.FileTokenStore``: encrypted on-disk token persistence
+  (Seraphine). ``TokenStore`` remains as a back-compat alias.
+- ``token_store.TokenStoreProtocol``: the common contract every store
+  implements (load/save/clear).
+- ``token_store.TokenBundle``: the persisted shape
+  (access/refresh/scopes).
+- ``db_token_store.DBTokenStore``: per-user SQLite-backed token store
+  (Aura).
+- ``oauth.OAuthFlow``: one-shot loopback consent flow (Seraphine).
+- ``oauth.WebOAuthFlow``: server-side web redirect consent flow (Aura).
+- ``routes.router``: FastAPI router for Seraphine's /google/* endpoints.
 """
 
 from google_integration.client import (
@@ -18,16 +21,26 @@ from google_integration.client import (
     GoogleAuthError,
     GoogleClient,
 )
-from google_integration.token_store import TokenBundle, TokenStore
-from google_integration.oauth import OAuthFlow
+from google_integration.db_token_store import DBTokenStore
+from google_integration.oauth import OAuthFlow, WebOAuthFlow
+from google_integration.token_store import (
+    FileTokenStore,
+    TokenBundle,
+    TokenStore,
+    TokenStoreProtocol,
+)
 from google_integration import routes
 
 __all__ = [
     "GoogleClient",
     "GoogleAuthError",
     "GoogleAPIError",
+    "FileTokenStore",
     "TokenStore",
+    "TokenStoreProtocol",
     "TokenBundle",
+    "DBTokenStore",
     "OAuthFlow",
+    "WebOAuthFlow",
     "routes",
 ]

@@ -45,5 +45,24 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-5"
 
+    # --- Google OAuth (multi-tenant, web redirect flow)
+    # If client_id or client_secret is empty, /google/connect returns
+    # 501 so the frontend chip renders a helpful hint instead of
+    # crashing. The redirect URL must match EXACTLY what is registered
+    # in the Google Cloud console for this OAuth client.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_oauth_redirect_url: str = (
+        "http://localhost:8001/google/oauth/callback"
+    )
+    # Scopes requested on consent. Space-separated so ops can override
+    # via a single env var. Defaults cover calendar read + write + gmail
+    # modify (mirrors Seraphine's default set).
+    google_scopes: str = (
+        "https://www.googleapis.com/auth/calendar.readonly "
+        "https://www.googleapis.com/auth/calendar.events "
+        "https://www.googleapis.com/auth/gmail.modify"
+    )
+
 
 settings = Settings()

@@ -214,27 +214,114 @@ class OAuthFlow:
 
     async def exchange_code(self, code: str) -> TokenBundle:
         """Exchange an auth code for access + refresh tokens."""
-        data = {
-            "code": code,
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "redirect_uri": self.redirect_uri,
-            "grant_type": "authorization_code",
-        }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(GOOGLE_TOKEN_URL, data=data)
-            if resp.status_code >= 400:
-                raise RuntimeError(
-                    f"google token exchange failed: {resp.status_code} {resp.text}"
-                )
-            payload = resp.json()
-
-        expires_in = int(payload.get("expires_in", 3600))
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-        scope_str = payload.get("scope", " ".join(self.scopes))
-        return TokenBundle(
-            access_token=payload["access_token"],
-            refresh_token=payload.get("refresh_token", ""),
-            expires_at=expires_at,
-            scopes=scope_str.split(),
+        return await _exchange_code(
+            code=code,
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            redirect_uri=self.redirect_uri,
+            default_scopes=self.scopes,
         )
+
+
+# ----------------------------------------------------------------------
+# Web-style OAuth (no local callback server)
+#
+# Aura drives the consent dance from the browser: it calls
+# ``WebOAuthFlow.build_consent_url(...)`` to hand the frontend a
+# Google consent URL, then the browser itself hits Google and Google
+# redirects to the server's own ``/google/oauth/callback`` route. That
+# route calls ``WebOAuthFlow.exchange_code(...)`` to swap the code for
+# tokens. No local port binding happens server-side.
+# ----------------------------------------------------------------------
+
+
+class WebOAuthFlow:
+    """OAuth helpers for a server-side web redirect flow.
+
+    Unlike :class:`OAuthFlow`, this doesn't bind a port — the
+    ``redirect_uri`` is the server's own public callback route and is
+    supplied by the caller. Used by Aura for multi-tenant OAuth.
+    """
+
+    def __init__(
+        self,
+        *,
+        client_id: str,
+        client_secret: str,
+        scopes: list[str],
+        redirect_uri: str,
+    ) -> None:
+        if not client_id or not client_secret:
+            raise RuntimeError("google_client_id/google_client_secret not set")
+        if not redirect_uri:
+            raise RuntimeError("redirect_uri is required for web OAuth flow")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scopes = list(scopes)
+        self.redirect_uri = redirect_uri
+
+    def build_consent_url(self, state: str) -> str:
+        """Return Google's consent URL carrying the caller-supplied
+        ``state`` token. The caller is responsible for signing+expiring
+        the state (so the callback can reject forged requests)."""
+        params = {
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(self.scopes),
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+            "state": state,
+        }
+        return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+    async def exchange_code(self, code: str) -> TokenBundle:
+        """Exchange an auth code for access + refresh tokens."""
+        return await _exchange_code(
+            code=code,
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            redirect_uri=self.redirect_uri,
+            default_scopes=self.scopes,
+        )
+
+
+async def _exchange_code(
+    *,
+    code: str,
+    client_id: str,
+    client_secret: str,
+    redirect_uri: str,
+    default_scopes: list[str],
+) -> TokenBundle:
+    """Shared token exchange: POST to Google's token endpoint.
+
+    Both the loopback ``OAuthFlow`` and the ``WebOAuthFlow`` funnel
+    through here — the only difference between them is how the consent
+    URL + redirect_uri are produced.
+    """
+    data = {
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(GOOGLE_TOKEN_URL, data=data)
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"google token exchange failed: {resp.status_code} {resp.text}"
+            )
+        payload = resp.json()
+
+    expires_in = int(payload.get("expires_in", 3600))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    scope_str = payload.get("scope", " ".join(default_scopes))
+    return TokenBundle(
+        access_token=payload["access_token"],
+        refresh_token=payload.get("refresh_token", ""),
+        expires_at=expires_at,
+        scopes=scope_str.split(),
+    )

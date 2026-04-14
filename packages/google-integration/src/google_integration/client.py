@@ -22,7 +22,10 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from google_integration.token_store import TokenBundle, TokenStore
+from google_integration.token_store import (
+    TokenBundle,
+    TokenStoreProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +138,7 @@ class GoogleClient:
 
     def __init__(
         self,
-        token_store: TokenStore,
+        token_store: TokenStoreProtocol,
         client_id: str,
         client_secret: str,
         scopes: list[str],

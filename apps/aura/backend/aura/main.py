@@ -39,7 +39,9 @@ from aura.chat.routes import router as chat_router
 from aura.chat import schema as chat_schema
 from aura.chat.service import ConversationService
 from aura.config import settings
+from aura.google import schema as google_schema
 from aura.google.routes import router as google_router
+from aura.google.service import GoogleAuthService
 from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
@@ -60,6 +62,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("mod_tasks", tasks_schema.migrate)
     store.register_migrator("mod_finance", finance_schema.migrate)
     store.register_migrator("aura_recurring", recurring_schema.migrate)
+    store.register_migrator("aura_google", google_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -85,6 +88,7 @@ async def lifespan(app: FastAPI):
     finance_service = FinanceService(store)
     conversations_service = ConversationService(store)
     recurring_service = RecurringService(store, task_service)
+    google_auth_service = GoogleAuthService(store, settings)
 
     app.state.store = store
     app.state.llm = llm
@@ -93,6 +97,7 @@ async def lifespan(app: FastAPI):
     app.state.finance_service = finance_service
     app.state.conversations_service = conversations_service
     app.state.recurring_service = recurring_service
+    app.state.google_auth_service = google_auth_service
 
     # Background materialize loop — every 10 minutes, create today's
     # occurrences for any active rule that is due and hasn't fired yet.

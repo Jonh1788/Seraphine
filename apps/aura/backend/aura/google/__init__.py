@@ -1,11 +1,11 @@
-"""Google integration stubs for Aura.
+"""Google integration for Aura (multi-tenant OAuth).
 
-Today this module only exposes status / connect / disconnect endpoints
-that the UI's connection chip can call. The real multi-tenant OAuth
-flow (per-user TokenStore in the DB, callback handler, refresh) is
-deferred — the chip will go green once those land.
+Per-user DBTokenStore + web redirect flow. The UI's GoogleCalendarChip
+drives ``/google/connect`` → consent popup → ``/google/oauth/callback``
+which persists tokens and ``postMessage``s the opener.
 """
 
 from aura.google.routes import router
+from aura.google.service import GoogleAuthService, GoogleOAuthError
 
-__all__ = ["router"]
+__all__ = ["router", "GoogleAuthService", "GoogleOAuthError"]
