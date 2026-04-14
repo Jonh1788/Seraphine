@@ -35,7 +35,7 @@ def _now() -> str:
 
 
 def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
-    """Map a 11-column SELECT row to a SeraphineTask."""
+    """Map a 12-column SELECT row to a SeraphineTask."""
     raw_payload = row[6]
     try:
         payload = json.loads(raw_payload) if raw_payload else {}
@@ -52,13 +52,14 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         created_at=row[7],
         updated_at=row[8],
         due_date=row[9],
-        user_id=row[10],
+        due_time=row[10],
+        user_id=row[11],
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
-    " updated_at, due_date, user_id"
+    " updated_at, due_date, due_time, user_id"
 )
 
 
@@ -93,6 +94,7 @@ class TaskService:
         payload: dict[str, Any] | None = None,
         status: str = "pending",
         due_date: str | None = None,
+        due_time: str | None = None,
         user_id: str | None = None,
     ) -> int:
         ts = _now()
@@ -103,10 +105,10 @@ class TaskService:
                 cur = conn.execute(
                     "INSERT INTO seraphine_tasks"
                     " (type, status, title, description, source, payload,"
-                    "  created_at, updated_at, due_date, user_id)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "  created_at, updated_at, due_date, due_time, user_id)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (type, status, title, description, source,
-                     payload_json, ts, ts, due_date, user_id),
+                     payload_json, ts, ts, due_date, due_time, user_id),
                 )
                 return int(cur.lastrowid or 0)
 

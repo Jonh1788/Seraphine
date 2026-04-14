@@ -31,6 +31,7 @@ from llm_adapters.types import ChatMessage
 from mod_finance import FinancialEntry, FinanceService
 from mod_finance.models import CATEGORIES
 from mod_tasks.routes import get_current_user_id
+from mod_tasks.service import TaskService
 
 from aura.chat.service import ConversationService
 
@@ -77,7 +78,14 @@ _SYSTEM_PROMPT = (
     "registrá-lo. Após registrar, confirme com mensagem curta mencionando "
     "o valor e a descrição. Categorize com bom senso. Se o usuário não "
     "mencionar a data, considere hoje. Não invente dados — se faltar "
-    "informação essencial (ex: valor não claro), pergunte antes de registrar."
+    "informação essencial (ex: valor não claro), pergunte antes de registrar. "
+    "Quando o usuário pedir para adicionar/criar uma tarefa (ex: 'adiciona "
+    "uma tarefa', 'lembra de ligar pro banco amanhã às 15h'), use a tool "
+    "create_task. Se mencionar horário, preencha due_time em HH:MM 24h. "
+    "Se mencionar dia relativo (amanhã, sexta), converta para YYYY-MM-DD. "
+    "Quando o usuário disser que concluiu/fez algo (ex: 'já paguei a conta', "
+    "'terminei o relatório'), use complete_task com o título (ou trecho) da "
+    "tarefa. Após criar ou concluir, confirme com uma mensagem curta."
 )
 
 
@@ -133,6 +141,43 @@ _TOOLS: list[dict[str, Any]] = [
             "required": ["type", "amount", "category", "description"],
         },
     },
+    {
+        "name": "create_task",
+        "description": (
+            "Cria uma nova tarefa para o usuário. Use quando o usuário pedir "
+            "'adiciona/cria uma tarefa'. Quando o usuário disser horário, "
+            "preencha due_time (HH:MM)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "due_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD; padrão = hoje",
+                },
+                "due_time": {
+                    "type": "string",
+                    "description": "HH:MM 24h; opcional",
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "complete_task",
+        "description": (
+            "Marca uma tarefa como concluída. Encontra por título (busca por "
+            "substring case-insensitive na lista atual de tasks pendentes do "
+            "usuário)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        },
+    },
 ]
 
 _TITLE_PROMPT = (
@@ -170,6 +215,15 @@ def _finance_or_503(request: Request) -> FinanceService:
     )
     if svc is None:
         raise HTTPException(status_code=503, detail="finance service não configurado")
+    return svc
+
+
+def _tasks_or_503(request: Request) -> TaskService:
+    svc: Optional[TaskService] = getattr(
+        request.app.state, "task_service", None,
+    )
+    if svc is None:
+        raise HTTPException(status_code=503, detail="task service não configurado")
     return svc
 
 
@@ -307,6 +361,88 @@ async def _exec_register_transaction(
     return {"ok": True, "entry": persisted}
 
 
+def _task_to_inline(task: Any) -> dict[str, Any]:
+    """Serialize a SeraphineTask into the minimal shape sent to the UI
+    (matches the frontend InlineTask interface)."""
+    return {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description or "",
+        "status": task.status,
+        "due_date": task.due_date,
+        "due_time": task.due_time,
+    }
+
+
+async def _exec_create_task(
+    tasks: TaskService,
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute the create_task tool — persists a generic task owned by
+    the user. Defaults due_date to today (São Paulo TZ)."""
+    title = (args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title vazio"}
+    description = (args.get("description") or "").strip()
+    due_date = (args.get("due_date") or "").strip() or _today_iso()
+    due_time_raw = args.get("due_time")
+    due_time = due_time_raw.strip() if isinstance(due_time_raw, str) else None
+    if due_time == "":
+        due_time = None
+
+    task_id = await tasks.create_task(
+        type="generic",
+        title=title,
+        description=description,
+        source="chat",
+        payload={},
+        status="pending",
+        due_date=due_date,
+        due_time=due_time,
+        user_id=user_id,
+    )
+    persisted = await tasks.get_task(task_id, user_id=user_id)
+    if persisted is None:
+        return {"ok": False, "error": "falha ao carregar tarefa criada"}
+    return {"ok": True, "task": _task_to_inline(persisted)}
+
+
+async def _exec_complete_task(
+    tasks: TaskService,
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute the complete_task tool — looks up the first pending task
+    whose title contains the requested substring (case-insensitive) and
+    marks it completed."""
+    query = (args.get("title") or "").strip()
+    if not query:
+        return {"ok": False, "error": "title vazio"}
+    pending = await tasks.list_tasks(
+        status="pending", limit=200, user_id=user_id,
+    )
+    needle = query.casefold()
+    match = next(
+        (t for t in pending if needle in (t.title or "").casefold()),
+        None,
+    )
+    if match is None:
+        return {
+            "ok": False,
+            "error": f"nenhuma tarefa pendente encontrada para '{query}'",
+        }
+    affected = await tasks.update_status(
+        match.id, "completed", user_id=user_id,
+    )
+    if not affected:
+        return {"ok": False, "error": "falha ao concluir tarefa"}
+    updated = await tasks.get_task(match.id, user_id=user_id)
+    if updated is None:
+        return {"ok": False, "error": "tarefa não encontrada após atualizar"}
+    return {"ok": True, "task": _task_to_inline(updated)}
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def stream_message(
     request: Request,
@@ -320,6 +456,7 @@ async def stream_message(
     SSE frames:
         data: {"delta": "..."}
         data: {"transaction": {id, type, amount, category, description, date}}
+        data: {"task": {id, title, status, due_date, due_time, description}}
         data: {"done": true, "title": "<optional>"}
         data: {"error": "msg"}
     """
@@ -327,6 +464,7 @@ async def stream_message(
     svc = _service_or_503(request)
     llm = _llm_or_503(request)
     finance = _finance_or_503(request)
+    tasks_svc = _tasks_or_503(request)
 
     user_text = body.content.strip()
     if not user_text:
@@ -348,10 +486,11 @@ async def stream_message(
 
     async def gen() -> AsyncIterator[bytes]:
         acc_parts: list[str] = []
-        # Transactions persisted across all tool-call rounds in this turn —
+        # Side effects persisted across all tool-call rounds in this turn —
         # stored on the assistant message metadata so reloads of the
         # conversation re-render the visual cards.
         turn_transactions: list[dict[str, Any]] = []
+        turn_tasks: list[dict[str, Any]] = []
         try:
             for _round in range(6):  # safety cap
                 pending_tool_calls: list[dict[str, Any]] | None = None
@@ -372,6 +511,10 @@ async def stream_message(
                     name, args = _parse_tool_call(tc)
                     if name == "register_transaction":
                         result = await _exec_register_transaction(finance, uid, args)
+                    elif name == "create_task":
+                        result = await _exec_create_task(tasks_svc, uid, args)
+                    elif name == "complete_task":
+                        result = await _exec_complete_task(tasks_svc, uid, args)
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -380,6 +523,12 @@ async def stream_message(
                         turn_transactions.append(entry)
                         yield (
                             f"data: {json.dumps({'transaction': entry})}\n\n"
+                        ).encode()
+                    if result.get("ok") and result.get("task"):
+                        task_payload = result["task"]
+                        turn_tasks.append(task_payload)
+                        yield (
+                            f"data: {json.dumps({'task': task_payload})}\n\n"
                         ).encode()
 
                     # Feed the tool result back to the LLM so it can
@@ -395,9 +544,13 @@ async def stream_message(
                     )
 
             reply = "".join(acc_parts).strip() or "(sem resposta)"
-            metadata: dict[str, Any] | None = (
-                {"transactions": turn_transactions} if turn_transactions else None
-            )
+            metadata: dict[str, Any] | None = None
+            if turn_transactions or turn_tasks:
+                metadata = {}
+                if turn_transactions:
+                    metadata["transactions"] = turn_transactions
+                if turn_tasks:
+                    metadata["tasks"] = turn_tasks
             try:
                 await svc.add_message(
                     conversation_id, uid, "assistant", reply, metadata=metadata,

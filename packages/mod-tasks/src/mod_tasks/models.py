@@ -19,4 +19,5 @@ class SeraphineTask:
     created_at: str | None = None
     updated_at: str | None = None
     due_date: str | None = None  # YYYY-MM-DD (optional user-facing deadline)
+    due_time: str | None = None  # HH:MM 24h (optional, pairs with due_date)
     user_id: str | None = None  # NULL for single-tenant (Seraphine), set for Aura

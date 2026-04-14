@@ -39,6 +39,7 @@ function NewTaskModal({ onClose, onCreated }: NewTaskModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState(isoToday());
+  const [dueTime, setDueTime] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,12 +50,13 @@ function NewTaskModal({ onClose, onCreated }: NewTaskModalProps) {
     setError(null);
     try {
       await tasksApi.createTask({
-        type: "task",
+        type: "generic",
         title: title.trim(),
         description: description.trim() || undefined,
         source: "web",
         payload: {},
         due_date: dueDate || null,
+        due_time: dueTime || null,
       });
       onCreated();
       onClose();
@@ -94,12 +96,20 @@ function NewTaskModal({ onClose, onCreated }: NewTaskModalProps) {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Detalhes (opcional)"
           />
-          <Input
-            label="Data"
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Data"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+            <Input
+              label="Horário"
+              type="time"
+              value={dueTime}
+              onChange={(e) => setDueTime(e.target.value)}
+            />
+          </div>
           {error ? <div className="text-sm text-red-400">{error}</div> : null}
           <div className="flex justify-end gap-2 mt-2">
             <Button type="button" variant="ghost" onClick={onClose}>

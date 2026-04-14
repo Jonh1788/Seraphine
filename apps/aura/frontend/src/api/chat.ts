@@ -11,8 +11,18 @@ export interface InlineTransaction {
   status: string;
 }
 
+export interface InlineTask {
+  id: number;
+  title: string;
+  description?: string | null;
+  status: string;
+  due_date?: string | null;
+  due_time?: string | null;
+}
+
 export interface ChatMessageMetadata {
   transactions?: InlineTransaction[];
+  tasks?: InlineTask[];
 }
 
 export interface ChatMessage {
@@ -79,6 +89,7 @@ export function deleteConversation(id: string): Promise<{ ok: boolean }> {
 export interface StreamHandlers {
   onDelta: (text: string) => void;
   onTransaction?: (entry: InlineTransaction) => void;
+  onTask?: (task: InlineTask) => void;
   onDone: (info: { title?: string }) => void;
   onError: (msg: string) => void;
   signal?: AbortSignal;
@@ -145,6 +156,7 @@ export async function streamMessage(
           const parsed = JSON.parse(payload) as {
             delta?: string;
             transaction?: InlineTransaction;
+            task?: InlineTask;
             done?: boolean;
             title?: string;
             error?: string;
@@ -152,6 +164,9 @@ export async function streamMessage(
           if (typeof parsed.delta === "string") handlers.onDelta(parsed.delta);
           if (parsed.transaction && handlers.onTransaction) {
             handlers.onTransaction(parsed.transaction);
+          }
+          if (parsed.task && handlers.onTask) {
+            handlers.onTask(parsed.task);
           }
           if (parsed.error) {
             handlers.onError(parsed.error);

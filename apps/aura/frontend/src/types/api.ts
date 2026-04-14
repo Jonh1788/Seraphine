@@ -20,6 +20,7 @@ export interface Task {
   status: TaskStatus;
   payload?: Record<string, unknown> | null;
   due_date?: string | null;
+  due_time?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -35,6 +36,7 @@ export interface CreateTaskBody {
   source?: string;
   payload?: Record<string, unknown>;
   due_date?: string | null;
+  due_time?: string | null;
 }
 
 export type EntryType = "income" | "expense";

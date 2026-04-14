@@ -54,6 +54,7 @@ class TaskCreate(BaseModel):
     source: str = "system"
     payload: dict[str, Any] = Field(default_factory=dict)
     due_date: str | None = None  # YYYY-MM-DD
+    due_time: str | None = None  # HH:MM (24h)
 
 
 class TaskStatusUpdate(BaseModel):
@@ -129,6 +130,7 @@ async def create_task(
             source=body.source,
             payload=body.payload,
             due_date=body.due_date,
+            due_time=body.due_time,
             user_id=user_id,
         )
         return {"id": task_id, "ok": True}

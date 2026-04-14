@@ -31,6 +31,7 @@ def migrate(conn: sqlite3.Connection) -> None:
           created_at    TEXT NOT NULL,
           updated_at    TEXT NOT NULL,
           due_date      TEXT,
+          due_time      TEXT,
           user_id       TEXT
         )
         """
@@ -41,6 +42,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     # on those columns or the index DDL fails on the legacy table.
     for ddl in (
         "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT",
+        "ALTER TABLE seraphine_tasks ADD COLUMN due_time TEXT",
         "ALTER TABLE seraphine_tasks ADD COLUMN user_id TEXT",
     ):
         try:
