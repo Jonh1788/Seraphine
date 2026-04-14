@@ -26,7 +26,7 @@ async def subscribe(request: Request, payload: SubscriptionPayload):
     push = getattr(request.app.state, "push_service", None)
     if not push:
         return {"ok": False, "error": "push not configured"}
-    push.add_subscription({"endpoint": payload.endpoint, "keys": payload.keys})
+    await push.add_subscription({"endpoint": payload.endpoint, "keys": payload.keys})
     return {"ok": True}
 
 
@@ -34,5 +34,33 @@ async def subscribe(request: Request, payload: SubscriptionPayload):
 async def unsubscribe(request: Request, payload: SubscriptionPayload):
     push = getattr(request.app.state, "push_service", None)
     if push:
-        push.remove_subscription(payload.endpoint)
+        await push.remove_subscription(payload.endpoint)
     return {"ok": True}
+
+
+@router.get("/push/status")
+async def push_status(request: Request):
+    push = getattr(request.app.state, "push_service", None)
+    if not push:
+        return {"configured": False, "subscription_count": 0, "endpoints": []}
+    return {
+        "configured": True,
+        "subscription_count": push.subscription_count,
+        "endpoints": [ep[:80] + "..." if len(ep) > 80 else ep for ep in push.list_endpoints()],
+    }
+
+
+class TestPayload(BaseModel):
+    title: str = "Seraphine — teste"
+    body: str = "Notificacao de teste. Se voce viu isso, o push ta funcionando."
+    url: str = "/"
+
+
+@router.post("/push/test")
+async def push_test(request: Request, payload: TestPayload | None = None):
+    push = getattr(request.app.state, "push_service", None)
+    if not push:
+        return {"ok": False, "error": "push not configured"}
+    p = payload or TestPayload()
+    sent = await push.send_notification(title=p.title, body=p.body, url=p.url, tag="push-test")
+    return {"ok": True, "sent": sent, "subscribers": push.subscription_count}

@@ -198,8 +198,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             push_service = PushService(
                 vapid_private_key=settings.vapid_private_key,
                 vapid_public_key=settings.vapid_public_key,
+                store=store,
             )
-            logger.info("Web Push service wired (VAPID public key=%s...)", settings.vapid_public_key[:20])
+            await push_service.load_from_store()
+            logger.info(
+                "Web Push service wired (VAPID public key=%s..., %d subs loaded)",
+                settings.vapid_public_key[:20],
+                push_service.subscription_count,
+            )
         except Exception as e:
             logger.warning("Web Push failed (non-critical): %s", e)
 

@@ -190,6 +190,13 @@ class MemoryStore:
                       ON seraphine_tasks(status);
                     CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
                       ON seraphine_tasks(type);
+
+                    CREATE TABLE IF NOT EXISTS push_subscriptions (
+                      endpoint   TEXT PRIMARY KEY,
+                      p256dh     TEXT NOT NULL,
+                      auth       TEXT NOT NULL,
+                      created_at TEXT NOT NULL
+                    );
                     """
                 )
 
@@ -775,5 +782,45 @@ class MemoryStore:
                 created_at=row[4],
                 superseded_by=row[5],
             )
+
+        return await asyncio.to_thread(_work)
+
+    # ------------------------------------------------------------------
+    # Push subscriptions
+    # ------------------------------------------------------------------
+
+    async def add_push_subscription(
+        self, endpoint: str, p256dh: str, auth: str
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO push_subscriptions"
+                    " (endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?)",
+                    (endpoint, p256dh, auth, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def remove_push_subscription(self, endpoint: str) -> int:
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM push_subscriptions WHERE endpoint = ?",
+                    (endpoint,),
+                )
+                return cur.rowcount or 0
+
+        return await asyncio.to_thread(_work)
+
+    async def list_push_subscriptions(self) -> list[dict[str, str]]:
+        def _work() -> list[dict[str, str]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT endpoint, p256dh, auth FROM push_subscriptions"
+                ).fetchall()
+            return [
+                {"endpoint": r[0], "p256dh": r[1], "auth": r[2]} for r in rows
+            ]
 
         return await asyncio.to_thread(_work)
