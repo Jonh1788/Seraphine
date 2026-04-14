@@ -26,6 +26,30 @@ export function ChatPage() {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Typewriter state — server pushes deltas into bufferRef as fast as
+  // they arrive, a RAF loop reveals chars from buffer → `streaming`
+  // at a smooth rate so the user sees real typing instead of jerky
+  // bursts. When the stream finishes, the loop drains the remainder
+  // and then commits the final message.
+  const bufferRef = useRef<string>("");
+  const displayedLenRef = useRef<number>(0);
+  const streamDoneRef = useRef<boolean>(false);
+  const rafRef = useRef<number | null>(null);
+  const lastFrameRef = useRef<number>(0);
+  const finalizeRef = useRef<(() => void) | null>(null);
+
+  const stopTyping = () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  };
+
+  // Cleanup any running RAF on unmount.
+  useEffect(() => {
+    return () => stopTyping();
+  }, []);
+
   // Load history when conversationId changes (or clear on null).
   useEffect(() => {
     setError(null);
@@ -96,27 +120,55 @@ export function ChatPage() {
     setDraft("");
     setStreaming("");
 
+    // Reset typewriter state for this turn.
+    bufferRef.current = "";
+    displayedLenRef.current = 0;
+    streamDoneRef.current = false;
+    lastFrameRef.current = performance.now();
+
+    // ~70 chars/sec baseline reveal; if the buffer gets ahead by a lot
+    // (Anthropic burst), we catch up by accelerating proportional to
+    // the gap so the typing never lags more than ~half a second behind.
+    const BASELINE_CPS = 70;
+    const tick = (now: number) => {
+      const dt = Math.max(0, now - lastFrameRef.current) / 1000;
+      lastFrameRef.current = now;
+      const buf = bufferRef.current;
+      const remaining = buf.length - displayedLenRef.current;
+      if (remaining > 0) {
+        // Rate scales with backlog so a 500-char burst doesn't take
+        // 7s to render. floor(1 + dt * (cps + gap/2)).
+        const speed = BASELINE_CPS + remaining * 0.5;
+        const advance = Math.max(1, Math.floor(dt * speed));
+        displayedLenRef.current = Math.min(buf.length, displayedLenRef.current + advance);
+        setStreaming(buf.slice(0, displayedLenRef.current));
+      }
+      const caughtUp = displayedLenRef.current >= bufferRef.current.length;
+      if (streamDoneRef.current && caughtUp) {
+        rafRef.current = null;
+        finalizeRef.current?.();
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
     try {
-      let acc = "";
       await streamMessage(cid, text, {
         onDelta: (chunk) => {
-          acc += chunk;
-          setStreaming(acc);
+          bufferRef.current += chunk;
         },
-        onDone: ({ title }) => {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: acc.trim() || "(sem resposta)" },
-          ]);
-          setStreaming(null);
-          // Refresh sidebar so the new conversation (or updated title)
-          // shows up.
-          setSidebarRefreshKey((k) => k + 1);
-          if (title) {
-            // Optional: nothing else to do — sidebar refetch picks it up.
-          }
+        onDone: () => {
+          streamDoneRef.current = true;
+          finalizeRef.current = () => {
+            const final = bufferRef.current.trim() || "(sem resposta)";
+            setMessages((prev) => [...prev, { role: "assistant", content: final }]);
+            setStreaming(null);
+            setSidebarRefreshKey((k) => k + 1);
+          };
         },
         onError: (msg) => {
+          stopTyping();
           setError(msg);
           setStreaming(null);
           // Roll back the optimistic user message + restore draft so the
