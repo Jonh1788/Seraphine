@@ -33,6 +33,7 @@ type Card = TaskCard | EntryCard;
 
 interface TasksViewProps {
   onBack: () => void;
+  focusId?: string;
 }
 
 function parsePayload(payload: SeraphineTask['payload']): FinanceImportPayload {
@@ -150,7 +151,101 @@ function PasswordModal({ filename, busy, onCancel, onConfirm }: PasswordModalPro
   );
 }
 
-export function TasksView({ onBack }: TasksViewProps): JSX.Element {
+/* ------------------------------------------------------------------ */
+/*  New Task modal                                                     */
+/* ------------------------------------------------------------------ */
+
+interface NewTaskModalProps {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (data: { title: string; description: string; due_date: string | null }) => void;
+}
+
+function NewTaskModal({ busy, onCancel, onConfirm }: NewTaskModalProps): JSX.Element {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !busy) onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, onCancel]);
+
+  const submit = (e?: React.FormEvent): void => {
+    e?.preventDefault();
+    const t = title.trim();
+    if (!t || busy) return;
+    onConfirm({
+      title: t,
+      description: description.trim(),
+      due_date: dueDate || null,
+    });
+  };
+
+  return (
+    <div className="password-modal-backdrop" onClick={busy ? undefined : onCancel}>
+      <form
+        className="password-modal new-task-modal"
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h4 className="password-modal__title">Nova tarefa</h4>
+        <label className="new-task-modal__label">
+          Titulo
+          <input
+            ref={inputRef}
+            type="text"
+            className="password-modal__input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={busy}
+            placeholder="O que precisa ser feito?"
+            required
+          />
+        </label>
+        <label className="new-task-modal__label">
+          Descricao (opcional)
+          <textarea
+            className="password-modal__input new-task-modal__textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={busy}
+            placeholder="Detalhes adicionais..."
+            rows={3}
+          />
+        </label>
+        <label className="new-task-modal__label">
+          Data de entrega (opcional)
+          <input
+            type="date"
+            className="password-modal__input"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+        <div className="password-modal__actions">
+          <button type="button" className="btn-reject" onClick={onCancel} disabled={busy}>
+            Cancelar
+          </button>
+          <button type="submit" className="btn-confirm" disabled={busy || !title.trim()}>
+            {busy ? 'Criando...' : 'Criar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [tasks, setTasks] = useState<SeraphineTask[]>([]);
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [confirmedEntries, setConfirmedEntries] = useState<FinanceEntry[]>([]);
@@ -162,11 +257,18 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
   const [passwordTask, setPasswordTask] = useState<SeraphineTask | null>(null);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const [newTaskBusy, setNewTaskBusy] = useState(false);
+  const [focusedCardKey, setFocusedCardKey] = useState<string | null>(null);
   // Optimistic overrides: key -> column (to move cards instantly on drop)
   const [overrides, setOverrides] = useState<Record<string, ColumnId>>({});
-  // Guards click-after-drag: dragStart sets it; onClick checks/resets so an
-  // accidental toggleExpand doesn't fire after a cancelled/completed drag.
+  // Guards click-after-drag: set on dragend (after a real drag), checked
+  // (and cleared) on click. A plain click — no drag — never sets it.
   const dragOccurredRef = useRef(false);
+  // Tracks the currently-dragged card key via a ref to avoid the React
+  // re-render that was previously aborting the native drag on some
+  // browsers when setDraggingKey fired during dragstart.
+  const dragKeyRef = useRef<string | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -449,18 +551,73 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
     }
   };
 
+  const handleCreateTask = async (data: {
+    title: string;
+    description: string;
+    due_date: string | null;
+  }): Promise<void> => {
+    setNewTaskBusy(true);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (data.due_date) payload.due_date = data.due_date;
+      const res = await fetch(`${API_BASE}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'generic',
+          title: data.title,
+          description: data.description,
+          source: 'chat',
+          payload,
+          due_date: data.due_date,
+        }),
+      });
+      if (!res.ok) {
+        let msg = `Falha HTTP ${res.status}`;
+        try {
+          const d = await res.json();
+          if (d?.detail) msg = typeof d.detail === 'string' ? d.detail : msg;
+        } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+      setShowNewTask(false);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setNewTaskBusy(false);
+    }
+  };
+
+  /* ---- drag-and-drop handlers ---------------------------------- */
+  // Fix: setDraggingKey was previously called synchronously in dragstart,
+  // triggering a re-render that applied CSS `transform: scale(.98)` to the
+  // drag source. Chromium aborts the drag when the source's transform or
+  // layout changes mid-dragstart. We now record the drag key in a ref
+  // (no re-render) and defer the visual `.dragging` class to the next
+  // animation frame so the native drag can fully start first.
   const handleDragStart = (card: Card) => (e: React.DragEvent): void => {
-    dragOccurredRef.current = true;
-    setDraggingKey(card.key);
+    dragKeyRef.current = card.key;
     try {
       e.dataTransfer.setData('text/plain', card.key);
       e.dataTransfer.effectAllowed = 'move';
     } catch {
-      /* ignore */
+      /* ignore — Safari sometimes throws in older versions */
     }
+    // Defer React state update so the browser finishes capturing the drag
+    // image before we touch the element's styles.
+    requestAnimationFrame(() => {
+      setDraggingKey(card.key);
+    });
   };
 
   const handleDragEnd = (): void => {
+    // Only mark dragOccurred if the drag actually started (ref was set).
+    // Prevents toggleExpand from suppressing a plain click.
+    if (dragKeyRef.current) {
+      dragOccurredRef.current = true;
+    }
+    dragKeyRef.current = null;
     setDraggingKey(null);
     setDragOver(null);
   };
@@ -478,17 +635,43 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
   const handleDrop = (col: ColumnId) => (e: React.DragEvent): void => {
     e.preventDefault();
     setDragOver(null);
-    const key = draggingKey || e.dataTransfer.getData('text/plain');
+    const key = dragKeyRef.current || draggingKey || e.dataTransfer.getData('text/plain');
+    dragKeyRef.current = null;
     if (!key) return;
     const card = cardsWithOverrides.find((c) => c.key === key);
-    if (!card) return;
     setDraggingKey(null);
+    if (!card) return;
     void moveCard(card, col);
   };
 
   const toggleExpand = (key: string): void => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  /* ---- focus/scroll-into-view on deep-link --------------------- */
+  useEffect(() => {
+    if (!focusId) return;
+    if (loading) return;
+    if (tasks.length === 0) return;
+    const key = `task-${focusId}`;
+    // Wait one frame so the card is in the DOM after re-render.
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-task-id="${CSS.escape(focusId)}"]`,
+      ) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFocusedCardKey(key);
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focusId, tasks, loading]);
+
+  useEffect(() => {
+    if (!focusedCardKey) return;
+    const t = setTimeout(() => setFocusedCardKey(null), 2000);
+    return () => clearTimeout(t);
+  }, [focusedCardKey]);
 
   const renderCardActions = (card: Card): JSX.Element | null => {
     const busy = busyKey === card.key;
@@ -641,6 +824,7 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
   const renderCard = (card: Card): JSX.Element => {
     const isOpen = !!expanded[card.key];
     const isDragging = draggingKey === card.key;
+    const isFocused = focusedCardKey === card.key;
     const err = cardErrors[card.key];
 
     let detail: JSX.Element | null = null;
@@ -651,6 +835,11 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
         detail = (
           <div className="task-card__detail">
             {task.description && <p>{task.description}</p>}
+            {task.due_date && (
+              <p>
+                <span className="task-card__detail-label">Entrega:</span> {task.due_date}
+              </p>
+            )}
             {payload.from && (
               <p>
                 <span className="task-card__detail-label">De:</span> {payload.from}
@@ -695,11 +884,20 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
     // drop into "Descartadas".
     const canDrag = !(card.kind === 'entry' && card.column === 'done');
 
+    const dataTaskId =
+      card.kind === 'task' && card.task.id != null ? String(card.task.id) : undefined;
+
+    const classes = ['task-card'];
+    if (isDragging) classes.push('dragging');
+    if (!canDrag) classes.push('task-card--locked');
+    if (isFocused) classes.push('task-card--focused');
+
     return (
       <div
         key={card.key}
-        className={`task-card${isDragging ? ' dragging' : ''}${canDrag ? '' : ' task-card--locked'}`}
+        className={classes.join(' ')}
         draggable={canDrag}
+        data-task-id={dataTaskId}
         onDragStart={canDrag ? handleDragStart(card) : undefined}
         onDragEnd={canDrag ? handleDragEnd : undefined}
         onClick={() => {
@@ -743,6 +941,15 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
             <h2 className="memory-view__title">Tarefas</h2>
             <p className="memory-view__subtitle">Kanban de tarefas e itens pendentes</p>
           </div>
+        </div>
+        <div className="tasks-view__header-actions">
+          <button
+            type="button"
+            className="btn-confirm tasks-view__new-btn"
+            onClick={() => setShowNewTask(true)}
+          >
+            + Nova tarefa
+          </button>
         </div>
       </div>
 
@@ -807,6 +1014,17 @@ export function TasksView({ onBack }: TasksViewProps): JSX.Element {
             setPasswordTask(null);
           }}
           onConfirm={handlePasswordConfirm}
+        />
+      )}
+
+      {showNewTask && (
+        <NewTaskModal
+          busy={newTaskBusy}
+          onCancel={() => {
+            if (newTaskBusy) return;
+            setShowNewTask(false);
+          }}
+          onConfirm={handleCreateTask}
         />
       )}
     </div>

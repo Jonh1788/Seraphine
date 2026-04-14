@@ -18,3 +18,4 @@ class SeraphineTask:
     payload: dict[str, Any] = field(default_factory=dict)  # JSON-serializable dict
     created_at: str | None = None
     updated_at: str | None = None
+    due_date: str | None = None  # YYYY-MM-DD (optional user-facing deadline)

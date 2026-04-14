@@ -4848,6 +4848,111 @@ button:disabled {
   opacity: 0.7;
 }
 
+.week-view__event--clickable,
+.month-grid__event--clickable,
+.allday-chip--clickable {
+  cursor: pointer;
+}
+
+.week-view__event--clickable:hover,
+.month-grid__event--clickable:hover,
+.allday-chip--clickable:hover {
+  filter: brightness(1.15);
+}
+
+/* ---------- All-day row (week/day views) ---------- */
+
+.allday-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 2px 2px;
+}
+
+.allday-chip {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-item__badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.22);
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.calendar-item__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-item__amount {
+  font-weight: 700;
+  font-size: 10.5px;
+  padding-left: 6px;
+}
+
+.calendar-item__amount--income {
+  color: #4ade80;
+}
+
+.calendar-item__amount--expense {
+  color: #f87171;
+}
+
+/* ---------- Day View ---------- */
+
+.day-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.day-view__header {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-0);
+  padding: 0 var(--space-3);
+  min-height: 1px;
+}
+
+.day-view__grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 50px 1fr;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.day-view__grid--today {
+  background: rgba(167, 139, 250, 0.02);
+}
+
+.day-view__hours {
+  display: flex;
+  flex-direction: column;
+}
+
+.day-view__column {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
 /* ---------- Calendar responsive ---------- */
 
 @media (max-width: 768px) {
@@ -5959,8 +6064,50 @@ button:disabled {
 }
 
 .task-card.dragging {
+  /* NB: no transform/scale here — applying one during dragstart makes
+     Chromium abort the native drag. Opacity is safe. */
   opacity: 0.5;
-  transform: scale(0.98);
+}
+
+.task-card--focused {
+  animation: task-card-focus-pulse 2s ease-out;
+  border-color: var(--accent);
+}
+
+@keyframes task-card-focus-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.7); }
+  50%  { box-shadow: 0 0 0 10px rgba(167, 139, 250, 0.12); }
+  100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+}
+
+.tasks-view__header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.tasks-view__new-btn {
+  white-space: nowrap;
+}
+
+.new-task-modal {
+  max-width: 440px;
+  width: 92vw;
+}
+
+.new-task-modal__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+.new-task-modal__textarea {
+  resize: vertical;
+  min-height: 64px;
+  font-family: inherit;
 }
 
 .task-card--locked {

@@ -43,6 +43,7 @@ export interface SeraphineTask {
   payload: string | Record<string, any>;
   created_at: string;
   updated_at?: string;
+  due_date?: string | null; // YYYY-MM-DD (optional user-facing deadline)
 }
 
 export const CATEGORY_COLORS: Record<string, string> = {

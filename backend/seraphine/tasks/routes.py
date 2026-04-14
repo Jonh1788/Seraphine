@@ -47,6 +47,7 @@ class TaskCreate(BaseModel):
     description: str = ""
     source: str = "system"
     payload: dict[str, Any] = Field(default_factory=dict)
+    due_date: str | None = None  # YYYY-MM-DD
 
 
 class TaskStatusUpdate(BaseModel):
@@ -67,14 +68,45 @@ async def list_tasks(
     status: str | None = None,
     type: str | None = None,
     limit: int = 100,
+    due_from: str | None = None,
+    due_to: str | None = None,
 ) -> dict[str, Any]:
-    """List tasks with optional filters."""
+    """List tasks with optional filters (status / type / due_date range)."""
     svc = _service_or_503(request)
     try:
-        tasks = await svc.list_tasks(status=status, type=type, limit=limit)
+        tasks = await svc.list_tasks(
+            status=status,
+            type=type,
+            limit=limit,
+            due_from=due_from,
+            due_to=due_to,
+        )
         return {"tasks": [dataclasses.asdict(t) for t in tasks]}
     except Exception as e:
         logger.exception("task list failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/by-date-range")
+async def list_tasks_by_date_range(
+    request: Request,
+    start: str,
+    end: str,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Return tasks whose ``due_date`` falls in ``[start, end]`` (YYYY-MM-DD).
+
+    Used by the calendar "Tarefas" filter. Tasks without a due_date are
+    excluded. The response shape matches ``GET /tasks``.
+    """
+    svc = _service_or_503(request)
+    try:
+        tasks = await svc.list_tasks(
+            limit=limit, due_from=start, due_to=end,
+        )
+        return {"tasks": [dataclasses.asdict(t) for t in tasks]}
+    except Exception as e:
+        logger.exception("task by-date-range failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -97,6 +129,7 @@ async def create_task(request: Request, body: TaskCreate) -> dict[str, Any]:
             description=body.description,
             source=body.source,
             payload=body.payload,
+            due_date=body.due_date,
         )
         return {"id": task_id, "ok": True}
     except Exception as e:
