@@ -32,6 +32,7 @@ from mod_tasks.service import TaskService
 from aura.auth.routes import router as auth_router
 from aura.auth import schema as auth_schema
 from aura.auth.service import UsersService
+from aura.chat.routes import router as chat_router
 from aura.config import settings
 
 logging.basicConfig(
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.dependency_overrides[get_current_user_id] = jwt_dep(settings.jwt_secret)
 
     app.include_router(auth_router)
+    app.include_router(chat_router)
     app.include_router(tasks_router)
     app.include_router(finance_router)
 

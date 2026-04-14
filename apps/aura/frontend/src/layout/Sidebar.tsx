@@ -7,6 +7,7 @@ import {
   Settings,
   LogOut,
   Sparkles,
+  MessageSquareText,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
@@ -18,7 +19,8 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { to: "/", label: "Visão Geral", icon: LayoutDashboard },
+  { to: "/", label: "Chat IA", icon: MessageSquareText },
+  { to: "/visao-geral", label: "Visão Geral", icon: LayoutDashboard },
   { to: "/tarefas", label: "Tarefas", icon: ListChecks },
   { to: "/financas", label: "Finanças", icon: Wallet },
   { to: "/calendario", label: "Calendário", icon: CalendarDays },

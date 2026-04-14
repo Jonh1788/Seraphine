@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { LoginPage } from "./auth/LoginPage";
 import { RegisterPage } from "./auth/RegisterPage";
 import { AppShell } from "./layout/AppShell";
+import { ChatPage } from "./pages/ChatPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { TasksPage } from "./pages/TasksPage";
 import { FinancePage } from "./pages/FinancePage";
@@ -18,6 +19,16 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route
           path="/"
+          element={
+            <ProtectedRoute>
+              <AppShell fullBleed>
+                <ChatPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/visao-geral"
           element={
             <ProtectedRoute>
               <AppShell>

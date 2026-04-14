@@ -3,11 +3,19 @@ import { X } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { MobileTopbar } from "./MobileTopbar";
 
-export function AppShell({ children }: { children: ReactNode }) {
+interface AppShellProps {
+  children: ReactNode;
+  /** Pages that paint full-bleed (chat, full-screen calendar) skip the
+   *  default padding + max-width wrapper and become the only scrollable
+   *  area inside <main>. */
+  fullBleed?: boolean;
+}
+
+export function AppShell({ children, fullBleed = false }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="min-h-screen flex bg-bg-base text-ink-primary">
+    <div className="h-screen flex bg-bg-base text-ink-primary">
       <div className="hidden lg:flex">
         <Sidebar variant="rail" />
       </div>
@@ -43,9 +51,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex-1 min-w-0 flex flex-col">
         <MobileTopbar onOpenMenu={() => setDrawerOpen(true)} />
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10">
-          <div className="mx-auto max-w-7xl">{children}</div>
-        </main>
+        {fullBleed ? (
+          <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+        ) : (
+          <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10">
+            <div className="mx-auto max-w-7xl">{children}</div>
+          </main>
+        )}
       </div>
     </div>
   );
