@@ -34,6 +34,8 @@ from aura.auth.routes import router as auth_router
 from aura.auth import schema as auth_schema
 from aura.auth.service import UsersService
 from aura.chat.routes import router as chat_router
+from aura.chat import schema as chat_schema
+from aura.chat.service import ConversationService
 from aura.config import settings
 
 logging.basicConfig(
@@ -48,6 +50,7 @@ async def lifespan(app: FastAPI):
     # ---- Storage
     store = Store(settings.sqlite_path)
     store.register_migrator("aura_users", auth_schema.migrate)
+    store.register_migrator("aura_chat", chat_schema.migrate)
     store.register_migrator("mod_tasks", tasks_schema.migrate)
     store.register_migrator("mod_finance", finance_schema.migrate)
     await store.ensure_schema()
@@ -73,12 +76,14 @@ async def lifespan(app: FastAPI):
     users_service = UsersService(store)
     task_service = TaskService(store, llm_client=llm, app_state=app.state)
     finance_service = FinanceService(store)
+    conversations_service = ConversationService(store)
 
     app.state.store = store
     app.state.llm = llm
     app.state.users_service = users_service
     app.state.task_service = task_service
     app.state.finance_service = finance_service
+    app.state.conversations_service = conversations_service
 
     logger.info("Aura ready — DB=%s", settings.sqlite_path)
     try:
