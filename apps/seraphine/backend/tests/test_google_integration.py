@@ -9,13 +9,13 @@ from typing import Any
 import httpx
 import pytest
 
-from seraphine.google.client import (
+from google_integration.client import (
     GoogleAuthError,
     GoogleClient,
     _decode_full_message,
     _summarize_message,
 )
-from seraphine.google.token_store import TokenBundle, TokenStore
+from google_integration.token_store import TokenBundle, TokenStore
 from seraphine.tools.google import (
     CalendarCreateEventTool,
     CalendarDeleteEventTool,
@@ -166,7 +166,7 @@ def _patch_httpx(monkeypatch, handler) -> None:
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_ac(*args, **kwargs)
 
-    monkeypatch.setattr("seraphine.google.client.httpx.AsyncClient", patched_ac)
+    monkeypatch.setattr("google_integration.client.httpx.AsyncClient", patched_ac)
 
 
 @pytest.mark.asyncio

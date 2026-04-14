@@ -25,8 +25,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from seraphine.config import settings
-from seraphine.google.client import GoogleAPIError, GoogleAuthError, GoogleClient
-from seraphine.google.oauth import OAuthFlow
+from google_integration.client import GoogleAPIError, GoogleAuthError, GoogleClient
+from google_integration.oauth import OAuthFlow
 
 router = APIRouter(prefix="/google", tags=["google"])
 logger = logging.getLogger(__name__)

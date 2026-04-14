@@ -140,7 +140,7 @@ async def _email_fallback(
 
     # Get user's email from the Google auth status
     try:
-        from seraphine.google.client import GMAIL_API
+        from google_integration.client import GMAIL_API
         profile = await google_client._authed_request("GET", f"{GMAIL_API}/users/me/profile")
         user_email = profile.json().get("emailAddress", "")
         if not user_email:

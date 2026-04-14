@@ -22,7 +22,7 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from seraphine.google.token_store import TokenBundle, TokenStore
+from google_integration.token_store import TokenBundle, TokenStore
 
 logger = logging.getLogger(__name__)
 

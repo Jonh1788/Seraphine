@@ -393,7 +393,7 @@ class WhatsAppTaskDetector:
             return
 
         try:
-            from seraphine.google.client import GMAIL_API
+            from google_integration.client import GMAIL_API
             import base64
             from email.mime.text import MIMEText
 

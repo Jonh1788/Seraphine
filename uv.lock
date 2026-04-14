@@ -839,6 +839,20 @@ wheels = [
 name = "google-integration"
 version = "0.1.0"
 source = { editable = "packages/google-integration" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=43" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.8" },
+]
 
 [[package]]
 name = "googleapis-common-protos"
@@ -3308,6 +3322,7 @@ dependencies = [
     { name = "core-db" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "google-integration" },
     { name = "httpx" },
     { name = "llm-adapters" },
     { name = "mlx-whisper" },
@@ -3350,6 +3365,7 @@ requires-dist = [
     { name = "core-db", editable = "packages/core-db" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "google-integration", editable = "packages/google-integration" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "llm-adapters", editable = "packages/llm-adapters" },
     { name = "mlx-whisper", specifier = ">=0.4.3" },

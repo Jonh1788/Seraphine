@@ -21,12 +21,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from seraphine.google.client import (
+from google_integration.client import (
     CALENDAR_CACHE_TTL_SECONDS,
     CalendarEventCache,
     GoogleClient,
 )
-from seraphine.google.token_store import TokenBundle, TokenStore
+from google_integration.token_store import TokenBundle, TokenStore
 from seraphine.tools.google import (
     CalendarCreateEventTool,
     CalendarDeleteEventTool,
@@ -47,7 +47,7 @@ def _patch_httpx(monkeypatch, handler) -> None:
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_ac(*args, **kwargs)
 
-    monkeypatch.setattr("seraphine.google.client.httpx.AsyncClient", patched_ac)
+    monkeypatch.setattr("google_integration.client.httpx.AsyncClient", patched_ac)
 
 
 async def _make_authed_client(tmp_path: Path) -> GoogleClient:

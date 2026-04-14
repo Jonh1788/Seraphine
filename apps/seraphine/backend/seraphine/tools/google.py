@@ -29,7 +29,7 @@ from email import encoders
 from pathlib import Path
 from typing import Any, Optional
 
-from seraphine.google.client import (
+from google_integration.client import (
     CALENDAR_API,
     GMAIL_API,
     GoogleAuthError,

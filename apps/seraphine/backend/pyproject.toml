@@ -23,6 +23,7 @@ dependencies = [
     "core-db",
     "mod-tasks",
     "mod-finance",
+    "google-integration",
 ]
 
 [tool.uv.sources]
@@ -30,6 +31,7 @@ llm-adapters = { workspace = true }
 core-db = { workspace = true }
 mod-tasks = { workspace = true }
 mod-finance = { workspace = true }
+google-integration = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

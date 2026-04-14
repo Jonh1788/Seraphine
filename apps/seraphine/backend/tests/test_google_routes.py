@@ -16,12 +16,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from seraphine.google.client import (
+from google_integration.client import (
     GoogleAPIError,
     GoogleAuthError,
     GoogleClient,
 )
-from seraphine.google.token_store import TokenBundle, TokenStore
+from google_integration.token_store import TokenBundle, TokenStore
 from seraphine.main import app
 
 
@@ -158,7 +158,7 @@ def _patch_httpx(monkeypatch: pytest.MonkeyPatch, handler) -> None:
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_ac(*args, **kwargs)
 
-    monkeypatch.setattr("seraphine.google.client.httpx.AsyncClient", patched_ac)
+    monkeypatch.setattr("google_integration.client.httpx.AsyncClient", patched_ac)
 
 
 async def test_client_raises_google_api_error_with_reason_on_403(

@@ -18,7 +18,7 @@ from seraphine.stt.whisper import WhisperSTT
 from seraphine.tools.registry import build_default_registry
 from seraphine.tts.qwen3 import Qwen3TtsAdapter
 from seraphine.conversation.routes import router as conversation_router
-from seraphine.google.routes import router as google_router
+from google_integration.routes import router as google_router
 from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
 
@@ -85,8 +85,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ------------------------------------------------------------------
     google_client = None
     if settings.google_client_id and settings.google_client_secret:
-        from seraphine.google.client import GoogleClient
-        from seraphine.google.token_store import TokenStore
+        from google_integration.client import GoogleClient
+        from google_integration.token_store import TokenStore
 
         token_store = TokenStore(settings.google_token_path)
         google_client = GoogleClient(

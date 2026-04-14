@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
-from seraphine.google.token_store import TokenBundle
+from google_integration.token_store import TokenBundle
 
 logger = logging.getLogger(__name__)
 
