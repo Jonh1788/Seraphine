@@ -91,6 +91,26 @@ export class PCMPlayback {
 
     console.log('[PCMPlayback] AudioContext created, state:', this.ctx.state);
 
+    // macOS/Safari can drop the AudioContext into 'suspended' or
+    // 'interrupted' between segments (tab focus, HAL handoff, idle).
+    // When that happens audio routed through the graph goes silent
+    // even though the <audio> element reports playing. Listen and
+    // resume so the next segment has sound.
+    const onStateChange = (): void => {
+      const state = this.ctx?.state;
+      console.log('[PCMPlayback] ctx statechange:', state);
+      if (state === 'suspended' || state === 'interrupted') {
+        this.ctx?.resume().catch((err) =>
+          console.warn('[PCMPlayback] resume on statechange failed:', err),
+        );
+      }
+    };
+    try {
+      this.ctx.addEventListener('statechange', onStateChange);
+    } catch {
+      /* old browsers */
+    }
+
     for (const cb of this.analyserCallbacks) {
       cb(this.analyser);
     }
@@ -202,6 +222,17 @@ export class PCMPlayback {
     audio.playbackRate = PLAYBACK_RATE;
     this.currentAudio = audio;
 
+    // Pre-kick the AudioContext: on macOS/Safari it can be 'suspended'
+    // or 'interrupted' when the previous segment ended and we're about
+    // to start a new one. Fire resume synchronously so the graph is
+    // alive by the time we call createMediaElementSource below.
+    const ctxPre = this.ctx;
+    if (ctxPre && ctxPre.state !== 'running') {
+      ctxPre.resume().catch((err) =>
+        console.warn('[PCMPlayback] pre-play resume failed:', err),
+      );
+    }
+
     // Flag to prevent double-advancing from onerror + play().catch
     let advanced = false;
     const advance = (): void => {
@@ -251,10 +282,18 @@ export class PCMPlayback {
       console.log('[PCMPlayback] play() started successfully');
     }).catch((err) => {
       console.warn('[PCMPlayback] play() rejected:', err);
-      // If autoplay is truly blocked, do NOT silently skip all segments.
-      // Instead, wait for a user gesture. But if we just keep advancing
-      // we'll drain the entire queue without playing anything.
-      // Only advance if this is a non-recoverable error.
+      const name = err instanceof Error ? err.name : String(err);
+      // NotAllowedError = autoplay policy — resume ctx + retry once
+      // instead of advancing (which would drop the rest of the queue).
+      if (name === 'NotAllowedError' && ctxPre) {
+        ctxPre.resume().then(() => {
+          audio.play().catch((err2) => {
+            console.warn('[PCMPlayback] retry after resume failed:', err2);
+            advance();
+          });
+        }).catch(() => advance());
+        return;
+      }
       advance();
     });
   }
