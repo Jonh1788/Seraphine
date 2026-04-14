@@ -1,42 +1,66 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  CalendarClock,
-  ListChecks,
-  Wallet,
-  ArrowDownRight,
-  ArrowUpRight,
-} from "lucide-react";
-import { GlassCard } from "../components/GlassCard";
-import { StatCard } from "../components/StatCard";
+import { CalendarDays, DollarSign, MoreHorizontal, Sparkles } from "lucide-react";
+import { GreetingHeader } from "../components/GreetingHeader";
+import { FilterPillBar, type FilterPill } from "../components/FilterPillBar";
+import { CalendarToolbar, type CalendarView } from "../components/CalendarToolbar";
 import { MonthCalendar, type CalendarEvent } from "../components/MonthCalendar";
+import { DayDetailPanel } from "../components/DayDetailPanel";
+import { BriefingCard } from "../components/BriefingCard";
+import { AtividadeRecenteCard } from "../components/AtividadeRecenteCard";
+import { CentroOperacoes } from "../components/CentroOperacoes";
+import { EquilibrioBars } from "../components/EquilibrioBars";
+import { InsightsCard } from "../components/InsightsCard";
 import * as financeApi from "../api/finance";
 import * as tasksApi from "../api/tasks";
 import type { FinanceSummary, Task } from "../types/api";
 
-function formatBRL(n: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    maximumFractionDigits: 0,
-  }).format(n);
+const MONTH_NAMES = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+];
+
+const FILTERS: FilterPill[] = [
+  { key: "agenda", label: "Agenda", icon: CalendarDays, color: "cyan" },
+  { key: "financas", label: "Finanças", icon: DollarSign, color: "green" },
+  { key: "projecoes", label: "Projeções", icon: Sparkles, color: "purple" },
+  { key: "outros", label: "Outros", icon: MoreHorizontal, color: "slate" },
+];
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
 }
 
-function isoToday(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function parseIso(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
 export function DashboardPage() {
   const now = useMemo(() => new Date(), []);
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [selected, setSelected] = useState<string>(isoDate(now));
+  const [view, setView] = useState<CalendarView>("month");
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(
+    () => new Set(["agenda", "financas", "projecoes", "outros"]),
+  );
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const today = isoToday();
+  const todayIso = isoDate(now);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +75,7 @@ export function DashboardPage() {
           setTasks(t);
         }
       } catch {
-        // ignore
+        // ignore — dashboard is non-blocking
       }
     })();
     return () => {
@@ -65,147 +89,123 @@ export function DashboardPage() {
         .filter((t) => t.due_date)
         .map((t) => ({
           date: (t.due_date ?? "").slice(0, 10),
-          color: t.status === "completed" ? "green" : t.status === "approved" ? "purple" : "blue",
+          color:
+            t.status === "completed"
+              ? "green"
+              : t.status === "approved"
+                ? "purple"
+                : "blue",
         })),
     [tasks],
   );
 
-  const completedToday = tasks.filter(
-    (t) => t.status === "completed" && (t.due_date ?? "").slice(0, 10) === today,
-  ).length;
-  const pendingToday = tasks.filter(
-    (t) => t.status === "pending" && (t.due_date ?? "").slice(0, 10) === today,
-  ).length;
-  const overdue = tasks.filter(
-    (t) =>
-      t.status !== "completed" &&
-      t.due_date &&
-      (t.due_date ?? "").slice(0, 10) < today,
-  ).length;
-  const upcoming = tasks.filter(
-    (t) =>
-      t.status !== "completed" &&
-      t.due_date &&
-      (t.due_date ?? "").slice(0, 10) > today,
-  ).length;
+  const selectedEvents = useMemo(() => {
+    return tasks
+      .filter((t) => (t.due_date ?? "").slice(0, 10) === selected)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+      }));
+  }, [tasks, selected]);
 
-  const monthTasks = tasks.filter((t) => {
-    const d = (t.due_date ?? "").slice(0, 10);
-    if (!d) return false;
-    const [y, m] = d.split("-").map(Number);
-    return y === year && m === month;
-  });
-  const monthCompleted = monthTasks.filter((t) => t.status === "completed").length;
-  const monthPending = monthTasks.filter((t) => t.status === "pending").length;
-  const monthApproved = monthTasks.filter((t) => t.status === "approved").length;
-  const rate =
-    monthTasks.length > 0 ? Math.round((monthCompleted / monthTasks.length) * 100) : 0;
+  const pendingTasks = tasks.filter((t) => t.status === "pending").length;
+  const completedTasks = tasks.filter((t) => t.status === "completed").length;
+  const approvedTasks = tasks.filter((t) => t.status === "approved").length;
+
+  // Briefing — today
+  const todayTasks = tasks.filter((t) => (t.due_date ?? "").slice(0, 10) === todayIso);
+  const todayDone = todayTasks.filter((t) => t.status === "completed").length;
+
+  // Finance mini — rough per-day average based on days elapsed in month.
+  const income = summary?.income ?? 0;
+  const expenses = summary?.expenses ?? 0;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const perDay = Math.round(expenses / Math.max(1, daysInMonth));
+  const savedPct = income > 0 ? Math.max(0, Math.round(((income - expenses) / income) * 100)) : 0;
+
+  const goPrev = () => {
+    const m = month === 1 ? 12 : month - 1;
+    const y = month === 1 ? year - 1 : year;
+    setMonth(m);
+    setYear(y);
+  };
+  const goNext = () => {
+    const m = month === 12 ? 1 : month + 1;
+    const y = month === 12 ? year + 1 : year;
+    setMonth(m);
+    setYear(y);
+  };
+  const goToday = () => {
+    const d = new Date();
+    setMonth(d.getMonth() + 1);
+    setYear(d.getFullYear());
+    setSelected(isoDate(d));
+  };
+
+  const toggleFilter = (key: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectedDate = selected ? parseIso(selected) : null;
 
   return (
-    <div className="flex flex-col gap-6">
-      <MonthCalendar month={month} year={year} events={events} onChangeMonth={(m, y) => {
-        setMonth(m);
-        setYear(y);
-      }} />
+    <div className="flex flex-col gap-5">
+      <GreetingHeader />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={CheckCircle2}
-          label="Concluídas hoje"
-          value={completedToday}
-          color="green"
-          hint="hoje"
-        />
-        <StatCard
-          icon={Clock}
-          label="Pendentes hoje"
-          value={pendingToday}
-          color="purple"
-          hint={pendingToday === 0 ? "tudo em dia" : "em andamento"}
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label="Atrasadas"
-          value={overdue}
-          color="red"
-          hint={overdue > 0 ? "requerem atenção" : "sem pendências"}
-        />
-        <StatCard
-          icon={CalendarClock}
-          label="Próximos"
-          value={upcoming}
-          color="orange"
-          hint="nos próximos dias"
-        />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterPillBar filters={FILTERS} active={activeFilters} onToggle={toggleFilter} />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <GlassCard>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="h-8 w-8 rounded-md bg-mod-tasks/15 ring-1 ring-mod-tasks/30 grid place-items-center">
-              <ListChecks className="h-4 w-4 text-mod-tasks" />
-            </div>
-            <div className="font-semibold">Tarefas — mês</div>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-lg bg-mod-finance/10 ring-1 ring-mod-finance/20 p-3 text-center">
-              <div className="text-2xl font-bold text-mod-finance">{monthCompleted}</div>
-              <div className="text-xs text-ink-dim mt-1">Concluídas</div>
-            </div>
-            <div className="rounded-lg bg-accent-purple/10 ring-1 ring-accent-purple/20 p-3 text-center">
-              <div className="text-2xl font-bold text-accent-purple">{monthApproved}</div>
-              <div className="text-xs text-ink-dim mt-1">Em andamento</div>
-            </div>
-            <div className="rounded-lg bg-mod-reminders/10 ring-1 ring-mod-reminders/20 p-3 text-center">
-              <div className="text-2xl font-bold text-mod-reminders">{monthPending}</div>
-              <div className="text-xs text-ink-dim mt-1">Pendentes</div>
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-ink-dim flex items-center justify-between">
-            <span>Taxa de conclusão</span>
-            <span className="text-ink-primary font-medium">{rate}%</span>
-          </div>
-        </GlassCard>
+      <CalendarToolbar
+        view={view}
+        onViewChange={setView}
+        onToday={goToday}
+        onPrev={goPrev}
+        onNext={goNext}
+        label={`${MONTH_NAMES[month - 1]} ${year}`}
+      />
 
-        <GlassCard>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="h-8 w-8 rounded-md bg-mod-finance/15 ring-1 ring-mod-finance/30 grid place-items-center">
-              <Wallet className="h-4 w-4 text-mod-finance" />
-            </div>
-            <div className="font-semibold">Resumo financeiro — mês</div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-ink-dim">
-                <ArrowUpRight className="h-4 w-4 text-mod-finance" /> Receitas
-              </div>
-              <div className="text-mod-finance font-semibold">
-                {formatBRL(summary?.income ?? 0)}
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-ink-dim">
-                <ArrowDownRight className="h-4 w-4 text-red-400" /> Despesas
-              </div>
-              <div className="text-red-400 font-semibold">
-                {formatBRL(summary?.expenses ?? 0)}
-              </div>
-            </div>
-            <div className="h-px bg-white/5" />
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">Saldo do mês</div>
-              <div
-                className={[
-                  "text-lg font-bold",
-                  (summary?.balance ?? 0) >= 0 ? "text-mod-finance" : "text-red-400",
-                ].join(" ")}
-              >
-                {formatBRL(summary?.balance ?? 0)}
-              </div>
-            </div>
-          </div>
-        </GlassCard>
+      <div className="grid gap-4 lg:grid-cols-4">
+        <div className="lg:col-span-3">
+          <MonthCalendar
+            month={month}
+            year={year}
+            selected={selected}
+            events={events}
+            onChangeMonth={(m, y) => {
+              setMonth(m);
+              setYear(y);
+            }}
+            onSelectDate={setSelected}
+            hideHeader
+          />
+        </div>
+        <div className="lg:col-span-1">
+          <DayDetailPanel date={selectedDate} events={selectedEvents} />
+        </div>
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BriefingCard done={todayDone} total={todayTasks.length} />
+        <AtividadeRecenteCard />
+      </div>
+
+      <CentroOperacoes
+        tarefas={{ done: completedTasks, pending: pendingTasks + approvedTasks }}
+        projetos={{ done: 0, active: 0 }}
+        financeiro={{ income, expenses, savedPct, perDay }}
+        habitosCount={0}
+        radarValues={[0, 0, 0, 0, 0]}
+      />
+
+      <EquilibrioBars />
+
+      <InsightsCard />
     </div>
   );
 }

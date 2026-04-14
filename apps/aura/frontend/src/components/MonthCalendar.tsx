@@ -15,6 +15,8 @@ interface MonthCalendarProps {
   events?: CalendarEvent[];
   onChangeMonth?: (month: number, year: number) => void;
   onSelectDate?: (iso: string) => void;
+  /** Hide the internal header + nav when the page renders its own toolbar. */
+  hideHeader?: boolean;
 }
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -52,6 +54,7 @@ export function MonthCalendar({
   events = [],
   onChangeMonth,
   onSelectDate,
+  hideHeader = false,
 }: MonthCalendarProps) {
   const today = useMemo(() => {
     const d = new Date();
@@ -109,29 +112,31 @@ export function MonthCalendar({
 
   return (
     <GlassCard>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-lg font-semibold text-ink-primary">
-          {MONTH_NAMES[month - 1]} <span className="text-ink-dim font-normal">de {year}</span>
+      {hideHeader ? null : (
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-lg font-semibold text-ink-primary">
+            {MONTH_NAMES[month - 1]} <span className="text-ink-dim font-normal">de {year}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={goPrev}
+              className="p-1.5 rounded-md hover:bg-white/5 text-ink-dim"
+              aria-label="Mês anterior"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={goNext}
+              className="p-1.5 rounded-md hover:bg-white/5 text-ink-dim"
+              aria-label="Próximo mês"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={goPrev}
-            className="p-1.5 rounded-md hover:bg-white/5 text-ink-dim"
-            aria-label="Mês anterior"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            className="p-1.5 rounded-md hover:bg-white/5 text-ink-dim"
-            aria-label="Próximo mês"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-7 gap-1 text-center text-xs uppercase tracking-wide text-ink-faint mb-2">
         {WEEKDAYS.map((w) => (
@@ -154,9 +159,9 @@ export function MonthCalendar({
                 "flex flex-col items-center justify-center gap-1",
                 c.muted ? "text-ink-faint/50" : "text-ink-primary hover:bg-white/5",
                 isSelected
-                  ? "ring-2 ring-accent-purple bg-accent-purple/10"
+                  ? "ring-1 ring-cyan-400/60 bg-cyan-400/15 text-cyan-200"
                   : isToday
-                    ? "ring-1 ring-accent-purple/60 bg-accent-purple/10 font-semibold"
+                    ? "ring-1 ring-cyan-400/50 bg-cyan-400/5 font-semibold text-cyan-200"
                     : "",
               ].join(" ")}
             >
