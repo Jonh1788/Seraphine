@@ -1,7 +1,7 @@
 // Seraphine Service Worker — app shell caching, data caching, background sync
 
-const CACHE_NAME = 'seraphine-v1';
-const DATA_CACHE = 'seraphine-data-v1';
+const CACHE_NAME = 'seraphine-v2';
+const DATA_CACHE = 'seraphine-data-v2';
 
 // App shell files to cache on install
 const APP_SHELL = [
@@ -237,7 +237,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Skip WebSocket, remaining API calls, and non-GET requests
+  // 3. Skip WebSocket, API calls, non-GET, and large binary assets that
+  // don't fit the Cache API quota (VRM avatars can be 70+MB).
   if (
     event.request.method !== 'GET' ||
     url.pathname.startsWith('/ws') ||
@@ -247,7 +248,9 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/whatsapp') ||
     url.pathname.startsWith('/memory') ||
     url.pathname.startsWith('/health') ||
-    url.pathname.startsWith('/push')
+    url.pathname.startsWith('/push') ||
+    url.pathname.startsWith('/tasks') ||
+    url.pathname.startsWith('/avatars/')
   ) {
     return;
   }
