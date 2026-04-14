@@ -5,7 +5,7 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.memory import FakeEmbeddings, MemoryManager, MemoryStore
 
 from tests.test_memory_manager import FakeCollection

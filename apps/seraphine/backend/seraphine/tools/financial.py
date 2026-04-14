@@ -840,7 +840,7 @@ class ImportFinancialPdfTool(Tool):
         import json as _json
         import re
 
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):
@@ -912,7 +912,7 @@ class ImportFinancialPdfTool(Tool):
         import json as _json
         import re
 
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):
@@ -1000,7 +1000,7 @@ class ImportFinancialPdfTool(Tool):
         import json as _json
         import re
 
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):
@@ -1071,7 +1071,7 @@ class ImportFinancialPdfTool(Tool):
 
     async def _llm_extract(self, text: str, categories: str) -> list[dict]:
         """Use Sonnet to extract transactions, chunking if text is large."""
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):

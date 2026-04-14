@@ -3,7 +3,10 @@ name = "llm-adapters"
 version = "0.1.0"
 description = "LLMClient Protocol + Anthropic/OpenAI/local implementations"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.8",
+]
 
 [build-system]
 requires = ["hatchling"]

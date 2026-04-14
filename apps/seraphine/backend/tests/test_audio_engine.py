@@ -14,7 +14,7 @@ from seraphine.conversation.audio_engine import (
     TurnEndEvent,
 )
 from seraphine.conversation.engine import ConversationEngine
-from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
 from seraphine.memory.store import MemoryStore
 from seraphine.stt.whisper import STTUnavailableError, Transcription
 

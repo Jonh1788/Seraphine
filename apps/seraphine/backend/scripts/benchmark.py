@@ -6,8 +6,8 @@ import time
 import httpx
 
 from seraphine.config import settings
-from seraphine.llm.anthropic import AnthropicClient
-from seraphine.llm.types import ChatMessage
+from llm_adapters.anthropic import AnthropicClient
+from llm_adapters.types import ChatMessage
 from seraphine.tts.elevenlabs import ElevenLabsAdapter
 
 

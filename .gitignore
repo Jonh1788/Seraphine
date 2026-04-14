@@ -35,6 +35,10 @@ DubGrav.m4a
 .env
 .env.local
 
+# Scratch / dev test files
+teste.json
+test.json
+
 # Claude scratch
 .claude/
 

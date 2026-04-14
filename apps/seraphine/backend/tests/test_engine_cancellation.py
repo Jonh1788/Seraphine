@@ -25,7 +25,7 @@ from seraphine.conversation.engine import (
     TurnCancelledEvent,
     TurnEndEvent,
 )
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.memory.store import MemoryStore
 
 

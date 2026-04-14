@@ -1186,6 +1186,16 @@ wheels = [
 name = "llm-adapters"
 version = "0.1.0"
 source = { editable = "packages/llm-adapters" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.8" },
+]
 
 [[package]]
 name = "llvmlite"
@@ -3246,6 +3256,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "llm-adapters" },
     { name = "mlx-whisper" },
     { name = "pdfplumber" },
     { name = "pydantic" },
@@ -3284,6 +3295,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "llm-adapters", editable = "packages/llm-adapters" },
     { name = "mlx-whisper", specifier = ">=0.4.3" },
     { name = "pdfplumber", specifier = ">=0.10" },
     { name = "pydantic", specifier = ">=2.8" },

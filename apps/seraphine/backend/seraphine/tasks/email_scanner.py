@@ -214,7 +214,7 @@ class EmailScanner:
 
     async def _llm_oneshot(self, prompt: str) -> str:
         """Run a single non-streaming chat turn and return the text."""
-        from seraphine.llm.types import ChatMessage
+        from llm_adapters.types import ChatMessage
 
         messages = [ChatMessage(role="user", content=prompt)]
         chunks: list[str] = []

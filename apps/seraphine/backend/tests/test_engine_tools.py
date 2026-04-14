@@ -13,7 +13,7 @@ from seraphine.conversation.engine import (
     ToolResultEvent,
     TurnEndEvent,
 )
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.memory.store import MemoryStore
 from seraphine.tools.filesystem import ListDirTool, WriteFileTool
 from seraphine.tools.registry import ToolRegistry

@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
 
 
 class OpenAICompatClient:

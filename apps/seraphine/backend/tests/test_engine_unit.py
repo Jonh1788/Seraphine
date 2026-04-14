@@ -11,7 +11,7 @@ from seraphine.conversation.engine import (
     TokenEvent,
     TurnEndEvent,
 )
-from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
 from seraphine.memory.store import MemoryStore
 
 

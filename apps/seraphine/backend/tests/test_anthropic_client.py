@@ -6,8 +6,8 @@ from typing import Any
 import httpx
 import pytest
 
-from seraphine.llm.anthropic import AnthropicClient, _convert_tools
-from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+from llm_adapters.anthropic import AnthropicClient, _convert_tools
+from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
 
 
 def _sse(events: list[dict[str, Any]]) -> bytes:

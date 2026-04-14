@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 from fastapi.testclient import TestClient
 
 from seraphine.conversation.engine import ConversationEngine
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.main import app
 from seraphine.memory.store import MemoryStore
 from seraphine.tts.moss import FakeTTSAdapter

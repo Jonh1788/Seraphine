@@ -8,8 +8,8 @@ from collections import defaultdict
 import httpx
 
 from seraphine.config import settings
-from seraphine.llm.anthropic import AnthropicClient
-from seraphine.llm.types import ChatMessage
+from llm_adapters.anthropic import AnthropicClient
+from llm_adapters.types import ChatMessage
 from seraphine.conversation.sentences import split_sentences, flush_remainder, strip_markdown_for_tts
 from seraphine.tts.elevenlabs import ElevenLabsAdapter
 

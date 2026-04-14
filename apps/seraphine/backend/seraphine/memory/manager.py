@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Literal, Protocol
 
 from pydantic import BaseModel
 
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.memory.embeddings import EmbeddingsClient
 from seraphine.memory.store import Fact, MemoryStore, Turn
 

@@ -180,7 +180,7 @@ class WhatsAppTaskDetector:
     async def _llm_analyse(
         self, chat_name: str, author: str, combined_text: str,
     ) -> TaskAnalysis:
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         llm = self._llm
         if not isinstance(llm, AnthropicClient):

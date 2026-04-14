@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 import pytest
 
 from seraphine.conversation.engine import ConversationEngine, TokenEvent, TurnEndEvent
-from seraphine.llm.types import ChatMessage, Token
+from llm_adapters.types import ChatMessage, Token
 from seraphine.memory import FakeEmbeddings, MemoryManager, MemoryStore
 from seraphine.memory.store import Turn
 

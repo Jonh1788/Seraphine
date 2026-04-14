@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from seraphine.config import settings
 from seraphine.conversation.audio_engine import AudioEngine
 from seraphine.conversation.engine import ConversationEngine
-from seraphine.llm.client import OllamaClient, OpenAICompatClient
+from llm_adapters.client import OllamaClient, OpenAICompatClient
 from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
@@ -32,10 +32,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await store.ensure_schema()
 
     if settings.llm_backend in ("anthropic", "claude_max"):
-        from seraphine.llm.anthropic import AnthropicClient
+        from llm_adapters.anthropic import AnthropicClient
 
         if settings.llm_backend == "claude_max":
-            from seraphine.llm.keychain import get_access_token, KeychainError
+            from llm_adapters.keychain import get_access_token, KeychainError
 
             try:
                 api_key = get_access_token()

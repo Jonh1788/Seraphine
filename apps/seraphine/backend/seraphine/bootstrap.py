@@ -154,7 +154,7 @@ def _check_anthropic() -> None:
 def _check_claude_max() -> None:
     """Validate the Claude Max OAuth token from macOS Keychain."""
     try:
-        from seraphine.llm.keychain import get_subscription_info, get_access_token
+        from llm_adapters.keychain import get_subscription_info, get_access_token
 
         info = get_subscription_info()
         if not info["has_token"]:

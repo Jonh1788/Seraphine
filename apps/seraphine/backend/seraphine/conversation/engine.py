@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
-from seraphine.llm.types import ChatMessage, LLMUnavailableError, Token
+from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
 from seraphine.tools.base import ToolResult
