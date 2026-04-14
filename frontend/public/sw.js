@@ -1,7 +1,7 @@
 // Seraphine Service Worker — app shell caching, data caching, background sync
 
-const CACHE_NAME = 'seraphine-v2';
-const DATA_CACHE = 'seraphine-data-v2';
+const CACHE_NAME = 'seraphine-v3';
+const DATA_CACHE = 'seraphine-data-v3';
 
 // App shell files to cache on install
 const APP_SHELL = [
@@ -42,6 +42,72 @@ async function queueAction(action) {
   const tx = db.transaction(STORE_NAME, 'readwrite');
   tx.objectStore(STORE_NAME).add(action);
   return new Promise((resolve) => { tx.oncomplete = resolve; });
+}
+
+// ── IndexedDB asset cache (big binaries like VRM avatars) ──
+// Cache API has a per-origin quota that smaller VRMs can share, but
+// 70MB+ VRoid exports don't fit reliably. IDB's quota is per-origin and
+// much larger (hundreds of MB on Safari PWAs, GBs on desktop).
+
+const ASSET_DB = 'seraphine-assets';
+const ASSET_STORE = 'blobs';
+
+function openAssetDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(ASSET_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(ASSET_STORE)) {
+        req.result.createObjectStore(ASSET_STORE, { keyPath: 'url' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getCachedAsset(url) {
+  try {
+    const db = await openAssetDB();
+    const tx = db.transaction(ASSET_STORE, 'readonly');
+    return await new Promise((resolve) => {
+      const req = tx.objectStore(ASSET_STORE).get(url);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function putCachedAsset(url, blob, contentType) {
+  try {
+    const db = await openAssetDB();
+    const tx = db.transaction(ASSET_STORE, 'readwrite');
+    tx.objectStore(ASSET_STORE).put({
+      url,
+      blob,
+      contentType,
+      cachedAt: Date.now(),
+    });
+    return await new Promise((resolve) => {
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}
+
+function assetResponseFromEntry(entry) {
+  return new Response(entry.blob, {
+    status: 200,
+    headers: {
+      'Content-Type': entry.contentType || 'model/gltf-binary',
+      'Content-Length': String(entry.blob.size),
+      'X-Seraphine-IDBCached': '1',
+    },
+  });
 }
 
 async function replayPendingActions() {
@@ -237,8 +303,38 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Skip WebSocket, API calls, non-GET, and large binary assets that
-  // don't fit the Cache API quota (VRM avatars can be 70+MB).
+  // 3. VRM avatars — cache-first via IndexedDB (Cache API quota can't
+  //    fit 70MB+ VRoid exports, IDB handles it).
+  if (
+    event.request.method === 'GET' &&
+    url.pathname.startsWith('/avatars/') &&
+    url.pathname.endsWith('.vrm')
+  ) {
+    event.respondWith(
+      (async () => {
+        const cached = await getCachedAsset(event.request.url);
+        if (cached) {
+          return assetResponseFromEntry(cached);
+        }
+        const response = await fetch(event.request);
+        if (!response.ok) return response;
+        // Tee so the browser gets the streaming response AND we can store it.
+        const cloned = response.clone();
+        // Fire-and-forget cache write so we don't block the first load.
+        cloned.blob().then((blob) => {
+          void putCachedAsset(
+            event.request.url,
+            blob,
+            response.headers.get('Content-Type') || 'model/gltf-binary',
+          );
+        }).catch(() => { /* quota exceeded — live without the cache */ });
+        return response;
+      })(),
+    );
+    return;
+  }
+
+  // 4. Skip WebSocket, API calls, non-GET.
   if (
     event.request.method !== 'GET' ||
     url.pathname.startsWith('/ws') ||
