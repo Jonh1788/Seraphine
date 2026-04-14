@@ -54,8 +54,20 @@ export function deleteConversation(id: string): Promise<{ ok: boolean }> {
 // Streaming send (per-conversation)
 // ---------------------------------------------------------------------------
 
+export interface InlineTransaction {
+  id: number;
+  type: "income" | "expense";
+  amount: number;
+  currency: string;
+  category: string;
+  description: string;
+  date: string;
+  status: string;
+}
+
 export interface StreamHandlers {
   onDelta: (text: string) => void;
+  onTransaction?: (entry: InlineTransaction) => void;
   onDone: (info: { title?: string }) => void;
   onError: (msg: string) => void;
   signal?: AbortSignal;
@@ -121,11 +133,15 @@ export async function streamMessage(
         try {
           const parsed = JSON.parse(payload) as {
             delta?: string;
+            transaction?: InlineTransaction;
             done?: boolean;
             title?: string;
             error?: string;
           };
           if (typeof parsed.delta === "string") handlers.onDelta(parsed.delta);
+          if (parsed.transaction && handlers.onTransaction) {
+            handlers.onTransaction(parsed.transaction);
+          }
           if (parsed.error) {
             handlers.onError(parsed.error);
             return;

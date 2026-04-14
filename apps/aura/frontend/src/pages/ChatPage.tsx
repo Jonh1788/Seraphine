@@ -6,9 +6,11 @@ import {
   getConversation,
   streamMessage,
   type ChatMessage,
+  type InlineTransaction,
 } from "../api/chat";
 import { ConversationsSidebar } from "../components/ConversationsSidebar";
 import { Markdown } from "../components/Markdown";
+import { TransactionsBlock } from "../components/TransactionCard";
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,6 +21,7 @@ export function ChatPage() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
+  const [streamingTransactions, setStreamingTransactions] = useState<InlineTransaction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -119,6 +122,7 @@ export function ChatPage() {
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
     setStreaming("");
+    setStreamingTransactions([]);
 
     // Reset typewriter state for this turn.
     bufferRef.current = "";
@@ -158,12 +162,16 @@ export function ChatPage() {
         onDelta: (chunk) => {
           bufferRef.current += chunk;
         },
+        onTransaction: (entry) => {
+          setStreamingTransactions((prev) => [...prev, entry]);
+        },
         onDone: () => {
           streamDoneRef.current = true;
           finalizeRef.current = () => {
             const final = bufferRef.current.trim() || "(sem resposta)";
             setMessages((prev) => [...prev, { role: "assistant", content: final }]);
             setStreaming(null);
+            setStreamingTransactions([]);
             setSidebarRefreshKey((k) => k + 1);
           };
         },
@@ -171,6 +179,7 @@ export function ChatPage() {
           stopTyping();
           setError(msg);
           setStreaming(null);
+          setStreamingTransactions([]);
           // Roll back the optimistic user message + restore draft so the
           // user can retry.
           setMessages((prev) => prev.slice(0, -1));
@@ -197,7 +206,11 @@ export function ChatPage() {
     }
   };
 
-  const showEmpty = !loadingHistory && messages.length === 0 && streaming === null;
+  const showEmpty =
+    !loadingHistory &&
+    messages.length === 0 &&
+    streaming === null &&
+    streamingTransactions.length === 0;
 
   return (
     <div className="h-full flex">
@@ -223,12 +236,18 @@ export function ChatPage() {
               {messages.map((m, i) => (
                 <Bubble key={i} message={m} />
               ))}
-              {streaming !== null &&
-                (streaming.length > 0 ? (
-                  <Bubble message={{ role: "assistant", content: streaming }} streaming />
-                ) : (
-                  <TypingBubble />
-                ))}
+              {streaming !== null && (
+                <div className="self-start max-w-[85%] flex flex-col gap-1">
+                  {streamingTransactions.length > 0 && (
+                    <TransactionsBlock transactions={streamingTransactions} />
+                  )}
+                  {streaming.length > 0 ? (
+                    <Markdown text={streaming} streaming />
+                  ) : streamingTransactions.length === 0 ? (
+                    <TypingBubble />
+                  ) : null}
+                </div>
+              )}
               {error && (
                 <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 self-start">
                   {error}
