@@ -1635,6 +1635,16 @@ dev = [
 name = "mod-vision"
 version = "0.1.0"
 source = { editable = "packages/mod-vision" }
+dependencies = [
+    { name = "llm-adapters" },
+    { name = "pdfplumber" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "llm-adapters", editable = "packages/llm-adapters" },
+    { name = "pdfplumber", specifier = ">=0.10" },
+]
 
 [[package]]
 name = "more-itertools"

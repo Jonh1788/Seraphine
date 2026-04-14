@@ -3,7 +3,13 @@ name = "mod-vision"
 version = "0.1.0"
 description = "PDF + image understanding via LLMClient (receipts, bank statements, photos)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pdfplumber>=0.10",
+    "llm-adapters",
+]
+
+[tool.uv.sources]
+llm-adapters = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
