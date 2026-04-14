@@ -497,18 +497,25 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
           await patchTaskStatus(task.id, 'rejected');
         } else if (target === 'done') {
           const payload = parsePayload(task.payload);
-          if (task.type === 'finance_import' && payload.needs_password) {
-            // Needs a password — revert the override, open modal.
-            setOverrides((prev) => {
-              const next = { ...prev };
-              delete next[key];
-              return next;
-            });
-            setPasswordTask(task);
-            setBusyKey(null);
-            return;
+          if (task.type === 'finance_import') {
+            // finance_import requires running the actual import tool.
+            if (payload.needs_password) {
+              // Needs a password — revert the override, open modal.
+              setOverrides((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+              });
+              setPasswordTask(task);
+              setBusyKey(null);
+              return;
+            }
+            await executeTask(task.id);
+          } else {
+            // Other task types (generic, calendar_add, etc.) — just mark
+            // completed. execute_task for these returns 501.
+            await patchTaskStatus(task.id, 'completed');
           }
-          await executeTask(task.id);
         }
       } else {
         const entry = card.entry;
@@ -653,7 +660,23 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     if (target.closest('button, input, textarea, a, select, .password-modal-backdrop')) {
       return;
     }
+    // Clean up any leftover drag state from a prior interaction whose
+    // pointerup/cancel was lost (e.g., pointer released outside the
+    // window). Prevents a ghost from sticking around.
+    if (dragStateRef.current) {
+      clearDragVisuals();
+      dragStateRef.current = null;
+    }
     const element = e.currentTarget as HTMLElement;
+    // Capture the pointer *immediately* so subsequent move/up events
+    // always arrive here even if the pointer leaves the card before the
+    // drag threshold is crossed. Without this we can lose pointerup and
+    // strand the ghost.
+    try {
+      element.setPointerCapture(e.pointerId);
+    } catch {
+      /* some browsers throw if already captured */
+    }
     dragStateRef.current = {
       card,
       startX: e.clientX,
@@ -673,13 +696,8 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     const dy = e.clientY - s.startY;
     if (!s.dragging) {
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-      // Promote to drag.
+      // Promote to drag. Pointer was already captured on pointerdown.
       s.dragging = true;
-      try {
-        s.element.setPointerCapture(s.pointerId);
-      } catch {
-        /* some browsers throw if already captured */
-      }
       s.ghost = buildGhost(s.element, e.clientX, e.clientY);
       setDraggingKey(s.card.key);
     }
