@@ -23,6 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from mod_vision import describe_image, extract_pdf_text
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -101,8 +103,32 @@ _SYSTEM_PROMPT = (
     "'weekly' ou 'monthly'. time é HH:MM 24h. Se o usuário disser 'todo "
     "dia' use daily; 'toda segunda/terça/...' use weekly com weekday; "
     "'todo mês dia X' use monthly com day_of_month. Após criar, confirme "
-    "com mensagem curta — o card da regra recorrente aparece visualmente."
+    "com mensagem curta — o card da regra recorrente aparece visualmente. "
+    "Se o usuário anexou um arquivo (nota fiscal, recibo, fatura), "
+    "interprete o conteúdo extraído e registre o TOTAL como uma transação "
+    "única via register_transaction, com description = nome do "
+    "estabelecimento (ou do banco/emissor), categoria adequada, "
+    "source='chat'. Não pergunte confirmação; registre direto."
 )
+
+_EXTRACT_PROMPT = (
+    "Você está vendo um recibo, nota fiscal ou fatura. Extraia em texto curto:\n"
+    "- Nome do estabelecimento ou emissor\n"
+    "- Valor TOTAL pago (em reais)\n"
+    "- Data (DD/MM/AAAA se visível)\n"
+    "- Tipo (gasto / recebimento)\n"
+    "- Categoria provável (alimentação, transporte, moradia, salario, freelance, ...)\n"
+    "\n"
+    "Responda em formato livre, em português, breve. Se algo não estiver visível, omita."
+)
+
+_ACCEPTED_MIMES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 # ----------------------------------------------------------------------
@@ -623,47 +649,25 @@ async def _exec_list_tasks(
     }
 
 
-@router.post("/conversations/{conversation_id}/messages")
-async def stream_message(
-    request: Request,
+def _run_agentic_stream(
+    llm: AnthropicClient,
+    finance: FinanceService,
+    tasks_svc: TaskService,
+    recurring_svc: RecurringService,
+    svc: ConversationService,
+    uid: str,
     conversation_id: str,
-    body: SendMessageBody,
-    user_id: str | None = Depends(get_current_user_id),
-) -> StreamingResponse:
-    """Persist user msg → run tool-using LLM loop → stream reply →
-    persist final reply.
+    user_text: str,
+    msgs: list[ChatMessage],
+    is_first_exchange: bool,
+) -> AsyncIterator[bytes]:
+    """Shared agentic-loop body for both text and attachment endpoints.
 
-    SSE frames:
-        data: {"delta": "..."}
-        data: {"transaction": {id, type, amount, category, description, date}}
-        data: {"task": {id, title, status, due_date, due_time, description}}
-        data: {"done": true, "title": "<optional>"}
-        data: {"error": "msg"}
+    Runs the LLM → tool-call → LLM loop, emitting SSE events, and then
+    persists the assistant reply + kicks off title generation on first
+    exchange. Returns an async byte iterator suitable for
+    ``StreamingResponse``.
     """
-    uid = _require_user(user_id)
-    svc = _service_or_503(request)
-    llm = _llm_or_503(request)
-    finance = _finance_or_503(request)
-    tasks_svc = _tasks_or_503(request)
-    recurring_svc = _recurring_or_503(request)
-
-    user_text = body.content.strip()
-    if not user_text:
-        raise HTTPException(status_code=422, detail="mensagem vazia")
-
-    user_msg_id = await svc.add_message(conversation_id, uid, "user", user_text)
-    if user_msg_id is None:
-        raise HTTPException(status_code=404, detail="conversa não encontrada")
-
-    history = await svc.get_messages_for_llm(conversation_id, uid)
-    if history is None:
-        raise HTTPException(status_code=404, detail="conversa não encontrada")
-
-    msgs: list[ChatMessage] = [ChatMessage(role="system", content=_SYSTEM_PROMPT)]
-    for m in history:
-        msgs.append(ChatMessage(role=m["role"], content=m["content"]))
-
-    is_first_exchange = len(history) == 1
 
     async def gen() -> AsyncIterator[bytes]:
         acc_parts: list[str] = []
@@ -787,11 +791,321 @@ async def stream_message(
             logger.exception("chat stream failed")
             yield f"data: {json.dumps({'error': str(exc)})}\n\n".encode()
 
+    return gen()
+
+
+def _sse_response(body: AsyncIterator[bytes]) -> StreamingResponse:
     headers = {
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     }
-    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+    return StreamingResponse(body, media_type="text/event-stream", headers=headers)
+
+
+@router.post("/conversations/{conversation_id}/messages")
+async def stream_message(
+    request: Request,
+    conversation_id: str,
+    body: SendMessageBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> StreamingResponse:
+    """Persist user msg → run tool-using LLM loop → stream reply →
+    persist final reply.
+
+    SSE frames:
+        data: {"delta": "..."}
+        data: {"transaction": {id, type, amount, category, description, date}}
+        data: {"task": {id, title, status, due_date, due_time, description}}
+        data: {"done": true, "title": "<optional>"}
+        data: {"error": "msg"}
+    """
+    uid = _require_user(user_id)
+    svc = _service_or_503(request)
+    llm = _llm_or_503(request)
+    finance = _finance_or_503(request)
+    tasks_svc = _tasks_or_503(request)
+    recurring_svc = _recurring_or_503(request)
+
+    user_text = body.content.strip()
+    if not user_text:
+        raise HTTPException(status_code=422, detail="mensagem vazia")
+
+    user_msg_id = await svc.add_message(conversation_id, uid, "user", user_text)
+    if user_msg_id is None:
+        raise HTTPException(status_code=404, detail="conversa não encontrada")
+
+    history = await svc.get_messages_for_llm(conversation_id, uid)
+    if history is None:
+        raise HTTPException(status_code=404, detail="conversa não encontrada")
+
+    msgs: list[ChatMessage] = [ChatMessage(role="system", content=_SYSTEM_PROMPT)]
+    for m in history:
+        msgs.append(ChatMessage(role=m["role"], content=m["content"]))
+
+    is_first_exchange = len(history) == 1
+
+    return _sse_response(
+        _run_agentic_stream(
+            llm, finance, tasks_svc, recurring_svc, svc, uid,
+            conversation_id, user_text, msgs, is_first_exchange,
+        )
+    )
+
+
+# ----------------------------------------------------------------------
+# Streaming reply with a file attachment (PDF or image)
+# ----------------------------------------------------------------------
+
+def _kind_for_mime(mime: str) -> str:
+    return "pdf" if mime == "application/pdf" else "image"
+
+
+async def _error_stream(msg: str) -> AsyncIterator[bytes]:
+    yield f"data: {json.dumps({'error': msg})}\n\n".encode()
+
+
+def _parse_multipart(
+    body: bytes, boundary: bytes,
+) -> dict[str, dict[str, Any]]:
+    """Tiny RFC-2046 multipart/form-data parser — good enough for our
+    single-file + a few scalar fields shape. Returns ``{field_name:
+    {"filename": str|None, "content_type": str|None, "data": bytes}}``.
+
+    Kept in-tree to avoid pulling ``python-multipart`` as a dep just
+    for one endpoint.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    delim = b"--" + boundary
+    # Strip preamble.
+    start = body.find(delim)
+    if start < 0:
+        return result
+    pos = start + len(delim)
+    while True:
+        # Expect either CRLF (more parts) or "--" (end).
+        if body[pos:pos + 2] == b"--":
+            break
+        if body[pos:pos + 2] == b"\r\n":
+            pos += 2
+        header_end = body.find(b"\r\n\r\n", pos)
+        if header_end < 0:
+            break
+        raw_headers = body[pos:header_end].decode("utf-8", errors="replace")
+        pos = header_end + 4
+        next_boundary = body.find(b"\r\n" + delim, pos)
+        if next_boundary < 0:
+            break
+        chunk = body[pos:next_boundary]
+        pos = next_boundary + 2 + len(delim)
+
+        # Parse Content-Disposition / Content-Type headers.
+        headers: dict[str, str] = {}
+        for line in raw_headers.split("\r\n"):
+            if ":" in line:
+                k, v = line.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+        disp = headers.get("content-disposition", "")
+        if "form-data" not in disp:
+            continue
+        params: dict[str, str] = {}
+        for part in disp.split(";")[1:]:
+            part = part.strip()
+            if "=" in part:
+                k, v = part.split("=", 1)
+                params[k.strip()] = v.strip().strip('"')
+        name = params.get("name")
+        if not name:
+            continue
+        result[name] = {
+            "filename": params.get("filename"),
+            "content_type": headers.get("content-type"),
+            "data": chunk,
+        }
+    return result
+
+
+def _extract_boundary(content_type: str | None) -> bytes | None:
+    if not content_type:
+        return None
+    for part in content_type.split(";"):
+        part = part.strip()
+        if part.startswith("boundary="):
+            val = part.split("=", 1)[1].strip().strip('"')
+            return val.encode("latin-1")
+    return None
+
+
+@router.post("/conversations/{conversation_id}/messages/with-attachment")
+async def stream_message_with_attachment(
+    request: Request,
+    conversation_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> StreamingResponse:
+    """Multipart sibling of ``stream_message``. Accepts a single PDF or
+    image, extracts a text representation via ``mod_vision``, injects it
+    into the conversation as an ephemeral system-side note, and runs the
+    same agentic tool loop — the LLM typically calls
+    ``register_transaction`` with the extracted total.
+
+    Same SSE shape as ``stream_message``.
+    """
+    uid = _require_user(user_id)
+    svc = _service_or_503(request)
+    llm = _llm_or_503(request)
+    finance = _finance_or_503(request)
+    tasks_svc = _tasks_or_503(request)
+    recurring_svc = _recurring_or_503(request)
+
+    ctype = request.headers.get("content-type", "")
+    if "multipart/form-data" not in ctype.lower():
+        raise HTTPException(
+            status_code=415, detail="esperado multipart/form-data",
+        )
+    boundary = _extract_boundary(ctype)
+    if not boundary:
+        raise HTTPException(
+            status_code=400, detail="boundary multipart ausente",
+        )
+
+    # Fast-path rejection via Content-Length so we don't buffer gigantic
+    # bodies into memory just to then reject them. Multipart framing adds
+    # a small per-part overhead so we allow a 1 MB slack.
+    limit = _MAX_ATTACHMENT_BYTES + 1024 * 1024
+    cl_hdr = request.headers.get("content-length")
+    if cl_hdr is not None:
+        try:
+            if int(cl_hdr) > limit:
+                raise HTTPException(
+                    status_code=413,
+                    detail="arquivo muito grande — máximo 10 MB",
+                )
+        except ValueError:
+            pass
+
+    raw = await request.body()
+    if len(raw) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail="arquivo muito grande — máximo 10 MB",
+        )
+
+    parts = _parse_multipart(raw, boundary)
+    file_part = parts.get("file")
+    if file_part is None or not file_part.get("filename"):
+        raise HTTPException(
+            status_code=422, detail="campo 'file' ausente",
+        )
+
+    mime = (file_part.get("content_type") or "").lower().split(";")[0].strip()
+    if mime not in _ACCEPTED_MIMES:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "tipo de arquivo não suportado — use PDF, JPEG, PNG ou WebP"
+            ),
+        )
+
+    data: bytes = file_part["data"]
+    size = len(data)
+    if size == 0:
+        raise HTTPException(status_code=422, detail="arquivo vazio")
+    if size > _MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="arquivo muito grande — máximo 10 MB",
+        )
+
+    content_part = parts.get("content")
+    user_text = ""
+    if content_part is not None:
+        try:
+            user_text = content_part["data"].decode("utf-8").strip()
+        except UnicodeDecodeError:
+            user_text = ""
+    filename = file_part.get("filename") or "anexo"
+    kind = _kind_for_mime(mime)
+
+    # Persist the user message (typed text only; file bytes are NOT
+    # stored — just the metadata chip).
+    attachment_meta = {
+        "attachment": {
+            "name": filename,
+            "kind": kind,
+            "mime": mime,
+            "size": size,
+        }
+    }
+    # If the user typed nothing, persist a placeholder so the bubble is
+    # not empty in history. The chip still renders via metadata.
+    persisted_text = user_text or f"[anexo: {filename}]"
+    user_msg_id = await svc.add_message(
+        conversation_id, uid, "user", persisted_text, metadata=attachment_meta,
+    )
+    if user_msg_id is None:
+        raise HTTPException(status_code=404, detail="conversa não encontrada")
+
+    # Extract the text representation.
+    try:
+        if kind == "pdf":
+            extracted = extract_pdf_text(data)
+        else:
+            extracted = await describe_image(
+                image_bytes=data,
+                mime_type=mime,
+                prompt=_EXTRACT_PROMPT,
+                llm=llm,
+            )
+    except Exception as exc:
+        logger.exception("attachment extraction failed")
+        return _sse_response(
+            _error_stream(f"falha ao processar anexo: {exc}"),
+        )
+
+    extracted = (extracted or "").strip()
+    if not extracted:
+        return _sse_response(
+            _error_stream(
+                "não consegui extrair nenhum conteúdo do anexo — "
+                "tente uma foto mais nítida ou um PDF com texto selecionável"
+            ),
+        )
+
+    history = await svc.get_messages_for_llm(conversation_id, uid)
+    if history is None:
+        raise HTTPException(status_code=404, detail="conversa não encontrada")
+
+    # Build the LLM input: the stored user bubble preserves what the
+    # user typed, but the LLM needs the extracted content, so we prepend
+    # it ephemerally to the LAST user message.
+    extraction_block = (
+        f'[conteúdo extraído do anexo "{filename}"]\n'
+        f"{extracted}\n"
+        "[fim do conteúdo extraído]"
+    )
+    msgs: list[ChatMessage] = [ChatMessage(role="system", content=_SYSTEM_PROMPT)]
+    for idx, m in enumerate(history):
+        is_last = idx == len(history) - 1
+        if is_last and m["role"] == "user":
+            augmented = (
+                f"{extraction_block}\n\n{m['content']}"
+                if m["content"] and not m["content"].startswith("[anexo:")
+                else extraction_block
+            )
+            msgs.append(ChatMessage(role="user", content=augmented))
+        else:
+            msgs.append(ChatMessage(role=m["role"], content=m["content"]))
+
+    is_first_exchange = len(history) == 1
+    # The text passed to the title generator should be what the user
+    # "said", which for attachment-only turns is the filename.
+    title_seed = user_text or f"anexo: {filename}"
+
+    return _sse_response(
+        _run_agentic_stream(
+            llm, finance, tasks_svc, recurring_svc, svc, uid,
+            conversation_id, title_seed, msgs, is_first_exchange,
+        )
+    )
 
 
 def _parse_tool_call(tc: dict[str, Any]) -> tuple[str, dict[str, Any]]:

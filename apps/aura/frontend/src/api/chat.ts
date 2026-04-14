@@ -34,10 +34,18 @@ export interface InlineRecurring {
   updated_at: string;
 }
 
+export interface AttachmentMetadata {
+  name: string;
+  kind: "pdf" | "image";
+  mime: string;
+  size: number;
+}
+
 export interface ChatMessageMetadata {
   transactions?: InlineTransaction[];
   tasks?: InlineTask[];
   recurring?: InlineRecurring[];
+  attachment?: AttachmentMetadata;
 }
 
 export interface ChatMessage {
@@ -111,44 +119,11 @@ export interface StreamHandlers {
   signal?: AbortSignal;
 }
 
-export async function streamMessage(
-  conversationId: string,
-  content: string,
-  handlers: StreamHandlers,
-): Promise<void> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(
-    `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ content }),
-      signal: handlers.signal,
-    },
-  );
-
-  if (!res.ok) {
-    let msg = res.statusText || "Falha ao iniciar stream";
-    try {
-      const data = (await res.json()) as { detail?: unknown };
-      if (typeof data.detail === "string") msg = data.detail;
-    } catch {
-      /* not JSON */
-    }
-    handlers.onError(msg);
-    throw new ApiError(res.status, msg, null);
-  }
+async function _consumeSse(res: Response, handlers: StreamHandlers): Promise<void> {
   if (!res.body) {
     handlers.onError("Stream vazio");
     return;
   }
-
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -206,4 +181,81 @@ export async function streamMessage(
     if ((err as { name?: string }).name === "AbortError") return;
     handlers.onError(err instanceof Error ? err.message : String(err));
   }
+}
+
+async function _extractError(res: Response, fallback: string): Promise<string> {
+  let msg = res.statusText || fallback;
+  try {
+    const data = (await res.json()) as { detail?: unknown };
+    if (typeof data.detail === "string") msg = data.detail;
+  } catch {
+    /* not JSON */
+  }
+  return msg;
+}
+
+export async function streamMessage(
+  conversationId: string,
+  content: string,
+  handlers: StreamHandlers,
+): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(
+    `/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ content }),
+      signal: handlers.signal,
+    },
+  );
+
+  if (!res.ok) {
+    const msg = await _extractError(res, "Falha ao iniciar stream");
+    handlers.onError(msg);
+    throw new ApiError(res.status, msg, null);
+  }
+  await _consumeSse(res, handlers);
+}
+
+export async function streamMessageWithAttachment(
+  conversationId: string,
+  content: string,
+  file: File,
+  handlers: StreamHandlers,
+): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const form = new FormData();
+  form.append("content", content);
+  form.append("file", file, file.name);
+
+  const res = await fetch(
+    `/chat/conversations/${encodeURIComponent(
+      conversationId,
+    )}/messages/with-attachment`,
+    {
+      method: "POST",
+      headers,
+      body: form,
+      signal: handlers.signal,
+    },
+  );
+
+  if (!res.ok) {
+    const msg = await _extractError(res, "Falha ao enviar anexo");
+    handlers.onError(msg);
+    throw new ApiError(res.status, msg, null);
+  }
+  await _consumeSse(res, handlers);
 }

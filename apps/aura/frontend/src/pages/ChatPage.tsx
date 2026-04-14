@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Paperclip, Headphones, Mic, Volume2, Send } from "lucide-react";
+import { Paperclip, Headphones, Mic, Volume2, Send, X, FileText, Image as ImageIcon } from "lucide-react";
 import {
   createConversation,
   getConversation,
   streamMessage,
+  streamMessageWithAttachment,
+  type AttachmentMetadata,
   type ChatMessage,
   type InlineRecurring,
   type InlineTask,
@@ -44,6 +46,8 @@ export function ChatPage() {
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachment, setAttachment] = useState<File | null>(null);
 
   // Typewriter state — server pushes deltas into bufferRef as fast as
   // they arrive, a RAF loop reveals chars from buffer → `streaming`
@@ -120,7 +124,8 @@ export function ChatPage() {
 
   const submit = async () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    const file = attachment;
+    if ((!text && !file) || busy) return;
     setError(null);
     setBusy(true);
 
@@ -138,9 +143,23 @@ export function ChatPage() {
       }
     }
 
-    const userMsg: ChatMessage = { role: "user", content: text };
+    const optimisticAttachment: AttachmentMetadata | undefined = file
+      ? {
+          name: file.name,
+          kind: file.type === "application/pdf" ? "pdf" : "image",
+          mime: file.type || "application/octet-stream",
+          size: file.size,
+        }
+      : undefined;
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: text || (file ? `[anexo: ${file.name}]` : ""),
+      metadata: optimisticAttachment ? { attachment: optimisticAttachment } : undefined,
+    };
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
+    setAttachment(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     setStreaming("");
     setStreamingTransactions([]);
     setStreamingTasks([]);
@@ -182,73 +201,59 @@ export function ChatPage() {
     };
     rafRef.current = requestAnimationFrame(tick);
 
-    try {
-      await streamMessage(cid, text, {
-        onDelta: (chunk) => {
-          bufferRef.current += chunk;
-        },
-        onTransaction: (entry) => {
-          streamingTransactionsRef.current = [
-            ...streamingTransactionsRef.current,
-            entry,
-          ];
-          setStreamingTransactions(streamingTransactionsRef.current);
-        },
-        onTask: (task) => {
-          // A complete_task call updates an existing task id that was
-          // previously created in the same turn — dedupe so the card
-          // flips from pending to completed in place.
-          const prev = streamingTasksRef.current;
-          const idx = prev.findIndex((t) => t.id === task.id);
-          const next = idx >= 0 ? prev.slice() : [...prev, task];
-          if (idx >= 0) next[idx] = task;
-          streamingTasksRef.current = next;
-          setStreamingTasks(next);
-        },
-        onRecurring: (rule) => {
-          const prev = streamingRecurringRef.current;
-          const idx = prev.findIndex((r) => r.id === rule.id);
-          const next = idx >= 0 ? prev.slice() : [...prev, rule];
-          if (idx >= 0) next[idx] = rule;
-          streamingRecurringRef.current = next;
-          setStreamingRecurring(next);
-        },
-        onDone: () => {
-          streamDoneRef.current = true;
-          finalizeRef.current = () => {
-            const final = bufferRef.current.trim() || "(sem resposta)";
-            const txs = streamingTransactionsRef.current;
-            const tks = streamingTasksRef.current;
-            const recs = streamingRecurringRef.current;
-            const metadata =
-              txs.length > 0 || tks.length > 0 || recs.length > 0
-                ? {
-                    ...(txs.length > 0 ? { transactions: txs } : {}),
-                    ...(tks.length > 0 ? { tasks: tks } : {}),
-                    ...(recs.length > 0 ? { recurring: recs } : {}),
-                  }
-                : undefined;
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content: final,
-                metadata,
-              },
-            ]);
-            setStreaming(null);
-            setStreamingTransactions([]);
-            setStreamingTasks([]);
-            setStreamingRecurring([]);
-            streamingTransactionsRef.current = [];
-            streamingTasksRef.current = [];
-            streamingRecurringRef.current = [];
-            setSidebarRefreshKey((k) => k + 1);
-          };
-        },
-        onError: (msg) => {
-          stopTyping();
-          setError(msg);
+    const handlers = {
+      onDelta: (chunk: string) => {
+        bufferRef.current += chunk;
+      },
+      onTransaction: (entry: InlineTransaction) => {
+        streamingTransactionsRef.current = [
+          ...streamingTransactionsRef.current,
+          entry,
+        ];
+        setStreamingTransactions(streamingTransactionsRef.current);
+      },
+      onTask: (task: InlineTask) => {
+        // A complete_task call updates an existing task id that was
+        // previously created in the same turn — dedupe so the card
+        // flips from pending to completed in place.
+        const prev = streamingTasksRef.current;
+        const idx = prev.findIndex((t) => t.id === task.id);
+        const next = idx >= 0 ? prev.slice() : [...prev, task];
+        if (idx >= 0) next[idx] = task;
+        streamingTasksRef.current = next;
+        setStreamingTasks(next);
+      },
+      onRecurring: (rule: InlineRecurring) => {
+        const prev = streamingRecurringRef.current;
+        const idx = prev.findIndex((r) => r.id === rule.id);
+        const next = idx >= 0 ? prev.slice() : [...prev, rule];
+        if (idx >= 0) next[idx] = rule;
+        streamingRecurringRef.current = next;
+        setStreamingRecurring(next);
+      },
+      onDone: () => {
+        streamDoneRef.current = true;
+        finalizeRef.current = () => {
+          const final = bufferRef.current.trim() || "(sem resposta)";
+          const txs = streamingTransactionsRef.current;
+          const tks = streamingTasksRef.current;
+          const recs = streamingRecurringRef.current;
+          const metadata =
+            txs.length > 0 || tks.length > 0 || recs.length > 0
+              ? {
+                  ...(txs.length > 0 ? { transactions: txs } : {}),
+                  ...(tks.length > 0 ? { tasks: tks } : {}),
+                  ...(recs.length > 0 ? { recurring: recs } : {}),
+                }
+              : undefined;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: final,
+              metadata,
+            },
+          ]);
           setStreaming(null);
           setStreamingTransactions([]);
           setStreamingTasks([]);
@@ -256,12 +261,33 @@ export function ChatPage() {
           streamingTransactionsRef.current = [];
           streamingTasksRef.current = [];
           streamingRecurringRef.current = [];
-          // Roll back the optimistic user message + restore draft so the
-          // user can retry.
-          setMessages((prev) => prev.slice(0, -1));
-          setDraft(text);
-        },
-      });
+          setSidebarRefreshKey((k) => k + 1);
+        };
+      },
+      onError: (msg: string) => {
+        stopTyping();
+        setError(msg);
+        setStreaming(null);
+        setStreamingTransactions([]);
+        setStreamingTasks([]);
+        setStreamingRecurring([]);
+        streamingTransactionsRef.current = [];
+        streamingTasksRef.current = [];
+        streamingRecurringRef.current = [];
+        // Roll back the optimistic user message + restore draft / file so
+        // the user can retry.
+        setMessages((prev) => prev.slice(0, -1));
+        setDraft(text);
+        if (file) setAttachment(file);
+      },
+    };
+
+    try {
+      if (file) {
+        await streamMessageWithAttachment(cid, text, file, handlers);
+      } else {
+        await streamMessage(cid, text, handlers);
+      }
     } catch {
       // streamMessage already invoked onError on failure.
     } finally {
@@ -414,11 +440,56 @@ export function ChatPage() {
         <div className="px-4 sm:px-6 lg:px-12 pb-6">
           <form
             onSubmit={onSubmit}
-            className="max-w-3xl mx-auto flex items-end gap-2 rounded-2xl bg-bg-surface border border-white/10 px-3 py-2 shadow-lg shadow-black/30"
+            className="max-w-3xl mx-auto flex flex-col gap-2 rounded-2xl bg-bg-surface border border-white/10 px-3 py-2 shadow-lg shadow-black/30"
           >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (f.size > 10 * 1024 * 1024) {
+                  setError("arquivo muito grande — máximo 10 MB");
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                  return;
+                }
+                setError(null);
+                setAttachment(f);
+              }}
+            />
+            {attachment && (
+              <div className="flex items-center gap-2 self-start rounded-lg bg-white/5 border border-white/10 px-2.5 py-1.5 text-xs text-ink-dim">
+                {attachment.type === "application/pdf" ? (
+                  <FileText className="h-3.5 w-3.5 text-cyan-300" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5 text-cyan-300" />
+                )}
+                <span className="max-w-[12rem] truncate">{attachment.name}</span>
+                <span className="text-ink-faint">
+                  {(attachment.size / 1024).toFixed(0)} KB
+                </span>
+                <button
+                  type="button"
+                  className="text-ink-faint hover:text-ink-primary"
+                  onClick={() => {
+                    setAttachment(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  title="Remover anexo"
+                  aria-label="Remover anexo"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          <div className="flex items-end gap-2">
             <button
               type="button"
-              className="text-ink-faint hover:text-ink-primary p-2"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-ink-faint hover:text-ink-primary p-2 disabled:opacity-50"
+              disabled={busy}
               title="Anexar"
               aria-label="Anexar"
             >
@@ -452,7 +523,7 @@ export function ChatPage() {
               className="flex-1 bg-transparent text-ink-primary placeholder:text-ink-faint resize-none px-2 py-2 max-h-40 focus:outline-none disabled:opacity-50"
             />
 
-            {draft.trim() ? (
+            {draft.trim() || attachment ? (
               <button
                 type="submit"
                 disabled={busy}
@@ -472,6 +543,7 @@ export function ChatPage() {
                 <Mic className="h-4 w-4" />
               </button>
             )}
+          </div>
           </form>
         </div>
       </div>
@@ -499,8 +571,19 @@ function Bubble({
 }) {
   const isUser = message.role === "user";
   if (isUser) {
+    const att = message.metadata?.attachment;
     return (
-      <div className="self-end max-w-[80%]">
+      <div className="self-end max-w-[80%] flex flex-col items-end gap-1">
+        {att && (
+          <div className="flex items-center gap-1.5 rounded-md bg-white/5 border border-white/10 px-2 py-1 text-xs text-ink-dim">
+            {att.kind === "pdf" ? (
+              <FileText className="h-3.5 w-3.5 text-cyan-300" />
+            ) : (
+              <ImageIcon className="h-3.5 w-3.5 text-cyan-300" />
+            )}
+            <span className="max-w-[14rem] truncate">{att.name}</span>
+          </div>
+        )}
         <div className="rounded-2xl rounded-br-md bg-cyan-500/15 border border-cyan-400/20 px-4 py-2.5 text-ink-primary text-[15px] leading-relaxed whitespace-pre-wrap">
           {message.content}
         </div>
