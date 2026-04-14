@@ -348,11 +348,11 @@ async def stream_message(
 
     async def gen() -> AsyncIterator[bytes]:
         acc_parts: list[str] = []
+        # Transactions persisted across all tool-call rounds in this turn —
+        # stored on the assistant message metadata so reloads of the
+        # conversation re-render the visual cards.
+        turn_transactions: list[dict[str, Any]] = []
         try:
-            # Agentic loop: keep running chat() while the model issues
-            # tool_calls. Each turn streams text deltas to the client; on
-            # tool_use we execute server-side, emit a transaction event,
-            # append a tool message, and loop.
             for _round in range(6):  # safety cap
                 pending_tool_calls: list[dict[str, Any]] | None = None
                 async for token in llm.chat(msgs, tools=_TOOLS, think=False):
@@ -375,10 +375,11 @@ async def stream_message(
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
-                    # Inform the UI when a transaction was actually persisted.
                     if result.get("ok") and result.get("entry"):
+                        entry = result["entry"]
+                        turn_transactions.append(entry)
                         yield (
-                            f"data: {json.dumps({'transaction': result['entry']})}\n\n"
+                            f"data: {json.dumps({'transaction': entry})}\n\n"
                         ).encode()
 
                     # Feed the tool result back to the LLM so it can
@@ -394,8 +395,13 @@ async def stream_message(
                     )
 
             reply = "".join(acc_parts).strip() or "(sem resposta)"
+            metadata: dict[str, Any] | None = (
+                {"transactions": turn_transactions} if turn_transactions else None
+            )
             try:
-                await svc.add_message(conversation_id, uid, "assistant", reply)
+                await svc.add_message(
+                    conversation_id, uid, "assistant", reply, metadata=metadata,
+                )
             except Exception:
                 logger.exception("failed to persist assistant reply")
 

@@ -8,8 +8,9 @@ conversation. Mirrors the pattern in mod_tasks / mod_finance.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,7 @@ class MessageRow:
     role: str
     content: str
     created_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -125,15 +127,28 @@ class ConversationService:
                 if row is None:
                     return None
                 msg_rows = conn.execute(
-                    "SELECT id, role, content, created_at FROM chat_messages"
+                    "SELECT id, role, content, created_at, metadata FROM chat_messages"
                     " WHERE conversation_id = ?"
                     " ORDER BY created_at ASC, id ASC",
                     (conversation_id,),
                 ).fetchall()
-            messages = [
-                MessageRow(id=m[0], role=m[1], content=m[2], created_at=m[3])
-                for m in msg_rows
-            ]
+            messages: list[MessageRow] = []
+            for m in msg_rows:
+                meta: dict[str, Any] = {}
+                raw_meta = m[4]
+                if raw_meta:
+                    try:
+                        parsed = json.loads(raw_meta)
+                        if isinstance(parsed, dict):
+                            meta = parsed
+                    except json.JSONDecodeError:
+                        meta = {}
+                messages.append(
+                    MessageRow(
+                        id=m[0], role=m[1], content=m[2],
+                        created_at=m[3], metadata=meta,
+                    )
+                )
             return ConversationDetail(
                 id=row[0], title=row[1], created_at=row[2], updated_at=row[3],
                 messages=messages,
@@ -181,6 +196,8 @@ class ConversationService:
         user_id: str,
         role: str,
         content: str,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> str | None:
         """Insert a message + bump conversation.updated_at. Returns new
         message id, or None if the conversation isn't owned by this user."""
@@ -188,10 +205,12 @@ class ConversationService:
             raise ValueError(f"invalid role: {role}")
         msg_id = str(uuid.uuid4())
         ts = _now()
+        meta_json = (
+            json.dumps(metadata, ensure_ascii=False) if metadata else None
+        )
 
         def _work() -> str | None:
             with self._store._connect() as conn:
-                # Ownership check + atomic bump in one shot.
                 cur = conn.execute(
                     "UPDATE conversations SET updated_at = ?"
                     " WHERE id = ? AND user_id = ?",
@@ -200,9 +219,10 @@ class ConversationService:
                 if (cur.rowcount or 0) == 0:
                     return None
                 conn.execute(
-                    "INSERT INTO chat_messages (id, conversation_id, role, content, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (msg_id, conversation_id, role, content, ts),
+                    "INSERT INTO chat_messages"
+                    " (id, conversation_id, role, content, metadata, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (msg_id, conversation_id, role, content, meta_json, ts),
                 )
             return msg_id
 

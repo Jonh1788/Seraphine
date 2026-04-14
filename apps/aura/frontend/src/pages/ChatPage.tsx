@@ -67,7 +67,11 @@ export function ChatPage() {
       .then((detail) => {
         if (cancelled) return;
         setMessages(
-          detail.messages.map((m) => ({ role: m.role, content: m.content })),
+          detail.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            metadata: m.metadata,
+          })),
         );
       })
       .catch((err) => {
@@ -169,7 +173,18 @@ export function ChatPage() {
           streamDoneRef.current = true;
           finalizeRef.current = () => {
             const final = bufferRef.current.trim() || "(sem resposta)";
-            setMessages((prev) => [...prev, { role: "assistant", content: final }]);
+            // Snapshot transactions seen during the stream so the
+            // committed bubble owns its metadata (and re-renders the
+            // cards on history reload).
+            const txs = streamingTransactions;
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: final,
+                metadata: txs.length > 0 ? { transactions: txs } : undefined,
+              },
+            ]);
             setStreaming(null);
             setStreamingTransactions([]);
             setSidebarRefreshKey((k) => k + 1);
@@ -342,8 +357,10 @@ function Bubble({
       </div>
     );
   }
+  const txs = message.metadata?.transactions ?? [];
   return (
-    <div className="self-start max-w-[85%]">
+    <div className="self-start max-w-[85%] flex flex-col gap-1">
+      {txs.length > 0 && <TransactionsBlock transactions={txs} />}
       <Markdown text={message.content} streaming={streaming} />
     </div>
   );

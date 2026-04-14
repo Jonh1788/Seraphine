@@ -24,6 +24,7 @@ def migrate(conn: sqlite3.Connection) -> None:
           conversation_id TEXT NOT NULL,
           role            TEXT NOT NULL CHECK (role IN ('user','assistant')),
           content         TEXT NOT NULL,
+          metadata        TEXT,
           created_at      TEXT NOT NULL,
           FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
@@ -31,3 +32,9 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON chat_messages(conversation_id, created_at);
         """
     )
+    # Idempotent ADD COLUMN for legacy rows that pre-date metadata.
+    try:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN metadata TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise

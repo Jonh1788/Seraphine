@@ -1,8 +1,24 @@
 import { request, getToken, ApiError } from "./client";
 
+export interface InlineTransaction {
+  id: number;
+  type: "income" | "expense";
+  amount: number;
+  currency: string;
+  category: string;
+  description: string;
+  date: string;
+  status: string;
+}
+
+export interface ChatMessageMetadata {
+  transactions?: InlineTransaction[];
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  metadata?: ChatMessageMetadata;
 }
 
 export interface ConversationSummary {
@@ -19,7 +35,13 @@ export interface ConversationDetail {
   title: string | null;
   created_at: string;
   updated_at: string;
-  messages: { id: string; role: "user" | "assistant"; content: string; created_at: string }[];
+  messages: {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    created_at: string;
+    metadata?: ChatMessageMetadata;
+  }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -53,17 +75,6 @@ export function deleteConversation(id: string): Promise<{ ok: boolean }> {
 // ---------------------------------------------------------------------------
 // Streaming send (per-conversation)
 // ---------------------------------------------------------------------------
-
-export interface InlineTransaction {
-  id: number;
-  type: "income" | "expense";
-  amount: number;
-  currency: string;
-  category: string;
-  description: string;
-  date: string;
-  status: string;
-}
 
 export interface StreamHandlers {
   onDelta: (text: string) => void;
