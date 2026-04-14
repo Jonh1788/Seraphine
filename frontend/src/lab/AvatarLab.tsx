@@ -64,6 +64,8 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     () => localStorage.getItem('seraphine.avatarUrl') || AVATARS[0]?.url || '',
   );
   const [swappingAvatar, setSwappingAvatar] = useState(false);
+  const [swapError, setSwapError] = useState<string | null>(null);
+  const [swapProgress, setSwapProgress] = useState<number>(0);
   const [activeCamera, setActiveCamera] = useState('bust');
   const [physicsMultiplier, setPhysicsMultiplier] = useState(() => {
     const saved = localStorage.getItem('seraphine.lab.physics');
@@ -194,13 +196,49 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     async (url: string) => {
       if (swappingAvatar || !controller) return;
       setSwappingAvatar(true);
+      setSwapError(null);
+      setSwapProgress(0);
+
+      // Pre-fetch with progress so the user sees a bar for large files
+      // (VRoid v2 ~70 MB can take a while). We hand the ArrayBuffer to the
+      // controller as a blob URL so GLTFLoader doesn't re-download it.
+      let objectUrl: string | null = null;
       try {
-        await controller.swapAvatar?.(url);
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ao baixar ${url}`);
+        const total = Number(resp.headers.get('Content-Length') || '0');
+        const reader = resp.body?.getReader();
+        if (reader && total > 0) {
+          const chunks: Uint8Array[] = [];
+          let received = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              received += value.length;
+              setSwapProgress(Math.round((received / total) * 100));
+            }
+          }
+          const blob = new Blob(chunks, { type: 'model/gltf-binary' });
+          objectUrl = URL.createObjectURL(blob);
+        } else {
+          const blob = await resp.blob();
+          objectUrl = URL.createObjectURL(blob);
+        }
+        setSwapProgress(100);
+        await controller.swapAvatar?.(objectUrl);
         setCurrentAvatar(url);
         localStorage.setItem('seraphine.avatarUrl', url);
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error('[lab] avatar swap failed:', err);
+        setSwapError(msg);
       } finally {
+        if (objectUrl) {
+          // GLTFLoader keeps a reference; revoke lazily so textures stay.
+          setTimeout(() => URL.revokeObjectURL(objectUrl!), 30_000);
+        }
         setSwappingAvatar(false);
       }
     },
@@ -396,6 +434,26 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                     </button>
                   ))}
                 </div>
+                {swappingAvatar && (
+                  <div className="avatar-lab__progress">
+                    <div className="avatar-lab__progress-bar">
+                      <div
+                        className="avatar-lab__progress-fill"
+                        style={{ width: `${swapProgress}%` }}
+                      />
+                    </div>
+                    <span className="avatar-lab__progress-label">
+                      {swapProgress < 100
+                        ? `Baixando ${swapProgress}%`
+                        : 'Processando VRM...'}
+                    </span>
+                  </div>
+                )}
+                {swapError && !swappingAvatar && (
+                  <div className="avatar-lab__swap-error" role="alert">
+                    Falha: {swapError}
+                  </div>
+                )}
               </section>
             )}
 

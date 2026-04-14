@@ -3378,6 +3378,37 @@ button:disabled {
   gap: var(--space-2);
 }
 
+.avatar-lab__progress {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.avatar-lab__progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.avatar-lab__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #a78bfa, #8b5cf6);
+  transition: width 120ms ease;
+}
+.avatar-lab__progress-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.avatar-lab__swap-error {
+  margin-top: var(--space-2);
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(239, 83, 80, 0.1);
+  border: 1px solid rgba(239, 83, 80, 0.3);
+  color: #f87171;
+  font-size: 12px;
+}
+
 .avatar-lab__btn {
   display: inline-flex;
   align-items: center;
