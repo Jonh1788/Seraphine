@@ -40,6 +40,9 @@ DubGrav.m4a
 # Local secrets
 .env
 .env.local
+# Google OAuth client JSON — contains client_secret
+client_secret_*.json
+client_secret_*.apps.googleusercontent.com.json
 
 # Scratch / dev test files
 teste.json
