@@ -15,6 +15,7 @@ import { CalendarView } from './calendar';
 import { WhatsAppPanel } from './whatsapp';
 import type { WhatsAppMessage } from './whatsapp';
 import { MemoryView } from './memory';
+import { TasksView } from './tasks';
 import {
   ChatIcon,
   CalendarIcon,
@@ -24,9 +25,10 @@ import {
   SettingsIcon,
   FlaskIcon,
   BrainIcon,
+  TasksIcon,
 } from './icons/Icons';
 
-type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory';
+type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -66,6 +68,7 @@ export function App(): JSX.Element {
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
+  const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
 
   // PWA: handle ?view= and ?share= URL params from manifest shortcuts / share target
   useEffect(() => {
@@ -87,7 +90,13 @@ export function App(): JSX.Element {
 
     // Shortcut view routing
     const view = params.get('view');
-    if (view === 'finance' || view === 'calendar' || view === 'whatsapp' || view === 'memory') {
+    if (
+      view === 'finance' ||
+      view === 'calendar' ||
+      view === 'whatsapp' ||
+      view === 'memory' ||
+      view === 'tasks'
+    ) {
       setActiveView(view);
     }
 
@@ -333,6 +342,41 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // Poll pending tasks + pending finance entries to drive the
+  // Tarefas nav badge. Refreshes when the Tarefas view closes.
+  // Skipped while viewing Tarefas — TasksView has its own refetch and we
+  // don't need duplicate background polling.
+  useEffect(() => {
+    if (activeView === 'tasks') return;
+    let cancelled = false;
+
+    const refreshCount = async (): Promise<void> => {
+      try {
+        const [tasksRes, entriesRes] = await Promise.all([
+          fetch('/tasks?status=pending&limit=200').then((r) =>
+            r.ok ? r.json() : { tasks: [] },
+          ),
+          fetch('/finance/entries?status=pending_review&limit=100').then((r) =>
+            r.ok ? r.json() : { entries: [] },
+          ),
+        ]);
+        if (cancelled) return;
+        const t = Array.isArray(tasksRes.tasks) ? tasksRes.tasks.length : 0;
+        const e = Array.isArray(entriesRes.entries) ? entriesRes.entries.length : 0;
+        setTasksPendingCount(t + e);
+      } catch {
+        if (!cancelled) setTasksPendingCount(0);
+      }
+    };
+
+    void refreshCount();
+    const timer = setInterval(refreshCount, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeView]);
+
   // Attach the playback's AnalyserNode into the avatar controller so
   // the RAF loop can drive lipsync visemes from the running audio.
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
@@ -435,6 +479,7 @@ export function App(): JSX.Element {
     onClick: () => void;
     active?: boolean;
     badge?: boolean;
+    badgeCount?: number;
   }[] = [
     {
       id: 'chat',
@@ -442,6 +487,15 @@ export function App(): JSX.Element {
       label: 'Chat',
       onClick: () => setActiveView('chat'),
       active: activeView === 'chat',
+    },
+    {
+      id: 'tasks',
+      icon: <TasksIcon size={22} />,
+      label: 'Tarefas',
+      onClick: () => setActiveView(activeView === 'tasks' ? 'chat' : 'tasks'),
+      active: activeView === 'tasks',
+      badge: tasksPendingCount > 0,
+      badgeCount: tasksPendingCount,
     },
     {
       id: 'calendar',
@@ -524,7 +578,13 @@ export function App(): JSX.Element {
               onClick={item.onClick}
             >
               {item.icon}
-              {item.badge && <span className="nav-rail__badge" />}
+              {item.badgeCount && item.badgeCount > 0 ? (
+                <span className="nav-rail__badge nav-rail__badge--count">
+                  {item.badgeCount > 99 ? '99+' : item.badgeCount}
+                </span>
+              ) : item.badge ? (
+                <span className="nav-rail__badge" />
+              ) : null}
             </button>
           ))}
           <div className="nav-rail__spacer" />
@@ -589,6 +649,9 @@ export function App(): JSX.Element {
           {activeView === 'memory' && (
             <MemoryView onBack={() => setActiveView('chat')} />
           )}
+          {activeView === 'tasks' && (
+            <TasksView onBack={() => setActiveView('chat')} />
+          )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView
               ws={wsRef.current}
@@ -649,7 +712,13 @@ export function App(): JSX.Element {
           >
             {item.icon}
             <span>{item.label}</span>
-            {item.badge && <span className="nav-rail__badge" />}
+            {item.badgeCount && item.badgeCount > 0 ? (
+              <span className="nav-rail__badge nav-rail__badge--count">
+                {item.badgeCount > 99 ? '99+' : item.badgeCount}
+              </span>
+            ) : item.badge ? (
+              <span className="nav-rail__badge" />
+            ) : null}
           </button>
         ))}
       </div>

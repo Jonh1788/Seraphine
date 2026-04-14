@@ -162,6 +162,17 @@ export function PlusIcon({ size = 24, className = '' }: IconProps) {
   );
 }
 
+export function TasksIcon({ size = 24, className = '' }: IconProps) {
+  // Kanban-style: three vertical columns with a task bar each.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <rect x="3" y="4" width="5" height="16" rx="1" />
+      <rect x="10" y="4" width="4" height="8" rx="1" />
+      <rect x="16" y="4" width="5" height="12" rx="1" />
+    </svg>
+  );
+}
+
 export function FlaskIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
