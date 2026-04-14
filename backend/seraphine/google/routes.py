@@ -275,6 +275,29 @@ async def gmail_message(request: Request, message_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(e))
 
 
+class BatchMarkReadPayload(BaseModel):
+    ids: list[str]
+
+
+@router.post("/gmail/messages/batch-mark-read")
+async def gmail_batch_mark_read(
+    request: Request, payload: BatchMarkReadPayload
+) -> dict[str, Any]:
+    """Remove UNREAD from many messages in one call."""
+    client = _client_or_503(request)
+    try:
+        count = await client.batch_mark_as_read(payload.ids)
+        return {"ok": True, "count": count}
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="marcar todos como lidos")
+        raise
+    except Exception as e:
+        logger.exception("unexpected error on batch mark-read")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.post("/gmail/messages/{message_id}/mark-read")
 async def gmail_mark_read(request: Request, message_id: str) -> dict[str, bool]:
     """Remove the UNREAD label from a Gmail message.

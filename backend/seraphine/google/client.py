@@ -493,6 +493,24 @@ class GoogleClient:
         )
         return resp.json()
 
+    async def batch_mark_as_read(self, message_ids: list[str]) -> int:
+        """Remove the UNREAD label from many messages in one call.
+
+        Uses Gmail's ``users.messages.batchModify`` which accepts up to 1000
+        ids per request. Returns the count of ids submitted.
+        """
+        if not message_ids:
+            return 0
+        url = f"{GMAIL_API}/users/me/messages/batchModify"
+        total = 0
+        for i in range(0, len(message_ids), 1000):
+            chunk = message_ids[i : i + 1000]
+            await self._authed_request(
+                "POST", url, json={"ids": chunk, "removeLabelIds": ["UNREAD"]}
+            )
+            total += len(chunk)
+        return total
+
     # ------------------------------------------------------------------
     # Gmail — write (Phase B)
     # ------------------------------------------------------------------

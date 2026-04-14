@@ -82,3 +82,26 @@ export async function markEmailAsRead(id: string): Promise<void> {
     throw new Error(detail ?? `HTTP ${res.status}`);
   }
 }
+
+export async function markEmailsAsReadBatch(ids: string[]): Promise<number> {
+  const res = await fetch(
+    `${API_BASE}/google/gmail/messages/batch-mark-read`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    },
+  );
+  if (!res.ok) {
+    let detail: string | null = null;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body?.detail === 'string') detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail ?? `HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as { count?: number };
+  return body.count ?? 0;
+}

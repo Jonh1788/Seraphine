@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
-import { getEmail, listImportantEmails, markEmailAsRead } from './api';
+import { getEmail, listImportantEmails, markEmailAsRead, markEmailsAsReadBatch } from './api';
 import { ModalShell } from './ModalShell';
 import type { EmailFull, EmailMessage } from './types';
 import { chipColor, formatEmailDate, parseSender } from './utils';
@@ -28,6 +28,7 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [markingAll, setMarkingAll] = useState<boolean>(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchEmails = useCallback(async () => {
@@ -107,6 +108,23 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
     setReplyText('');
   };
 
+  const markAllRead = async () => {
+    const unreadIds = emails.filter((m) => m.isUnread).map((m) => m.id);
+    if (unreadIds.length === 0) return;
+    setMarkingAll(true);
+    setError(null);
+    try {
+      await markEmailsAsReadBatch(unreadIds);
+      setEmails((prev) =>
+        prev.map((m) => (unreadIds.includes(m.id) ? { ...m, isUnread: false } : m)),
+      );
+    } catch (e) {
+      setError(`Falha ao marcar todos: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
   const markRead = async (email: EmailMessage) => {
     setMarkingId(email.id);
     setError(null);
@@ -135,6 +153,17 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
       <header className="email-inbox-header">
         <h2>Emails importantes nao lidos</h2>
         <div className="email-inbox-header__actions">
+          {emails.some((m) => m.isUnread) && (
+            <button
+              type="button"
+              className="btn-ghost email-inbox-header__mark-all"
+              onClick={() => void markAllRead()}
+              disabled={markingAll}
+              title="Marcar todos como lidos"
+            >
+              {markingAll ? 'Marcando...' : 'Marcar todos como lidos'}
+            </button>
+          )}
           <button
             type="button"
             className="btn-ghost"
