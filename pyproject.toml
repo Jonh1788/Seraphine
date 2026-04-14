@@ -1,0 +1,16 @@
+# Root uv workspace — orchestrates all packages under packages/ and
+# the Seraphine + Aura apps under apps/. Each child has its own
+# pyproject.toml and src/ layout; uv resolves path dependencies between
+# them locally.
+
+[tool.uv.workspace]
+# Seraphine backend moves into apps/seraphine/backend in Phase 2 and
+# Aura backend arrives in Phase 12 — until then only the shared
+# packages are workspace members. The workspace file gains more entries
+# as each phase completes.
+members = [
+    "packages/*",
+]
+
+# No project table at the root — this is a workspace-only file. All
+# dependencies live in child pyproject.toml files.

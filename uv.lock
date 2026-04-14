@@ -1,0 +1,61 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[manifest]
+members = [
+    "core-auth",
+    "core-db",
+    "core-mcp",
+    "google-integration",
+    "llm-adapters",
+    "mod-calendar",
+    "mod-finance",
+    "mod-tasks",
+    "mod-vision",
+]
+
+[[package]]
+name = "core-auth"
+version = "0.1.0"
+source = { editable = "packages/core-auth" }
+
+[[package]]
+name = "core-db"
+version = "0.1.0"
+source = { editable = "packages/core-db" }
+
+[[package]]
+name = "core-mcp"
+version = "0.1.0"
+source = { editable = "packages/core-mcp" }
+
+[[package]]
+name = "google-integration"
+version = "0.1.0"
+source = { editable = "packages/google-integration" }
+
+[[package]]
+name = "llm-adapters"
+version = "0.1.0"
+source = { editable = "packages/llm-adapters" }
+
+[[package]]
+name = "mod-calendar"
+version = "0.1.0"
+source = { editable = "packages/mod-calendar" }
+
+[[package]]
+name = "mod-finance"
+version = "0.1.0"
+source = { editable = "packages/mod-finance" }
+
+[[package]]
+name = "mod-tasks"
+version = "0.1.0"
+source = { editable = "packages/mod-tasks" }
+
+[[package]]
+name = "mod-vision"
+version = "0.1.0"
+source = { editable = "packages/mod-vision" }

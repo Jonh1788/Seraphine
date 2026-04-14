@@ -1,0 +1,3 @@
+packages:
+  - "apps/seraphine/frontend"
+  - "apps/aura/frontend"

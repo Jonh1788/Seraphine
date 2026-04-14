@@ -1,0 +1,13 @@
+[project]
+name = "mod-calendar"
+version = "0.1.0"
+description = "Provider-agnostic calendar service (Google impl lives in google-integration)"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mod_calendar"]
