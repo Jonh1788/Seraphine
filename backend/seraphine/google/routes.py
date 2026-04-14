@@ -122,6 +122,35 @@ async def oauth_start(request: Request) -> OAuthStartResponse:
     return OAuthStartResponse(consent_url=consent_url)
 
 
+@router.get("/oauth/start")
+async def oauth_start_redirect(request: Request):
+    """GET alias: browse directly to /google/oauth/start and get redirected
+    to Google's consent screen. Useful when surfacing a re-auth link in
+    error messages or docs (POST requires a form/fetch)."""
+    from fastapi.responses import RedirectResponse
+
+    client = _client_or_503(request)
+    flow = OAuthFlow(
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        scopes=settings.google_scopes,
+        port=settings.google_oauth_port,
+    )
+    consent_url = await flow.start()
+
+    async def _complete() -> None:
+        try:
+            code = await flow.wait_for_callback(timeout=300.0)
+            bundle = await flow.exchange_code(code)
+            await client.save_bundle(bundle)
+            logger.info("google oauth completed; tokens persisted")
+        except Exception as e:
+            logger.warning("google oauth flow failed: %s", e)
+
+    asyncio.create_task(_complete())
+    return RedirectResponse(consent_url, status_code=302)
+
+
 class OAuthStatus(BaseModel):
     authed: bool
     email: Optional[str] = None
