@@ -4,8 +4,10 @@ import type { InlineRecurring } from "./chat";
 export type { InlineRecurring };
 
 export async function listRecurring(): Promise<InlineRecurring[]> {
-  const res = await request<{ recurring: InlineRecurring[] }>("/recurring");
-  return res.recurring;
+  const res = await request<{ recurring?: InlineRecurring[] } | null>("/recurring");
+  // Backend returns {recurring: [...]} but be defensive against shape
+  // drift (e.g., a 204 or empty body returning null).
+  return Array.isArray(res?.recurring) ? res!.recurring : [];
 }
 
 export function deleteRecurring(id: string): Promise<{ ok: boolean }> {

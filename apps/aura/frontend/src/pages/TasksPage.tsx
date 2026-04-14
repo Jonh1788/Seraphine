@@ -166,11 +166,14 @@ export function TasksPage() {
   const reload = useCallback(async () => {
     try {
       const [t, r] = await Promise.all([
-        tasksApi.listTasks({ limit: 200 }),
-        recurringApi.listRecurring().catch(() => []),
+        tasksApi.listTasks({ limit: 200 }).catch(() => [] as Task[]),
+        recurringApi.listRecurring().catch(() => [] as InlineRecurring[]),
       ]);
-      setTasks(t);
-      setRecurring(r);
+      // Defensive: if /recurring is missing (e.g., backend not restarted)
+      // listRecurring resolves with undefined.recurring → undefined.
+      // Always coerce to array so the page never crashes on `.length`.
+      setTasks(Array.isArray(t) ? t : []);
+      setRecurring(Array.isArray(r) ? r : []);
     } catch {
       // ignore
     }
