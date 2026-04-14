@@ -1,11 +1,20 @@
-"""POST /chat/messages — stateless, JWT-protected."""
+"""POST /chat/messages — stateless, JWT-protected.
+
+Two flavors:
+- POST /chat/messages — streams tokens as SSE so the UI types out the
+  reply live. The default for the web UI.
+- POST /chat/messages/sync — drains the stream server-side and returns
+  one ChatResponse. Useful for scripting / tests.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Literal, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from llm_adapters import AnthropicClient
@@ -50,21 +59,69 @@ def _llm_or_503(request: Request) -> AnthropicClient:
     return llm
 
 
-@router.post("/messages", response_model=ChatResponse)
-async def send_message(
+def _build_messages(body: ChatRequest) -> list[ChatMessage]:
+    msgs: list[ChatMessage] = [ChatMessage(role="system", content=_SYSTEM_PROMPT)]
+    for m in body.messages:
+        msgs.append(ChatMessage(role=m.role, content=m.content))
+    return msgs
+
+
+@router.post("/messages")
+async def send_message_stream(
     request: Request,
     body: ChatRequest,
     user_id: str = Depends(get_current_user_id),
-) -> ChatResponse:
+) -> StreamingResponse:
+    """Stream the assistant reply as SSE.
+
+    Frame format (one event per line, blank line terminator):
+        data: {"delta": "..."}
+        ...
+        data: {"done": true}
+        ...
+        data: {"error": "msg"}   # on failure mid-stream
+
+    Frontend reads via ``response.body.getReader()`` and appends each
+    delta to the current assistant message.
+    """
     llm = _llm_or_503(request)
     if user_id is None:
         raise HTTPException(status_code=401, detail="autenticação requerida")
 
-    msgs: list[ChatMessage] = [ChatMessage(role="system", content=_SYSTEM_PROMPT)]
-    for m in body.messages:
-        msgs.append(ChatMessage(role=m.role, content=m.content))
+    msgs = _build_messages(body)
 
-    # Drain the streaming Token sequence into a single reply string.
+    async def gen() -> AsyncIterator[bytes]:
+        try:
+            async for token in llm.chat(msgs, think=False):
+                if token.text:
+                    yield f"data: {json.dumps({'delta': token.text})}\n\n".encode()
+                if token.done:
+                    break
+            yield b"data: {\"done\": true}\n\n"
+        except Exception as exc:
+            logger.exception("chat stream failed")
+            payload = json.dumps({"error": str(exc)})
+            yield f"data: {payload}\n\n".encode()
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",  # disable nginx buffering if behind proxy
+    }
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+@router.post("/messages/sync", response_model=ChatResponse)
+async def send_message_sync(
+    request: Request,
+    body: ChatRequest,
+    user_id: str = Depends(get_current_user_id),
+) -> ChatResponse:
+    """Non-streaming variant — drains the stream server-side."""
+    llm = _llm_or_503(request)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="autenticação requerida")
+
+    msgs = _build_messages(body)
     parts: list[str] = []
     try:
         async for token in llm.chat(msgs, think=False):

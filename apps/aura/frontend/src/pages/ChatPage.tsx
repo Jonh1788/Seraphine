@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Paperclip, Headphones, Mic, Volume2, Send } from "lucide-react";
-import { sendMessage, type ChatMessage } from "../api/chat";
-import { ApiError } from "../api/client";
+import { streamMessage, type ChatMessage } from "../api/chat";
 
 export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Auto-scroll to bottom on new content / busy change.
+  // Auto-scroll to bottom on every content change (including each
+  // streamed token).
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, streaming, busy]);
 
   const submit = async () => {
     const text = draft.trim();
@@ -26,17 +27,31 @@ export function ChatPage() {
     setMessages(next);
     setDraft("");
     setBusy(true);
+    setStreaming("");
     try {
-      const { reply } = await sendMessage(next);
-      setMessages([...next, { role: "assistant", content: reply }]);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha ao enviar mensagem");
-      // Roll back the optimistic user message so the user can retry.
-      setMessages(messages);
-      setDraft(text);
+      let acc = "";
+      await streamMessage(next, {
+        onDelta: (chunk) => {
+          acc += chunk;
+          setStreaming(acc);
+        },
+        onDone: () => {
+          // Commit whatever accumulated as the final assistant message.
+          setMessages([...next, { role: "assistant", content: acc.trim() || "(sem resposta)" }]);
+          setStreaming(null);
+        },
+        onError: (msg) => {
+          setError(msg);
+          setStreaming(null);
+          // Roll back the optimistic user message so the user can retry.
+          setMessages(messages);
+          setDraft(text);
+        },
+      });
+    } catch {
+      // streamMessage already calls onError on failure.
     } finally {
       setBusy(false);
-      // Refocus so the user can keep typing immediately.
       setTimeout(() => taRef.current?.focus(), 0);
     }
   };
@@ -68,7 +83,11 @@ export function ChatPage() {
             {messages.map((m, i) => (
               <Bubble key={i} message={m} />
             ))}
-            {busy && <TypingBubble />}
+            {streaming !== null && (
+              streaming.length > 0
+                ? <Bubble message={{ role: "assistant", content: streaming }} streaming />
+                : <TypingBubble />
+            )}
             {error && (
               <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 self-start">
                 {error}
@@ -146,7 +165,7 @@ export function ChatPage() {
   );
 }
 
-function Bubble({ message }: { message: ChatMessage }) {
+function Bubble({ message, streaming = false }: { message: ChatMessage; streaming?: boolean }) {
   const isUser = message.role === "user";
   if (isUser) {
     return (
@@ -161,6 +180,9 @@ function Bubble({ message }: { message: ChatMessage }) {
     <div className="self-start max-w-[85%]">
       <div className="text-ink-primary text-[15px] leading-relaxed whitespace-pre-wrap">
         {message.content}
+        {streaming && (
+          <span className="inline-block w-[2px] h-[1em] align-[-2px] ml-0.5 bg-accent-purple animate-pulse" />
+        )}
       </div>
     </div>
   );
