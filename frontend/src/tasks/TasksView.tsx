@@ -262,13 +262,20 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [focusedCardKey, setFocusedCardKey] = useState<string | null>(null);
   // Optimistic overrides: key -> column (to move cards instantly on drop)
   const [overrides, setOverrides] = useState<Record<string, ColumnId>>({});
-  // Guards click-after-drag: set on dragend (after a real drag), checked
-  // (and cleared) on click. A plain click — no drag — never sets it.
-  const dragOccurredRef = useRef(false);
-  // Tracks the currently-dragged card key via a ref to avoid the React
-  // re-render that was previously aborting the native drag on some
-  // browsers when setDraggingKey fired during dragstart.
-  const dragKeyRef = useRef<string | null>(null);
+  // Pointer-drag state stored in refs to avoid re-renders mid-drag. The
+  // HTML5-DnD path was unreliable on Chromium + touch; pointer events are
+  // identical across browsers and drive Playwright's locator.dragTo cleanly.
+  // Refs used during a single drag gesture.
+  const dragStateRef = useRef<{
+    card: Card;
+    startX: number;
+    startY: number;
+    pointerId: number;
+    element: HTMLElement;
+    dragging: boolean;        // threshold crossed → true drag
+    ghost: HTMLElement | null;
+    targetColumn: ColumnId | null;
+  } | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -589,59 +596,142 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     }
   };
 
-  /* ---- drag-and-drop handlers ---------------------------------- */
-  // Fix: setDraggingKey was previously called synchronously in dragstart,
-  // triggering a re-render that applied CSS `transform: scale(.98)` to the
-  // drag source. Chromium aborts the drag when the source's transform or
-  // layout changes mid-dragstart. We now record the drag key in a ref
-  // (no re-render) and defer the visual `.dragging` class to the next
-  // animation frame so the native drag can fully start first.
-  const handleDragStart = (card: Card) => (e: React.DragEvent): void => {
-    dragKeyRef.current = card.key;
+  /* ---- pointer-based drag handlers ----------------------------- */
+  // HTML5 draggable is flaky in Chromium + React (dragstart aborts when the
+  // source gets any transform/layout change mid-start) and useless on touch.
+  // We replace it with pointer events: pointerdown records origin, a move
+  // beyond THRESHOLD_PX promotes the gesture to a "drag", pointermove
+  // hit-tests `.tasks-column` under the cursor to pick a target, pointerup
+  // either drops on that column or, if never promoted, fires a click.
+  const DRAG_THRESHOLD_PX = 5;
+
+  const clearDragVisuals = (): void => {
+    const s = dragStateRef.current;
+    if (s?.ghost && s.ghost.parentNode) {
+      s.ghost.parentNode.removeChild(s.ghost);
+    }
+    setDraggingKey(null);
+    setDragOver(null);
+  };
+
+  const findColumnAt = (x: number, y: number): ColumnId | null => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!el) return null;
+    const col = el.closest<HTMLElement>('[data-column-id]');
+    if (!col) return null;
+    const id = col.getAttribute('data-column-id');
+    if (!id) return null;
+    if (id === 'pending' || id === 'in_progress' || id === 'done' || id === 'discarded') {
+      return id;
+    }
+    return null;
+  };
+
+  const buildGhost = (source: HTMLElement, x: number, y: number): HTMLElement => {
+    const rect = source.getBoundingClientRect();
+    const ghost = source.cloneNode(true) as HTMLElement;
+    ghost.classList.add('task-card__ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.left = `${x - rect.width / 2}px`;
+    ghost.style.top = `${y - 16}px`;
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '9999';
+    ghost.style.opacity = '0.9';
+    ghost.style.transform = 'rotate(1.5deg)';
+    ghost.style.boxShadow = '0 10px 24px rgba(0, 0, 0, 0.4)';
+    document.body.appendChild(ghost);
+    return ghost;
+  };
+
+  const handlePointerDown = (card: Card) => (e: React.PointerEvent<HTMLDivElement>): void => {
+    // Only left mouse button / primary pointer.
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    // Ignore if the pointerdown originated inside an interactive child
+    // (button, input, link) — those have their own click semantics.
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, textarea, a, select, .password-modal-backdrop')) {
+      return;
+    }
+    const element = e.currentTarget as HTMLElement;
+    dragStateRef.current = {
+      card,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerId: e.pointerId,
+      element,
+      dragging: false,
+      ghost: null,
+      targetColumn: null,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const s = dragStateRef.current;
+    if (!s || s.pointerId !== e.pointerId) return;
+    const dx = e.clientX - s.startX;
+    const dy = e.clientY - s.startY;
+    if (!s.dragging) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      // Promote to drag.
+      s.dragging = true;
+      try {
+        s.element.setPointerCapture(s.pointerId);
+      } catch {
+        /* some browsers throw if already captured */
+      }
+      s.ghost = buildGhost(s.element, e.clientX, e.clientY);
+      setDraggingKey(s.card.key);
+    }
+    // Update ghost position.
+    if (s.ghost) {
+      const rect = s.ghost.getBoundingClientRect();
+      s.ghost.style.left = `${e.clientX - rect.width / 2}px`;
+      s.ghost.style.top = `${e.clientY - 16}px`;
+    }
+    // Hide ghost briefly to hit-test the column underneath.
+    const prevVis = s.ghost ? s.ghost.style.visibility : '';
+    if (s.ghost) s.ghost.style.visibility = 'hidden';
+    const col = findColumnAt(e.clientX, e.clientY);
+    if (s.ghost) s.ghost.style.visibility = prevVis;
+    s.targetColumn = col;
+    setDragOver(col);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const s = dragStateRef.current;
+    if (!s || s.pointerId !== e.pointerId) return;
+    const wasDragging = s.dragging;
+    const card = s.card;
+    const target = s.targetColumn;
     try {
-      e.dataTransfer.setData('text/plain', card.key);
-      e.dataTransfer.effectAllowed = 'move';
+      s.element.releasePointerCapture(s.pointerId);
     } catch {
-      /* ignore — Safari sometimes throws in older versions */
+      /* ignore */
     }
-    // Defer React state update so the browser finishes capturing the drag
-    // image before we touch the element's styles.
-    requestAnimationFrame(() => {
-      setDraggingKey(card.key);
-    });
-  };
+    clearDragVisuals();
+    dragStateRef.current = null;
 
-  const handleDragEnd = (): void => {
-    // Only mark dragOccurred if the drag actually started (ref was set).
-    // Prevents toggleExpand from suppressing a plain click.
-    if (dragKeyRef.current) {
-      dragOccurredRef.current = true;
+    if (wasDragging) {
+      if (target && target !== card.column) {
+        void moveCard(card, target);
+      }
+      return;
     }
-    dragKeyRef.current = null;
-    setDraggingKey(null);
-    setDragOver(null);
+    // No drag: treat as a click → toggle expand.
+    toggleExpand(card.key);
   };
 
-  const handleDragOver = (col: ColumnId) => (e: React.DragEvent): void => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (dragOver !== col) setDragOver(col);
-  };
-
-  const handleDragLeave = (col: ColumnId) => (): void => {
-    if (dragOver === col) setDragOver(null);
-  };
-
-  const handleDrop = (col: ColumnId) => (e: React.DragEvent): void => {
-    e.preventDefault();
-    setDragOver(null);
-    const key = dragKeyRef.current || draggingKey || e.dataTransfer.getData('text/plain');
-    dragKeyRef.current = null;
-    if (!key) return;
-    const card = cardsWithOverrides.find((c) => c.key === key);
-    setDraggingKey(null);
-    if (!card) return;
-    void moveCard(card, col);
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const s = dragStateRef.current;
+    if (!s || s.pointerId !== e.pointerId) return;
+    try {
+      s.element.releasePointerCapture(s.pointerId);
+    } catch {
+      /* ignore */
+    }
+    clearDragVisuals();
+    dragStateRef.current = null;
   };
 
   const toggleExpand = (key: string): void => {
@@ -896,17 +986,13 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       <div
         key={card.key}
         className={classes.join(' ')}
-        draggable={canDrag}
         data-task-id={dataTaskId}
-        onDragStart={canDrag ? handleDragStart(card) : undefined}
-        onDragEnd={canDrag ? handleDragEnd : undefined}
-        onClick={() => {
-          if (dragOccurredRef.current) {
-            dragOccurredRef.current = false;
-            return;
-          }
-          toggleExpand(card.key);
-        }}
+        data-card-key={card.key}
+        onPointerDown={canDrag ? handlePointerDown(card) : undefined}
+        onPointerMove={canDrag ? handlePointerMove : undefined}
+        onPointerUp={canDrag ? handlePointerUp : undefined}
+        onPointerCancel={canDrag ? handlePointerCancel : undefined}
+        onClick={canDrag ? undefined : () => toggleExpand(card.key)}
       >
         <div className="task-card__head">
           <span className="task-card__badge">{card.typeLabel}</span>
@@ -986,9 +1072,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
             <div
               key={col.id}
               className={`tasks-column${isOver ? ' drag-over' : ''}`}
-              onDragOver={handleDragOver(col.id)}
-              onDragLeave={handleDragLeave(col.id)}
-              onDrop={handleDrop(col.id)}
+              data-column-id={col.id}
             >
               <div className="tasks-column__header">
                 <span className="tasks-column__title">{col.title}</span>

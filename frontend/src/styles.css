@@ -6052,6 +6052,17 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* Pointer-event drag: prevent touch scroll/gestures from hijacking the
+     drag gesture on mobile. Desktop behavior is unchanged. */
+  touch-action: none;
+  user-select: none;
+}
+
+.task-card__ghost {
+  /* Visual clone of a card that follows the pointer while dragging. */
+  cursor: grabbing;
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
 }
 
 .task-card:hover {
