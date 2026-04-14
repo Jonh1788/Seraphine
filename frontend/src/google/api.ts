@@ -62,3 +62,11 @@ export async function getEmail(id: string): Promise<EmailFull> {
   const res = await fetch(`${API_BASE}/google/gmail/messages/${encodeURIComponent(id)}`);
   return json<EmailFull>(res);
 }
+
+export async function markEmailAsRead(id: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/google/gmail/messages/${encodeURIComponent(id)}/mark-read`,
+    { method: 'POST' },
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}

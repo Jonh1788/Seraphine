@@ -438,6 +438,14 @@ class GoogleClient:
             q="is:important is:unread", max_results=max_results
         )
 
+    async def mark_as_read(self, message_id: str) -> dict:
+        """Remove the UNREAD label from a single message."""
+        url = f"{GMAIL_API}/users/me/messages/{message_id}/modify"
+        resp = await self._authed_request(
+            "POST", url, json={"removeLabelIds": ["UNREAD"]}
+        )
+        return resp.json()
+
     # ------------------------------------------------------------------
     # Gmail — write (Phase B)
     # ------------------------------------------------------------------

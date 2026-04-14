@@ -62,6 +62,7 @@ export interface EmailFull {
   to: string;
   subject: string;
   body: string;
+  bodyHtml?: string | null;
   date: string;
   attachments?: EmailAttachment[];
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
-import { getEmail, listImportantEmails } from './api';
+import { getEmail, listImportantEmails, markEmailAsRead } from './api';
 import { ModalShell } from './ModalShell';
 import type { EmailFull, EmailMessage } from './types';
 import { chipColor, formatEmailDate, parseSender } from './utils';
@@ -27,6 +27,7 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
   const [loadingFull, setLoadingFull] = useState<string | null>(null);
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchEmails = useCallback(async () => {
@@ -106,8 +107,21 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
     setReplyText('');
   };
 
-  const markRead = (email: EmailMessage) => {
-    sendUserMessage(`Marca como lido o email '${email.subject}' de ${email.from}`);
+  const markRead = async (email: EmailMessage) => {
+    setMarkingId(email.id);
+    setError(null);
+    try {
+      await markEmailAsRead(email.id);
+      // Optimistic local update: drop unread flag, collapse row.
+      setEmails((prev) =>
+        prev.map((m) => (m.id === email.id ? { ...m, isUnread: false } : m)),
+      );
+      if (expandedId === email.id) setExpandedId(null);
+    } catch (e) {
+      setError(`Falha ao marcar como lido: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setMarkingId(null);
+    }
   };
 
   if (!open) return null;
@@ -192,9 +206,16 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
               {expanded && (
                 <div className="email-row__body">
                   {isLoadingBody && <div className="email-row__loading">Carregando corpo...</div>}
-                  {full && (
+                  {full && (full.bodyHtml ? (
+                    <iframe
+                      className="email-row__body-frame"
+                      title={`email-${email.id}`}
+                      sandbox=""
+                      srcDoc={full.bodyHtml}
+                    />
+                  ) : (
                     <pre className="email-row__body-text">{full.body}</pre>
-                  )}
+                  ))}
                   <div className="email-actions">
                     <button
                       type="button"
@@ -207,10 +228,10 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
                     <button
                       type="button"
                       className="btn-ghost"
-                      onClick={() => markRead(email)}
-                      disabled={!ws}
+                      onClick={() => void markRead(email)}
+                      disabled={markingId === email.id}
                     >
-                      Marcar como lido
+                      {markingId === email.id ? 'Marcando...' : 'Marcar como lido'}
                     </button>
                   </div>
                   {replyingId === email.id && (

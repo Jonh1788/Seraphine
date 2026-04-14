@@ -187,6 +187,18 @@ async def gmail_message(request: Request, message_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.post("/gmail/messages/{message_id}/mark-read")
+async def gmail_mark_read(request: Request, message_id: str) -> dict[str, bool]:
+    client = _client_or_503(request)
+    try:
+        await client.mark_as_read(message_id)
+        return {"ok": True}
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
