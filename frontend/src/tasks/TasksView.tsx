@@ -262,6 +262,19 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [focusedCardKey, setFocusedCardKey] = useState<string | null>(null);
   // Optimistic overrides: key -> column (to move cards instantly on drop)
   const [overrides, setOverrides] = useState<Record<string, ColumnId>>({});
+  // Per-card in-flight mutation counter. Refresh must NOT clear overrides
+  // for cards with pending mutations (> 0), otherwise a rapid second move
+  // briefly flips the card back to the backend's stale state.
+  const inFlightRef = useRef<Map<string, number>>(new Map());
+  const inFlightInc = (key: string): void => {
+    inFlightRef.current.set(key, (inFlightRef.current.get(key) ?? 0) + 1);
+  };
+  const inFlightDec = (key: string): number => {
+    const n = (inFlightRef.current.get(key) ?? 0) - 1;
+    if (n <= 0) inFlightRef.current.delete(key);
+    else inFlightRef.current.set(key, n);
+    return Math.max(0, n);
+  };
   // Pointer-drag state stored in refs to avoid re-renders mid-drag. The
   // HTML5-DnD path was unreliable on Chromium + touch; pointer events are
   // identical across browsers and drive Playwright's locator.dragTo cleanly.
@@ -295,7 +308,16 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       setConfirmedEntries(
         Array.isArray(confirmedEntriesRes.entries) ? confirmedEntriesRes.entries : [],
       );
-      setOverrides({});
+      // Keep overrides for keys with an in-flight mutation — clearing
+      // them would flip the card back to the server's stale state while
+      // a newer PATCH is still in transit.
+      setOverrides((prev) => {
+        const next: Record<string, ColumnId> = {};
+        for (const key of Object.keys(prev)) {
+          if ((inFlightRef.current.get(key) ?? 0) > 0) next[key] = prev[key];
+        }
+        return next;
+      });
       setCardErrors({});
     } catch (e) {
       setError(String(e));
@@ -482,8 +504,9 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     const key = card.key;
     setCardError(key, null);
 
-    // Optimistic override
+    // Optimistic override + mark in-flight so refresh won't clobber it.
     setOverrides((prev) => ({ ...prev, [key]: target }));
+    inFlightInc(key);
     setBusyKey(key);
 
     try {
@@ -545,7 +568,19 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         return next;
       });
     } finally {
+      const remaining = inFlightDec(key);
       setBusyKey((curr) => (curr === key ? null : curr));
+      // If this was the last in-flight mutation for the card, clear its
+      // override — the next refresh (already fetched above) reflects the
+      // latest backend state.
+      if (remaining === 0) {
+        setOverrides((prev) => {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
     }
   };
 
@@ -1049,10 +1084,11 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         <div className="tasks-view__header-actions">
           <button
             type="button"
-            className="btn-confirm tasks-view__new-btn"
+            className="tasks-view__new-btn"
             onClick={() => setShowNewTask(true)}
           >
-            + Nova tarefa
+            <span className="tasks-view__new-btn__plus" aria-hidden>+</span>
+            <span>Nova tarefa</span>
           </button>
         </div>
       </div>
