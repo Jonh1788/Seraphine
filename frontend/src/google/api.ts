@@ -68,5 +68,17 @@ export async function markEmailAsRead(id: string): Promise<void> {
     `${API_BASE}/google/gmail/messages/${encodeURIComponent(id)}/mark-read`,
     { method: 'POST' },
   );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    // Prefer the backend's PT-BR `detail` over a bare HTTP status — the
+    // route surfaces scope/reauth hints there (e.g. "permissao
+    // insuficiente — reconecte o Google em /google/oauth/start").
+    let detail: string | null = null;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body?.detail === 'string') detail = body.detail;
+    } catch {
+      // Response wasn't JSON — fall back to status below.
+    }
+    throw new Error(detail ?? `HTTP ${res.status}`);
+  }
 }
