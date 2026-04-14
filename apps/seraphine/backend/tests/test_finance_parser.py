@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from seraphine.finance.parser import ParsedFinancial, parse_financial_text
+from mod_finance.parser import ParsedFinancial, parse_financial_text
 
 
 class TestParseIncome:

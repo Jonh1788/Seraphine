@@ -1498,6 +1498,32 @@ source = { editable = "packages/mod-calendar" }
 name = "mod-finance"
 version = "0.1.0"
 source = { editable = "packages/mod-finance" }
+dependencies = [
+    { name = "core-db" },
+    { name = "fastapi" },
+    { name = "mod-tasks" },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "core-db", editable = "packages/core-db" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "mod-tasks", editable = "packages/mod-tasks" },
+    { name = "pydantic", specifier = ">=2.8" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+]
 
 [[package]]
 name = "mod-tasks"
@@ -3285,6 +3311,8 @@ dependencies = [
     { name = "httpx" },
     { name = "llm-adapters" },
     { name = "mlx-whisper" },
+    { name = "mod-finance" },
+    { name = "mod-tasks" },
     { name = "pdfplumber" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -3325,6 +3353,8 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "llm-adapters", editable = "packages/llm-adapters" },
     { name = "mlx-whisper", specifier = ">=0.4.3" },
+    { name = "mod-finance", editable = "packages/mod-finance" },
+    { name = "mod-tasks", editable = "packages/mod-tasks" },
     { name = "pdfplumber", specifier = ">=0.10" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pydantic-settings", specifier = ">=2.4" },

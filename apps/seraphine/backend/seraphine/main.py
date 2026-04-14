@@ -128,10 +128,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ------------------------------------------------------------------
     finance_service = None
     try:
-        from seraphine.finance.service import FinanceService
-        finance_service = FinanceService(db_path=settings.sqlite_path)
-        await finance_service.ensure_tables()
-        logger.info("Finance service wired (db=%s)", settings.sqlite_path)
+        from mod_finance import FinanceService
+        from mod_finance import schema as finance_schema
+        store.register_migrator("mod_finance", finance_schema.migrate)
+        await store.ensure_schema()  # idempotent — re-runs all migrators
+        finance_service = FinanceService(store)
+        logger.info("Finance service wired (mod-finance)")
     except Exception as e:
         logger.warning("Finance service failed (non-critical): %s", e)
 
@@ -455,7 +457,7 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
     app.include_router(google_router)
 
-    from seraphine.finance.routes import router as finance_router
+    from mod_finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router
     from mod_tasks.routes import router as tasks_router
 

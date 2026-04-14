@@ -13,7 +13,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from seraphine.finance.parser import ALL_CATEGORIES
+from mod_finance.parser import ALL_CATEGORIES
 from seraphine.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -286,7 +286,7 @@ class AddFinancialEntryTool(Tool):
             )
 
         try:
-            from seraphine.finance.models import FinancialEntry
+            from mod_finance.models import FinancialEntry
             entry_obj = FinancialEntry(
                 id=None,
                 type=entry_type,
@@ -398,7 +398,7 @@ class BulkAddFinancialEntriesTool(Tool):
         if not entries_data:
             return ToolResult(ok=False, error="entries list is empty.")
 
-        from seraphine.finance.models import FinancialEntry
+        from mod_finance.models import FinancialEntry
 
         created = 0
         skipped = 0
@@ -773,7 +773,7 @@ class ImportFinancialPdfTool(Tool):
                 metadata={"transactions": 0, "source": source},
             )
 
-        from seraphine.finance.models import FinancialEntry
+        from mod_finance.models import FinancialEntry
         import unicodedata
 
         _valid_cats = set(ALL_CATEGORIES)

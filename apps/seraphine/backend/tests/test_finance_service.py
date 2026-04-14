@@ -3,16 +3,21 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
-from seraphine.finance.models import FinancialEntry, RecurringRule
-from seraphine.finance.service import FinanceService
+from core_db import Store
+from mod_finance import schema as finance_schema
+from mod_finance.models import FinancialEntry, RecurringRule
+from mod_finance.service import FinanceService
 
 
 @pytest_asyncio.fixture
 async def svc(tmp_path):
-    service = FinanceService(tmp_path / "finance.sqlite")
-    await service.ensure_tables()
+    store = Store(tmp_path / "finance.sqlite")
+    store.register_migrator("mod_finance", finance_schema.migrate)
+    await store.ensure_schema()
+    service = FinanceService(store)
     yield service
     await service.aclose()
+    await store.aclose()
 
 
 # ------------------------------------------------------------------
@@ -22,8 +27,7 @@ async def svc(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ensure_tables(svc: FinanceService):
-    """Tables are created and calling ensure_tables again is idempotent."""
-    await svc.ensure_tables()  # second call should not raise
+    """Schema is set up by the fixture and yields empty lists."""
     entries = await svc.list_entries()
     assert entries == []
     rules = await svc.list_recurring()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 CATEGORIES = [
     "moradia",
@@ -29,6 +29,7 @@ class FinancialEntry:
     recurring_id: int | None = None
     status: str = "confirmed"  # 'confirmed' | 'pending_review'
     created_at: str | None = None
+    user_id: str | None = None  # NULL for single-tenant (Seraphine)
 
 
 @dataclass
@@ -44,3 +45,4 @@ class RecurringRule:
     end_date: str | None = None  # None = indefinite
     active: bool = True
     created_at: str | None = None
+    user_id: str | None = None  # NULL for single-tenant (Seraphine)

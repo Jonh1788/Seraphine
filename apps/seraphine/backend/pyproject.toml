@@ -21,11 +21,15 @@ dependencies = [
     "pywebpush>=2",
     "llm-adapters",
     "core-db",
+    "mod-tasks",
+    "mod-finance",
 ]
 
 [tool.uv.sources]
 llm-adapters = { workspace = true }
 core-db = { workspace = true }
+mod-tasks = { workspace = true }
+mod-finance = { workspace = true }
 
 [project.optional-dependencies]
 dev = [
