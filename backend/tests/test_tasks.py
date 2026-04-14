@@ -431,6 +431,150 @@ def test_routes_crud_and_404_for_missing_task(tmp_path: Path) -> None:
             _reset_task_service(prev)
 
 
+async def test_due_date_migration_idempotent(tmp_path: Path) -> None:
+    """ensure_schema() must be safe to call multiple times and must add
+    due_date to legacy tables that predate the column."""
+    import sqlite3
+
+    db_path = tmp_path / "migrate.sqlite"
+
+    # Simulate a pre-migration DB: create the table WITHOUT due_date.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE seraphine_tasks (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              type          TEXT NOT NULL,
+              status        TEXT NOT NULL DEFAULT 'pending',
+              title         TEXT NOT NULL,
+              description   TEXT NOT NULL,
+              source        TEXT NOT NULL,
+              payload       TEXT NOT NULL,
+              created_at    TEXT NOT NULL,
+              updated_at    TEXT NOT NULL
+            )
+            """,
+        )
+
+    s = MemoryStore(db_path)
+    await s.ensure_schema()
+    # Second call is a no-op and must not raise "duplicate column name".
+    await s.ensure_schema()
+
+    svc = TaskService(s)
+    task_id = await svc.create_task(
+        type="generic", title="after-migration", description="", source="chat",
+        payload={}, due_date="2026-06-01",
+    )
+    task = await svc.get_task(task_id)
+    assert task is not None
+    assert task.due_date == "2026-06-01"
+
+
+async def test_create_task_with_due_date_roundtrip(service: TaskService) -> None:
+    task_id = await service.create_task(
+        type="generic",
+        title="Comprar presente",
+        description="",
+        source="chat",
+        payload={},
+        due_date="2026-05-01",
+    )
+    task = await service.get_task(task_id)
+    assert task is not None
+    assert task.due_date == "2026-05-01"
+
+    listed = await service.list_tasks()
+    assert len(listed) == 1
+    assert listed[0].due_date == "2026-05-01"
+
+
+async def test_list_tasks_due_date_range_filter(service: TaskService) -> None:
+    # In-range
+    in1 = await service.create_task(
+        type="generic", title="a", description="", source="chat",
+        payload={}, due_date="2026-04-10",
+    )
+    in2 = await service.create_task(
+        type="generic", title="b", description="", source="chat",
+        payload={}, due_date="2026-04-15",
+    )
+    # Out of range
+    await service.create_task(
+        type="generic", title="c", description="", source="chat",
+        payload={}, due_date="2026-05-01",
+    )
+    # No due_date at all — must be excluded when filter is active
+    await service.create_task(
+        type="generic", title="d", description="", source="chat",
+        payload={},
+    )
+
+    ranged = await service.list_tasks(
+        due_from="2026-04-01", due_to="2026-04-30",
+    )
+    ids = {t.id for t in ranged}
+    assert ids == {in1, in2}
+    assert all(t.due_date is not None for t in ranged)
+
+
+def test_routes_by_date_range(tmp_path: Path) -> None:
+    import asyncio
+
+    store_ = MemoryStore(tmp_path / "range.sqlite")
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(store_.ensure_schema())
+    svc = TaskService(store_)
+    # Seed a mix of tasks: 2 inside range, 1 outside, 1 without due_date.
+    loop.run_until_complete(svc.create_task(
+        type="generic", title="in1", description="", source="chat",
+        payload={}, due_date="2026-04-10",
+    ))
+    loop.run_until_complete(svc.create_task(
+        type="generic", title="in2", description="", source="chat",
+        payload={}, due_date="2026-04-20",
+    ))
+    loop.run_until_complete(svc.create_task(
+        type="generic", title="out", description="", source="chat",
+        payload={}, due_date="2026-05-02",
+    ))
+    loop.run_until_complete(svc.create_task(
+        type="generic", title="noDate", description="", source="chat",
+        payload={},
+    ))
+
+    with TestClient(app) as client:
+        prev = getattr(app.state, "task_service", None)
+        _reset_task_service(svc)
+        try:
+            # Create also via POST with due_date to prove route accepts it.
+            resp = client.post(
+                "/tasks",
+                json={
+                    "type": "generic",
+                    "title": "created",
+                    "description": "d",
+                    "source": "chat",
+                    "payload": {},
+                    "due_date": "2026-04-25",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+
+            resp = client.get(
+                "/tasks/by-date-range",
+                params={"start": "2026-04-01", "end": "2026-04-30"},
+            )
+            assert resp.status_code == 200, resp.text
+            titles = {t["title"] for t in resp.json()["tasks"]}
+            assert titles == {"in1", "in2", "created"}
+            for t in resp.json()["tasks"]:
+                assert t["due_date"] is not None
+                assert "2026-04-01" <= t["due_date"] <= "2026-04-30"
+        finally:
+            _reset_task_service(prev)
+
+
 def test_routes_execute_shape(tmp_path: Path) -> None:
     import asyncio
 

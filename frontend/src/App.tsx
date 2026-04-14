@@ -69,6 +69,7 @@ export function App(): JSX.Element {
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
   const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
+  const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(undefined);
 
   // PWA: handle ?view= and ?share= URL params from manifest shortcuts / share target
   useEffect(() => {
@@ -98,12 +99,35 @@ export function App(): JSX.Element {
       view === 'tasks'
     ) {
       setActiveView(view);
+      // Deep-link to a specific task card.
+      const focus = params.get('focus');
+      if (view === 'tasks' && focus) {
+        setFocusedTaskId(focus);
+      }
     }
 
     // Clean URL without reload
-    if (params.has('view') || params.has('share')) {
+    if (params.has('view') || params.has('share') || params.has('focus')) {
       window.history.replaceState({}, '', '/');
     }
+  }, []);
+
+  // When navigating away from tasks, clear the one-shot focus id so the
+  // next visit isn't stuck highlighting an old card.
+  useEffect(() => {
+    if (activeView !== 'tasks' && focusedTaskId !== undefined) {
+      setFocusedTaskId(undefined);
+    }
+  }, [activeView, focusedTaskId]);
+
+  const handleNavigateToTask = useCallback((taskId: string) => {
+    setFocusedTaskId(taskId);
+    setActiveView('tasks');
+    // Keep URL in sync for shareable deep-links.
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'tasks');
+    url.searchParams.set('focus', taskId);
+    window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
   // PWA: Subscribe to Web Push notifications
@@ -637,7 +661,10 @@ export function App(): JSX.Element {
             <FinanceDashboard onBack={() => setActiveView('chat')} />
           )}
           {activeView === 'calendar' && (
-            <CalendarView onBack={() => setActiveView('chat')} />
+            <CalendarView
+              onBack={() => setActiveView('chat')}
+              onNavigateToTask={handleNavigateToTask}
+            />
           )}
           {activeView === 'whatsapp' && (
             <WhatsAppPanel
@@ -650,7 +677,10 @@ export function App(): JSX.Element {
             <MemoryView onBack={() => setActiveView('chat')} />
           )}
           {activeView === 'tasks' && (
-            <TasksView onBack={() => setActiveView('chat')} />
+            <TasksView
+              onBack={() => setActiveView('chat')}
+              focusId={focusedTaskId}
+            />
           )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView

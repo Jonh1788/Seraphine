@@ -35,6 +35,7 @@ def _to_task(row: dict[str, Any]) -> SeraphineTask:
         payload=row.get("payload") or {},
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+        due_date=row.get("due_date"),
     )
 
 
@@ -72,6 +73,7 @@ class TaskService:
         source: str = "system",
         payload: dict[str, Any] | None = None,
         status: str = "pending",
+        due_date: str | None = None,
     ) -> int:
         return await self._store.add_task(
             type=type,
@@ -80,6 +82,7 @@ class TaskService:
             description=description,
             source=source,
             payload=payload or {},
+            due_date=due_date,
         )
 
     async def list_tasks(
@@ -88,9 +91,15 @@ class TaskService:
         status: str | None = None,
         type: str | None = None,
         limit: int = 100,
+        due_from: str | None = None,
+        due_to: str | None = None,
     ) -> list[SeraphineTask]:
         rows = await self._store.get_tasks(
-            status=status, type=type, limit=limit
+            status=status,
+            type=type,
+            limit=limit,
+            due_from=due_from,
+            due_to=due_to,
         )
         return [_to_task(r) for r in rows]
 

@@ -46,7 +46,12 @@ def _now() -> str:
 
 
 def _row_to_task(row: tuple[Any, ...]) -> dict[str, Any]:
-    """Convert a seraphine_tasks row into a dict, parsing payload JSON."""
+    """Convert a seraphine_tasks row into a dict, parsing payload JSON.
+
+    The SELECT clause for tasks is stable:
+      id, type, status, title, description, source, payload,
+      created_at, updated_at, due_date
+    """
     raw_payload = row[6]
     try:
         payload = json.loads(raw_payload) if raw_payload else {}
@@ -62,6 +67,7 @@ def _row_to_task(row: tuple[Any, ...]) -> dict[str, Any]:
         "payload": payload,
         "created_at": row[7],
         "updated_at": row[8],
+        "due_date": row[9] if len(row) > 9 else None,
     }
 
 
@@ -191,6 +197,20 @@ class MemoryStore:
                     CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
                       ON seraphine_tasks(type);
                     """
+                )
+                # Lightweight migration: add due_date column on old DBs.
+                # SQLite has no IF NOT EXISTS for ADD COLUMN, so we swallow
+                # the "duplicate column name" OperationalError idempotently.
+                try:
+                    conn.execute(
+                        "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_due_date"
+                    " ON seraphine_tasks(due_date)"
                 )
 
         await asyncio.to_thread(_work)
@@ -663,6 +683,7 @@ class MemoryStore:
         description: str,
         source: str,
         payload: dict[str, Any],
+        due_date: str | None = None,
     ) -> int:
         """Insert a new internal task and return its autoincrement id."""
         ts = _now()
@@ -673,10 +694,10 @@ class MemoryStore:
                 cur = conn.execute(
                     "INSERT INTO seraphine_tasks"
                     "(type, status, title, description, source, payload,"
-                    " created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " created_at, updated_at, due_date)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (type, status, title, description, source,
-                     payload_json, ts, ts),
+                     payload_json, ts, ts, due_date),
                 )
                 return int(cur.lastrowid or 0)
 
@@ -688,8 +709,15 @@ class MemoryStore:
         status: str | None = None,
         type: str | None = None,
         limit: int = 100,
+        due_from: str | None = None,
+        due_to: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return tasks ordered newest-first, with optional filters."""
+        """Return tasks ordered newest-first, with optional filters.
+
+        ``due_from`` / ``due_to`` restrict the result to tasks whose
+        ``due_date`` (YYYY-MM-DD) falls inside the inclusive range. Tasks
+        without a due_date are excluded when either bound is supplied.
+        """
         def _work() -> list[dict[str, Any]]:
             clauses: list[str] = []
             params: list[Any] = []
@@ -699,13 +727,19 @@ class MemoryStore:
             if type is not None:
                 clauses.append("type = ?")
                 params.append(type)
+            if due_from is not None:
+                clauses.append("due_date IS NOT NULL AND due_date >= ?")
+                params.append(due_from)
+            if due_to is not None:
+                clauses.append("due_date IS NOT NULL AND due_date <= ?")
+                params.append(due_to)
             where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
 
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT id, type, status, title, description, source,"
-                    " payload, created_at, updated_at"
+                    " payload, created_at, updated_at, due_date"
                     f" FROM seraphine_tasks{where}"
                     " ORDER BY created_at DESC, id DESC LIMIT ?",
                     params,
@@ -720,7 +754,7 @@ class MemoryStore:
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT id, type, status, title, description, source,"
-                    " payload, created_at, updated_at"
+                    " payload, created_at, updated_at, due_date"
                     " FROM seraphine_tasks WHERE id = ?",
                     (task_id,),
                 ).fetchone()
