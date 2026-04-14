@@ -86,46 +86,57 @@ export function DashboardPage() {
     };
   }, [month, year]);
 
+  const showAgenda = activeFilters.has("agenda");
+  const showFinancas = activeFilters.has("financas");
+  // 'projecoes' and 'outros' have no backing data yet — toggling them
+  // is a visual no-op until those modules ship.
+
   const events = useMemo<CalendarEvent[]>(() => {
-    const taskEvents: CalendarEvent[] = tasks
-      .filter((t) => t.due_date)
-      .map((t) => ({
-        date: (t.due_date ?? "").slice(0, 10),
-        color:
-          t.status === "completed"
-            ? "green"
-            : t.status === "approved"
-              ? "purple"
-              : "blue",
-      }));
-    const financeEvents: CalendarEvent[] = entries.map((e) => ({
-      date: (e.date ?? "").slice(0, 10),
-      // green for income, red for expense — same palette as the
-      // transaction cards in chat.
-      color: e.type === "income" ? "green" : "red",
-    }));
+    const taskEvents: CalendarEvent[] = showAgenda
+      ? tasks
+          .filter((t) => t.due_date)
+          .map((t) => ({
+            date: (t.due_date ?? "").slice(0, 10),
+            color:
+              t.status === "completed"
+                ? "green"
+                : t.status === "approved"
+                  ? "purple"
+                  : "blue",
+          }))
+      : [];
+    const financeEvents: CalendarEvent[] = showFinancas
+      ? entries.map((e) => ({
+          date: (e.date ?? "").slice(0, 10),
+          color: e.type === "income" ? "green" : "red",
+        }))
+      : [];
     return [...taskEvents, ...financeEvents];
-  }, [tasks, entries]);
+  }, [tasks, entries, showAgenda, showFinancas]);
 
   const selectedEvents = useMemo(() => {
-    const taskItems = tasks
-      .filter((t) => (t.due_date ?? "").slice(0, 10) === selected)
-      .map((t) => ({ id: `task-${t.id}`, title: t.title }));
-    const entryItems = entries
-      .filter((e) => (e.date ?? "").slice(0, 10) === selected)
-      .map((e) => {
-        const sign = e.type === "income" ? "+" : "-";
-        const amt = e.amount.toLocaleString("pt-BR", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-        return {
-          id: `entry-${e.id}`,
-          title: `${e.description} · ${sign}R$ ${amt}`,
-        };
-      });
+    const taskItems = showAgenda
+      ? tasks
+          .filter((t) => (t.due_date ?? "").slice(0, 10) === selected)
+          .map((t) => ({ id: `task-${t.id}`, title: t.title }))
+      : [];
+    const entryItems = showFinancas
+      ? entries
+          .filter((e) => (e.date ?? "").slice(0, 10) === selected)
+          .map((e) => {
+            const sign = e.type === "income" ? "+" : "-";
+            const amt = e.amount.toLocaleString("pt-BR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+            return {
+              id: `entry-${e.id}`,
+              title: `${e.description} · ${sign}R$ ${amt}`,
+            };
+          })
+      : [];
     return [...entryItems, ...taskItems];
-  }, [tasks, entries, selected]);
+  }, [tasks, entries, selected, showAgenda, showFinancas]);
 
   const pendingTasks = tasks.filter((t) => t.status === "pending").length;
   const completedTasks = tasks.filter((t) => t.status === "completed").length;
