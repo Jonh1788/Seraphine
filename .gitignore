@@ -14,6 +14,11 @@ dist/
 .vite/
 *.log
 
+# Rust / Tauri
+target/
+**/Cargo.lock.tmp
+src-tauri/gen/
+
 # Data / runtime
 data/
 *.sqlite

@@ -1,0 +1,29 @@
+[package]
+name = "seraphine-desktop"
+version = "0.1.0"
+description = "Seraphine — local-first personal assistant (macOS desktop shell)"
+authors = ["Jonathan"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# tauri-build builds the frontend artifacts and merges them into the
+# binary; runs at compile time only.
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+[lib]
+name = "seraphine_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
