@@ -1,5 +1,5 @@
-"""core-db — base SQLite store + migration registry.
+"""core-db — base SQLite Store + migration registry."""
 
-Populated in Phase 4. This is a Phase-1 placeholder so uv workspace
-resolution works against a real package directory.
-"""
+from core_db.store import Store, Migrator
+
+__all__ = ["Store", "Migrator"]

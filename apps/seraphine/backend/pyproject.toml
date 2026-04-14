@@ -20,10 +20,12 @@ dependencies = [
     "pdfplumber>=0.10",
     "pywebpush>=2",
     "llm-adapters",
+    "core-db",
 ]
 
 [tool.uv.sources]
 llm-adapters = { workspace = true }
+core-db = { workspace = true }
 
 [project.optional-dependencies]
 dev = [

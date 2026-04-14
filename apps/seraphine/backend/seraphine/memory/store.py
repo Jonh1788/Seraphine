@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from core_db import Store
+
 
 class Turn(BaseModel):
     id: str
@@ -88,139 +90,131 @@ def _row_to_event(row: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-class MemoryStore:
+def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
+    """Schema for Seraphine's domain tables.
+
+    Until each module is extracted into its own package (Phases 5-9),
+    every Seraphine-owned table lives here as a single migrator. Each
+    extraction will move its CREATE TABLE block out and into
+    ``packages/mod-<name>/schema.py`` registered via ``Store.register_migrator``.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS conversations (
+          id          TEXT PRIMARY KEY,
+          created_at  TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS turns (
+          id              TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id),
+          role            TEXT NOT NULL CHECK (role IN ('user','assistant')),
+          content         TEXT NOT NULL,
+          created_at      TEXT NOT NULL,
+          token_count     INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_turns_conv
+          ON turns(conversation_id, created_at);
+        CREATE TABLE IF NOT EXISTS facts (
+          id            TEXT PRIMARY KEY,
+          text          TEXT NOT NULL,
+          source        TEXT NOT NULL,
+          confidence    REAL NOT NULL,
+          created_at    TEXT NOT NULL,
+          superseded_by TEXT REFERENCES facts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_created
+          ON facts(created_at DESC);
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+          id              TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id),
+          summary         TEXT NOT NULL,
+          up_to_turn_id   TEXT NOT NULL,
+          created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_summaries_conv
+          ON conversation_summaries(conversation_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS notifications (
+          id         TEXT PRIMARY KEY,
+          event      TEXT NOT NULL,
+          task_id    TEXT,
+          title      TEXT,
+          summary    TEXT,
+          payload    TEXT NOT NULL,
+          read       INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_unread
+          ON notifications(read, created_at DESC);
+        CREATE TABLE IF NOT EXISTS tool_audit (
+          id             TEXT PRIMARY KEY,
+          request_id     TEXT NOT NULL,
+          tool           TEXT NOT NULL,
+          args_json      TEXT NOT NULL,
+          approved       INTEGER,
+          ok             INTEGER,
+          output_excerpt TEXT,
+          error          TEXT,
+          created_at     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS event_timeline (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_type  TEXT NOT NULL,
+          summary     TEXT NOT NULL,
+          source      TEXT NOT NULL,
+          metadata    TEXT NOT NULL DEFAULT '{}',
+          created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_timeline_created
+          ON event_timeline(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_event_timeline_source
+          ON event_timeline(source, created_at DESC);
+        CREATE TABLE IF NOT EXISTS seraphine_tasks (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          type          TEXT NOT NULL,
+          status        TEXT NOT NULL DEFAULT 'pending',
+          title         TEXT NOT NULL,
+          description   TEXT NOT NULL,
+          source        TEXT NOT NULL,
+          payload       TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          updated_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_status
+          ON seraphine_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
+          ON seraphine_tasks(type);
+
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          endpoint   TEXT PRIMARY KEY,
+          p256dh     TEXT NOT NULL,
+          auth       TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        """
+    )
+    # Lightweight migration: add due_date column on old DBs. SQLite has
+    # no IF NOT EXISTS for ADD COLUMN, so we swallow the duplicate
+    # column error idempotently.
+    try:
+        conn.execute(
+            "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT"
+        )
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_due_date"
+        " ON seraphine_tasks(due_date)"
+    )
+
+
+class MemoryStore(Store):
     def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-        self._conn: sqlite3.Connection | None = None
-
-    def _connect(self) -> sqlite3.Connection:
-        if self._conn is not None:
-            return self._conn
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON")
-        self._conn = conn
-        return conn
-
-    async def aclose(self) -> None:
-        """Close the persistent connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
-
-    async def ensure_schema(self) -> None:
-        def _work() -> None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self._connect() as conn:
-                conn.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS conversations (
-                      id          TEXT PRIMARY KEY,
-                      created_at  TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS turns (
-                      id              TEXT PRIMARY KEY,
-                      conversation_id TEXT NOT NULL REFERENCES conversations(id),
-                      role            TEXT NOT NULL CHECK (role IN ('user','assistant')),
-                      content         TEXT NOT NULL,
-                      created_at      TEXT NOT NULL,
-                      token_count     INTEGER
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_turns_conv
-                      ON turns(conversation_id, created_at);
-                    CREATE TABLE IF NOT EXISTS facts (
-                      id            TEXT PRIMARY KEY,
-                      text          TEXT NOT NULL,
-                      source        TEXT NOT NULL,
-                      confidence    REAL NOT NULL,
-                      created_at    TEXT NOT NULL,
-                      superseded_by TEXT REFERENCES facts(id)
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_facts_created
-                      ON facts(created_at DESC);
-                    CREATE TABLE IF NOT EXISTS conversation_summaries (
-                      id              TEXT PRIMARY KEY,
-                      conversation_id TEXT NOT NULL REFERENCES conversations(id),
-                      summary         TEXT NOT NULL,
-                      up_to_turn_id   TEXT NOT NULL,
-                      created_at      TEXT NOT NULL
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_summaries_conv
-                      ON conversation_summaries(conversation_id, created_at DESC);
-                    CREATE TABLE IF NOT EXISTS notifications (
-                      id         TEXT PRIMARY KEY,
-                      event      TEXT NOT NULL,
-                      task_id    TEXT,
-                      title      TEXT,
-                      summary    TEXT,
-                      payload    TEXT NOT NULL,
-                      read       INTEGER NOT NULL DEFAULT 0,
-                      created_at TEXT NOT NULL
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_notif_unread
-                      ON notifications(read, created_at DESC);
-                    CREATE TABLE IF NOT EXISTS tool_audit (
-                      id             TEXT PRIMARY KEY,
-                      request_id     TEXT NOT NULL,
-                      tool           TEXT NOT NULL,
-                      args_json      TEXT NOT NULL,
-                      approved       INTEGER,
-                      ok             INTEGER,
-                      output_excerpt TEXT,
-                      error          TEXT,
-                      created_at     TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS event_timeline (
-                      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                      event_type  TEXT NOT NULL,
-                      summary     TEXT NOT NULL,
-                      source      TEXT NOT NULL,
-                      metadata    TEXT NOT NULL DEFAULT '{}',
-                      created_at  TEXT NOT NULL
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_event_timeline_created
-                      ON event_timeline(created_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_event_timeline_source
-                      ON event_timeline(source, created_at DESC);
-                    CREATE TABLE IF NOT EXISTS seraphine_tasks (
-                      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                      type          TEXT NOT NULL,
-                      status        TEXT NOT NULL DEFAULT 'pending',
-                      title         TEXT NOT NULL,
-                      description   TEXT NOT NULL,
-                      source        TEXT NOT NULL,
-                      payload       TEXT NOT NULL,
-                      created_at    TEXT NOT NULL,
-                      updated_at    TEXT NOT NULL
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_status
-                      ON seraphine_tasks(status);
-                    CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
-                      ON seraphine_tasks(type);
-
-                    CREATE TABLE IF NOT EXISTS push_subscriptions (
-                      endpoint   TEXT PRIMARY KEY,
-                      p256dh     TEXT NOT NULL,
-                      auth       TEXT NOT NULL,
-                      created_at TEXT NOT NULL
-                    );
-                    """
-                )
-                # Lightweight migration: add due_date column on old DBs.
-                # SQLite has no IF NOT EXISTS for ADD COLUMN, so we swallow
-                # the "duplicate column name" OperationalError idempotently.
-                try:
-                    conn.execute(
-                        "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT"
-                    )
-                except sqlite3.OperationalError as exc:
-                    if "duplicate column name" not in str(exc).lower():
-                        raise
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_due_date"
-                    " ON seraphine_tasks(due_date)"
-                )
-
-        await asyncio.to_thread(_work)
+        super().__init__(path)
+        # Register Seraphine's monolithic schema migrator. Future module
+        # extractions will register their own and remove their CREATE
+        # TABLE block from `_seraphine_core_migrator`.
+        self.register_migrator("seraphine_core", _seraphine_core_migrator)
 
     async def create_conversation(self) -> str:
         conv_id = str(uuid.uuid4())
