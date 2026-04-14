@@ -3,6 +3,7 @@ import type { InlineTask } from "../api/chat";
 
 interface Props {
   tasks: InlineTask[];
+  onOpen?: (taskId: string) => void;
 }
 
 function isoToday(): string {
@@ -36,7 +37,7 @@ function groupByDate(tasks: InlineTask[]): [string, InlineTask[]][] {
   return Array.from(groups.entries());
 }
 
-export function TasksBlock({ tasks }: Props) {
+export function TasksBlock({ tasks, onOpen }: Props) {
   if (tasks.length === 0) return null;
   const groups = groupByDate(tasks);
 
@@ -66,7 +67,7 @@ export function TasksBlock({ tasks }: Props) {
                 {label}
               </div>
               {items.map((t) => (
-                <Card key={t.id} t={t} />
+                <Card key={t.id} t={t} onOpen={onOpen} />
               ))}
             </div>
           );
@@ -76,7 +77,7 @@ export function TasksBlock({ tasks }: Props) {
   );
 }
 
-function Card({ t }: { t: InlineTask }) {
+function Card({ t, onOpen }: { t: InlineTask; onOpen?: (id: string) => void }) {
   const isDone = t.status === "completed";
   // Static class names so Tailwind's JIT can include them in the build.
   const Icon = isDone ? CheckCircle2 : Circle;
@@ -85,8 +86,8 @@ function Card({ t }: { t: InlineTask }) {
     ? "text-[15px] font-medium text-ink-dim line-through"
     : "text-[15px] font-medium text-ink-primary";
 
-  return (
-    <div className="flex items-start gap-3 rounded-lg bg-white/[0.03] border border-white/5 p-3">
+  const inner = (
+    <>
       <Icon className={`h-5 w-5 mt-0.5 shrink-0 ${iconFg}`} />
       <div className="flex-1 min-w-0">
         <div className={titleCls}>{t.title}</div>
@@ -97,6 +98,23 @@ function Card({ t }: { t: InlineTask }) {
           </div>
         ) : null}
       </div>
+    </>
+  );
+
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(String(t.id))}
+        className="flex items-start gap-3 rounded-lg bg-white/[0.03] border border-white/5 p-3 text-left hover:border-white/10 hover:bg-white/[0.06] transition-colors w-full"
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-start gap-3 rounded-lg bg-white/[0.03] border border-white/5 p-3">
+      {inner}
     </div>
   );
 }

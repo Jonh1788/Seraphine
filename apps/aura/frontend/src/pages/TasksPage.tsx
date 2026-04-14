@@ -5,6 +5,8 @@ import {
   Clock,
   AlertTriangle,
   Plus,
+  RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -16,7 +18,32 @@ import { Button } from "../components/Button";
 import { Input, Textarea } from "../components/Input";
 import { TabPills } from "../components/TabPills";
 import * as tasksApi from "../api/tasks";
+import * as recurringApi from "../api/recurring";
+import type { InlineRecurring } from "../api/chat";
 import type { Task, TaskStatus } from "../types/api";
+import { TaskEditorModal } from "../components/TaskEditorModal";
+
+const WEEKDAY_LABELS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+
+function prettyRecurringSchedule(r: InlineRecurring): string {
+  const time = r.time ? ` · ${r.time}` : "";
+  if (r.frequency === "daily") return `Diário${time}`;
+  if (r.frequency === "weekly") {
+    const w =
+      r.weekday !== null && r.weekday !== undefined
+        ? WEEKDAY_LABELS[r.weekday] ?? "?"
+        : "?";
+    return `${w}${time}`;
+  }
+  if (r.frequency === "monthly") {
+    const d =
+      r.day_of_month !== null && r.day_of_month !== undefined
+        ? `dia ${r.day_of_month}`
+        : "mensal";
+    return `Mensal · ${d}${time}`;
+  }
+  return r.frequency;
+}
 
 const COLUMNS: KanbanColumnDef[] = [
   { id: "pending", label: "Para Fazer", color: "blue" },
@@ -130,18 +157,34 @@ export function TasksPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [recurring, setRecurring] = useState<InlineRecurring[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState("kanban");
   const today = isoToday();
 
   const reload = useCallback(async () => {
     try {
-      const t = await tasksApi.listTasks({ limit: 200 });
+      const [t, r] = await Promise.all([
+        tasksApi.listTasks({ limit: 200 }),
+        recurringApi.listRecurring().catch(() => []),
+      ]);
       setTasks(t);
+      setRecurring(r);
     } catch {
       // ignore
     }
   }, []);
+
+  const onDeleteRecurring = async (id: string) => {
+    const prev = recurring;
+    setRecurring((p) => p.filter((r) => r.id !== id));
+    try {
+      await recurringApi.deleteRecurring(id);
+    } catch {
+      setRecurring(prev);
+    }
+  };
 
   useEffect(() => {
     reload();
@@ -265,9 +308,11 @@ export function TasksPage() {
               </div>
             ) : (
               tasks.slice(0, 30).map((t) => (
-                <div
+                <button
                   key={t.id}
-                  className="flex items-start gap-3 px-3 py-2 rounded-lg bg-bg-elevated/60 border border-white/5"
+                  type="button"
+                  onClick={() => setEditingId(t.id)}
+                  className="flex items-start gap-3 px-3 py-2 rounded-lg bg-bg-elevated/60 border border-white/5 text-left hover:border-white/10 hover:bg-bg-elevated/90 transition-colors"
                 >
                   <div
                     className={[
@@ -287,7 +332,7 @@ export function TasksPage() {
                       </div>
                     ) : null}
                   </div>
-                </div>
+                </button>
               ))
             )}
           </div>
@@ -303,9 +348,68 @@ export function TasksPage() {
           </span>
         </Button>
       </div>
-      <KanbanBoard tasks={tasks} columns={COLUMNS} onMove={move} onDelete={onDelete} />
+      <KanbanBoard
+        tasks={tasks}
+        columns={COLUMNS}
+        onMove={move}
+        onDelete={onDelete}
+        onOpen={(id) => setEditingId(id)}
+      />
+
+      <GlassCard className="flex flex-col">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="h-8 w-8 rounded-md bg-accent-purple/15 ring-1 ring-accent-purple/30 grid place-items-center">
+            <RefreshCw className="h-4 w-4 text-accent-purple" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Tarefas Recorrentes</div>
+            <div className="text-xs text-ink-dim">
+              {recurring.length === 0
+                ? "Peça à Aura no chat: 'tirar o lixo toda segunda às 10:00'"
+                : `${recurring.length} ${recurring.length === 1 ? "regra" : "regras"}`}
+            </div>
+          </div>
+        </div>
+        {recurring.length === 0 ? null : (
+          <div className="flex flex-col gap-2">
+            {recurring.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-bg-elevated/60 border border-white/5"
+              >
+                <RefreshCw className="h-4 w-4 shrink-0 text-accent-purple" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-ink-primary truncate">
+                    {r.title}
+                  </div>
+                  <div className="text-xs text-ink-faint mt-0.5">
+                    {prettyRecurringSchedule(r)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDeleteRecurring(r.id)}
+                  className="p-1.5 rounded-md text-ink-faint hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  aria-label="Remover regra"
+                  title="Remover regra"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassCard>
 
       {modalOpen ? <NewTaskModal onClose={() => setModalOpen(false)} onCreated={reload} /> : null}
+      {editingId ? (
+        <TaskEditorModal
+          taskId={editingId}
+          onClose={() => setEditingId(null)}
+          onSaved={reload}
+          onDeleted={reload}
+        />
+      ) : null}
     </div>
   );
 }

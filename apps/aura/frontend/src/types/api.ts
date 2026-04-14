@@ -10,6 +10,7 @@ export interface AuthResponse {
 }
 
 export type TaskStatus = "pending" | "approved" | "completed" | "rejected";
+export type TaskPriority = "low" | "med" | "high";
 
 export interface Task {
   id: string;
@@ -21,6 +22,8 @@ export interface Task {
   payload?: Record<string, unknown> | null;
   due_date?: string | null;
   due_time?: string | null;
+  priority?: TaskPriority | null;
+  tags?: string[] | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -37,6 +40,19 @@ export interface CreateTaskBody {
   payload?: Record<string, unknown>;
   due_date?: string | null;
   due_time?: string | null;
+  priority?: TaskPriority | null;
+  tags?: string[];
+}
+
+export interface UpdateTaskBody {
+  title?: string;
+  description?: string;
+  status?: TaskStatus;
+  // For due_date/due_time/priority: empty string clears the field.
+  due_date?: string | null;
+  due_time?: string | null;
+  priority?: TaskPriority | "" | null;
+  tags?: string[];
 }
 
 export type EntryType = "income" | "expense";

@@ -47,3 +47,96 @@ body {
 button {
   font-family: inherit;
 }
+
+/* ---------- Tiptap editor (TaskEditorModal) --------------------------- */
+/* Minimal typography styles — we avoid @tailwindcss/typography to keep
+   bundle small. Mirrors the block-editor look from the Néctar reference. */
+.tiptap-editor {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.tiptap-editor p {
+  margin: 0.4em 0;
+}
+.tiptap-editor h1 {
+  font-size: 1.65em;
+  font-weight: 700;
+  margin: 0.8em 0 0.3em;
+  line-height: 1.25;
+  color: #f3f4f6;
+}
+.tiptap-editor h2 {
+  font-size: 1.35em;
+  font-weight: 700;
+  margin: 0.7em 0 0.3em;
+  color: #f3f4f6;
+}
+.tiptap-editor h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+  color: #f3f4f6;
+}
+.tiptap-editor strong {
+  color: #f3f4f6;
+  font-weight: 600;
+}
+.tiptap-editor em {
+  font-style: italic;
+}
+.tiptap-editor code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.tiptap-editor pre {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.75em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.tiptap-editor pre code {
+  background: transparent;
+  padding: 0;
+}
+.tiptap-editor blockquote {
+  border-left: 3px solid rgba(167, 139, 250, 0.6);
+  padding-left: 0.9em;
+  color: #cbd5e1;
+  margin: 0.6em 0;
+}
+.tiptap-editor ul,
+.tiptap-editor ol {
+  padding-left: 1.35em;
+  margin: 0.4em 0;
+}
+.tiptap-editor ul {
+  list-style: disc;
+}
+.tiptap-editor ol {
+  list-style: decimal;
+}
+.tiptap-editor li > p {
+  margin: 0.15em 0;
+}
+.tiptap-editor hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 0.8em 0;
+}
+.tiptap-editor a {
+  color: #a78bfa;
+  text-decoration: underline;
+}
+/* Placeholder (from @tiptap/extension-placeholder) */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #64748b;
+  float: left;
+  pointer-events: none;
+  height: 0;
+}

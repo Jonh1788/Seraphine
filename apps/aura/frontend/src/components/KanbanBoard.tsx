@@ -14,6 +14,7 @@ interface KanbanBoardProps {
   columns: KanbanColumnDef[];
   onMove: (taskId: string, to: TaskStatus) => void;
   onDelete?: (taskId: string) => void;
+  onOpen?: (taskId: string) => void;
 }
 
 const COLOR_RING: Record<KanbanColumnDef["color"], string> = {
@@ -22,7 +23,7 @@ const COLOR_RING: Record<KanbanColumnDef["color"], string> = {
   green: "ring-mod-finance/40 bg-mod-finance/10 text-mod-finance",
 };
 
-export function KanbanBoard({ tasks, columns, onMove, onDelete }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, columns, onMove, onDelete, onOpen }: KanbanBoardProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
 
@@ -85,6 +86,13 @@ export function KanbanBoard({ tasks, columns, onMove, onDelete }: KanbanBoardPro
                       setDraggingId(t.id);
                     }}
                     onDragEnd={() => setDraggingId(null)}
+                    onClick={(e) => {
+                      // Only fire "open" on a plain click (ignore drag
+                      // lifecycle). Skip when the click came from the
+                      // delete button.
+                      if ((e.target as HTMLElement).closest("[data-kanban-delete]")) return;
+                      onOpen?.(t.id);
+                    }}
                     className={[
                       "group rounded-lg border border-white/5 bg-bg-elevated/80 p-3 cursor-grab active:cursor-grabbing",
                       "hover:border-white/10 transition-colors",
@@ -111,7 +119,11 @@ export function KanbanBoard({ tasks, columns, onMove, onDelete }: KanbanBoardPro
                       {onDelete ? (
                         <button
                           type="button"
-                          onClick={() => onDelete(t.id)}
+                          data-kanban-delete
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(t.id);
+                          }}
                           className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-red-400 transition-opacity"
                           aria-label="Remover tarefa"
                         >

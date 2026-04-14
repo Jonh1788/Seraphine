@@ -35,12 +35,22 @@ def _now() -> str:
 
 
 def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
-    """Map a 12-column SELECT row to a SeraphineTask."""
+    """Map a 14-column SELECT row to a SeraphineTask."""
     raw_payload = row[6]
     try:
         payload = json.loads(raw_payload) if raw_payload else {}
     except (json.JSONDecodeError, TypeError):
         payload = {}
+    raw_tags = row[12] if len(row) > 12 else None
+    tags: list[str]
+    try:
+        if raw_tags:
+            parsed = json.loads(raw_tags)
+            tags = [str(x) for x in parsed] if isinstance(parsed, list) else []
+        else:
+            tags = []
+    except (json.JSONDecodeError, TypeError):
+        tags = []
     return SeraphineTask(
         id=row[0],
         type=row[1],
@@ -54,12 +64,14 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         due_date=row[9],
         due_time=row[10],
         user_id=row[11],
+        tags=tags,
+        priority=row[13] if len(row) > 13 else None,
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
-    " updated_at, due_date, due_time, user_id"
+    " updated_at, due_date, due_time, user_id, tags, priority"
 )
 
 
@@ -96,19 +108,24 @@ class TaskService:
         due_date: str | None = None,
         due_time: str | None = None,
         user_id: str | None = None,
+        priority: str | None = None,
+        tags: list[str] | None = None,
     ) -> int:
         ts = _now()
         payload_json = json.dumps(payload or {}, ensure_ascii=False)
+        tags_json = json.dumps(tags or [], ensure_ascii=False)
 
         def _work() -> int:
             with self._store._connect() as conn:
                 cur = conn.execute(
                     "INSERT INTO seraphine_tasks"
                     " (type, status, title, description, source, payload,"
-                    "  created_at, updated_at, due_date, due_time, user_id)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "  created_at, updated_at, due_date, due_time, user_id,"
+                    "  tags, priority)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (type, status, title, description, source,
-                     payload_json, ts, ts, due_date, due_time, user_id),
+                     payload_json, ts, ts, due_date, due_time, user_id,
+                     tags_json, priority),
                 )
                 return int(cur.lastrowid or 0)
 
@@ -200,6 +217,86 @@ class TaskService:
                         " WHERE id = ? AND user_id = ?",
                         (status, ts, task_id, user_id),
                     )
+                return cur.rowcount or 0
+
+        return await asyncio.to_thread(_work)
+
+    async def update_task(
+        self,
+        task_id: int,
+        *,
+        user_id: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+        due_date: str | None = None,
+        due_time: str | None = None,
+        priority: str | None = None,
+        tags: list[str] | None = None,
+        unset_due_date: bool = False,
+        unset_due_time: bool = False,
+        unset_priority: bool = False,
+    ) -> int:
+        """Partial update. Only provided fields are written.
+
+        To clear a nullable field, pass the ``unset_*`` flag rather than
+        ``None`` (None means "don't touch"). ``tags`` uses a special
+        sentinel: pass an empty list to clear tags.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if title is not None:
+            sets.append("title = ?")
+            params.append(title)
+        if description is not None:
+            sets.append("description = ?")
+            params.append(description)
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if unset_due_date:
+            sets.append("due_date = NULL")
+        elif due_date is not None:
+            sets.append("due_date = ?")
+            params.append(due_date)
+        if unset_due_time:
+            sets.append("due_time = NULL")
+        elif due_time is not None:
+            sets.append("due_time = ?")
+            params.append(due_time)
+        if unset_priority:
+            sets.append("priority = NULL")
+        elif priority is not None:
+            sets.append("priority = ?")
+            params.append(priority)
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(json.dumps(tags, ensure_ascii=False))
+
+        if not sets:
+            # Nothing to update — treat as a no-op; callers that want to
+            # confirm existence should use get_task.
+            return 0
+
+        sets.append("updated_at = ?")
+        params.append(_now())
+
+        def _work() -> int:
+            with self._store._connect() as conn:
+                if user_id is None:
+                    sql = (
+                        "UPDATE seraphine_tasks SET "
+                        + ", ".join(sets)
+                        + " WHERE id = ?"
+                    )
+                    cur = conn.execute(sql, (*params, task_id))
+                else:
+                    sql = (
+                        "UPDATE seraphine_tasks SET "
+                        + ", ".join(sets)
+                        + " WHERE id = ? AND user_id = ?"
+                    )
+                    cur = conn.execute(sql, (*params, task_id, user_id))
                 return cur.rowcount or 0
 
         return await asyncio.to_thread(_work)

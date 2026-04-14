@@ -5,6 +5,7 @@ from typing import Any
 
 TASK_TYPES = ["finance_import", "calendar_add", "whatsapp_reply", "generic"]
 TASK_STATUSES = ["pending", "approved", "rejected", "completed", "failed"]
+TASK_PRIORITIES = ["low", "med", "high"]
 
 
 @dataclass
@@ -21,3 +22,5 @@ class SeraphineTask:
     due_date: str | None = None  # YYYY-MM-DD (optional user-facing deadline)
     due_time: str | None = None  # HH:MM 24h (optional, pairs with due_date)
     user_id: str | None = None  # NULL for single-tenant (Seraphine), set for Aura
+    priority: str | None = None  # low / med / high (optional)
+    tags: list[str] = field(default_factory=list)  # free-form short labels

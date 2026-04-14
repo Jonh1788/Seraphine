@@ -20,9 +20,24 @@ export interface InlineTask {
   due_time?: string | null;
 }
 
+export interface InlineRecurring {
+  id: string;
+  title: string;
+  description?: string | null;
+  frequency: "daily" | "weekly" | "monthly";
+  weekday?: number | null;
+  day_of_month?: number | null;
+  time?: string | null;
+  active: boolean;
+  last_materialized_date?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ChatMessageMetadata {
   transactions?: InlineTransaction[];
   tasks?: InlineTask[];
+  recurring?: InlineRecurring[];
 }
 
 export interface ChatMessage {
@@ -90,6 +105,7 @@ export interface StreamHandlers {
   onDelta: (text: string) => void;
   onTransaction?: (entry: InlineTransaction) => void;
   onTask?: (task: InlineTask) => void;
+  onRecurring?: (rule: InlineRecurring) => void;
   onDone: (info: { title?: string }) => void;
   onError: (msg: string) => void;
   signal?: AbortSignal;
@@ -157,6 +173,7 @@ export async function streamMessage(
             delta?: string;
             transaction?: InlineTransaction;
             task?: InlineTask;
+            recurring?: InlineRecurring;
             done?: boolean;
             title?: string;
             error?: string;
@@ -167,6 +184,9 @@ export async function streamMessage(
           }
           if (parsed.task && handlers.onTask) {
             handlers.onTask(parsed.task);
+          }
+          if (parsed.recurring && handlers.onRecurring) {
+            handlers.onRecurring(parsed.recurring);
           }
           if (parsed.error) {
             handlers.onError(parsed.error);

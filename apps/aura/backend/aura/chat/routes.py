@@ -34,6 +34,7 @@ from mod_tasks.routes import get_current_user_id
 from mod_tasks.service import TaskService
 
 from aura.chat.service import ConversationService
+from aura.recurring.service import RecurringService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -91,7 +92,16 @@ _SYSTEM_PROMPT = (
     "atrasadas'), use a tool list_tasks. Por padrão, hoje. Se o usuário "
     "pedir um dia específico (amanhã, sexta), converta para YYYY-MM-DD. "
     "Não liste novamente o que já foi mostrado nesta mesma conversa — "
-    "as tarefas aparecem como cards visuais para o usuário."
+    "as tarefas aparecem como cards visuais para o usuário. "
+    "Quando o usuário descrever uma rotina ou tarefa recorrente (ex: "
+    "'tirar o lixo toda segunda às 10:00', 'todo dia às 8h tomar remédio', "
+    "'todo mês dia 5 pagar aluguel'), use a tool create_recurring_task. "
+    "Converta dias da semana para weekday (segunda=0, terça=1, quarta=2, "
+    "quinta=3, sexta=4, sábado=5, domingo=6). frequency deve ser 'daily', "
+    "'weekly' ou 'monthly'. time é HH:MM 24h. Se o usuário disser 'todo "
+    "dia' use daily; 'toda segunda/terça/...' use weekly com weekday; "
+    "'todo mês dia X' use monthly com day_of_month. Após criar, confirme "
+    "com mensagem curta — o card da regra recorrente aparece visualmente."
 )
 
 
@@ -185,6 +195,44 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "create_recurring_task",
+        "description": (
+            "Cria uma regra de tarefa recorrente (diária, semanal ou mensal). "
+            "Use quando o usuário descrever algo que se repete no tempo, "
+            "ex: 'tirar o lixo toda segunda às 10:00', 'todo dia tomar "
+            "remédio às 8h', 'todo mês dia 5 pagar aluguel'. Se hoje "
+            "corresponder à regra, uma tarefa já é materializada na hora."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "frequency": {
+                    "type": "string",
+                    "enum": ["daily", "weekly", "monthly"],
+                },
+                "weekday": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6,
+                    "description": "0=segunda, 6=domingo. Só para weekly.",
+                },
+                "day_of_month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31,
+                    "description": "Dia do mês 1..31. Só para monthly.",
+                },
+                "time": {
+                    "type": "string",
+                    "description": "HH:MM 24h; opcional",
+                },
+                "description": {"type": "string"},
+            },
+            "required": ["title", "frequency"],
+        },
+    },
+    {
         "name": "list_tasks",
         "description": (
             "Lista as tarefas do usuário, opcionalmente filtradas por data ou "
@@ -257,6 +305,15 @@ def _tasks_or_503(request: Request) -> TaskService:
     )
     if svc is None:
         raise HTTPException(status_code=503, detail="task service não configurado")
+    return svc
+
+
+def _recurring_or_503(request: Request) -> RecurringService:
+    svc: Optional[RecurringService] = getattr(
+        request.app.state, "recurring_service", None,
+    )
+    if svc is None:
+        raise HTTPException(status_code=503, detail="recurring service não configurado")
     return svc
 
 
@@ -476,6 +533,72 @@ async def _exec_complete_task(
     return {"ok": True, "task": _task_to_inline(updated)}
 
 
+async def _exec_create_recurring_task(
+    recurring: RecurringService,
+    tasks: TaskService,
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    """Create a recurring rule. If today matches, also immediately
+    materialize a task for today so the user sees the card right away."""
+    title = (args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title vazio"}
+    frequency = (args.get("frequency") or "").strip()
+    if frequency not in ("daily", "weekly", "monthly"):
+        return {
+            "ok": False,
+            "error": "frequency inválida (use daily/weekly/monthly)",
+        }
+
+    weekday = args.get("weekday")
+    day_of_month = args.get("day_of_month")
+    try:
+        weekday_i = int(weekday) if weekday is not None else None
+        day_i = int(day_of_month) if day_of_month is not None else None
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "weekday/day_of_month inválido"}
+
+    time_raw = args.get("time")
+    time = time_raw.strip() if isinstance(time_raw, str) else None
+    if time == "":
+        time = None
+    description = (args.get("description") or "").strip() or None
+
+    try:
+        rule = await recurring.create(
+            user_id=user_id,
+            title=title,
+            frequency=frequency,
+            weekday=weekday_i,
+            day_of_month=day_i,
+            time=time,
+            description=description,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    # If today matches, fire an occurrence immediately.
+    from datetime import datetime as _dt
+    materialized_task_payload: dict[str, Any] | None = None
+    try:
+        task_id = await recurring.materialize_for_rule_if_due(
+            rule, _dt.now(_TZ),
+        )
+        if task_id is not None:
+            persisted = await tasks.get_task(task_id, user_id=user_id)
+            if persisted is not None:
+                materialized_task_payload = _task_to_inline(persisted)
+    except Exception:
+        logger.exception("create_recurring_task: immediate materialize failed")
+
+    return {
+        "ok": True,
+        "recurring": rule.to_dict(),
+        "materialized_task": materialized_task_payload,
+    }
+
+
 async def _exec_list_tasks(
     tasks: TaskService,
     user_id: str,
@@ -522,6 +645,7 @@ async def stream_message(
     llm = _llm_or_503(request)
     finance = _finance_or_503(request)
     tasks_svc = _tasks_or_503(request)
+    recurring_svc = _recurring_or_503(request)
 
     user_text = body.content.strip()
     if not user_text:
@@ -548,6 +672,7 @@ async def stream_message(
         # conversation re-render the visual cards.
         turn_transactions: list[dict[str, Any]] = []
         turn_tasks: list[dict[str, Any]] = []
+        turn_recurring: list[dict[str, Any]] = []
         try:
             for _round in range(6):  # safety cap
                 pending_tool_calls: list[dict[str, Any]] | None = None
@@ -574,6 +699,10 @@ async def stream_message(
                         result = await _exec_complete_task(tasks_svc, uid, args)
                     elif name == "list_tasks":
                         result = await _exec_list_tasks(tasks_svc, uid, args)
+                    elif name == "create_recurring_task":
+                        result = await _exec_create_recurring_task(
+                            recurring_svc, tasks_svc, uid, args,
+                        )
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -598,6 +727,18 @@ async def stream_message(
                             yield (
                                 f"data: {json.dumps({'task': task_payload})}\n\n"
                             ).encode()
+                    if result.get("ok") and result.get("recurring"):
+                        rec_payload = result["recurring"]
+                        turn_recurring.append(rec_payload)
+                        yield (
+                            f"data: {json.dumps({'recurring': rec_payload})}\n\n"
+                        ).encode()
+                        mat = result.get("materialized_task")
+                        if mat:
+                            turn_tasks.append(mat)
+                            yield (
+                                f"data: {json.dumps({'task': mat})}\n\n"
+                            ).encode()
 
                     # Feed the tool result back to the LLM so it can
                     # craft a confirmation message.
@@ -613,12 +754,14 @@ async def stream_message(
 
             reply = "".join(acc_parts).strip() or "(sem resposta)"
             metadata: dict[str, Any] | None = None
-            if turn_transactions or turn_tasks:
+            if turn_transactions or turn_tasks or turn_recurring:
                 metadata = {}
                 if turn_transactions:
                     metadata["transactions"] = turn_transactions
                 if turn_tasks:
                     metadata["tasks"] = turn_tasks
+                if turn_recurring:
+                    metadata["recurring"] = turn_recurring
             try:
                 await svc.add_message(
                     conversation_id, uid, "assistant", reply, metadata=metadata,

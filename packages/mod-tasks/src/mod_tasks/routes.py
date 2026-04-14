@@ -15,7 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from mod_tasks.models import TASK_STATUSES, TASK_TYPES
+from mod_tasks.models import TASK_PRIORITIES, TASK_STATUSES, TASK_TYPES
 from mod_tasks.service import TaskService
 
 router = APIRouter(tags=["tasks"])
@@ -55,10 +55,21 @@ class TaskCreate(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     due_date: str | None = None  # YYYY-MM-DD
     due_time: str | None = None  # HH:MM (24h)
+    priority: str | None = None  # low / med / high
+    tags: list[str] | None = None
 
 
-class TaskStatusUpdate(BaseModel):
-    status: str
+class TaskPatch(BaseModel):
+    # All fields optional — only provided keys are updated. To clear a
+    # nullable field, send an explicit empty string (for due_date/time/
+    # priority) or an empty list (tags).
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    due_date: str | None = None
+    due_time: str | None = None
+    priority: str | None = None
+    tags: list[str] | None = None
 
 
 class TaskExecute(BaseModel):
@@ -122,6 +133,11 @@ async def create_task(
         raise HTTPException(
             status_code=422, detail=f"type must be one of {TASK_TYPES}",
         )
+    if body.priority is not None and body.priority not in TASK_PRIORITIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"priority must be one of {TASK_PRIORITIES}",
+        )
     try:
         task_id = await svc.create_task(
             type=body.type,
@@ -132,6 +148,8 @@ async def create_task(
             due_date=body.due_date,
             due_time=body.due_time,
             user_id=user_id,
+            priority=body.priority,
+            tags=body.tags,
         )
         return {"id": task_id, "ok": True}
     except Exception as e:
@@ -139,22 +157,85 @@ async def create_task(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.patch("/tasks/{task_id}")
-async def update_task_status(
+@router.get("/tasks/{task_id}")
+async def get_task(
     request: Request,
     task_id: int,
-    body: TaskStatusUpdate,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    task = await svc.get_task(task_id, user_id=user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return dataclasses.asdict(task)
+
+
+@router.patch("/tasks/{task_id}")
+async def update_task(
+    request: Request,
+    task_id: int,
+    body: TaskPatch,
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, bool]:
     svc = _service_or_503(request)
-    if body.status not in TASK_STATUSES:
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=422, detail="empty patch body")
+    if "status" in data and data["status"] not in TASK_STATUSES:
         raise HTTPException(
             status_code=422, detail=f"status must be one of {TASK_STATUSES}",
         )
+    # priority: accept None/empty-string as "clear". Validate real values.
+    unset_priority = False
+    priority_val: str | None = None
+    if "priority" in data:
+        raw = data["priority"]
+        if raw in (None, ""):
+            unset_priority = True
+        elif raw in TASK_PRIORITIES:
+            priority_val = raw
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"priority must be one of {TASK_PRIORITIES}",
+            )
+    # due_date / due_time: empty string means "clear".
+    unset_due_date = False
+    due_date_val: str | None = None
+    if "due_date" in data:
+        raw = data["due_date"]
+        if raw in (None, ""):
+            unset_due_date = True
+        else:
+            due_date_val = raw
+    unset_due_time = False
+    due_time_val: str | None = None
+    if "due_time" in data:
+        raw = data["due_time"]
+        if raw in (None, ""):
+            unset_due_time = True
+        else:
+            due_time_val = raw
+
     try:
-        affected = await svc.update_status(task_id, body.status, user_id=user_id)
+        affected = await svc.update_task(
+            task_id,
+            user_id=user_id,
+            title=data.get("title") if "title" in data else None,
+            description=(
+                data.get("description") if "description" in data else None
+            ),
+            status=data.get("status") if "status" in data else None,
+            due_date=due_date_val,
+            due_time=due_time_val,
+            priority=priority_val,
+            tags=data.get("tags") if "tags" in data else None,
+            unset_due_date=unset_due_date,
+            unset_due_time=unset_due_time,
+            unset_priority=unset_priority,
+        )
     except Exception as e:
-        logger.exception("task status update failed")
+        logger.exception("task update failed")
         raise HTTPException(status_code=500, detail=str(e))
     if not affected:
         raise HTTPException(status_code=404, detail="task not found")

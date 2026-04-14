@@ -13,8 +13,10 @@ was coming.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -37,6 +39,9 @@ from aura.chat.routes import router as chat_router
 from aura.chat import schema as chat_schema
 from aura.chat.service import ConversationService
 from aura.config import settings
+from aura.recurring import schema as recurring_schema
+from aura.recurring.routes import router as recurring_router
+from aura.recurring.service import RecurringService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +58,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("aura_chat", chat_schema.migrate)
     store.register_migrator("mod_tasks", tasks_schema.migrate)
     store.register_migrator("mod_finance", finance_schema.migrate)
+    store.register_migrator("aura_recurring", recurring_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -77,6 +83,7 @@ async def lifespan(app: FastAPI):
     task_service = TaskService(store, llm_client=llm, app_state=app.state)
     finance_service = FinanceService(store)
     conversations_service = ConversationService(store)
+    recurring_service = RecurringService(store, task_service)
 
     app.state.store = store
     app.state.llm = llm
@@ -84,11 +91,50 @@ async def lifespan(app: FastAPI):
     app.state.task_service = task_service
     app.state.finance_service = finance_service
     app.state.conversations_service = conversations_service
+    app.state.recurring_service = recurring_service
+
+    # Background materialize loop — every 10 minutes, create today's
+    # occurrences for any active rule that is due and hasn't fired yet.
+    # Stdlib-only on purpose: a pip dependency for something this small
+    # isn't worth it.
+    materialize_task: asyncio.Task[None] | None = None
+
+    async def _materialize_loop() -> None:
+        interval = 600  # 10 min
+        while True:
+            try:
+                created = await recurring_service.materialize_due(
+                    datetime.now(timezone.utc),
+                )
+                if created:
+                    logger.info(
+                        "recurring: materialized %d occurrences", len(created),
+                    )
+            except Exception:
+                logger.exception("recurring materialize loop failed")
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+
+    # Fire once at startup so boot-time misses are caught immediately.
+    try:
+        await recurring_service.materialize_due(datetime.now(timezone.utc))
+    except Exception:
+        logger.exception("initial recurring materialize failed")
+
+    materialize_task = asyncio.create_task(_materialize_loop())
 
     logger.info("Aura ready — DB=%s", settings.sqlite_path)
     try:
         yield
     finally:
+        if materialize_task is not None:
+            materialize_task.cancel()
+            try:
+                await materialize_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await store.aclose()
 
 
@@ -118,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(tasks_router)
     app.include_router(finance_router)
+    app.include_router(recurring_router)
 
     @app.get("/health")
     async def health() -> dict:

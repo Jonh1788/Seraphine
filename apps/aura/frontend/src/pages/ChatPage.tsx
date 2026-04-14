@@ -6,6 +6,7 @@ import {
   getConversation,
   streamMessage,
   type ChatMessage,
+  type InlineRecurring,
   type InlineTask,
   type InlineTransaction,
 } from "../api/chat";
@@ -13,6 +14,8 @@ import { ConversationsSidebar } from "../components/ConversationsSidebar";
 import { Markdown } from "../components/Markdown";
 import { TransactionsBlock } from "../components/TransactionCard";
 import { TasksBlock } from "../components/TaskCard";
+import { TaskEditorModal } from "../components/TaskEditorModal";
+import { RecurringBlock } from "../components/RecurringCard";
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -25,15 +28,18 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState<string | null>(null);
   const [streamingTransactions, setStreamingTransactions] = useState<InlineTransaction[]>([]);
   const [streamingTasks, setStreamingTasks] = useState<InlineTask[]>([]);
+  const [streamingRecurring, setStreamingRecurring] = useState<InlineRecurring[]>([]);
   // Refs mirror the streaming-* state so the RAF-driven finalize closure
   // can read the latest arrays without being captured stale. (React
   // batches setState during SSE bursts and the finalize runs outside
   // the render where `onDone` was created.)
   const streamingTransactionsRef = useRef<InlineTransaction[]>([]);
   const streamingTasksRef = useRef<InlineTask[]>([]);
+  const streamingRecurringRef = useRef<InlineRecurring[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -137,8 +143,10 @@ export function ChatPage() {
     setStreaming("");
     setStreamingTransactions([]);
     setStreamingTasks([]);
+    setStreamingRecurring([]);
     streamingTransactionsRef.current = [];
     streamingTasksRef.current = [];
+    streamingRecurringRef.current = [];
 
     // Reset typewriter state for this turn.
     bufferRef.current = "";
@@ -196,17 +204,27 @@ export function ChatPage() {
           streamingTasksRef.current = next;
           setStreamingTasks(next);
         },
+        onRecurring: (rule) => {
+          const prev = streamingRecurringRef.current;
+          const idx = prev.findIndex((r) => r.id === rule.id);
+          const next = idx >= 0 ? prev.slice() : [...prev, rule];
+          if (idx >= 0) next[idx] = rule;
+          streamingRecurringRef.current = next;
+          setStreamingRecurring(next);
+        },
         onDone: () => {
           streamDoneRef.current = true;
           finalizeRef.current = () => {
             const final = bufferRef.current.trim() || "(sem resposta)";
             const txs = streamingTransactionsRef.current;
             const tks = streamingTasksRef.current;
+            const recs = streamingRecurringRef.current;
             const metadata =
-              txs.length > 0 || tks.length > 0
+              txs.length > 0 || tks.length > 0 || recs.length > 0
                 ? {
                     ...(txs.length > 0 ? { transactions: txs } : {}),
                     ...(tks.length > 0 ? { tasks: tks } : {}),
+                    ...(recs.length > 0 ? { recurring: recs } : {}),
                   }
                 : undefined;
             setMessages((prev) => [
@@ -220,8 +238,10 @@ export function ChatPage() {
             setStreaming(null);
             setStreamingTransactions([]);
             setStreamingTasks([]);
+            setStreamingRecurring([]);
             streamingTransactionsRef.current = [];
             streamingTasksRef.current = [];
+            streamingRecurringRef.current = [];
             setSidebarRefreshKey((k) => k + 1);
           };
         },
@@ -231,8 +251,10 @@ export function ChatPage() {
           setStreaming(null);
           setStreamingTransactions([]);
           setStreamingTasks([]);
+          setStreamingRecurring([]);
           streamingTransactionsRef.current = [];
           streamingTasksRef.current = [];
+          streamingRecurringRef.current = [];
           // Roll back the optimistic user message + restore draft so the
           // user can retry.
           setMessages((prev) => prev.slice(0, -1));
@@ -264,7 +286,8 @@ export function ChatPage() {
     messages.length === 0 &&
     streaming === null &&
     streamingTransactions.length === 0 &&
-    streamingTasks.length === 0;
+    streamingTasks.length === 0 &&
+    streamingRecurring.length === 0;
 
   return (
     <div className="h-full flex">
@@ -288,20 +311,24 @@ export function ChatPage() {
           ) : (
             <div className="max-w-3xl mx-auto flex flex-col gap-5">
               {messages.map((m, i) => (
-                <Bubble key={i} message={m} />
+                <Bubble key={i} message={m} onOpenTask={setEditingTaskId} />
               ))}
               {streaming !== null && (
                 <div className="self-start max-w-[85%] flex flex-col gap-1">
                   {streamingTransactions.length > 0 && (
                     <TransactionsBlock transactions={streamingTransactions} />
                   )}
+                  {streamingRecurring.length > 0 && (
+                    <RecurringBlock rules={streamingRecurring} />
+                  )}
                   {streamingTasks.length > 0 && (
-                    <TasksBlock tasks={streamingTasks} />
+                    <TasksBlock tasks={streamingTasks} onOpen={setEditingTaskId} />
                   )}
                   {streaming.length > 0 ? (
                     <Markdown text={streaming} streaming />
                   ) : streamingTransactions.length === 0 &&
-                    streamingTasks.length === 0 ? (
+                    streamingTasks.length === 0 &&
+                    streamingRecurring.length === 0 ? (
                     <TypingBubble />
                   ) : null}
                 </div>
@@ -379,6 +406,13 @@ export function ChatPage() {
           </form>
         </div>
       </div>
+
+      {editingTaskId ? (
+        <TaskEditorModal
+          taskId={editingTaskId}
+          onClose={() => setEditingTaskId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -386,9 +420,11 @@ export function ChatPage() {
 function Bubble({
   message,
   streaming = false,
+  onOpenTask,
 }: {
   message: ChatMessage;
   streaming?: boolean;
+  onOpenTask?: (id: string) => void;
 }) {
   const isUser = message.role === "user";
   if (isUser) {
@@ -402,10 +438,12 @@ function Bubble({
   }
   const txs = message.metadata?.transactions ?? [];
   const tks = message.metadata?.tasks ?? [];
+  const recs = message.metadata?.recurring ?? [];
   return (
     <div className="self-start max-w-[85%] flex flex-col gap-1">
       {txs.length > 0 && <TransactionsBlock transactions={txs} />}
-      {tks.length > 0 && <TasksBlock tasks={tks} />}
+      {recs.length > 0 && <RecurringBlock rules={recs} />}
+      {tks.length > 0 && <TasksBlock tasks={tks} onOpen={onOpenTask} />}
       <Markdown text={message.content} streaming={streaming} />
     </div>
   );

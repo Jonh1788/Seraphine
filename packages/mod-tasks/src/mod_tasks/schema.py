@@ -32,18 +32,23 @@ def migrate(conn: sqlite3.Connection) -> None:
           updated_at    TEXT NOT NULL,
           due_date      TEXT,
           due_time      TEXT,
-          user_id       TEXT
+          user_id       TEXT,
+          priority      TEXT,
+          tags          TEXT
         )
         """
     )
     # Step 2: idempotent ADD COLUMN for legacy DBs that pre-date
-    # user_id / due_date. SQLite has no IF NOT EXISTS for ALTER, so we
-    # swallow the duplicate-column error. MUST run before CREATE INDEX
-    # on those columns or the index DDL fails on the legacy table.
+    # user_id / due_date / priority / tags. SQLite has no IF NOT EXISTS
+    # for ALTER, so we swallow the duplicate-column error. MUST run
+    # before CREATE INDEX on those columns or the index DDL fails on
+    # the legacy table.
     for ddl in (
         "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT",
         "ALTER TABLE seraphine_tasks ADD COLUMN due_time TEXT",
         "ALTER TABLE seraphine_tasks ADD COLUMN user_id TEXT",
+        "ALTER TABLE seraphine_tasks ADD COLUMN priority TEXT",
+        "ALTER TABLE seraphine_tasks ADD COLUMN tags TEXT",
     ):
         try:
             conn.execute(ddl)
