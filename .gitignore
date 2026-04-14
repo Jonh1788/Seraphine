@@ -18,6 +18,7 @@ dist/
 target/
 **/Cargo.lock.tmp
 src-tauri/gen/
+**/src-tauri/gen/
 
 # Data / runtime
 data/
