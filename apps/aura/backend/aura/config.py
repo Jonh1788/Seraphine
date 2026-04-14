@@ -56,12 +56,20 @@ class Settings(BaseSettings):
         "http://localhost:8001/google/oauth/callback"
     )
     # Scopes requested on consent. Space-separated so ops can override
-    # via a single env var. Defaults cover calendar read + write + gmail
-    # modify (mirrors Seraphine's default set).
+    # via a single env var.
+    #
+    # Defaults cover Calendar read + write plus the openid/email/profile
+    # set needed to fetch the user's email address via userinfo. Gmail
+    # was intentionally dropped — gmail.modify / gmail.readonly are
+    # restricted scopes (Google demands a CASA audit to publish), and
+    # Aura doesn't have a Gmail feature yet. Add it back if/when the
+    # inbox UI lands and a separate verification track starts.
     google_scopes: str = (
+        "openid "
+        "email "
+        "profile "
         "https://www.googleapis.com/auth/calendar.readonly "
-        "https://www.googleapis.com/auth/calendar.events "
-        "https://www.googleapis.com/auth/gmail.modify"
+        "https://www.googleapis.com/auth/calendar.events"
     )
 
 
