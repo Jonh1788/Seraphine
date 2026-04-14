@@ -19,8 +19,8 @@ import logging
 import re
 from typing import Any
 
-from seraphine.memory.store import MemoryStore
-from seraphine.tasks.service import TaskService
+from core_db import Store
+from mod_tasks.service import TaskService
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class EmailScanner:
         google_client: Any,
         task_service: TaskService,
         llm_client: Any = None,
-        store: MemoryStore | None = None,
+        store: Store | None = None,
     ) -> None:
         self._google = google_client
         self._tasks = task_service

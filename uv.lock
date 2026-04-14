@@ -1503,6 +1503,32 @@ source = { editable = "packages/mod-finance" }
 name = "mod-tasks"
 version = "0.1.0"
 source = { editable = "packages/mod-tasks" }
+dependencies = [
+    { name = "core-db" },
+    { name = "fastapi" },
+    { name = "llm-adapters" },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "core-db", editable = "packages/core-db" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "llm-adapters", editable = "packages/llm-adapters" },
+    { name = "pydantic", specifier = ">=2.8" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+]
 
 [[package]]
 name = "mod-vision"

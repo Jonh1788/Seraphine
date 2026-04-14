@@ -12,12 +12,14 @@ from fastapi.testclient import TestClient
 
 from seraphine.main import app
 from seraphine.memory.store import MemoryStore
-from seraphine.tasks.service import TaskService
+from mod_tasks import TaskService
+from mod_tasks import schema as tasks_schema
 
 
 @pytest.fixture
 async def store(tmp_path: Path) -> MemoryStore:
     s = MemoryStore(tmp_path / "tasks.sqlite")
+    s.register_migrator("mod_tasks", tasks_schema.migrate)
     await s.ensure_schema()
     return s
 
@@ -160,6 +162,7 @@ async def test_execute_missing_task() -> None:
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         s = MemoryStore(Path(td) / "t.sqlite")
+        s.register_migrator("mod_tasks", tasks_schema.migrate)
         await s.ensure_schema()
         svc = TaskService(s)
         with pytest.raises(ValueError):
@@ -358,6 +361,7 @@ def test_routes_crud_and_404_for_missing_task(tmp_path: Path) -> None:
     import asyncio
 
     store_ = MemoryStore(tmp_path / "routes.sqlite")
+    store_.register_migrator("mod_tasks", tasks_schema.migrate)
     asyncio.new_event_loop().run_until_complete(store_.ensure_schema())
     svc = TaskService(store_)
     with TestClient(app) as client:
@@ -457,6 +461,7 @@ async def test_due_date_migration_idempotent(tmp_path: Path) -> None:
         )
 
     s = MemoryStore(db_path)
+    s.register_migrator("mod_tasks", tasks_schema.migrate)
     await s.ensure_schema()
     # Second call is a no-op and must not raise "duplicate column name".
     await s.ensure_schema()
@@ -522,6 +527,7 @@ def test_routes_by_date_range(tmp_path: Path) -> None:
     import asyncio
 
     store_ = MemoryStore(tmp_path / "range.sqlite")
+    store_.register_migrator("mod_tasks", tasks_schema.migrate)
     loop = asyncio.new_event_loop()
     loop.run_until_complete(store_.ensure_schema())
     svc = TaskService(store_)
@@ -579,6 +585,7 @@ def test_routes_execute_shape(tmp_path: Path) -> None:
     import asyncio
 
     store_ = MemoryStore(tmp_path / "exec.sqlite")
+    store_.register_migrator("mod_tasks", tasks_schema.migrate)
     asyncio.new_event_loop().run_until_complete(store_.ensure_schema())
     svc = TaskService(store_)
     # Seed a calendar_add task before entering TestClient (avoids nested loops).

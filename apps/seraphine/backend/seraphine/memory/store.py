@@ -47,32 +47,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _row_to_task(row: tuple[Any, ...]) -> dict[str, Any]:
-    """Convert a seraphine_tasks row into a dict, parsing payload JSON.
-
-    The SELECT clause for tasks is stable:
-      id, type, status, title, description, source, payload,
-      created_at, updated_at, due_date
-    """
-    raw_payload = row[6]
-    try:
-        payload = json.loads(raw_payload) if raw_payload else {}
-    except (json.JSONDecodeError, TypeError):
-        payload = {}
-    return {
-        "id": row[0],
-        "type": row[1],
-        "status": row[2],
-        "title": row[3],
-        "description": row[4],
-        "source": row[5],
-        "payload": payload,
-        "created_at": row[7],
-        "updated_at": row[8],
-        "due_date": row[9] if len(row) > 9 else None,
-    }
-
-
 def _row_to_event(row: tuple[Any, ...]) -> dict[str, Any]:
     """Convert an event_timeline row into a dict, parsing metadata JSON."""
     raw_meta = row[4]
@@ -168,22 +142,6 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
           ON event_timeline(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_event_timeline_source
           ON event_timeline(source, created_at DESC);
-        CREATE TABLE IF NOT EXISTS seraphine_tasks (
-          id            INTEGER PRIMARY KEY AUTOINCREMENT,
-          type          TEXT NOT NULL,
-          status        TEXT NOT NULL DEFAULT 'pending',
-          title         TEXT NOT NULL,
-          description   TEXT NOT NULL,
-          source        TEXT NOT NULL,
-          payload       TEXT NOT NULL,
-          created_at    TEXT NOT NULL,
-          updated_at    TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_status
-          ON seraphine_tasks(status);
-        CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_type
-          ON seraphine_tasks(type);
-
         CREATE TABLE IF NOT EXISTS push_subscriptions (
           endpoint   TEXT PRIMARY KEY,
           p256dh     TEXT NOT NULL,
@@ -192,20 +150,10 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    # Lightweight migration: add due_date column on old DBs. SQLite has
-    # no IF NOT EXISTS for ADD COLUMN, so we swallow the duplicate
-    # column error idempotently.
-    try:
-        conn.execute(
-            "ALTER TABLE seraphine_tasks ADD COLUMN due_date TEXT"
-        )
-    except sqlite3.OperationalError as exc:
-        if "duplicate column name" not in str(exc).lower():
-            raise
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_due_date"
-        " ON seraphine_tasks(due_date)"
-    )
+    # `seraphine_tasks` schema (and its due_date / user_id ALTERs) has
+    # moved to packages/mod-tasks/schema.py — registered separately by
+    # the app at startup. push_subscriptions remains here until Phase 7
+    # gives push its own module.
 
 
 class MemoryStore(Store):
@@ -673,124 +621,9 @@ class MemoryStore(Store):
 
         return await asyncio.to_thread(_work)
 
-    # ---------- seraphine internal tasks ----------
-
-    async def add_task(
-        self,
-        *,
-        type: str,
-        status: str,
-        title: str,
-        description: str,
-        source: str,
-        payload: dict[str, Any],
-        due_date: str | None = None,
-    ) -> int:
-        """Insert a new internal task and return its autoincrement id."""
-        ts = _now()
-        payload_json = json.dumps(payload or {}, ensure_ascii=False)
-
-        def _work() -> int:
-            with self._connect() as conn:
-                cur = conn.execute(
-                    "INSERT INTO seraphine_tasks"
-                    "(type, status, title, description, source, payload,"
-                    " created_at, updated_at, due_date)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (type, status, title, description, source,
-                     payload_json, ts, ts, due_date),
-                )
-                return int(cur.lastrowid or 0)
-
-        return await asyncio.to_thread(_work)
-
-    async def get_tasks(
-        self,
-        *,
-        status: str | None = None,
-        type: str | None = None,
-        limit: int = 100,
-        due_from: str | None = None,
-        due_to: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return tasks ordered newest-first, with optional filters.
-
-        ``due_from`` / ``due_to`` restrict the result to tasks whose
-        ``due_date`` (YYYY-MM-DD) falls inside the inclusive range. Tasks
-        without a due_date are excluded when either bound is supplied.
-        """
-        def _work() -> list[dict[str, Any]]:
-            clauses: list[str] = []
-            params: list[Any] = []
-            if status is not None:
-                clauses.append("status = ?")
-                params.append(status)
-            if type is not None:
-                clauses.append("type = ?")
-                params.append(type)
-            if due_from is not None:
-                clauses.append("due_date IS NOT NULL AND due_date >= ?")
-                params.append(due_from)
-            if due_to is not None:
-                clauses.append("due_date IS NOT NULL AND due_date <= ?")
-                params.append(due_to)
-            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-            params.append(limit)
-
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT id, type, status, title, description, source,"
-                    " payload, created_at, updated_at, due_date"
-                    f" FROM seraphine_tasks{where}"
-                    " ORDER BY created_at DESC, id DESC LIMIT ?",
-                    params,
-                ).fetchall()
-
-            return [_row_to_task(r) for r in rows]
-
-        return await asyncio.to_thread(_work)
-
-    async def get_task(self, task_id: int) -> dict[str, Any] | None:
-        def _work() -> dict[str, Any] | None:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT id, type, status, title, description, source,"
-                    " payload, created_at, updated_at, due_date"
-                    " FROM seraphine_tasks WHERE id = ?",
-                    (task_id,),
-                ).fetchone()
-            if row is None:
-                return None
-            return _row_to_task(row)
-
-        return await asyncio.to_thread(_work)
-
-    async def update_task_status(self, task_id: int, status: str) -> int:
-        """Update a task's status; returns number of rows affected (0 or 1)."""
-        ts = _now()
-
-        def _work() -> int:
-            with self._connect() as conn:
-                cur = conn.execute(
-                    "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
-                    " WHERE id = ?",
-                    (status, ts, task_id),
-                )
-                return cur.rowcount or 0
-
-        return await asyncio.to_thread(_work)
-
-    async def delete_task(self, task_id: int) -> int:
-        """Delete a task by id; returns number of rows affected (0 or 1)."""
-        def _work() -> int:
-            with self._connect() as conn:
-                cur = conn.execute(
-                    "DELETE FROM seraphine_tasks WHERE id = ?",
-                    (task_id,),
-                )
-                return cur.rowcount or 0
-
-        return await asyncio.to_thread(_work)
+    # seraphine internal tasks moved to packages/mod-tasks (Phase 5).
+    # The shared core-db Store is reused via the same connection — no
+    # CRUD API is exposed from MemoryStore for tasks anymore.
 
     async def get_fact(self, fact_id: str) -> Fact | None:
         def _work() -> Fact | None:

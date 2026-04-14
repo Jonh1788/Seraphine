@@ -141,18 +141,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task_service = None
     email_scanner = None
     try:
-        from seraphine.tasks.service import TaskService
+        from mod_tasks import TaskService
+        from mod_tasks import schema as tasks_schema
+        # Register the mod-tasks schema migrator so its tables are
+        # created/migrated on the next ensure_schema() call.
+        store.register_migrator("mod_tasks", tasks_schema.migrate)
+        await store.ensure_schema()  # idempotent — re-runs all registered migrators
         task_service = TaskService(
             store,
             google_client=google_client,
             llm_client=llm,
             app_state=app.state,
         )
-        logger.info("Task service wired (shared memory store)")
+        logger.info("Task service wired (mod-tasks)")
 
-        # Email scanner (if Google client available)
         if google_client:
-            from seraphine.tasks.email_scanner import EmailScanner
+            from mod_tasks.email_scanner import EmailScanner
             email_scanner = EmailScanner(
                 google_client, task_service, llm_client=llm, store=store,
             )
@@ -453,7 +457,7 @@ def create_app() -> FastAPI:
 
     from seraphine.finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router
-    from seraphine.tasks.routes import router as tasks_router
+    from mod_tasks.routes import router as tasks_router
 
     app.include_router(finance_router)
     app.include_router(push_router)
