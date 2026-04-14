@@ -124,7 +124,11 @@ class Settings(BaseSettings):
     google_scopes: Annotated[list[str], NoDecode] = [
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/gmail.readonly",
+        # gmail.modify supersets gmail.readonly (read + label changes +
+        # trash/untrash) and is required by /messages/{id}/modify, which
+        # powers the "mark as read" action. It does NOT grant full
+        # access; gmail.send below covers outbound.
+        "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.send",
     ]
     google_token_path: Path = Path.home() / ".seraphine" / "google_tokens.enc"

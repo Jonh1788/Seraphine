@@ -102,6 +102,34 @@ class GoogleAuthError(RuntimeError):
     """Raised when no usable credentials are available."""
 
 
+class GoogleAPIError(RuntimeError):
+    """Raised when the Google API returns a non-2xx, non-401 response.
+
+    Carries the upstream ``status_code`` and a parsed ``reason`` string
+    (when the JSON body exposes one) so route handlers can surface the
+    real error to the client instead of collapsing everything into a
+    generic 502.
+    """
+
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        method: str,
+        url: str,
+        body: str,
+        reason: str | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.method = method
+        self.url = url
+        self.body = body
+        self.reason = reason
+        super().__init__(
+            f"google api {method} {url} failed: {status_code} {body[:500]}"
+        )
+
+
 class GoogleClient:
     """Async Google Workspace client with transparent refresh."""
 
@@ -235,9 +263,28 @@ class GoogleClient:
                     method, url, params=params, json=json, headers=hdrs
                 )
             if resp.status_code >= 400:
-                raise RuntimeError(
-                    f"google api {method} {url} failed: "
-                    f"{resp.status_code} {resp.text[:500]}"
+                body = resp.text or ""
+                reason: str | None = None
+                try:
+                    payload = resp.json()
+                    err = payload.get("error") if isinstance(payload, dict) else None
+                    if isinstance(err, dict):
+                        # Google's REST errors look like
+                        # {"error": {"code": 403, "message": "...",
+                        #            "errors": [{"reason": "insufficientPermissions", ...}]}}
+                        errors = err.get("errors") or []
+                        if errors and isinstance(errors, list):
+                            reason = errors[0].get("reason")
+                        if reason is None:
+                            reason = err.get("status") or err.get("message")
+                except Exception:  # pragma: no cover — malformed body is fine
+                    reason = None
+                raise GoogleAPIError(
+                    status_code=resp.status_code,
+                    method=method,
+                    url=url,
+                    body=body,
+                    reason=reason,
                 )
             return resp
 

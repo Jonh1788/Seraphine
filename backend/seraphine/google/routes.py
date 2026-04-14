@@ -25,11 +25,54 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from seraphine.config import settings
-from seraphine.google.client import GoogleAuthError, GoogleClient
+from seraphine.google.client import GoogleAPIError, GoogleAuthError, GoogleClient
 from seraphine.google.oauth import OAuthFlow
 
 router = APIRouter(prefix="/google", tags=["google"])
 logger = logging.getLogger(__name__)
+
+
+# Gmail write actions (modify/trash/send) require scopes broader than
+# gmail.readonly. Users who connected before 2026-04 will have a token
+# without gmail.modify and must reconnect via /google/oauth/start to
+# get the new scopes persisted.
+_REAUTH_HINT = (
+    "permissao insuficiente — reconecte o Google em /google/oauth/start"
+)
+
+
+def _raise_google_api_error(e: GoogleAPIError, *, action: str) -> None:
+    """Translate a :class:`GoogleAPIError` into an :class:`HTTPException`.
+
+    - 401 → 401 (shouldn't normally reach here — GoogleAuthError path
+      handles unauth'd clients, and 401 on the wire triggers a refresh
+      retry inside the client). Kept as a safety net.
+    - 403 → 403 with a PT-BR re-auth hint when the reason indicates a
+      missing scope. Other 403s pass through as-is.
+    - Other 4xx → pass through verbatim.
+    - 5xx → 502 (treated as an upstream failure).
+    """
+    status = e.status_code
+    reason = (e.reason or "").strip()
+    logger.warning(
+        "google api error during %s: status=%d reason=%s body=%s",
+        action, status, reason or "-", e.body[:500],
+    )
+    if status == 403 and reason in {
+        "insufficientPermissions",
+        "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        "forbidden",
+    }:
+        detail = f"{action}: {_REAUTH_HINT} (reason={reason})"
+        raise HTTPException(status_code=403, detail=detail)
+    if 400 <= status < 500:
+        detail = f"{action}: {reason or e.body[:200] or 'google api error'}"
+        raise HTTPException(status_code=status, detail=detail)
+    # 5xx from Google — treat as a bad upstream.
+    raise HTTPException(
+        status_code=502,
+        detail=f"{action}: google upstream {status} {reason or ''}".strip(),
+    )
 
 
 def _client_or_503(request: Request) -> GoogleClient:
@@ -143,7 +186,11 @@ async def calendar_events(
         )
     except GoogleAuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="listar eventos")
+        raise
     except Exception as e:
+        logger.exception("unexpected error listing calendar events")
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -154,7 +201,11 @@ async def calendar_calendars(request: Request) -> list[dict[str, Any]]:
         return await client.list_calendars()
     except GoogleAuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="listar calendarios")
+        raise
     except Exception as e:
+        logger.exception("unexpected error listing calendars")
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -172,7 +223,11 @@ async def gmail_important(
         return await client.list_important_unread(max_results=limit)
     except GoogleAuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="listar emails importantes")
+        raise
     except Exception as e:
+        logger.exception("unexpected error listing important emails")
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -183,19 +238,34 @@ async def gmail_message(request: Request, message_id: str) -> dict[str, Any]:
         return await client.get_message(message_id)
     except GoogleAuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="carregar email")
+        raise
     except Exception as e:
+        logger.exception("unexpected error fetching gmail message")
         raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/gmail/messages/{message_id}/mark-read")
 async def gmail_mark_read(request: Request, message_id: str) -> dict[str, bool]:
+    """Remove the UNREAD label from a Gmail message.
+
+    Requires the ``gmail.modify`` scope. Users who connected Google
+    before this scope was added will receive a 403 with an explicit
+    re-auth hint (see :data:`_REAUTH_HINT`) and must reconnect via
+    ``POST /google/oauth/start``.
+    """
     client = _client_or_503(request)
     try:
         await client.mark_as_read(message_id)
         return {"ok": True}
     except GoogleAuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="marcar como lido")
+        raise  # unreachable; keeps type-checkers happy
     except Exception as e:
+        logger.exception("unexpected error marking gmail message as read")
         raise HTTPException(status_code=502, detail=str(e))
 
 
