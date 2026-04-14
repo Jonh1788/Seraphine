@@ -481,8 +481,9 @@ class GoogleClient:
         return _decode_full_message(raw)
 
     async def list_important_unread(self, *, max_results: int = 20) -> list[dict]:
+        """List important unread emails from the last 7 days."""
         return await self.list_messages(
-            q="is:important is:unread", max_results=max_results
+            q="is:important is:unread newer_than:7d", max_results=max_results
         )
 
     async def mark_as_read(self, message_id: str) -> dict:
