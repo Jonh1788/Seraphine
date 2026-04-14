@@ -85,7 +85,13 @@ _SYSTEM_PROMPT = (
     "Se mencionar dia relativo (amanhã, sexta), converta para YYYY-MM-DD. "
     "Quando o usuário disser que concluiu/fez algo (ex: 'já paguei a conta', "
     "'terminei o relatório'), use complete_task com o título (ou trecho) da "
-    "tarefa. Após criar ou concluir, confirme com uma mensagem curta."
+    "tarefa. Após criar ou concluir, confirme com uma mensagem curta. "
+    "Quando o usuário pedir para ver/listar tarefas (ex: 'quais minhas "
+    "tarefas hoje?', 'mostra o que tenho pra fazer essa semana', 'tarefas "
+    "atrasadas'), use a tool list_tasks. Por padrão, hoje. Se o usuário "
+    "pedir um dia específico (amanhã, sexta), converta para YYYY-MM-DD. "
+    "Não liste novamente o que já foi mostrado nesta mesma conversa — "
+    "as tarefas aparecem como cards visuais para o usuário."
 )
 
 
@@ -176,6 +182,33 @@ _TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"title": {"type": "string"}},
             "required": ["title"],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": (
+            "Lista as tarefas do usuário, opcionalmente filtradas por data ou "
+            "intervalo de datas e por status. Use quando o usuário pedir para "
+            "ver/mostrar tarefas (ex: 'quais minhas tarefas hoje?', 'tarefas "
+            "atrasadas', 'o que tenho pra fazer essa semana')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "due_from": {
+                    "type": "string",
+                    "description": "Data inicial YYYY-MM-DD (inclusive). Omita pra buscar todas.",
+                },
+                "due_to": {
+                    "type": "string",
+                    "description": "Data final YYYY-MM-DD (inclusive). Omita pra buscar todas.",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "approved", "completed", "rejected", "failed"],
+                    "description": "Filtrar por status. Omita pra todos.",
+                },
+            },
         },
     },
 ]
@@ -443,6 +476,30 @@ async def _exec_complete_task(
     return {"ok": True, "task": _task_to_inline(updated)}
 
 
+async def _exec_list_tasks(
+    tasks: TaskService,
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    """Read-only listing — returns the matched tasks so the chat UI can
+    render them as cards via the {task} SSE channel (deduped by id)."""
+    due_from = args.get("due_from") or None
+    due_to = args.get("due_to") or None
+    status = args.get("status") or None
+    rows = await tasks.list_tasks(
+        status=status,
+        due_from=due_from,
+        due_to=due_to,
+        limit=200,
+        user_id=user_id,
+    )
+    return {
+        "ok": True,
+        "count": len(rows),
+        "tasks": [_task_to_inline(t) for t in rows],
+    }
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def stream_message(
     request: Request,
@@ -515,6 +572,8 @@ async def stream_message(
                         result = await _exec_create_task(tasks_svc, uid, args)
                     elif name == "complete_task":
                         result = await _exec_complete_task(tasks_svc, uid, args)
+                    elif name == "list_tasks":
+                        result = await _exec_list_tasks(tasks_svc, uid, args)
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -530,6 +589,15 @@ async def stream_message(
                         yield (
                             f"data: {json.dumps({'task': task_payload})}\n\n"
                         ).encode()
+                    # list_tasks emits each row through the same {task}
+                    # channel; the frontend dedupes by id so a card already
+                    # created earlier in the turn just refreshes in place.
+                    if result.get("ok") and isinstance(result.get("tasks"), list):
+                        for task_payload in result["tasks"]:
+                            turn_tasks.append(task_payload)
+                            yield (
+                                f"data: {json.dumps({'task': task_payload})}\n\n"
+                            ).encode()
 
                     # Feed the tool result back to the LLM so it can
                     # craft a confirmation message.
