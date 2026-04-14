@@ -1,17 +1,16 @@
 /**
- * Streaming PCM player using HTMLAudioElement.
+ * Streaming PCM player using Web Audio AudioBufferSourceNode.
  *
- * Previous approaches using Web Audio API (AudioBufferSourceNode,
- * ScriptProcessorNode) all crashed macOS CoreAudio. This approach
- * bypasses the Web Audio graph entirely:
+ * History: a previous implementation used chained HTMLAudioElement +
+ * MediaElementAudioSourceNode. That worked on Chrome but stuttered on
+ * Safari/PWA (WebKit has known issues with chained <audio> elements
+ * routed through the Web Audio graph — audio would cut out mid-utterance
+ * — and AudioBufferSourceNode is the canonical gapless-streaming path).
  *
- * 1. Accumulate s16le PCM chunks into a buffer
- * 2. When enough data arrives, wrap it in a WAV header
- * 3. Create a Blob URL and play it via an <audio> element
- * 4. Chain successive audio elements for gapless playback
- *
- * The AnalyserNode for lipsync uses a separate MediaElementSource
- * from the playing <audio> element.
+ * Now: we decode each PCM segment straight into an AudioBuffer and
+ * schedule it on the AudioContext timeline. Each source's start time is
+ * `max(ctx.currentTime, lastScheduledEnd)` so segments play gapless even
+ * if one lands late. AnalyserNode connects naturally for lipsync.
  */
 import { getSharedAudioContext } from './sharedContext';
 
@@ -20,32 +19,29 @@ const INPUT_RATE = 24000;
 
 /**
  * First segment is small so the player starts making sound almost
- * immediately. Previous value was 1.5s, meaning the user waited a full
- * 1.5 seconds of accumulated PCM before hearing the first byte — a
- * massive TTFB hit. 0.35s is short enough to feel instant and still
- * large enough that HTMLAudioElement doesn't stutter on initial load.
+ * immediately. 0.2s is short enough to feel instant and large enough
+ * that decoded playback doesn't stutter on initial load.
  */
 const FIRST_SEGMENT_SECONDS = 0.2;
 const FIRST_SEGMENT_SAMPLES = Math.floor(FIRST_SEGMENT_SECONDS * INPUT_RATE);
 /**
- * Subsequent segments are larger to reduce blob-URL churn. The first
- * segment is already playing by the time these are built, so their
- * size affects gapless continuity, not perceived latency.
+ * Subsequent segments are larger to reduce decode/schedule churn. The
+ * first segment is already playing by the time these are built, so their
+ * size affects throughput, not perceived latency.
  */
 const NEXT_SEGMENT_SECONDS = 1.0;
 const NEXT_SEGMENT_SAMPLES = Math.floor(NEXT_SEGMENT_SECONDS * INPUT_RATE);
 
 /**
  * Playback speed multiplier. Keep at 1.0 when the TTS backend applies
- * server-side speed (e.g. ElevenLabs voice_settings.speed). Using
- * HTMLAudioElement.playbackRate > 1 pitch-shifts the voice and makes
- * it sound cartoonish; server-side speed preserves pitch.
+ * server-side speed. Applied via AudioBufferSourceNode.playbackRate.
  */
 let PLAYBACK_RATE = 1.0;
 
 export class PCMPlayback {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private gain: GainNode | null = null;
   private carry: Uint8Array | null = null;
 
   /** Accumulated raw s16le bytes waiting to become a segment. */
@@ -53,20 +49,17 @@ export class PCMPlayback {
   private accumSamples = 0;
   /**
    * First segment per utterance uses the small threshold for fast TTFB;
-   * subsequent segments use the larger threshold. Reset to false on
-   * every new utterance via `flush()` / `reset()`.
+   * subsequent segments use the larger threshold. Reset on each flush/reset.
    */
   private firstSegmentEmitted = false;
 
-  /** Queue of WAV blob URLs ready to play. */
-  private queue: string[] = [];
-  /** Currently playing audio element. */
-  private currentAudio: HTMLAudioElement | null = null;
-  private currentSource: MediaElementAudioSourceNode | null = null;
-  /** Whether we're actively playing through the queue. */
-  private playing = false;
-  /** Guard against double-calling playNext from onerror + play().catch */
-  private playNextScheduled = false;
+  /** AudioContext timeline position of the end of the last scheduled buffer. */
+  private lastScheduledEnd = 0;
+  /** Currently scheduled sources so we can stop them on barge-in. */
+  private scheduledSources: Set<AudioBufferSourceNode> = new Set();
+  /** Number of buffers awaiting `onended` — when this hits 0 with no pending
+   *  accumulator bytes, playback of this utterance is complete. */
+  private pending = 0;
 
   private flushResolve: (() => void) | null = null;
   private flushing = false;
@@ -76,7 +69,7 @@ export class PCMPlayback {
   constructor() {}
 
   /**
-   * Lazily initialise the AudioContext and AnalyserNode.
+   * Lazily initialise the AudioContext, AnalyserNode, and Gain.
    * MUST be called from a user-gesture context the first time so the
    * browser lets the AudioContext start in "running" state.
    */
@@ -84,18 +77,22 @@ export class PCMPlayback {
     if (this.ctx) return this.ctx;
     this.ctx = getSharedAudioContext();
 
+    this.gain = this.ctx.createGain();
+    this.gain.gain.value = 1.0;
+
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 512;
     this.analyser.smoothingTimeConstant = 0;
+
+    // Source chain: AudioBufferSourceNode → gain → analyser → destination.
+    this.gain.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
 
     console.log('[PCMPlayback] AudioContext created, state:', this.ctx.state);
 
     // macOS/Safari can drop the AudioContext into 'suspended' or
-    // 'interrupted' between segments (tab focus, HAL handoff, idle).
-    // When that happens audio routed through the graph goes silent
-    // even though the <audio> element reports playing. Listen and
-    // resume so the next segment has sound.
+    // 'interrupted' between utterances. Auto-resume so the next buffer
+    // has a running context to schedule against.
     const onStateChange = (): void => {
       const state = this.ctx?.state;
       console.log('[PCMPlayback] ctx statechange:', state);
@@ -155,9 +152,10 @@ export class PCMPlayback {
     }
   }
 
-  /** Convert accumulated PCM into a WAV blob URL and enqueue for playback. */
+  /** Convert accumulated PCM into an AudioBuffer and schedule for playback. */
   private flushAccumToSegment(): void {
     if (this.accumSamples === 0) return;
+    const ctx = this.ensureCtx();
 
     // Merge all accumulated byte arrays
     const totalBytes = this.accumBytes.reduce((s, a) => s + a.byteLength, 0);
@@ -167,46 +165,45 @@ export class PCMPlayback {
       merged.set(a, offset);
       offset += a.byteLength;
     }
+    const sampleCount = this.accumSamples;
     this.accumBytes = [];
     this.accumSamples = 0;
-    // Any subsequent segment in this utterance uses the larger threshold.
     this.firstSegmentEmitted = true;
 
-    // Create WAV blob
-    const wav = createWavBlob(merged, INPUT_RATE);
-    const url = URL.createObjectURL(wav);
-    this.queue.push(url);
-
-    console.log('[PCMPlayback] segment created, queue length:', this.queue.length, 'bytes:', totalBytes);
-
-    // Start playback if not already playing
-    if (!this.playing) {
-      this.playing = true;
-      this.playNext();
-    }
-  }
-
-  /** Play the next segment from the queue. */
-  private playNext(): void {
-    this.playNextScheduled = false;
-
-    // Clean up previous
-    if (this.currentSource) {
-      try { this.currentSource.disconnect(); } catch { /* ignore */ }
-      this.currentSource = null;
-    }
-    if (this.currentAudio) {
-      this.currentAudio.onended = null;
-      this.currentAudio.onerror = null;
-      this.currentAudio.pause();
-      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
-      this.currentAudio = null;
+    // Pre-kick ctx if suspended (macOS/Safari).
+    if (ctx.state !== 'running') {
+      ctx.resume().catch((err) =>
+        console.warn('[PCMPlayback] pre-schedule resume failed:', err),
+      );
     }
 
-    if (this.queue.length === 0) {
-      this.playing = false;
-      // If flushing and no more segments, we're done
-      if (this.flushing) {
+    // Decode s16le → Float32 AudioBuffer (mono, 24kHz).
+    const buffer = ctx.createBuffer(1, sampleCount, INPUT_RATE);
+    const channel = buffer.getChannelData(0);
+    // Use DataView for correct little-endian int16 decoding.
+    const dv = new DataView(merged.buffer, merged.byteOffset, merged.byteLength);
+    for (let i = 0; i < sampleCount; i++) {
+      channel[i] = dv.getInt16(i * 2, true) / 0x8000;
+    }
+
+    // Schedule the source at max(now + tiny lead, lastScheduledEnd).
+    // A 20ms lead on the very first segment covers Safari's initial start
+    // latency so we don't begin mid-glitch.
+    const now = ctx.currentTime;
+    const lead = this.lastScheduledEnd > 0 ? 0 : 0.02;
+    const startAt = Math.max(now + lead, this.lastScheduledEnd);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = PLAYBACK_RATE;
+    src.connect(this.gain!);
+
+    this.scheduledSources.add(src);
+    this.pending += 1;
+    src.onended = () => {
+      this.scheduledSources.delete(src);
+      try { src.disconnect(); } catch { /* */ }
+      this.pending -= 1;
+      if (this.pending === 0 && this.accumSamples === 0 && this.flushing) {
         this.flushing = false;
         if (this.flushResolve) {
           const r = this.flushResolve;
@@ -214,106 +211,38 @@ export class PCMPlayback {
           r();
         }
       }
+    };
+
+    try {
+      src.start(startAt);
+    } catch (err) {
+      console.warn('[PCMPlayback] source.start failed:', err);
+      this.scheduledSources.delete(src);
+      this.pending -= 1;
       return;
     }
 
-    const url = this.queue.shift()!;
-    const audio = new Audio(url);
-    audio.playbackRate = PLAYBACK_RATE;
-    this.currentAudio = audio;
+    this.lastScheduledEnd = startAt + buffer.duration / PLAYBACK_RATE;
 
-    // Pre-kick the AudioContext: on macOS/Safari it can be 'suspended'
-    // or 'interrupted' when the previous segment ended and we're about
-    // to start a new one. Fire resume synchronously so the graph is
-    // alive by the time we call createMediaElementSource below.
-    const ctxPre = this.ctx;
-    if (ctxPre && ctxPre.state !== 'running') {
-      ctxPre.resume().catch((err) =>
-        console.warn('[PCMPlayback] pre-play resume failed:', err),
-      );
-    }
-
-    // Flag to prevent double-advancing from onerror + play().catch
-    let advanced = false;
-    const advance = (): void => {
-      if (advanced) return;
-      advanced = true;
-      URL.revokeObjectURL(url);
-      // Schedule playNext asynchronously to avoid stack buildup
-      if (!this.playNextScheduled) {
-        this.playNextScheduled = true;
-        queueMicrotask(() => this.playNext());
-      }
-    };
-
-    audio.onended = () => {
-      console.log('[PCMPlayback] segment ended');
-      advance();
-    };
-
-    audio.onerror = (ev) => {
-      console.warn('[PCMPlayback] audio error:', ev);
-      advance();
-    };
-
-    // Try to connect to AnalyserNode for lipsync, but NEVER let this
-    // prevent audio from playing. createMediaElementSource() re-routes
-    // the element output through the AudioContext graph, so the context
-    // MUST be running for sound to come out.
-    let connectedToGraph = false;
-    const ctx = this.ctx;
-    if (ctx && this.analyser && ctx.state === 'running') {
-      try {
-        const source = ctx.createMediaElementSource(audio);
-        source.connect(this.analyser);
-        this.currentSource = source;
-        connectedToGraph = true;
-        console.log('[PCMPlayback] connected to analyser graph');
-      } catch (err) {
-        console.warn('[PCMPlayback] createMediaElementSource failed, playing directly:', err);
-        // Audio element will play directly to speakers (no analyser)
-      }
-    }
-
-    console.log('[PCMPlayback] playing segment, connectedToGraph:', connectedToGraph,
-      'ctx state:', ctx?.state ?? 'none');
-
-    audio.play().then(() => {
-      console.log('[PCMPlayback] play() started successfully');
-    }).catch((err) => {
-      console.warn('[PCMPlayback] play() rejected:', err);
-      const name = err instanceof Error ? err.name : String(err);
-      // NotAllowedError = autoplay policy — resume ctx + retry once
-      // instead of advancing (which would drop the rest of the queue).
-      if (name === 'NotAllowedError' && ctxPre) {
-        ctxPre.resume().then(() => {
-          audio.play().catch((err2) => {
-            console.warn('[PCMPlayback] retry after resume failed:', err2);
-            advance();
-          });
-        }).catch(() => advance());
-        return;
-      }
-      advance();
-    });
+    console.log(
+      '[PCMPlayback] segment scheduled — dur=%s start=%s end=%s pending=%d',
+      buffer.duration.toFixed(3),
+      startAt.toFixed(3),
+      this.lastScheduledEnd.toFixed(3),
+      this.pending,
+    );
   }
 
-  /**
-   * Push any PCM bytes currently sitting in the accumulator into a
-   * queued segment WITHOUT waiting for playback to drain. Safe to call
-   * repeatedly — does not touch `flushResolve` / `flushing`, so it
-   * won't collide with a concurrent `flush()` awaiting full drain.
-   *
-   * Used by per-sentence `tts_end` handlers that want the tail of each
-   * sentence to play but don't need to block on it.
-   */
-  /** Set playback speed at runtime. Used by the backend to compensate
-   *  when ElevenLabs v3 doesn't accept server-side speed. */
+  /** Set playback speed at runtime. */
   setPlaybackRate(rate: number): void {
     PLAYBACK_RATE = rate;
-    // Apply to the currently playing audio element if any.
-    if (this.currentAudio) {
-      this.currentAudio.playbackRate = rate;
+    // Apply to any currently-scheduled sources.
+    for (const src of this.scheduledSources) {
+      try {
+        src.playbackRate.value = rate;
+      } catch {
+        /* */
+      }
     }
   }
 
@@ -325,12 +254,12 @@ export class PCMPlayback {
     // Drain any remaining accumulated data
     this.flushAccumToSegment();
 
-    if (!this.playing && this.queue.length === 0) {
+    if (this.pending === 0) {
       this.reset();
       return;
     }
 
-    // Wait for all segments to finish playing
+    // Wait for all scheduled buffers to finish.
     this.flushing = true;
     await new Promise<void>((resolve) => {
       this.flushResolve = resolve;
@@ -353,45 +282,29 @@ export class PCMPlayback {
     this.firstSegmentEmitted = false;
     this.flushing = false;
     this.flushResolve = null;
+    this.lastScheduledEnd = 0;
   }
 
   /**
    * Stop all in-flight playback immediately (barge-in).
    *
-   * Clears the pending queue, pauses and releases the currently playing
-   * <audio> element, and drops any accumulated PCM bytes. Does NOT touch
-   * the AudioContext or AnalyserNode, so the instance stays reusable for
-   * the next turn.
+   * Stops every scheduled source node, clears the accumulator, drops any
+   * pending promise. Keeps ctx/analyser alive for reuse.
    */
   stop(): void {
-    // Pending accumulator
     this.carry = null;
     this.accumBytes = [];
     this.accumSamples = 0;
 
-    // Drain queued segments
-    for (const url of this.queue) {
-      URL.revokeObjectURL(url);
+    for (const src of this.scheduledSources) {
+      try { src.onended = null; } catch { /* */ }
+      try { src.stop(); } catch { /* */ }
+      try { src.disconnect(); } catch { /* */ }
     }
-    this.queue = [];
+    this.scheduledSources.clear();
+    this.pending = 0;
+    this.lastScheduledEnd = 0;
 
-    // Tear down the playing element without disposing the graph
-    if (this.currentSource) {
-      try { this.currentSource.disconnect(); } catch { /* ignore */ }
-      this.currentSource = null;
-    }
-    if (this.currentAudio) {
-      this.currentAudio.onended = null;
-      this.currentAudio.onerror = null;
-      try { this.currentAudio.pause(); } catch { /* ignore */ }
-      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
-      this.currentAudio = null;
-    }
-
-    this.playing = false;
-    this.playNextScheduled = false;
-
-    // If a flush() was awaiting, release it
     if (this.flushing) {
       this.flushing = false;
       if (this.flushResolve) {
@@ -403,67 +316,16 @@ export class PCMPlayback {
   }
 
   dispose(): void {
-    // Stop current playback
-    if (this.currentSource) {
-      try { this.currentSource.disconnect(); } catch { /* ignore */ }
-    }
-    if (this.currentAudio) {
-      this.currentAudio.onended = null;
-      this.currentAudio.onerror = null;
-      this.currentAudio.pause();
-      if (this.currentAudio.src) URL.revokeObjectURL(this.currentAudio.src);
-    }
-    // Clear queue
-    for (const url of this.queue) {
-      URL.revokeObjectURL(url);
-    }
-    this.queue = [];
-    this.currentAudio = null;
-    this.currentSource = null;
-    this.playing = false;
-    this.reset();
+    this.stop();
     if (this.analyser) {
-      try { this.analyser.disconnect(); } catch { /* ignore */ }
+      try { this.analyser.disconnect(); } catch { /* */ }
       this.analyser = null;
+    }
+    if (this.gain) {
+      try { this.gain.disconnect(); } catch { /* */ }
+      this.gain = null;
     }
     this.analyserCallbacks = [];
     this.ctx = null;
-  }
-}
-
-/** Create a WAV Blob from raw s16le PCM data. */
-function createWavBlob(pcm: Uint8Array, sampleRate: number): Blob {
-  const headerSize = 44;
-  const buffer = new ArrayBuffer(headerSize + pcm.byteLength);
-  const view = new DataView(buffer);
-
-  // RIFF header
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + pcm.byteLength, true);
-  writeString(view, 8, 'WAVE');
-
-  // fmt chunk
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // chunk size
-  view.setUint16(20, 1, true);  // PCM format
-  view.setUint16(22, 1, true);  // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate
-  view.setUint16(32, 2, true);  // block align
-  view.setUint16(34, 16, true); // bits per sample
-
-  // data chunk
-  writeString(view, 36, 'data');
-  view.setUint32(40, pcm.byteLength, true);
-
-  // Copy PCM data
-  new Uint8Array(buffer, headerSize).set(pcm);
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-function writeString(view: DataView, offset: number, str: string): void {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i));
   }
 }
