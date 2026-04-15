@@ -1,0 +1,10 @@
+{
+  "name": "seraphine-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo root — Seraphine + Aura + shared packages. See specs/monorepo-modularization-sdd.md.",
+  "workspaces": [
+    "apps/seraphine/frontend",
+    "apps/aura/frontend"
+  ]
+}

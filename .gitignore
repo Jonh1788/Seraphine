@@ -14,6 +14,12 @@ dist/
 .vite/
 *.log
 
+# Rust / Tauri
+target/
+**/Cargo.lock.tmp
+src-tauri/gen/
+**/src-tauri/gen/
+
 # Data / runtime
 data/
 *.sqlite
@@ -34,6 +40,16 @@ DubGrav.m4a
 # Local secrets
 .env
 .env.local
+.env.prod
+# Compose override is local-dev scratch (ports, disabled services)
+docker-compose.override.yml
+# Google OAuth client JSON — contains client_secret
+client_secret_*.json
+client_secret_*.apps.googleusercontent.com.json
+
+# Scratch / dev test files
+teste.json
+test.json
 
 # Claude scratch
 .claude/
@@ -48,7 +64,11 @@ services/voxtral-tts/
 # Runtime artifacts / generated state (NOT code)
 services/browser-agent/user-data/
 backend/.wwebjs_auth/
+apps/seraphine/backend/.wwebjs_auth/
+apps/*/data/
+apps/*/backend/.wwebjs_auth/
 services/whatsapp-bridge/.wwebjs_auth/
+**/.wwebjs_auth/
 
 # Third-party binaries / proxies
 services/claude-stream-proxy/
