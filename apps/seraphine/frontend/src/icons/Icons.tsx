@@ -173,6 +173,43 @@ export function TasksIcon({ size = 24, className = '' }: IconProps) {
   );
 }
 
+export function CircleIcon({ size = 24, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <circle cx="12" cy="12" r="10" />
+    </svg>
+  );
+}
+
+export function CheckCircleIcon({ size = 24, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  );
+}
+
+export function ClockIcon({ size = 24, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+export function RepeatIcon({ size = 24, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <polyline points="17 1 21 5 17 9" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <polyline points="7 23 3 19 7 15" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
 export function FlaskIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>

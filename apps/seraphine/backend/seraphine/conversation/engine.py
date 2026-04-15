@@ -573,6 +573,20 @@ class ConversationEngine:
                     # survives chat history reload.
                     if result.metadata and result.metadata.get("html_card"):
                         accumulated.append("\n" + result.metadata["html_card"])
+                    # Persist structured task/recurring data as HTML
+                    # comments so the frontend can parse them on reload.
+                    if result.metadata and result.metadata.get("task"):
+                        accumulated.append(
+                            "\n<!--task-data:"
+                            + json.dumps(result.metadata["task"])
+                            + "-->"
+                        )
+                    if result.metadata and result.metadata.get("recurring"):
+                        accumulated.append(
+                            "\n<!--recurring-data:"
+                            + json.dumps(result.metadata["recurring"])
+                            + "-->"
+                        )
                     tool_payload: dict[str, Any] = {
                         "tool": tool_name,
                         # Anthropic adapter needs the ORIGINAL

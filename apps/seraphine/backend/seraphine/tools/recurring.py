@@ -211,12 +211,25 @@ class CreateRecurringTaskTool(Tool):
         if materialized_today:
             text += " Today's occurrence has been created."
 
+        meta: dict[str, Any] = {
+            "recurring": rule.to_dict(),
+            "materialized_today": materialized_today,
+            "html_card": card_html,
+        }
+        if materialized_today and task_id is not None:
+            today_str = datetime.now(SP_TZ).date().isoformat()
+            meta["task"] = {
+                "id": task_id,
+                "title": title,
+                "status": "pending",
+                "due_date": today_str,
+                "due_time": time_val,
+                "priority": None,
+                "description": description,
+            }
+
         return ToolResult(
             ok=True,
             output=text,
-            metadata={
-                "html_card": card_html,
-                "recurring": rule.to_dict(),
-                "materialized_today": materialized_today,
-            },
+            metadata=meta,
         )

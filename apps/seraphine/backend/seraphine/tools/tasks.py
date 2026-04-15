@@ -231,7 +231,19 @@ class CreateTaskTool(Tool):
         return ToolResult(
             ok=True,
             output=". ".join(parts) + ".",
-            metadata={"task_id": task_id, "html_card": card_html},
+            metadata={
+                "task_id": task_id,
+                "task": {
+                    "id": task_id,
+                    "title": title,
+                    "status": "pending",
+                    "due_date": due_date,
+                    "due_time": due_time,
+                    "priority": priority,
+                    "description": description,
+                },
+                "html_card": card_html,
+            },
         )
 
 
@@ -342,5 +354,17 @@ class UpdateTaskTool(Tool):
         return ToolResult(
             ok=True,
             output=f"Tarefa #{task_id} atualizada: {task.title}.",
-            metadata={"task_id": task_id, "html_card": card_html},
+            metadata={
+                "task_id": task_id,
+                "task": {
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "due_date": task.due_date,
+                    "due_time": task.due_time,
+                    "priority": task.priority,
+                    "description": task.description,
+                },
+                "html_card": card_html,
+            },
         )

@@ -12,6 +12,11 @@ import type { PCMPlayback } from '../audio/playback';
 import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import { RealtimeController } from '../realtime';
 import { API_BASE } from '../api';
+import { TaskChatBlock } from './TaskChatBlock';
+import type { ChatTask } from './TaskChatBlock';
+import { RecurringChatBlock } from './RecurringChatBlock';
+import type { RecurringRule } from './RecurringChatBlock';
+import { TaskEditorModal } from '../tasks/TaskEditorModal';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -54,6 +59,10 @@ interface Turn {
   mcpApproval?: McpApproval;
   /** Attached images (data URLs) for user turns with vision content. */
   images?: string[];
+  /** Structured task data from tool_result metadata. */
+  tasks?: ChatTask[];
+  /** Structured recurring rule from tool_result metadata. */
+  recurring?: RecurringRule[];
 }
 
 /**
@@ -319,6 +328,8 @@ export function ChatView({
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, McpAction>>(new Map());
+  /** Task being edited from a chat task card. */
+  const [editingChatTaskId, setEditingChatTaskId] = useState<number | null>(null);
   const CONV_KEY = 'seraphine_conversation_id';
   const conversationIdRef = useRef<string | undefined>(
     localStorage.getItem(CONV_KEY) || undefined
@@ -333,11 +344,28 @@ export function ChatView({
       .then((r) => r.ok ? r.json() : [])
       .then((data: Array<{ id: string; role: string; content: string }>) => {
         if (data.length > 0) {
-          setTurns(data.map((t) => ({
-            id: t.id,
-            role: t.role as 'user' | 'assistant',
-            content: t.content,
-          })));
+          setTurns(data.map((t) => {
+            const turn: Turn = {
+              id: t.id,
+              role: t.role as 'user' | 'assistant',
+              content: t.content,
+            };
+            // Parse embedded task data from persisted turn text
+            const taskDataRe = /<!--task-data:([\s\S]*?)-->/g;
+            let match: RegExpExecArray | null;
+            while ((match = taskDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                if (parsed.tasks) {
+                  turn.tasks = [...(turn.tasks || []), ...parsed.tasks];
+                }
+                if (parsed.recurring) {
+                  turn.recurring = [...(turn.recurring || []), parsed.recurring];
+                }
+              } catch { /* ignore malformed */ }
+            }
+            return turn;
+          }));
         }
       })
       .catch(() => {});
@@ -481,10 +509,55 @@ export function ChatView({
             ];
           });
         }
-        // Rich HTML cards (e.g. weather_forecast) — inject directly
+        // Structured task data from tool metadata — render as React component
+        const taskMeta = meta && typeof meta['task'] === 'object' ? meta['task'] as Record<string, unknown> : null;
+        const recurringMeta = meta && typeof meta['recurring'] === 'object' ? meta['recurring'] as Record<string, unknown> : null;
+
+        if (tr.ok && (taskMeta || recurringMeta)) {
+          setTurns((prev) => {
+            const streamIdx = prev.findIndex((t) => t.streaming);
+            const idx = streamIdx !== -1 ? streamIdx : prev.length - 1;
+            if (idx < 0) return prev;
+            const next = prev.slice();
+            const turn = { ...next[idx] };
+
+            if (taskMeta) {
+              // task metadata may contain a single task or an array of tasks
+              const tasksArr: ChatTask[] = Array.isArray(taskMeta['tasks'])
+                ? (taskMeta['tasks'] as ChatTask[])
+                : [{
+                    id: taskMeta['id'] as number,
+                    title: taskMeta['title'] as string,
+                    status: taskMeta['status'] as string,
+                    due_date: taskMeta['due_date'] as string | null | undefined,
+                    due_time: taskMeta['due_time'] as string | null | undefined,
+                    priority: taskMeta['priority'] as string | null | undefined,
+                  }];
+              turn.tasks = [...(turn.tasks || []), ...tasksArr];
+            }
+
+            if (recurringMeta) {
+              const rule: RecurringRule = {
+                id: String(recurringMeta['id'] ?? ''),
+                title: (recurringMeta['title'] as string) ?? '',
+                frequency: (recurringMeta['frequency'] as string) ?? '',
+                weekday: recurringMeta['weekday'] as number | null | undefined,
+                day_of_month: recurringMeta['day_of_month'] as number | null | undefined,
+                time: recurringMeta['time'] as string | null | undefined,
+              };
+              turn.recurring = [...(turn.recurring || []), rule];
+            }
+
+            next[idx] = turn;
+            return next;
+          });
+        }
+
+        // Rich HTML cards (e.g. weather_forecast, finance) — inject directly
         // into the chat without waiting for Claude to echo it.
+        // Skip html_card when we already have structured task/recurring data.
         const htmlCard =
-          meta && typeof meta['html_card'] === 'string'
+          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta
             ? (meta['html_card'] as string)
             : null;
         if (tr.ok && htmlCard) {
@@ -852,6 +925,8 @@ export function ChatView({
                   {t.role === 'assistant' ? (
                     (() => {
                       let raw = stripAudioTags(parsed ? parsed.response : t.content);
+                      // Strip embedded task-data comments (used for history restoration)
+                      raw = raw.replace(/<!--task-data:[\s\S]*?-->/g, '');
                       const cards: string[] = [];
                       // Primary: explicit <!--card--> delimiters
                       raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
@@ -879,6 +954,15 @@ export function ChatView({
                               dangerouslySetInnerHTML={{ __html: html }}
                               onClick={handleCardClick}
                             />
+                          ))}
+                          {t.tasks && t.tasks.length > 0 && (
+                            <TaskChatBlock
+                              tasks={t.tasks}
+                              onOpenEditor={(id) => setEditingChatTaskId(id)}
+                            />
+                          )}
+                          {t.recurring && t.recurring.map((rule, ri) => (
+                            <RecurringChatBlock key={`rec-${ri}`} rule={rule} />
                           ))}
                         </>
                       );
@@ -1107,6 +1191,16 @@ export function ChatView({
           <button type="button" className="lightbox__close" aria-label="Fechar">&times;</button>
           <img src={lightboxSrc} alt="Imagem ampliada" className="lightbox__img" onClick={(e) => e.stopPropagation()} />
         </div>
+      )}
+
+      {/* Task editor modal triggered from chat task cards */}
+      {editingChatTaskId != null && (
+        <TaskEditorModal
+          taskId={editingChatTaskId}
+          onClose={() => setEditingChatTaskId(null)}
+          onDeleted={() => setEditingChatTaskId(null)}
+          onUpdated={() => { /* stays open, auto-saves */ }}
+        />
       )}
     </div>
   );
