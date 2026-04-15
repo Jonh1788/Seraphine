@@ -262,12 +262,17 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
               Status
             </span>
-            <select className="te__value te__select" value={status} onChange={(e) => handleStatusChange(e.target.value)}>
+            <span className="te__dot" style={{ background: STATUS_COLORS[status] || '#888' }} />
+            <select
+              className="te__value te__select"
+              value={status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              style={{ color: STATUS_COLORS[status] || 'var(--text)' }}
+            >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-            <span className="te__dot" style={{ background: STATUS_COLORS[status] || '#888' }} />
           </div>
 
           <div className="te__row">
@@ -313,6 +318,14 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+              Tags
+            </span>
+            <span className="te__value te__tags-placeholder">adicionar tag...</span>
           </div>
         </div>
 

@@ -61,7 +61,7 @@ body,
 body {
   background: radial-gradient(ellipse at top, #12122a 0%, var(--bg-0) 60%);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui,
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
     sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -6536,25 +6536,27 @@ button:disabled {
 .te__row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .te__label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-dim);
-  min-width: 100px;
+  min-width: 130px;
   flex-shrink: 0;
 }
 
 .te__label svg {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .te__value {
@@ -6566,7 +6568,8 @@ button:disabled {
   background: none;
   border: none;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
   padding: 2px 0;
@@ -6604,8 +6607,8 @@ button:disabled {
 
 .te__date-input { width: 0; height: 0; opacity: 0; position: absolute; }
 .te__date-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text);
   cursor: pointer;
 }
@@ -6620,22 +6623,29 @@ button:disabled {
 .te__time-input {
   width: 70px;
   color: var(--text);
+  font-size: 14px;
   font-weight: 500;
+}
+
+.te__tags-placeholder {
+  color: var(--text-faint);
+  font-size: 14px;
+  cursor: pointer;
 }
 
 /* Description */
 .te__description {
   flex: 1;
-  min-height: 120px;
-  margin: var(--space-3) var(--space-5);
-  padding: var(--space-3);
+  min-height: 160px;
+  margin: 0 var(--space-5);
+  padding: var(--space-4) 0;
   background: none;
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
-  line-height: 1.6;
+  line-height: 1.7;
   resize: none;
   outline: none;
 }
