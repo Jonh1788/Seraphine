@@ -6452,114 +6452,221 @@ button:disabled {
 
 /* ── Task Editor Modal ─────────────────────────────────────────────── */
 
+/* ── Task Editor Modal (Aura-style) ──────────────────────────── */
+
 .task-editor-modal {
-  max-width: 500px;
+  max-width: 640px;
   width: 92vw;
-}
-
-.task-editor-modal__header {
+  max-height: min(86vh, 760px);
+  background: var(--bg-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xl);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.task-editor-modal__close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--r-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 160ms ease, background 160ms ease;
-}
-
-.task-editor-modal__close:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.task-editor-modal__title-input {
-  font-size: 16px;
-  font-weight: 600;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 1px 0 0 rgba(255,255,255,0.04) inset, var(--shadow-lg);
 }
 
 .task-editor-modal__loading {
   text-align: center;
   color: var(--text-dim);
-  padding: var(--space-4);
+  padding: var(--space-6);
   margin: 0;
 }
 
 .task-editor-modal__error {
-  color: var(--red);
+  color: var(--danger);
   font-size: 13px;
+  padding: var(--space-4);
   margin: 0;
 }
 
-.task-editor-modal__footer {
+/* Header: big title + action buttons */
+.te__header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: var(--space-2);
+  align-items: flex-start;
   gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-3);
 }
 
-.task-editor-modal__save-status {
+.te__title {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  outline: none;
+  padding: 0;
+  line-height: 1.3;
+}
+
+.te__title::placeholder { color: var(--text-faint); }
+
+.te__actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.te__action {
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 150ms, background 150ms;
+}
+
+.te__action:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.te__action--danger { color: var(--danger); background: rgba(239, 68, 68, 0.1); }
+.te__action--danger:hover { background: rgba(239, 68, 68, 0.2); }
+
+/* Metadata rows */
+.te__fields {
+  padding: 0 var(--space-5);
+  display: flex;
+  flex-direction: column;
+}
+
+.te__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.te__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.te__label svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.te__value {
   flex: 1;
   min-width: 0;
 }
 
-.task-editor-modal__save-indicator {
-  font-size: 11px;
-  transition: color 200ms ease;
+.te__select {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.task-editor-modal__save-indicator--saving {
-  color: var(--text-dim);
+.te__select option { background: var(--bg-2); color: var(--text); }
+
+.te__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.task-editor-modal__save-indicator--saved {
-  color: #4ade80;
+.te__date-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
-.task-editor-modal__save-indicator--error {
-  color: var(--red);
+.te__date-input,
+.te__time-input {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  padding: 2px 0;
+  width: auto;
 }
 
-.task-editor-modal__remind-label {
+.te__date-input { width: 0; height: 0; opacity: 0; position: absolute; }
+.te__date-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.te__time-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  color: var(--text-dim);
 }
 
-.task-editor-modal__remind-label svg {
-  width: 14px;
-  height: 14px;
+.te__time-input {
+  width: 50px;
+  color: var(--text-dim);
 }
 
-.task-editor-modal__danger {
+/* Description */
+.te__description {
+  flex: 1;
+  min-height: 120px;
+  margin: var(--space-3) var(--space-5);
+  padding: var(--space-3);
+  background: none;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+}
+
+.te__description::placeholder { color: var(--text-faint); }
+
+/* Footer */
+.te__footer {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-5);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 11px;
 }
 
-.task-editor-modal__confirm-text {
-  font-size: 12px;
-  color: var(--red);
-  white-space: nowrap;
-}
+.te__created { color: var(--text-faint); }
+
+.te__save { transition: color 200ms ease; }
+.te__save--idle { color: transparent; }
+.te__save--saving { color: var(--text-dim); }
+.te__save--saved { color: #4ade80; }
+.te__save--saved::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #4ade80; margin-right: 4px; }
+.te__save--error { color: var(--danger); }
 
 @media (max-width: 520px) {
-  .task-editor-modal {
-    max-width: 100%;
-  }
-
-  .new-task-modal__row {
-    flex-direction: column;
-  }
+  .task-editor-modal { max-width: 100%; max-height: 95vh; }
+  .te__header { padding: var(--space-3); }
+  .te__title { font-size: 18px; }
+  .te__fields { padding: 0 var(--space-3); }
+  .te__description { margin: var(--space-2) var(--space-3); }
+  .te__footer { padding: var(--space-2) var(--space-3); }
 }
 
 .task-card--locked {

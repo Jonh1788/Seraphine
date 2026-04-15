@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { XIcon, BellIcon } from '../icons/Icons';
+import { XIcon, BellIcon, CalendarIcon, ClockIcon } from '../icons/Icons';
 import type { SeraphineTask } from '../finance/types';
 import { API_BASE } from '../api';
+
+const STATUS_COLORS: Record<string, string> = {
+  pending: '#a78bfa',
+  approved: '#22d3ee',
+  completed: '#4ade80',
+  rejected: '#64748b',
+};
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'pending', label: 'Pendente' },
@@ -48,6 +55,7 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
   const [deleting, setDeleting] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -164,24 +172,15 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
     }
   };
 
-  const saveLabel =
-    saveStatus === 'saving'
-      ? 'salvando...'
-      : saveStatus === 'saved'
-        ? 'salvo'
-        : saveStatus === 'error'
-          ? 'erro ao salvar'
-          : '';
-
   if (loadError) {
     return (
       <div className="password-modal-backdrop" onClick={onClose}>
-        <div className="password-modal task-editor-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="task-editor-modal__header">
-            <h4 className="password-modal__title">Erro</h4>
-            <button type="button" className="task-editor-modal__close" onClick={onClose}>
-              <XIcon size={18} />
-            </button>
+        <div className="task-editor-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="te__header">
+            <span className="te__title" style={{ cursor: 'default' }}>Erro</span>
+            <div className="te__actions">
+              <button type="button" className="te__action" onClick={onClose}><XIcon size={16} /></button>
+            </div>
           </div>
           <p className="task-editor-modal__error">{loadError}</p>
         </div>
@@ -199,143 +198,128 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
     );
   }
 
+  const fmtDateLabel = dueDate
+    ? (() => {
+        const [, m, d] = dueDate.split('-').map(Number);
+        const months = ['', 'janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+        return `${d} de ${months[m] || m}`;
+      })()
+    : '';
+
+  const createdLabel = task?.created_at
+    ? (() => {
+        const dt = new Date(task.created_at);
+        return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+      })()
+    : '';
+
   return (
     <div className="password-modal-backdrop" onClick={onClose}>
       <div
-        className="password-modal task-editor-modal"
+        className="task-editor-modal"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="task-editor-modal__header">
-          <h4 className="password-modal__title">Editar tarefa</h4>
-          <button type="button" className="task-editor-modal__close" onClick={onClose}>
-            <XIcon size={18} />
-          </button>
-        </div>
-
-        <label className="new-task-modal__label">
-          Titulo
+        {/* Header: title + action buttons */}
+        <div className="te__header">
           <input
             type="text"
-            className="password-modal__input task-editor-modal__title-input"
+            className="te__title"
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
+            placeholder="Titulo da tarefa..."
           />
-        </label>
+          <div className="te__actions">
+            {confirmDelete ? (
+              <>
+                <button type="button" className="te__action te__action--danger" disabled={deleting} onClick={handleDelete}>
+                  {deleting ? '...' : 'Sim'}
+                </button>
+                <button type="button" className="te__action" onClick={() => setConfirmDelete(false)}>
+                  Nao
+                </button>
+              </>
+            ) : (
+              <button type="button" className="te__action te__action--danger" onClick={() => setConfirmDelete(true)} title="Excluir">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            )}
+            <button type="button" className="te__action" onClick={onClose} title="Fechar">
+              <XIcon size={16} />
+            </button>
+          </div>
+        </div>
 
-        <div className="new-task-modal__row">
-          <label className="new-task-modal__label">
-            Status
-            <select
-              className="password-modal__input"
-              value={status}
-              onChange={(e) => handleStatusChange(e.target.value)}
-            >
+        {/* Metadata rows */}
+        <div className="te__fields">
+          <div className="te__row">
+            <span className="te__label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              Status
+            </span>
+            <select className="te__value te__select" value={status} onChange={(e) => handleStatusChange(e.target.value)}>
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-          </label>
-          <label className="new-task-modal__label">
-            Prioridade
-            <select
-              className="password-modal__input"
-              value={priority}
-              onChange={(e) => handlePriorityChange(e.target.value)}
-            >
+            <span className="te__dot" style={{ background: STATUS_COLORS[status] || '#888' }} />
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+              Prioridade
+            </span>
+            <select className="te__value te__select" value={priority} onChange={(e) => handlePriorityChange(e.target.value)}>
               {PRIORITY_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-          </label>
-        </div>
+          </div>
 
-        <div className="new-task-modal__row">
-          <label className="new-task-modal__label">
-            Data de entrega
-            <input
-              type="date"
-              className="password-modal__input"
-              value={dueDate}
-              onChange={(e) => handleDueDateChange(e.target.value)}
-            />
-          </label>
-          <label className="new-task-modal__label">
-            Horario
-            <input
-              type="time"
-              className="password-modal__input"
-              value={dueTime}
-              onChange={(e) => handleDueTimeChange(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="new-task-modal__row">
-          <label className="new-task-modal__label">
-            <span className="task-editor-modal__remind-label">
-              <BellIcon size={14} /> Lembrete
+          <div className="te__row">
+            <span className="te__label">
+              <CalendarIcon size={14} />
+              Data
             </span>
-            <select
-              className="password-modal__input"
-              value={remind}
-              onChange={(e) => handleRemindChange(e.target.value)}
-            >
+            <span className="te__value te__date-group">
+              <input ref={dateInputRef} type="date" className="te__date-input" value={dueDate} onChange={(e) => handleDueDateChange(e.target.value)} />
+              <span className="te__date-label" onClick={() => dateInputRef.current?.showPicker?.()}>{fmtDateLabel || 'Selecionar'}</span>
+              <span className="te__time-group">
+                <ClockIcon size={12} />
+                <input type="time" className="te__time-input" value={dueTime} onChange={(e) => handleDueTimeChange(e.target.value)} placeholder="--:--" />
+              </span>
+            </span>
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
+              <BellIcon size={14} />
+              Lembrete
+            </span>
+            <select className="te__value te__select" value={remind} onChange={(e) => handleRemindChange(e.target.value)}>
               {REMIND_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-          </label>
+          </div>
         </div>
 
-        <label className="new-task-modal__label">
-          Descricao
-          <textarea
-            className="password-modal__input new-task-modal__textarea"
-            value={description}
-            onChange={(e) => handleDescriptionChange(e.target.value)}
-            rows={4}
-            placeholder="Notas ou detalhes..."
-          />
-        </label>
+        {/* Description area */}
+        <textarea
+          className="te__description"
+          value={description}
+          onChange={(e) => handleDescriptionChange(e.target.value)}
+          placeholder="Escreva os detalhes..."
+        />
 
-        <div className="task-editor-modal__footer">
-          <div className="task-editor-modal__save-status">
-            {saveLabel && (
-              <span className={`task-editor-modal__save-indicator task-editor-modal__save-indicator--${saveStatus}`}>
-                {saveLabel}
-              </span>
-            )}
-          </div>
-          <div className="task-editor-modal__danger">
-            {confirmDelete ? (
-              <>
-                <span className="task-editor-modal__confirm-text">Tem certeza?</span>
-                <button
-                  type="button"
-                  className="btn-reject"
-                  disabled={deleting}
-                  onClick={handleDelete}
-                >
-                  {deleting ? 'Excluindo...' : 'Sim, excluir'}
-                </button>
-                <button
-                  type="button"
-                  className="btn-confirm"
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  Cancelar
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="btn-reject"
-                onClick={() => setConfirmDelete(true)}
-              >
-                Excluir tarefa
-              </button>
-            )}
-          </div>
+        {/* Footer */}
+        <div className="te__footer">
+          <span className="te__created">{createdLabel}</span>
+          <span className={`te__save te__save--${saveStatus}`}>
+            {saveStatus === 'saving' && 'salvando...'}
+            {saveStatus === 'saved' && 'salvo'}
+            {saveStatus === 'error' && 'erro ao salvar'}
+          </span>
         </div>
       </div>
     </div>
