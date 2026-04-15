@@ -4536,6 +4536,16 @@ button:disabled {
 /*  Calendar View — Full Page                                          */
 /* ================================================================== */
 
+/* Glass card utility */
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sm), 0 1px 0 0 rgba(255,255,255,0.04) inset;
+}
+
 .calendar-view {
   display: flex;
   flex-direction: column;
@@ -4544,12 +4554,34 @@ button:disabled {
   background: var(--bg-0);
 }
 
+/* ---------- Greeting bar ---------- */
+
+.calendar-view__greeting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  flex-shrink: 0;
+}
+
+.calendar-view__greeting-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.calendar-view__greeting-date {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+
 .calendar-view__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-5) var(--space-3);
   flex-shrink: 0;
   gap: var(--space-4);
 }
@@ -4579,7 +4611,7 @@ button:disabled {
 }
 
 .calendar-view__title {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--text);
   text-transform: capitalize;
@@ -4597,6 +4629,8 @@ button:disabled {
   50% { opacity: 0.4; }
 }
 
+/* ---------- Filter pills (colorful) ---------- */
+
 .calendar-view__filters {
   display: flex;
   gap: var(--space-2);
@@ -4611,7 +4645,7 @@ button:disabled {
   font-size: 13px;
   font-weight: 500;
   border: 1px solid var(--border);
-  background: transparent;
+  background: rgba(255,255,255,0.05);
   color: var(--text-dim);
   cursor: pointer;
   transition: all 200ms ease;
@@ -4620,12 +4654,13 @@ button:disabled {
 .calendar-filter:hover {
   border-color: var(--border-strong);
   color: var(--text);
+  background: rgba(255,255,255,0.08);
 }
 
+/* Active state colors are applied via inline style for per-filter color.
+   This class provides the structural active appearance. */
 .calendar-filter--active {
-  background: rgba(167, 139, 250, 0.12);
-  color: var(--accent);
-  border-color: rgba(167, 139, 250, 0.3);
+  font-weight: 600;
 }
 
 .calendar-view__nav {
@@ -4679,7 +4714,6 @@ button:disabled {
   gap: 2px;
   padding: var(--space-2) var(--space-5);
   background: var(--bg-0);
-  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -4703,85 +4737,243 @@ button:disabled {
   color: var(--text);
 }
 
-/* ---------- Month Grid ---------- */
+/* ---------- Month layout: grid + sidebar ---------- */
 
-.month-grid {
+.calendar-view__month-layout {
   flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- Month Grid v2 — dots ---------- */
+
+.month-grid-v2 {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   grid-template-rows: auto repeat(6, 1fr);
   gap: 1px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--space-3);
+}
+
+.month-grid-v2__header {
+  padding: var(--space-2) var(--space-2);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.month-grid-v2__day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: var(--space-2) var(--space-1);
+  min-height: 72px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all 150ms ease;
+  position: relative;
+}
+
+.month-grid-v2__day:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.month-grid-v2__day--other {
+  opacity: 0.35;
+}
+
+.month-grid-v2__day--selected {
+  background: rgba(167, 139, 250, 0.12);
+}
+
+.month-grid-v2__day--selected:hover {
+  background: rgba(167, 139, 250, 0.16);
+}
+
+.month-grid-v2__day-num {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 1;
+}
+
+.month-grid-v2__today-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.month-grid-v2__day--today {
+  /* extra visual weight for today */
+}
+
+.month-grid-v2__dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.month-grid-v2__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.month-grid-v2__dot-overflow {
+  font-size: 9px;
+  color: var(--text-faint);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ---------- Day Detail Panel ---------- */
+
+.day-detail-panel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--space-4);
+}
+
+.day-detail-panel__header {
+  flex-shrink: 0;
+}
+
+.day-detail-panel__date {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.day-detail-panel__weekday {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+
+.day-detail-panel__divider {
+  height: 1px;
   background: var(--border);
+  margin: var(--space-4) 0;
+  flex-shrink: 0;
+}
+
+.day-detail-panel__content {
+  flex: 1;
   overflow-y: auto;
   min-height: 0;
 }
 
-.month-grid__header {
-  padding: var(--space-2) var(--space-2);
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-dim);
+.day-detail-panel__section {
+  margin-bottom: var(--space-4);
+}
+
+.day-detail-panel__section-label {
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  background: var(--bg-0);
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-2);
 }
 
-.month-grid__day {
-  background: var(--bg-1);
-  min-height: 90px;
-  padding: var(--space-2);
-  position: relative;
-  overflow: hidden;
+.day-detail-panel__item {
+  padding: var(--space-3);
+  border-left: 3px solid var(--accent);
+  background: rgba(255,255,255,0.03);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  margin-bottom: var(--space-2);
+  transition: background 150ms ease;
 }
 
-.month-grid__day--other {
-  opacity: 0.4;
+.day-detail-panel__item--clickable {
+  cursor: pointer;
 }
 
-.month-grid__day--today {
-  background: rgba(167, 139, 250, 0.04);
-  box-shadow: inset 0 0 0 1px var(--accent);
+.day-detail-panel__item--clickable:hover {
+  background: rgba(255,255,255,0.06);
 }
 
-.month-grid__day-num {
+.day-detail-panel__item-title {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
-.month-grid__day--today .month-grid__day-num {
-  display: inline-flex;
+.day-detail-panel__item-time {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.day-detail-panel__item-amount {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.day-detail-panel__item-amount--income {
+  color: #4ade80;
+}
+
+.day-detail-panel__item-amount--expense {
+  color: #f87171;
+}
+
+.day-detail-panel__item-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #22d3ee;
+  margin-top: 4px;
+}
+
+.day-detail-panel__empty {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #000;
-  font-weight: 700;
+  flex: 1;
+  gap: var(--space-3);
+  min-height: 200px;
 }
 
-.month-grid__event {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-bottom: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: opacity 150ms ease;
+.day-detail-panel__empty--inline {
+  min-height: 80px;
 }
 
-.month-grid__event:hover {
-  opacity: 0.8;
-}
-
-.month-grid__event--more {
-  font-size: 10px;
+.day-detail-panel__empty-icon {
   color: var(--text-faint);
-  background: transparent !important;
+  opacity: 0.5;
+}
+
+.day-detail-panel__empty-text {
+  font-size: 14px;
+  color: var(--text-faint);
 }
 
 /* ---------- Week View ---------- */
@@ -4880,13 +5072,11 @@ button:disabled {
 }
 
 .week-view__event--clickable,
-.month-grid__event--clickable,
 .allday-chip--clickable {
   cursor: pointer;
 }
 
 .week-view__event--clickable:hover,
-.month-grid__event--clickable:hover,
 .allday-chip--clickable:hover {
   filter: brightness(1.15);
 }
@@ -4993,6 +5183,10 @@ button:disabled {
     gap: var(--space-2);
   }
 
+  .calendar-view__greeting {
+    padding: var(--space-3) var(--space-3) var(--space-1);
+  }
+
   .calendar-view__filters {
     order: 3;
     width: 100%;
@@ -5006,14 +5200,18 @@ button:disabled {
     white-space: nowrap;
   }
 
-  .month-grid__day {
-    min-height: 60px;
-    padding: var(--space-1);
+  .calendar-view__month-layout {
+    grid-template-columns: 1fr;
+    padding: var(--space-3);
+    overflow-y: auto;
   }
 
-  .month-grid__event {
-    font-size: 10px;
-    padding: 1px 4px;
+  .day-detail-panel {
+    max-height: 300px;
+  }
+
+  .month-grid-v2__day {
+    min-height: 56px;
   }
 
   .week-view {

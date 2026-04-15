@@ -55,6 +55,21 @@ const fmtDayLong = new Intl.DateTimeFormat('pt-BR', {
   month: 'long',
 });
 
+const fmtGreetingDate = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+});
+
+const fmtDetailDate = new Intl.DateTimeFormat('pt-BR', {
+  day: 'numeric',
+  month: 'long',
+});
+
+const fmtDetailWeekday = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'long',
+});
+
 const WEEKDAY_LONG: string[] = [
   'domingo', 'segunda-feira', 'terca-feira',
   'quarta-feira', 'quinta-feira', 'sexta-feira', 'sabado',
@@ -117,7 +132,14 @@ const CATEGORY_COLORS: Record<FilterKey, string> = {
   agenda: '#a78bfa',
   financas: '#4ade80',
   outros: '#42a5f5',
-  tarefas: '#fbbf24',
+  tarefas: '#22d3ee',
+};
+
+const CATEGORY_LABELS: Record<FilterKey, string> = {
+  agenda: 'Agenda',
+  financas: 'Financas',
+  tarefas: 'Tarefas',
+  outros: 'Outros',
 };
 
 function eventColor(ev: CalendarEvent): string {
@@ -216,18 +238,134 @@ function taskToItem(task: SeraphineTask): CalendarItem | null {
 }
 
 /* ------------------------------------------------------------------ */
-/*  MonthGrid                                                          */
+/*  DayDetailPanel — sidebar showing selected day's items              */
+/* ------------------------------------------------------------------ */
+
+function DayDetailPanel({
+  selectedDay,
+  items,
+  filters,
+  onItemClick,
+}: {
+  selectedDay: Date | null;
+  items: CalendarItem[];
+  filters: Set<FilterKey>;
+  onItemClick: (item: CalendarItem) => void;
+}): JSX.Element {
+  if (!selectedDay) {
+    return (
+      <div className="day-detail-panel glass-card">
+        <div className="day-detail-panel__empty">
+          <CalendarIcon size={32} className="day-detail-panel__empty-icon" />
+          <span className="day-detail-panel__empty-text">Selecione um dia</span>
+        </div>
+      </div>
+    );
+  }
+
+  const dayItems = items.filter(
+    (it) => filters.has(it.category) && isSameDay(it.start, selectedDay),
+  );
+  dayItems.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  const dateLabel = fmtDetailDate.format(selectedDay);
+  const weekdayLabel = fmtDetailWeekday.format(selectedDay);
+
+  const agendaItems = dayItems.filter((it) => it.category === 'agenda');
+  const financeItems = dayItems.filter((it) => it.category === 'financas');
+  const taskItems = dayItems.filter((it) => it.category === 'tarefas');
+  const otherItems = dayItems.filter((it) => it.category === 'outros');
+
+  const renderSection = (
+    sectionItems: CalendarItem[],
+    label: string,
+    color: string,
+  ) => {
+    if (sectionItems.length === 0) return null;
+    return (
+      <div className="day-detail-panel__section">
+        <div className="day-detail-panel__section-label" style={{ color }}>
+          {label}
+        </div>
+        {sectionItems.map((it) => (
+          <div
+            key={it.key}
+            className={`day-detail-panel__item${it.taskId ? ' day-detail-panel__item--clickable' : ''}`}
+            style={{ borderLeftColor: CATEGORY_COLORS[it.category] }}
+            onClick={it.taskId ? () => onItemClick(it) : undefined}
+          >
+            <div className="day-detail-panel__item-title">{it.title}</div>
+            {!it.allDay && (
+              <div className="day-detail-panel__item-time">
+                {fmtTime.format(it.start)} - {fmtTime.format(it.end)}
+              </div>
+            )}
+            {it.allDay && !it.amount && (
+              <div className="day-detail-panel__item-time">Dia inteiro</div>
+            )}
+            {it.amount != null && it.amountKind && (
+              <div
+                className={`day-detail-panel__item-amount day-detail-panel__item-amount--${it.amountKind}`}
+              >
+                {fmtBRLSigned(it.amount, it.amountKind)}
+              </div>
+            )}
+            {it.taskId && (
+              <div className="day-detail-panel__item-status">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Tarefa</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="day-detail-panel glass-card">
+      <div className="day-detail-panel__header">
+        <div className="day-detail-panel__date">{dateLabel}</div>
+        <div className="day-detail-panel__weekday">{weekdayLabel}</div>
+      </div>
+      <div className="day-detail-panel__divider" />
+      <div className="day-detail-panel__content">
+        {dayItems.length === 0 ? (
+          <div className="day-detail-panel__empty day-detail-panel__empty--inline">
+            <span className="day-detail-panel__empty-text">Nenhum evento neste dia</span>
+          </div>
+        ) : (
+          <>
+            {renderSection(agendaItems, 'Agenda', CATEGORY_COLORS.agenda)}
+            {renderSection(financeItems, 'Financas', CATEGORY_COLORS.financas)}
+            {renderSection(taskItems, 'Tarefas', CATEGORY_COLORS.tarefas)}
+            {renderSection(otherItems, 'Outros', CATEGORY_COLORS.outros)}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  MonthGrid — event dots instead of text                             */
 /* ------------------------------------------------------------------ */
 
 function MonthGrid({
   date,
   items,
   filters,
+  selectedDay,
+  onDayClick,
   onItemClick,
 }: {
   date: Date;
   items: CalendarItem[];
   filters: Set<FilterKey>;
+  selectedDay: Date | null;
+  onDayClick: (day: Date) => void;
   onItemClick: (item: CalendarItem) => void;
 }) {
   const cells = useMemo(() => monthGrid(date), [date]);
@@ -248,47 +386,61 @@ function MonthGrid({
   const now = useMemo(() => new Date(), []);
   const viewMonth = date.getMonth();
 
+  // Silence unused prop
+  void onItemClick;
+
   return (
-    <div className="month-grid">
+    <div className="month-grid-v2 glass-card">
       {WEEKDAY_LABELS.map((label) => (
-        <div key={label} className="month-grid__header">{label}</div>
+        <div key={label} className="month-grid-v2__header">{label}</div>
       ))}
       {cells.map((cell) => {
         const otherMonth = cell.getMonth() !== viewMonth;
         const today = isSameDay(cell, now);
+        const selected = selectedDay ? isSameDay(cell, selectedDay) : false;
         const dayItems = byDay.get(dayKey(cell)) ?? [];
-        const visible = dayItems.slice(0, 3);
-        const extra = dayItems.length - visible.length;
-        const classes = ['month-grid__day'];
-        if (otherMonth) classes.push('month-grid__day--other');
-        if (today) classes.push('month-grid__day--today');
+
+        // Collect unique category dots (max 4)
+        const dotCategories: FilterKey[] = [];
+        const seen = new Set<FilterKey>();
+        for (const it of dayItems) {
+          if (!seen.has(it.category)) {
+            seen.add(it.category);
+            dotCategories.push(it.category);
+          }
+          if (dotCategories.length >= 4) break;
+        }
+
+        const overflow = dayItems.length > 4 ? dayItems.length - 4 : 0;
+
+        const classes = ['month-grid-v2__day'];
+        if (otherMonth) classes.push('month-grid-v2__day--other');
+        if (today) classes.push('month-grid-v2__day--today');
+        if (selected) classes.push('month-grid-v2__day--selected');
+
         return (
-          <div key={cell.toISOString()} className={classes.join(' ')}>
-            <div className="month-grid__day-num">{cell.getDate()}</div>
-            {visible.map((it) => (
-              <div
-                key={it.key}
-                className={`month-grid__event${it.taskId ? ' month-grid__event--clickable' : ''}`}
-                style={{ backgroundColor: `${it.color}22`, color: it.color }}
-                title={it.title}
-                onClick={it.taskId ? () => onItemClick(it) : undefined}
-              >
-                {it.category === 'tarefas' && (
-                  <span className="calendar-item__badge">Tarefa</span>
-                )}
-                <span className="calendar-item__title">{it.title}</span>
-                {it.amount != null && it.amountKind && (
+          <div
+            key={cell.toISOString()}
+            className={classes.join(' ')}
+            onClick={() => onDayClick(cell)}
+          >
+            <div className="month-grid-v2__day-num">
+              <span className={today ? 'month-grid-v2__today-ring' : undefined}>
+                {cell.getDate()}
+              </span>
+            </div>
+            {dotCategories.length > 0 && (
+              <div className="month-grid-v2__dots">
+                {dotCategories.map((cat) => (
                   <span
-                    className={`calendar-item__amount calendar-item__amount--${it.amountKind}`}
-                  >
-                    {fmtBRLSigned(it.amount, it.amountKind)}
-                  </span>
+                    key={cat}
+                    className="month-grid-v2__dot"
+                    style={{ backgroundColor: CATEGORY_COLORS[cat] }}
+                  />
+                ))}
+                {overflow > 0 && (
+                  <span className="month-grid-v2__dot-overflow">+{overflow}</span>
                 )}
-              </div>
-            ))}
-            {extra > 0 && (
-              <div className="month-grid__event month-grid__event--more">
-                +{extra} mais
               </div>
             )}
           </div>
@@ -578,6 +730,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [tasks, setTasks] = useState<SeraphineTask[]>([]);
@@ -704,18 +857,11 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   }, [fetchEvents]);
 
   // Unified list of CalendarItems (events + finance entries + tasks).
-  // When the `financas` filter is off, we still include google-calendar
-  // financas events in the list so filtering is consistent — but they
-  // won't render because the filter set excludes them.
   const items: CalendarItem[] = useMemo(() => {
     const list: CalendarItem[] = [];
     for (const ev of events) {
       const cat = eventCategory(ev);
-      // For google-calendar "financas" items we don't have an amount, so
-      // render them WITHOUT decoration — the /finance/entries source is
-      // the amount-bearing one and is preferred visually.
       list.push(eventToItem(ev));
-      // silence unused cat
       void cat;
     }
     for (const entry of financeEntries) {
@@ -772,55 +918,64 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     }
   };
 
+  const handleDayClick = (day: Date): void => {
+    setSelectedDay((prev) => (prev && isSameDay(prev, day) ? null : day));
+  };
+
   const headerLabel =
     viewMode === 'day'
       ? fmtDayLong.format(currentDate)
       : fmtMonthYear.format(currentDate);
 
+  const greetingLabel = fmtGreetingDate.format(now);
+
+  // Filter pill data
+  const filterPills: { key: FilterKey; label: string; color: string; icon: JSX.Element | null }[] = [
+    { key: 'agenda', label: CATEGORY_LABELS.agenda, color: CATEGORY_COLORS.agenda, icon: <CalendarIcon size={14} /> },
+    { key: 'financas', label: CATEGORY_LABELS.financas, color: CATEGORY_COLORS.financas, icon: <FinanceIcon size={14} /> },
+    { key: 'tarefas', label: CATEGORY_LABELS.tarefas, color: CATEGORY_COLORS.tarefas, icon: <TasksIcon size={14} /> },
+    { key: 'outros', label: CATEGORY_LABELS.outros, color: CATEGORY_COLORS.outros, icon: null },
+  ];
+
   return (
     <div className="calendar-view">
+      {/* Greeting header */}
+      <div className="calendar-view__greeting">
+        <button className="calendar-view__back" onClick={onBack} type="button">
+          <ArrowLeftIcon size={18} />
+        </button>
+        <div className="calendar-view__greeting-text">
+          <span className="calendar-view__greeting-date">{greetingLabel}</span>
+          {loading && <span className="calendar-view__loading">atualizando...</span>}
+        </div>
+      </div>
+
       {/* Header */}
       <div className="calendar-view__header">
         <div className="calendar-view__header-left">
-          <button className="calendar-view__back" onClick={onBack} type="button">
-            <ArrowLeftIcon size={18} />
-          </button>
           <h2 className="calendar-view__title">{headerLabel}</h2>
-          {loading && <span className="calendar-view__loading">atualizando...</span>}
         </div>
 
         <div className="calendar-view__filters">
-          <button
-            type="button"
-            className={`calendar-filter${filters.has('agenda') ? ' calendar-filter--active' : ''}`}
-            onClick={() => toggleFilter('agenda')}
-          >
-            <CalendarIcon size={14} />
-            Agenda
-          </button>
-          <button
-            type="button"
-            className={`calendar-filter${filters.has('financas') ? ' calendar-filter--active' : ''}`}
-            onClick={() => toggleFilter('financas')}
-          >
-            <FinanceIcon size={14} />
-            Financas
-          </button>
-          <button
-            type="button"
-            className={`calendar-filter${filters.has('tarefas') ? ' calendar-filter--active' : ''}`}
-            onClick={() => toggleFilter('tarefas')}
-          >
-            <TasksIcon size={14} />
-            Tarefas
-          </button>
-          <button
-            type="button"
-            className={`calendar-filter${filters.has('outros') ? ' calendar-filter--active' : ''}`}
-            onClick={() => toggleFilter('outros')}
-          >
-            Outros
-          </button>
+          {filterPills.map((pill) => {
+            const active = filters.has(pill.key);
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                className={`calendar-filter${active ? ' calendar-filter--active' : ''}`}
+                style={active ? {
+                  backgroundColor: `${pill.color}1f`,
+                  borderColor: `${pill.color}4d`,
+                  color: pill.color,
+                } : undefined}
+                onClick={() => toggleFilter(pill.key)}
+              >
+                {pill.icon}
+                {pill.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="calendar-view__nav">
@@ -867,7 +1022,6 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
           className={`calendar-view__toggle-btn${viewMode === 'week' ? ' calendar-view__toggle-btn--active' : ''}`}
           onClick={() => {
             setViewMode('week');
-            // Jump to current week when switching to week view
             setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
           }}
         >
@@ -887,12 +1041,22 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
 
       {/* Grid */}
       {viewMode === 'month' && (
-        <MonthGrid
-          date={currentDate}
-          items={items}
-          filters={filters}
-          onItemClick={handleItemClick}
-        />
+        <div className="calendar-view__month-layout">
+          <MonthGrid
+            date={currentDate}
+            items={items}
+            filters={filters}
+            selectedDay={selectedDay}
+            onDayClick={handleDayClick}
+            onItemClick={handleItemClick}
+          />
+          <DayDetailPanel
+            selectedDay={selectedDay}
+            items={items}
+            filters={filters}
+            onItemClick={handleItemClick}
+          />
+        </div>
       )}
       {viewMode === 'week' && (
         <WeekView
