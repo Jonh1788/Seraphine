@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Literal, Protocol, Union
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,12 @@ DEFAULT_SYSTEM_PROMPT = (
     "Available tools include: web_search (DuckDuckGo), web_fetch (read a URL), "
     "route_planner (driving directions), play_music (YouTube Music), filesystem, "
     "shell, Supertasks MCP, request_skill (for missing capabilities).\n\n"
+    "TASK vs REMINDER RULE:\n"
+    "When the user wants to DO something, track something, or schedule an action "
+    "(e.g. 'preciso cobrar', 'tenho que limpar', 'levar mozão', 'comprar', 'pagar'), "
+    "ALWAYS use add_task — NEVER create_reminder or MCP create_task for these. Tasks appear in the "
+    "calendar and Kanban board. Only use create_reminder for pure time-based alarms/notifications "
+    "that don't need tracking (e.g. 'me avisa quando der 18h').\n\n"
     "WEATHER DISPLAY RULE:\n"
     "When you have weather/forecast data (from web_search, web_fetch, or any "
     "source), ALWAYS call format_weather_card to display it as a beautiful "
@@ -114,6 +120,7 @@ def _build_date_context() -> str:
     base = (
         f"Current date: {now.strftime('%Y-%m-%d')} ({now.strftime('%A')}), "
         f"local time {now.strftime('%H:%M')} (Brasília, America/Sao_Paulo). "
+        f"'amanhã' = {(now + timedelta(days=1)).strftime('%Y-%m-%d')}. "
         f"Resolve 'hoje'/'amanhã'/'semana que vem' from this reference. "
         f"For tool arguments that take a date, ALWAYS use ISO 8601 with "
         f"the correct YEAR (e.g. 2026-07-14T14:00:00-03:00). But when "

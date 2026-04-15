@@ -145,12 +145,15 @@ def _build_task_card(
 class CreateTaskTool(Tool):
     """Create a task in Seraphine's internal task system."""
 
-    name = "create_task"
+    name = "add_task"
     description = (
-        "Create a task/to-do item in Seraphine's Kanban board. Use this "
-        "whenever the user asks you to create a task, reminder-like to-do, "
-        "or actionable item they want to track. The task will appear in "
-        "the Kanban view under 'Pendentes'."
+        "Create a task/to-do item in Seraphine's internal Kanban board AND calendar. "
+        "ALWAYS prefer this over reminders and over any MCP/Supertasks tool. Use when "
+        "the user wants to do something, schedule something, track something, or asks "
+        "you to remind them about something. The task shows up as an interactive "
+        "card in the chat with toggleable status. "
+        "Triggers: 'preciso', 'tenho que', 'lembrar', 'agendar', 'marcar', "
+        "'fazer', 'cobrar', 'levar', 'comprar', 'ligar', 'pagar', 'enviar'."
     )
     json_schema = {
         "type": "object",
@@ -228,5 +231,116 @@ class CreateTaskTool(Tool):
         return ToolResult(
             ok=True,
             output=". ".join(parts) + ".",
+            metadata={"task_id": task_id, "html_card": card_html},
+        )
+
+
+class UpdateTaskTool(Tool):
+    """Update an existing task."""
+
+    name = "update_task"
+    description = (
+        "Update an existing task by its ID. Use when the user asks to change, "
+        "edit, reschedule, or modify a task that was already created. You can "
+        "update the title, description, due_date, due_time, priority, or status. "
+        "The task_id comes from the add_task tool result or from context. "
+        "When the user says 'muda pra amanhã', 'troca o horário', 'cancela', "
+        "'já fiz', 'concluir', use this tool on the task from the conversation."
+    )
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "integer",
+                "description": "ID of the task to update (from add_task result).",
+            },
+            "title": {
+                "type": "string",
+                "description": "New title (omit to keep current).",
+            },
+            "description": {
+                "type": "string",
+                "description": "New description (omit to keep current).",
+            },
+            "due_date": {
+                "type": "string",
+                "description": "New date in YYYY-MM-DD (empty string clears it).",
+            },
+            "due_time": {
+                "type": "string",
+                "description": "New time in HH:MM (empty string clears it).",
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["low", "med", "high", ""],
+                "description": "New priority (empty string clears it).",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["pending", "approved", "completed", "rejected"],
+                "description": "New status.",
+            },
+        },
+        "required": ["task_id"],
+    }
+    requires_confirmation = False
+    category = "meta"
+
+    def __init__(self, task_service: Any) -> None:
+        self._svc = task_service
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        task_id = args.get("task_id")
+        if task_id is None:
+            return ToolResult(ok=False, error="task_id is required")
+
+        kwargs: dict[str, Any] = {}
+        for field in ("title", "description", "status", "priority"):
+            if field in args and args[field] is not None:
+                val = args[field]
+                if field == "priority" and val == "":
+                    kwargs["unset_priority"] = True
+                else:
+                    kwargs[field] = val
+
+        if "due_date" in args:
+            val = args["due_date"]
+            if val == "" or val is None:
+                kwargs["unset_due_date"] = True
+            else:
+                kwargs["due_date"] = val
+
+        if "due_time" in args:
+            val = args["due_time"]
+            if val == "" or val is None:
+                kwargs["unset_due_time"] = True
+            else:
+                kwargs["due_time"] = val
+
+        if not kwargs:
+            return ToolResult(ok=False, error="No fields to update.")
+
+        try:
+            await self._svc.update_task(int(task_id), **kwargs)
+            task = await self._svc.get_task(int(task_id))
+        except Exception as exc:
+            logger.exception("update_task tool failed")
+            return ToolResult(ok=False, error=str(exc))
+
+        if task is None:
+            return ToolResult(ok=False, error=f"Task {task_id} not found.")
+
+        card_html = _build_task_card(
+            title=task.title,
+            task_id=task.id,
+            status=task.status,
+            due_date=task.due_date,
+            due_time=task.due_time,
+            priority=task.priority,
+        )
+
+        return ToolResult(
+            ok=True,
+            output=f"Tarefa #{task_id} atualizada: {task.title}.",
             metadata={"task_id": task_id, "html_card": card_html},
         )

@@ -77,7 +77,10 @@ def _parse_time(raw: str) -> datetime | None:
 class CreateReminderTool(Tool):
     name = "create_reminder"
     description = (
-        "Create a scheduled reminder. The `time` parameter MUST be in ISO 8601 format "
+        "Create a timed push notification/alarm (NOT a task). Only use for simple "
+        "time-based alerts that don't need tracking. For actionable items the user "
+        "wants to track, complete, or see in the calendar/Kanban, use create_task "
+        "instead. The `time` parameter MUST be in ISO 8601 format "
         "(e.g. '2026-04-12T14:00:00-03:00') or a simple time like '14:00'. "
         "Convert any natural-language time the user says into one of these formats "
         "before calling this tool. The timezone is America/Sao_Paulo (UTC-3). "

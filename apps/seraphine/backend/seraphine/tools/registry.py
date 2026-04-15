@@ -191,9 +191,10 @@ def build_default_registry(
         reg.register(ListFinancialEntriesTool(finance_service))
         reg.register(ImportFinancialPdfTool(finance_service, llm=llm))
     if task_service is not None:
-        from seraphine.tools.tasks import CreateTaskTool
+        from seraphine.tools.tasks import CreateTaskTool, UpdateTaskTool
 
         reg.register(CreateTaskTool(task_service))
+        reg.register(UpdateTaskTool(task_service))
     if recurring_service is not None:
         from seraphine.tools.recurring import CreateRecurringTaskTool
 
