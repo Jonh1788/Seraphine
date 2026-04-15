@@ -807,19 +807,26 @@ export function ChatView({
                   )}
                   {t.role === 'assistant' ? (
                     (() => {
-                      const raw = stripAudioTags(parsed ? parsed.response : t.content);
-                      // Split on <!--card--> / <!--/card--> delimiters
-                      const cardRe = /<!--card-->([\s\S]*?)<!--\/card-->/g;
+                      let raw = stripAudioTags(parsed ? parsed.response : t.content);
                       const cards: string[] = [];
-                      const text = raw.replace(cardRe, (_: string, inner: string) => {
+                      // Primary: explicit <!--card--> delimiters
+                      raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
                         cards.push(inner);
                         return '';
                       });
+                      // Fallback: split at first <div class="rich-card (legacy cards without delimiters)
+                      if (cards.length === 0) {
+                        const idx = raw.indexOf('<div class="rich-card');
+                        if (idx !== -1) {
+                          cards.push(raw.slice(idx));
+                          raw = raw.slice(0, idx);
+                        }
+                      }
                       return (
                         <>
-                          {text.trim() && (
+                          {raw.trim() && (
                             <Markdown rehypePlugins={[rehypeRaw]}>
-                              {text}
+                              {raw}
                             </Markdown>
                           )}
                           {cards.map((html, i) => (

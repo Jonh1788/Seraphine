@@ -182,8 +182,8 @@ function fmtBRLSigned(amount: number, kind: 'income' | 'expense'): string {
   return kind === 'income' ? `+${abs}` : `-${abs}`;
 }
 
-function parseIsoLocalDate(iso: string): Date {
-  // YYYY-MM-DD in user's local tz.
+function parseIsoLocalDate(iso: string | null | undefined): Date {
+  if (!iso) return new Date();
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
@@ -865,7 +865,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       void cat;
     }
     for (const entry of financeEntries) {
-      list.push(entryToItem(entry));
+      if (entry.date) list.push(entryToItem(entry));
     }
     for (const task of tasks) {
       const it = taskToItem(task);
