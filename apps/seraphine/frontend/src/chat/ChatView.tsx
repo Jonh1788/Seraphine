@@ -673,6 +673,50 @@ export function ChatView({
     }
   }, []);
 
+  /** Event-delegation handler for interactive task cards in chat. */
+  const handleCardClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const toggle = target.closest<HTMLElement>('[data-action="toggle-status"]');
+    if (!toggle) return;
+    const taskId = toggle.getAttribute('data-task-id');
+    const nextStatus = toggle.getAttribute('data-next-status');
+    if (!taskId || !nextStatus) return;
+    e.stopPropagation();
+
+    // Optimistic visual update
+    const item = toggle.closest('.task-chat-card__item');
+    const titleEl = item?.querySelector('.task-chat-card__title');
+    const isDone = nextStatus === 'completed';
+
+    // Swap SVG icon
+    const circleIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>';
+    const checkIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+    toggle.innerHTML = isDone ? checkIcon : circleIcon;
+    toggle.setAttribute('data-current-status', isDone ? 'completed' : 'pending');
+    toggle.setAttribute('data-next-status', isDone ? 'pending' : 'completed');
+
+    if (titleEl) {
+      if (isDone) titleEl.classList.add('task-chat-card__title--done');
+      else titleEl.classList.remove('task-chat-card__title--done');
+    }
+
+    // PATCH backend
+    fetch(`${API_BASE}/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: isDone ? 'completed' : 'pending' }),
+    }).catch(() => {
+      // Revert on failure
+      toggle.innerHTML = isDone ? circleIcon : checkIcon;
+      toggle.setAttribute('data-current-status', isDone ? 'pending' : 'completed');
+      toggle.setAttribute('data-next-status', isDone ? 'completed' : 'pending');
+      if (titleEl) {
+        if (isDone) titleEl.classList.remove('task-chat-card__title--done');
+        else titleEl.classList.add('task-chat-card__title--done');
+      }
+    });
+  }, []);
+
   const handleMcpApproval = useCallback(
     (taskId: string, action: McpAction) => {
       ws.send({
@@ -833,6 +877,7 @@ export function ChatView({
                             <div
                               key={`card-${i}`}
                               dangerouslySetInnerHTML={{ __html: html }}
+                              onClick={handleCardClick}
                             />
                           ))}
                         </>

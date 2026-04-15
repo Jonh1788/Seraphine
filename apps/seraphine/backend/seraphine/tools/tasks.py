@@ -35,41 +35,109 @@ _PRIORITY_LABELS: dict[str, str] = {
 
 def _build_task_card(
     *,
-    title: str,
-    status: str,
+    tasks: list[dict[str, str | None]] | None = None,
+    title: str = "",
+    task_id: str | int | None = None,
+    status: str = "pending",
     due_date: str | None = None,
     due_time: str | None = None,
     priority: str | None = None,
 ) -> str:
-    """Build an HTML card for a task using the rich-card design system."""
-    safe_title = _html.escape(title)
-    label, _status_icon = _STATUS_LABELS.get(status, ("Pendente", CIRCLE))
-    icon = CLIPBOARD
+    """Build an Aura-style HTML card for task(s).
 
-    meta_parts: list[str] = [label]
-    if priority and priority in _PRIORITY_LABELS:
-        meta_parts.append(f"Prioridade {_PRIORITY_LABELS[priority]}")
-    if due_date:
-        # Format as DD/MM
-        if len(due_date) >= 10:
-            date_str = f"{due_date[8:10]}/{due_date[5:7]}"
-        else:
-            date_str = due_date
-        if due_time:
-            date_str += f" {due_time}"
-        meta_parts.append(date_str)
+    Accepts either a list of task dicts (batch) or a single task via
+    the title/task_id/status/due_date/due_time/priority params.
+    """
+    if tasks is None:
+        tasks = [
+            {
+                "title": title,
+                "task_id": str(task_id) if task_id is not None else "",
+                "status": status,
+                "due_date": due_date,
+                "due_time": due_time,
+                "priority": priority,
+            }
+        ]
 
-    meta_str = " &middot; ".join(meta_parts)
+    count = len(tasks)
+    count_label = f"{count} tarefa{'s' if count != 1 else ''}"
+
+    # --- header ---
+    header = (
+        '<div class="task-chat-card__header">'
+        f'  <div class="rich-card__icon rich-card__icon--tasks">{CLIPBOARD}</div>'
+        '  <div>'
+        '    <div class="rich-card__title">Tarefas</div>'
+        f'    <div class="rich-card__subtitle">{count_label}</div>'
+        '  </div>'
+        '</div>'
+    )
+
+    # --- group tasks by date label ---
+    from datetime import date as _date  # noqa: WPS433 (local import ok)
+
+    def _date_label(d: str | None) -> str:
+        if not d or len(d) < 10:
+            return ""
+        try:
+            parsed = _date.fromisoformat(d[:10])
+        except ValueError:
+            return d
+        if parsed == _date.today():
+            return "HOJE"
+        return f"{parsed.day:02d}/{parsed.month:02d}"
+
+    # Build items HTML
+    items_html = ""
+    current_group = object()
+    for t in tasks:
+        t_title = _html.escape(str(t.get("title") or ""))
+        t_status = str(t.get("status") or "pending")
+        t_id = str(t.get("task_id") or "")
+        t_due_date = t.get("due_date")
+        t_due_time = t.get("due_time")
+
+        # Date group label
+        group = _date_label(t_due_date)  # type: ignore[arg-type]
+        if group and group != current_group:
+            current_group = group
+            items_html += (
+                f'<div class="task-chat-card__date-group">{group}</div>'
+            )
+
+        # Status icon
+        is_done = t_status == "completed"
+        status_icon = CHECK_CIRCLE if is_done else CIRCLE
+        next_status = "pending" if is_done else "completed"
+        strike = " task-chat-card__title--done" if is_done else ""
+
+        # Time display
+        time_html = ""
+        if t_due_time:
+            time_html = (
+                f'<span class="task-chat-card__time">'
+                f'{CLOCK} {_html.escape(str(t_due_time))}'
+                f'</span>'
+            )
+
+        items_html += (
+            f'<div class="task-chat-card__item">'
+            f'  <span class="task-chat-card__toggle"'
+            f'    data-task-id="{_html.escape(t_id)}"'
+            f'    data-action="toggle-status"'
+            f'    data-current-status="{_html.escape(t_status)}"'
+            f'    data-next-status="{next_status}">'
+            f'    {status_icon}'
+            f'  </span>'
+            f'  <span class="task-chat-card__title{strike}">{t_title}</span>'
+            f'  {time_html}'
+            f'</div>'
+        )
 
     return (
-        '<!--card--><div class="rich-card rich-card--tasks">'
-        '  <div class="rich-card__item">'
-        f'    <div class="rich-card__item-icon rich-card__icon--tasks">{icon}</div>'
-        f'    <div class="rich-card__item-body">'
-        f'      <div class="rich-card__item-title">{safe_title}</div>'
-        f'      <div class="rich-card__item-meta">{meta_str}</div>'
-        f'    </div>'
-        f'  </div>'
+        f'<!--card--><div class="rich-card rich-card--tasks task-chat-card">'
+        f'{header}{items_html}'
         f'</div><!--/card-->'
     )
 
@@ -144,6 +212,7 @@ class CreateTaskTool(Tool):
 
         card_html = _build_task_card(
             title=title,
+            task_id=task_id,
             status="pending",
             due_date=due_date,
             due_time=due_time,

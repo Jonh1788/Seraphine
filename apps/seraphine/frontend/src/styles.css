@@ -6935,3 +6935,201 @@ button:disabled {
   opacity: 0.5;
   margin-top: var(--space-3);
 }
+
+/* ==========================================================================
+   Task Chat Card — Aura-style interactive task card in chat
+   ========================================================================== */
+
+.task-chat-card {
+  padding: var(--space-4);
+}
+
+.task-chat-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.task-chat-card__date-group {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #22d3ee;
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.task-chat-card__date-group:first-of-type {
+  margin-top: 0;
+}
+
+.task-chat-card__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: var(--space-2);
+  transition: background 120ms ease;
+}
+
+.task-chat-card__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.task-chat-card__toggle {
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  transition: color 120ms ease;
+}
+
+.task-chat-card__toggle:hover {
+  color: #22d3ee;
+}
+
+.task-chat-card__title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.task-chat-card__title--done {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.task-chat-card__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.task-chat-card__time svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ==========================================================================
+   Recurring Tasks Section — in Tasks panel below Kanban
+   ========================================================================== */
+
+.recurring-section {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.recurring-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.recurring-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.recurring-section__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.recurring-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  padding: var(--space-3);
+  min-width: 200px;
+  flex: 1 1 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.recurring-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.recurring-card__meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.recurring-card__freq {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.1);
+  color: #22d3ee;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.recurring-card__delete {
+  align-self: flex-end;
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--r-sm);
+  color: #ef5350;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.recurring-card__delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef5350;
+}
+
+/* Task card priority dot */
+.task-card__priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-card__priority-dot--low { background: #4ade80; }
+.task-card__priority-dot--med { background: #fbbf24; }
+.task-card__priority-dot--high { background: #ef4444; }
+
+.task-card__due {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-card__due--overdue {
+  color: #ef5350;
+}

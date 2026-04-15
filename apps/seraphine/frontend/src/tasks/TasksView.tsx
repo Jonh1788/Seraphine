@@ -595,10 +595,30 @@ function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskEditorMo
   );
 }
 
+interface RecurringRule {
+  id: string;
+  title: string;
+  frequency: string;
+  weekday: number | null;
+  day_of_month: number | null;
+  time: string | null;
+  active: boolean;
+  description: string | null;
+}
+
+const FREQ_LABELS: Record<string, string> = {
+  daily: 'Diaria',
+  weekly: 'Semanal',
+  monthly: 'Mensal',
+};
+
+const WEEKDAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+
 export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [tasks, setTasks] = useState<SeraphineTask[]>([]);
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [confirmedEntries, setConfirmedEntries] = useState<FinanceEntry[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -645,7 +665,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const [tasksRes, pendingEntriesRes, confirmedEntriesRes] = await Promise.all([
+      const [tasksRes, pendingEntriesRes, confirmedEntriesRes, recurringRes] = await Promise.all([
         fetch(`${API_BASE}/tasks?limit=200`).then((r) => (r.ok ? r.json() : { tasks: [] })),
         fetch(`${API_BASE}/finance/entries?status=pending_review&limit=100`).then((r) =>
           r.ok ? r.json() : { entries: [] },
@@ -653,11 +673,17 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         fetch(`${API_BASE}/finance/entries?status=confirmed&limit=100`).then((r) =>
           r.ok ? r.json() : { entries: [] },
         ),
+        fetch(`${API_BASE}/recurring`).then((r) =>
+          r.ok ? r.json() : { recurring: [] },
+        ),
       ]);
       setTasks(Array.isArray(tasksRes.tasks) ? tasksRes.tasks : []);
       setEntries(Array.isArray(pendingEntriesRes.entries) ? pendingEntriesRes.entries : []);
       setConfirmedEntries(
         Array.isArray(confirmedEntriesRes.entries) ? confirmedEntriesRes.entries : [],
+      );
+      setRecurringRules(
+        Array.isArray(recurringRes.recurring) ? recurringRes.recurring : [],
       );
       // Keep overrides for keys with an in-flight mutation — clearing
       // them would flip the card back to the server's stale state while
@@ -779,16 +805,21 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   }, [cardsWithOverrides]);
 
   const summary = useMemo(() => {
-    const pendingCount = byColumn.pending.length;
-    const approvedCount = byColumn.in_progress.length;
+    const totalTasks = tasks.length;
     const completedToday = cardsWithOverrides.filter(
       (c) => c.column === 'done' && isWithinDays(c.createdAt, 1),
     ).length;
-    const failedCount = cardsWithOverrides.filter(
-      (c) => c.kind === 'task' && c.task.status === 'failed' && isWithinDays(c.createdAt, 7),
-    ).length;
-    return { pendingCount, approvedCount, completedToday, failedCount };
-  }, [byColumn, cardsWithOverrides]);
+    const pendingCount = byColumn.pending.length;
+    // Overdue: tasks with a due_date in the past and not completed/rejected
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const overdueCount = tasks.filter((t) => {
+      if (t.status === 'completed' || t.status === 'rejected' || t.status === 'failed') return false;
+      if (!t.due_date) return false;
+      return t.due_date < todayStr;
+    }).length;
+    return { totalTasks, completedToday, pendingCount, overdueCount };
+  }, [tasks, byColumn, cardsWithOverrides]);
 
   const setCardError = (key: string, msg: string | null): void => {
     setCardErrors((prev) => {
@@ -991,6 +1022,16 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setNewTaskBusy(false);
+    }
+  };
+
+  const deleteRecurringRule = async (ruleId: string): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/recurring/${ruleId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRecurringRules((prev) => prev.filter((r) => r.id !== ruleId));
+    } catch {
+      // silent — will refresh on next load
     }
   };
 
@@ -1411,8 +1452,21 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
           <span className="task-card__badge">{card.typeLabel}</span>
           <span className="task-card__time">{timeAgo(card.createdAt)}</span>
         </div>
-        <div className="task-card__title">{card.title}</div>
+        <div className="task-card__title">
+          {card.kind === 'task' && card.task.priority && (
+            <span className={`task-card__priority-dot task-card__priority-dot--${card.task.priority}`} />
+          )}
+          {card.title}
+        </div>
         {card.subtitle && <div className="task-card__subtitle">{card.subtitle}</div>}
+        {card.kind === 'task' && (card.task.due_date || card.task.due_time) && (
+          <div className={`task-card__due${card.task.due_date && card.task.due_date < new Date().toISOString().slice(0, 10) && card.task.status !== 'completed' && card.task.status !== 'rejected' ? ' task-card__due--overdue' : ''}`}>
+            {card.task.due_date && card.task.due_date.length >= 10
+              ? `${card.task.due_date.slice(8, 10)}/${card.task.due_date.slice(5, 7)}`
+              : ''}
+            {card.task.due_time ? ` ${card.task.due_time}` : ''}
+          </div>
+        )}
         {err && <div className="task-card__error" role="alert">{err}</div>}
         {detail}
         {renderCardActions(card)}
@@ -1455,20 +1509,20 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
 
       <div className="tasks-view__summary">
         <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.pendingCount}</span>
-          <span className="tasks-summary-pill__label">pendentes</span>
-        </div>
-        <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.approvedCount}</span>
-          <span className="tasks-summary-pill__label">em andamento</span>
+          <span className="tasks-summary-pill__value">{summary.totalTasks}</span>
+          <span className="tasks-summary-pill__label">total</span>
         </div>
         <div className="tasks-summary-pill">
           <span className="tasks-summary-pill__value">{summary.completedToday}</span>
           <span className="tasks-summary-pill__label">concluidas hoje</span>
         </div>
         <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.failedCount}</span>
-          <span className="tasks-summary-pill__label">falharam</span>
+          <span className="tasks-summary-pill__value">{summary.pendingCount}</span>
+          <span className="tasks-summary-pill__label">pendentes</span>
+        </div>
+        <div className="tasks-summary-pill">
+          <span className="tasks-summary-pill__value">{summary.overdueCount}</span>
+          <span className="tasks-summary-pill__label">atrasadas</span>
         </div>
       </div>
 
@@ -1502,6 +1556,40 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
           );
         })}
       </div>
+
+      {recurringRules.length > 0 && (
+        <div className="recurring-section">
+          <div className="recurring-section__header">
+            <span className="recurring-section__title">Tarefas Recorrentes</span>
+          </div>
+          <div className="recurring-section__list">
+            {recurringRules.filter((r) => r.active).map((rule) => (
+              <div key={rule.id} className="recurring-card">
+                <div className="recurring-card__title">{rule.title}</div>
+                <div className="recurring-card__meta">
+                  <span className="recurring-card__freq">
+                    {FREQ_LABELS[rule.frequency] || rule.frequency}
+                  </span>
+                  {rule.time && <span>{rule.time}</span>}
+                  {rule.frequency === 'weekly' && rule.weekday != null && (
+                    <span>{WEEKDAY_LABELS[rule.weekday] || ''}</span>
+                  )}
+                  {rule.frequency === 'monthly' && rule.day_of_month != null && (
+                    <span>dia {rule.day_of_month}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="recurring-card__delete"
+                  onClick={() => void deleteRecurringRule(rule.id)}
+                >
+                  <XIcon size={12} /> Excluir
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {passwordTask && (
         <PasswordModal
