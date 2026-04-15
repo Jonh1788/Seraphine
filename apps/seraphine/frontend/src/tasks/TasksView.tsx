@@ -1186,6 +1186,11 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
               ? `${card.task.due_date.slice(8, 10)}/${card.task.due_date.slice(5, 7)}`
               : ''}
             {card.task.due_time ? ` ${card.task.due_time}` : ''}
+            {card.task.remind && (
+              <span className="task-card__remind" title="Lembrete ativo">
+                <BellIcon size={12} />
+              </span>
+            )}
           </div>
         )}
         {err && <div className="task-card__error" role="alert">{err}</div>}

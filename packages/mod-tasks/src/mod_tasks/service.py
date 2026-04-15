@@ -35,7 +35,7 @@ def _now() -> str:
 
 
 def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
-    """Map a 14-column SELECT row to a SeraphineTask."""
+    """Map a 15-column SELECT row to a SeraphineTask."""
     raw_payload = row[6]
     try:
         payload = json.loads(raw_payload) if raw_payload else {}
@@ -66,12 +66,13 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         user_id=row[11],
         tags=tags,
         priority=row[13] if len(row) > 13 else None,
+        remind=row[14] if len(row) > 14 else None,
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
-    " updated_at, due_date, due_time, user_id, tags, priority"
+    " updated_at, due_date, due_time, user_id, tags, priority, remind"
 )
 
 
@@ -110,6 +111,7 @@ class TaskService:
         user_id: str | None = None,
         priority: str | None = None,
         tags: list[str] | None = None,
+        remind: str | None = None,
     ) -> int:
         ts = _now()
         payload_json = json.dumps(payload or {}, ensure_ascii=False)
@@ -121,11 +123,11 @@ class TaskService:
                     "INSERT INTO seraphine_tasks"
                     " (type, status, title, description, source, payload,"
                     "  created_at, updated_at, due_date, due_time, user_id,"
-                    "  tags, priority)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "  tags, priority, remind)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (type, status, title, description, source,
                      payload_json, ts, ts, due_date, due_time, user_id,
-                     tags_json, priority),
+                     tags_json, priority, remind),
                 )
                 return int(cur.lastrowid or 0)
 
@@ -233,9 +235,11 @@ class TaskService:
         due_time: str | None = None,
         priority: str | None = None,
         tags: list[str] | None = None,
+        remind: str | None = None,
         unset_due_date: bool = False,
         unset_due_time: bool = False,
         unset_priority: bool = False,
+        unset_remind: bool = False,
     ) -> int:
         """Partial update. Only provided fields are written.
 
@@ -272,6 +276,11 @@ class TaskService:
         if tags is not None:
             sets.append("tags = ?")
             params.append(json.dumps(tags, ensure_ascii=False))
+        if unset_remind:
+            sets.append("remind = NULL")
+        elif remind is not None:
+            sets.append("remind = ?")
+            params.append(remind)
 
         if not sets:
             # Nothing to update — treat as a no-op; callers that want to

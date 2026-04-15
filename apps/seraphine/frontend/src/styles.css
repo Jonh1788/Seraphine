@@ -6529,6 +6529,17 @@ button:disabled {
   color: var(--red);
 }
 
+.task-editor-modal__remind-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-editor-modal__remind-label svg {
+  width: 14px;
+  height: 14px;
+}
+
 .task-editor-modal__danger {
   display: flex;
   align-items: center;
@@ -7022,6 +7033,19 @@ button:disabled {
   height: 12px;
 }
 
+.task-chat-card__remind {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.task-chat-card__remind svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* ==========================================================================
    Recurring Chat Block — recurring rule card shown in chat
    ========================================================================== */
@@ -7231,4 +7255,16 @@ button:disabled {
 
 .task-card__due--overdue {
   color: #ef5350;
+}
+
+.task-card__remind {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  margin-left: 2px;
+}
+
+.task-card__remind svg {
+  width: 12px;
+  height: 12px;
 }

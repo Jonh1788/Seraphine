@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { TasksIcon, CircleIcon, CheckCircleIcon, ClockIcon } from '../icons/Icons';
+import { TasksIcon, CircleIcon, CheckCircleIcon, ClockIcon, BellIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
 
 export interface ChatTask {
@@ -9,6 +9,7 @@ export interface ChatTask {
   due_date?: string | null;
   due_time?: string | null;
   priority?: string | null;
+  remind?: string | null;
 }
 
 export interface TaskChatBlockProps {
@@ -123,6 +124,11 @@ export function TaskChatBlock({ tasks, onOpenEditor }: TaskChatBlockProps): JSX.
                   <span className="task-chat-card__time">
                     <ClockIcon size={12} />
                     {task.due_time}
+                  </span>
+                )}
+                {task.remind && (
+                  <span className="task-chat-card__remind" title="Lembrete ativo">
+                    <BellIcon size={12} />
                   </span>
                 )}
               </div>

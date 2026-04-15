@@ -24,3 +24,4 @@ class SeraphineTask:
     user_id: str | None = None  # NULL for single-tenant (Seraphine), set for Aura
     priority: str | None = None  # low / med / high (optional)
     tags: list[str] = field(default_factory=list)  # free-form short labels
+    remind: str | None = None  # at_time / 1h_before / 1d_before

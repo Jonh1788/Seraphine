@@ -47,6 +47,7 @@ export interface SeraphineTask {
   due_time?: string | null; // HH:MM 24h (optional, pairs with due_date)
   priority?: string | null; // low / med / high
   tags?: string[];
+  remind?: string | null; // at_time / 1h_before / 1d_before
 }
 
 export const CATEGORY_COLORS: Record<string, string> = {

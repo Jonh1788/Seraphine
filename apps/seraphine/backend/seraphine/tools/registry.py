@@ -193,8 +193,8 @@ def build_default_registry(
     if task_service is not None:
         from seraphine.tools.tasks import CreateTaskTool, UpdateTaskTool
 
-        reg.register(CreateTaskTool(task_service))
-        reg.register(UpdateTaskTool(task_service))
+        reg.register(CreateTaskTool(task_service, scheduler=reminder_scheduler))
+        reg.register(UpdateTaskTool(task_service, scheduler=reminder_scheduler))
     if recurring_service is not None:
         from seraphine.tools.recurring import CreateRecurringTaskTool
 

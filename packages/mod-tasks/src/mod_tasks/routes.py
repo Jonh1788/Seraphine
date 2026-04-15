@@ -47,6 +47,9 @@ def _service_or_503(request: Request) -> TaskService:
 # Request / response models
 # ------------------------------------------------------------------
 
+REMIND_VALUES = {"at_time", "1h_before", "1d_before"}
+
+
 class TaskCreate(BaseModel):
     type: str
     title: str
@@ -57,12 +60,13 @@ class TaskCreate(BaseModel):
     due_time: str | None = None  # HH:MM (24h)
     priority: str | None = None  # low / med / high
     tags: list[str] | None = None
+    remind: str | None = None  # at_time / 1h_before / 1d_before
 
 
 class TaskPatch(BaseModel):
     # All fields optional — only provided keys are updated. To clear a
     # nullable field, send an explicit empty string (for due_date/time/
-    # priority) or an empty list (tags).
+    # priority/remind) or an empty list (tags).
     title: str | None = None
     description: str | None = None
     status: str | None = None
@@ -70,6 +74,7 @@ class TaskPatch(BaseModel):
     due_time: str | None = None
     priority: str | None = None
     tags: list[str] | None = None
+    remind: str | None = None  # at_time / 1h_before / 1d_before / "" to clear
 
 
 class TaskExecute(BaseModel):
@@ -138,6 +143,11 @@ async def create_task(
             status_code=422,
             detail=f"priority must be one of {TASK_PRIORITIES}",
         )
+    if body.remind is not None and body.remind not in REMIND_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"remind must be one of {sorted(REMIND_VALUES)}",
+        )
     try:
         task_id = await svc.create_task(
             type=body.type,
@@ -150,6 +160,7 @@ async def create_task(
             user_id=user_id,
             priority=body.priority,
             tags=body.tags,
+            remind=body.remind,
         )
         return {"id": task_id, "ok": True}
     except Exception as e:
@@ -217,6 +228,21 @@ async def update_task(
         else:
             due_time_val = raw
 
+    # remind: empty string means "clear". Validate real values.
+    unset_remind = False
+    remind_val: str | None = None
+    if "remind" in data:
+        raw = data["remind"]
+        if raw in (None, ""):
+            unset_remind = True
+        elif raw in REMIND_VALUES:
+            remind_val = raw
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"remind must be one of {sorted(REMIND_VALUES)}",
+            )
+
     try:
         affected = await svc.update_task(
             task_id,
@@ -230,9 +256,11 @@ async def update_task(
             due_time=due_time_val,
             priority=priority_val,
             tags=data.get("tags") if "tags" in data else None,
+            remind=remind_val,
             unset_due_date=unset_due_date,
             unset_due_time=unset_due_time,
             unset_priority=unset_priority,
+            unset_remind=unset_remind,
         )
     except Exception as e:
         logger.exception("task update failed")

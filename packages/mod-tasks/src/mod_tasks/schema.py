@@ -34,7 +34,8 @@ def migrate(conn: sqlite3.Connection) -> None:
           due_time      TEXT,
           user_id       TEXT,
           priority      TEXT,
-          tags          TEXT
+          tags          TEXT,
+          remind        TEXT
         )
         """
     )
@@ -49,6 +50,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE seraphine_tasks ADD COLUMN user_id TEXT",
         "ALTER TABLE seraphine_tasks ADD COLUMN priority TEXT",
         "ALTER TABLE seraphine_tasks ADD COLUMN tags TEXT",
+        "ALTER TABLE seraphine_tasks ADD COLUMN remind TEXT",
     ):
         try:
             conn.execute(ddl)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { XIcon } from '../icons/Icons';
+import { XIcon, BellIcon } from '../icons/Icons';
 import type { SeraphineTask } from '../finance/types';
 import { API_BASE } from '../api';
 
@@ -15,6 +15,13 @@ const PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: 'low', label: 'Baixa' },
   { value: 'med', label: 'Media' },
   { value: 'high', label: 'Alta' },
+];
+
+const REMIND_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Nao lembrar' },
+  { value: 'at_time', label: 'Na hora' },
+  { value: '1h_before', label: '1 hora antes' },
+  { value: '1d_before', label: '1 dia antes' },
 ];
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -35,6 +42,7 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
   const [priority, setPriority] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
+  const [remind, setRemind] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -63,6 +71,7 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
         setPriority(data.priority || '');
         setDueDate(data.due_date || '');
         setDueTime(data.due_time || '');
+        setRemind(data.remind || '');
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -136,6 +145,11 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
   const handleDueTimeChange = (v: string): void => {
     setDueTime(v);
     patchField({ due_time: v || '' });
+  };
+
+  const handleRemindChange = (v: string): void => {
+    setRemind(v);
+    patchField({ remind: v || '' });
   };
 
   const handleDelete = async (): Promise<void> => {
@@ -253,6 +267,23 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
               value={dueTime}
               onChange={(e) => handleDueTimeChange(e.target.value)}
             />
+          </label>
+        </div>
+
+        <div className="new-task-modal__row">
+          <label className="new-task-modal__label">
+            <span className="task-editor-modal__remind-label">
+              <BellIcon size={14} /> Lembrete
+            </span>
+            <select
+              className="password-modal__input"
+              value={remind}
+              onChange={(e) => handleRemindChange(e.target.value)}
+            >
+              {REMIND_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </label>
         </div>
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import html as _html
 import logging
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from seraphine.tools.base import Tool, ToolResult
 from seraphine.tools.svg_icons import (
@@ -31,6 +33,64 @@ _PRIORITY_LABELS: dict[str, str] = {
     "med": "Media",
     "high": "Alta",
 }
+
+_REMIND_LABELS: dict[str, str] = {
+    "at_time": "Na hora",
+    "1h_before": "1h antes",
+    "1d_before": "1 dia antes",
+}
+
+_SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _compute_fire_time(
+    due_date: str,
+    due_time: str | None,
+    remind: str,
+) -> datetime | None:
+    """Calculate the datetime to fire the reminder notification."""
+    try:
+        if due_time:
+            dt = datetime.strptime(f"{due_date} {due_time}", "%Y-%m-%d %H:%M")
+        else:
+            # No time specified — default to 09:00
+            dt = datetime.strptime(due_date, "%Y-%m-%d").replace(hour=9, minute=0)
+        dt = dt.replace(tzinfo=_SP_TZ)
+    except ValueError:
+        return None
+
+    if remind == "1h_before":
+        dt -= timedelta(hours=1)
+    elif remind == "1d_before":
+        dt -= timedelta(days=1)
+    # "at_time" — no offset
+
+    return dt
+
+
+def _schedule_task_reminder(
+    scheduler: Any,
+    task_id: int,
+    title: str,
+    due_date: str,
+    due_time: str | None,
+    remind: str,
+) -> str | None:
+    """Schedule a reminder via ReminderScheduler. Returns the job id or None."""
+    fire_at = _compute_fire_time(due_date, due_time, remind)
+    if fire_at is None:
+        return None
+    job_id = f"task-remind-{task_id}"
+    try:
+        scheduler.add_reminder(
+            fire_at=fire_at,
+            message=f"Lembrete de tarefa: {title}",
+            reminder_id=job_id,
+        )
+        return job_id
+    except Exception:
+        logger.exception("failed to schedule reminder for task %d", task_id)
+        return None
 
 
 def _build_task_card(
@@ -179,14 +239,24 @@ class CreateTaskTool(Tool):
                 "enum": ["low", "med", "high"],
                 "description": "Optional priority level.",
             },
+            "remind": {
+                "type": "string",
+                "enum": ["at_time", "1h_before", "1d_before"],
+                "description": (
+                    "When to send a notification. 'at_time' = at due_date+due_time, "
+                    "'1h_before' = 1 hour before, '1d_before' = 1 day before. "
+                    "Omit for no reminder."
+                ),
+            },
         },
         "required": ["title"],
     }
     requires_confirmation = False
     category = "meta"
 
-    def __init__(self, task_service: Any) -> None:
+    def __init__(self, task_service: Any, scheduler: Any = None) -> None:
         self._svc = task_service
+        self._scheduler = scheduler
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         title = str(args.get("title", "")).strip()
@@ -197,6 +267,7 @@ class CreateTaskTool(Tool):
         due_date = args.get("due_date") or None
         due_time = args.get("due_time") or None
         priority = args.get("priority") or None
+        remind = args.get("remind") or None
 
         try:
             task_id = await self._svc.create_task(
@@ -208,10 +279,17 @@ class CreateTaskTool(Tool):
                 due_date=due_date,
                 due_time=due_time,
                 priority=priority,
+                remind=remind,
             )
         except Exception as exc:
             logger.exception("create_task tool failed")
             return ToolResult(ok=False, error=str(exc))
+
+        # Schedule reminder if applicable
+        if remind and due_date and self._scheduler is not None:
+            _schedule_task_reminder(
+                self._scheduler, task_id, title, due_date, due_time, remind,
+            )
 
         card_html = _build_task_card(
             title=title,
@@ -227,6 +305,8 @@ class CreateTaskTool(Tool):
             parts.append(f"Entrega: {due_date}")
         if priority:
             parts.append(f"Prioridade: {_PRIORITY_LABELS.get(priority, priority)}")
+        if remind:
+            parts.append(f"Lembrete: {_REMIND_LABELS.get(remind, remind)}")
 
         return ToolResult(
             ok=True,
@@ -241,6 +321,7 @@ class CreateTaskTool(Tool):
                     "due_time": due_time,
                     "priority": priority,
                     "description": description,
+                    "remind": remind,
                 },
                 "html_card": card_html,
             },
@@ -292,14 +373,24 @@ class UpdateTaskTool(Tool):
                 "enum": ["pending", "approved", "completed", "rejected"],
                 "description": "New status.",
             },
+            "remind": {
+                "type": "string",
+                "enum": ["at_time", "1h_before", "1d_before", ""],
+                "description": (
+                    "When to send a notification. Empty string clears it. "
+                    "'at_time' = at due_date+due_time, '1h_before' = 1 hour before, "
+                    "'1d_before' = 1 day before."
+                ),
+            },
         },
         "required": ["task_id"],
     }
     requires_confirmation = False
     category = "meta"
 
-    def __init__(self, task_service: Any) -> None:
+    def __init__(self, task_service: Any, scheduler: Any = None) -> None:
         self._svc = task_service
+        self._scheduler = scheduler
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         task_id = args.get("task_id")
@@ -329,6 +420,13 @@ class UpdateTaskTool(Tool):
             else:
                 kwargs["due_time"] = val
 
+        if "remind" in args:
+            val = args["remind"]
+            if val == "" or val is None:
+                kwargs["unset_remind"] = True
+            else:
+                kwargs["remind"] = val
+
         if not kwargs:
             return ToolResult(ok=False, error="No fields to update.")
 
@@ -341,6 +439,18 @@ class UpdateTaskTool(Tool):
 
         if task is None:
             return ToolResult(ok=False, error=f"Task {task_id} not found.")
+
+        # Reschedule or cancel reminder
+        if self._scheduler is not None:
+            job_id = f"task-remind-{task_id}"
+            if task.remind and task.due_date:
+                _schedule_task_reminder(
+                    self._scheduler, int(task_id), task.title,
+                    task.due_date, task.due_time, task.remind,
+                )
+            else:
+                # No remind or no due_date — cancel any existing job
+                self._scheduler.cancel_reminder(job_id)
 
         card_html = _build_task_card(
             title=task.title,
@@ -364,6 +474,7 @@ class UpdateTaskTool(Tool):
                     "due_time": task.due_time,
                     "priority": task.priority,
                     "description": task.description,
+                    "remind": task.remind,
                 },
                 "html_card": card_html,
             },
