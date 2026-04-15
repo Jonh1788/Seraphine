@@ -6618,8 +6618,9 @@ button:disabled {
 }
 
 .te__time-input {
-  width: 50px;
-  color: var(--text-dim);
+  width: 70px;
+  color: var(--text);
+  font-weight: 500;
 }
 
 /* Description */

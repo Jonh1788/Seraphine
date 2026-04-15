@@ -960,13 +960,18 @@ export function ChatView({
                       raw = raw.replace(/<!--recurring-data:[\s\S]*?-->/g, '');
                       raw = raw.replace(/<!--reminder-data:[\s\S]*?-->/g, '');
                       const cards: string[] = [];
+                      const hasReactTasks = (t.tasks && t.tasks.length > 0) || (t.recurring && t.recurring.length > 0) || (t.reminders && t.reminders.length > 0);
                       // Primary: explicit <!--card--> delimiters
                       raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
+                        // Skip task/recurring HTML cards when we already have React components
+                        if (hasReactTasks && (inner.includes('task-chat-card') || inner.includes('rich-card--tasks') || inner.includes('rich-card--recurring'))) {
+                          return '';
+                        }
                         cards.push(inner);
                         return '';
                       });
                       // Fallback: split at first <div class="rich-card (legacy cards without delimiters)
-                      if (cards.length === 0) {
+                      if (cards.length === 0 && !hasReactTasks) {
                         const idx = raw.indexOf('<div class="rich-card');
                         if (idx !== -1) {
                           cards.push(raw.slice(idx));

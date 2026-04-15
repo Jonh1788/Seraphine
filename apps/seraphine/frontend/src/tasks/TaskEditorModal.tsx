@@ -17,12 +17,18 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'rejected', label: 'Descartado' },
 ];
 
-const PRIORITY_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'Nenhuma' },
-  { value: 'low', label: 'Baixa' },
-  { value: 'med', label: 'Media' },
-  { value: 'high', label: 'Alta' },
+const PRIORITY_OPTIONS: { value: string; label: string; color?: string }[] = [
+  { value: '', label: 'Selecionar' },
+  { value: 'low', label: 'Baixa', color: '#4ade80' },
+  { value: 'med', label: 'Media', color: '#f59e0b' },
+  { value: 'high', label: 'Alta', color: '#ef4444' },
 ];
+
+const PRIORITY_COLORS: Record<string, string> = {
+  low: '#4ade80',
+  med: '#f59e0b',
+  high: '#ef4444',
+};
 
 const REMIND_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Nao lembrar' },
@@ -269,11 +275,17 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
               Prioridade
             </span>
-            <select className="te__value te__select" value={priority} onChange={(e) => handlePriorityChange(e.target.value)}>
+            <select
+              className="te__value te__select"
+              value={priority}
+              onChange={(e) => handlePriorityChange(e.target.value)}
+              style={{ color: PRIORITY_COLORS[priority] || 'var(--text)' }}
+            >
               {PRIORITY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <option key={o.value} value={o.value} style={{ color: o.color || 'var(--text)' }}>{o.label}</option>
               ))}
             </select>
+            {priority && <span className="te__dot" style={{ background: PRIORITY_COLORS[priority] }} />}
           </div>
 
           <div className="te__row">
@@ -285,8 +297,8 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
               <input ref={dateInputRef} type="date" className="te__date-input" value={dueDate} onChange={(e) => handleDueDateChange(e.target.value)} />
               <span className="te__date-label" onClick={() => dateInputRef.current?.showPicker?.()}>{fmtDateLabel || 'Selecionar'}</span>
               <span className="te__time-group">
-                <ClockIcon size={12} />
-                <input type="time" className="te__time-input" value={dueTime} onChange={(e) => handleDueTimeChange(e.target.value)} placeholder="--:--" />
+                <ClockIcon size={14} />
+                <input type="time" className="te__time-input" value={dueTime} onChange={(e) => handleDueTimeChange(e.target.value)} />
               </span>
             </span>
           </div>
