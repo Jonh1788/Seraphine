@@ -16,6 +16,7 @@ dependencies = [
     "mod-finance",
     "google-integration",
     "mod-vision",
+    "faster-whisper>=1.0",
 ]
 
 [tool.uv.sources]

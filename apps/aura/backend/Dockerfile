@@ -45,7 +45,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     AURA_SQLITE_PATH=/data/aura.sqlite
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 1001 --gid 0 --no-create-home aura \
  && mkdir -p /data \

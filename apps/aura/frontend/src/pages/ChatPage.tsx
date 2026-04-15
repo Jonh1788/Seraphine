@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Paperclip, Headphones, Mic, Volume2, Send, X, FileText, Image as ImageIcon } from "lucide-react";
+import { Paperclip, Headphones, Mic, Volume2, Send, X, FileText, Image as ImageIcon, Square, Loader2 } from "lucide-react";
 import {
   createConversation,
   getConversation,
   streamMessage,
   streamMessageWithAttachment,
+  transcribeAudio,
   type AttachmentMetadata,
   type ChatMessage,
   type InlineRecurring,
@@ -49,6 +50,20 @@ export function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [attachment, setAttachment] = useState<File | null>(null);
 
+  // --- Mic recording (STT) -------------------------------------------------
+  // 120s hard cap in the browser. Recorder holds a live MediaStream so we
+  // must stop all tracks on unmount / errors, otherwise the browser keeps
+  // the mic indicator lit and the OS shows Aura as recording forever.
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordStreamRef = useRef<MediaStream | null>(null);
+  const recordTimerRef = useRef<number | null>(null);
+  const recordAutoStopRef = useRef<number | null>(null);
+  const MAX_RECORD_SECONDS = 120;
+
   // Typewriter state — server pushes deltas into bufferRef as fast as
   // they arrive, a RAF loop reveals chars from buffer → `streaming`
   // at a smooth rate so the user sees real typing instead of jerky
@@ -71,6 +86,32 @@ export function ChatPage() {
   // Cleanup any running RAF on unmount.
   useEffect(() => {
     return () => stopTyping();
+  }, []);
+
+  // Stop recorder + release mic tracks on unmount so leaving the page
+  // mid-recording doesn't strand the microphone indicator.
+  useEffect(() => {
+    return () => {
+      if (recordTimerRef.current !== null) {
+        window.clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+      if (recordAutoStopRef.current !== null) {
+        window.clearTimeout(recordAutoStopRef.current);
+        recordAutoStopRef.current = null;
+      }
+      const rec = recorderRef.current;
+      if (rec && rec.state !== "inactive") {
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+      recordStreamRef.current = null;
+      recorderRef.current = null;
+    };
   }, []);
 
   // Load history when conversationId changes (or clear on null).
@@ -122,8 +163,140 @@ export function ChatPage() {
     }
   };
 
-  const submit = async () => {
-    const text = draft.trim();
+  // --- Mic handlers --------------------------------------------------------
+
+  const cleanupRecording = () => {
+    if (recordTimerRef.current !== null) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (recordAutoStopRef.current !== null) {
+      window.clearTimeout(recordAutoStopRef.current);
+      recordAutoStopRef.current = null;
+    }
+    recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordStreamRef.current = null;
+    recorderRef.current = null;
+    setRecording(false);
+    setRecordSeconds(0);
+  };
+
+  const startRecording = async () => {
+    if (recording || transcribing || busy) return;
+    setError(null);
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setError("Não foi possível acessar o microfone. Verifique as permissões.");
+      return;
+    }
+
+    // Prefer opus (compact, supported in Chrome/Firefox). Safari falls
+    // back to whatever MediaRecorder picks by default (mp4/aac).
+    const preferredMime = "audio/webm;codecs=opus";
+    let mimeType: string | undefined;
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(preferredMime)) {
+      mimeType = preferredMime;
+    }
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+    } catch {
+      stream.getTracks().forEach((t) => t.stop());
+      setError("Gravação de áudio não suportada neste navegador.");
+      return;
+    }
+
+    recordChunksRef.current = [];
+    recordStreamRef.current = stream;
+    recorderRef.current = recorder;
+
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) recordChunksRef.current.push(ev.data);
+    };
+    recorder.onerror = () => {
+      setError("Falha na gravação de áudio.");
+      cleanupRecording();
+    };
+    recorder.onstop = async () => {
+      const chunks = recordChunksRef.current;
+      recordChunksRef.current = [];
+      const type = recorder.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type });
+      cleanupRecording();
+
+      if (blob.size < 1024) {
+        // Empty / sub-second recordings produce garbage transcripts.
+        setError("Gravação muito curta. Tente novamente.");
+        return;
+      }
+
+      setTranscribing(true);
+      try {
+        const text = await transcribeAudio(blob);
+        const trimmed = text.trim();
+        if (!trimmed) {
+          setError("Não consegui entender o áudio. Tente novamente.");
+          return;
+        }
+        // Auto-send. Seed the draft first so the rollback-on-error path
+        // inside submit() restores the right text.
+        setDraft(trimmed);
+        await submit(trimmed);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Falha ao transcrever áudio");
+      } finally {
+        setTranscribing(false);
+      }
+    };
+
+    try {
+      recorder.start();
+    } catch {
+      cleanupRecording();
+      setError("Não foi possível iniciar a gravação.");
+      return;
+    }
+
+    setRecording(true);
+    setRecordSeconds(0);
+    recordTimerRef.current = window.setInterval(() => {
+      setRecordSeconds((s) => s + 1);
+    }, 1000);
+    recordAutoStopRef.current = window.setTimeout(() => {
+      // Auto-stop at the cap — triggers onstop → transcribe.
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+    }, MAX_RECORD_SECONDS * 1000);
+  };
+
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state === "inactive") return;
+    try {
+      rec.stop();
+    } catch {
+      cleanupRecording();
+    }
+  };
+
+  const toggleRecording = () => {
+    if (recording) stopRecording();
+    else void startRecording();
+  };
+
+  const submit = async (overrideText?: string) => {
+    const text = (overrideText ?? draft).trim();
     const file = attachment;
     if ((!text && !file) || busy) return;
     setError(null);
@@ -533,11 +706,40 @@ export function ChatPage() {
               >
                 <Send className="h-4 w-4" />
               </button>
+            ) : transcribing ? (
+              <button
+                type="button"
+                disabled
+                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-cyan-500/15 text-cyan-300 cursor-wait"
+                title="Transcrevendo…"
+                aria-label="Transcrevendo"
+              >
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </button>
+            ) : recording ? (
+              <div className="ml-1 flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs text-red-300 tabular-nums">
+                  <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  {String(Math.floor(recordSeconds / 60)).padStart(1, "0")}:
+                  {String(recordSeconds % 60).padStart(2, "0")}
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  className="grid place-items-center h-9 w-9 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors animate-pulse"
+                  title="Parar gravação"
+                  aria-label="Parar gravação"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
-                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 transition-colors"
-                title="Gravar áudio (em breve)"
+                onClick={toggleRecording}
+                disabled={busy}
+                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-50 transition-colors"
+                title="Gravar áudio"
                 aria-label="Gravar áudio"
               >
                 <Mic className="h-4 w-4" />

@@ -225,6 +225,36 @@ export async function streamMessage(
   await _consumeSse(res, handlers);
 }
 
+// ---------------------------------------------------------------------------
+// Speech-to-text
+// ---------------------------------------------------------------------------
+
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const form = new FormData();
+  // Give the part a filename so FastAPI treats it as an UploadFile
+  // (without a filename some clients drop it to a plain string).
+  const filename = audio.type.includes("webm") ? "audio.webm" : "audio.bin";
+  form.append("audio", audio, filename);
+
+  const res = await fetch("/chat/transcribe", {
+    method: "POST",
+    headers,
+    body: form,
+  });
+
+  if (!res.ok) {
+    const msg = await _extractError(res, "Falha ao transcrever áudio");
+    throw new ApiError(res.status, msg, null);
+  }
+
+  const data = (await res.json()) as { text?: unknown };
+  return typeof data.text === "string" ? data.text : "";
+}
+
 export async function streamMessageWithAttachment(
   conversationId: string,
   content: string,

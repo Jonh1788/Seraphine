@@ -45,6 +45,8 @@ from aura.google.service import GoogleAuthService
 from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
+from aura.stt.routes import router as stt_router
+from aura.stt.service import STTService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +92,31 @@ async def lifespan(app: FastAPI):
     recurring_service = RecurringService(store, task_service)
     google_auth_service = GoogleAuthService(store, settings)
 
+    # ---- STT (lazy model load on first /chat/transcribe call).
+    # mkdir is best-effort: in dev the default /data isn't writable;
+    # devs can override via AURA_WHISPER_CACHE_DIR. The transcribe call
+    # will surface a clear error if the cache dir really is unusable.
+    try:
+        settings.whisper_cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning(
+            "STT cache dir %s not writable (%s) — set "
+            "AURA_WHISPER_CACHE_DIR if you intend to use /chat/transcribe",
+            settings.whisper_cache_dir, e,
+        )
+    stt_service = STTService(
+        model_name=settings.whisper_model,
+        compute_type=settings.whisper_compute_type,
+        cache_dir=settings.whisper_cache_dir,
+    )
+    logger.info(
+        "STT service wired (model=%s, compute=%s, cache=%s) — "
+        "first request will download ~500MB",
+        settings.whisper_model,
+        settings.whisper_compute_type,
+        settings.whisper_cache_dir,
+    )
+
     app.state.store = store
     app.state.llm = llm
     app.state.users_service = users_service
@@ -98,6 +125,7 @@ async def lifespan(app: FastAPI):
     app.state.conversations_service = conversations_service
     app.state.recurring_service = recurring_service
     app.state.google_auth_service = google_auth_service
+    app.state.stt_service = stt_service
 
     # Background materialize loop — every 10 minutes, create today's
     # occurrences for any active rule that is due and hasn't fired yet.
@@ -168,6 +196,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(chat_router)
+    app.include_router(stt_router)
     app.include_router(tasks_router)
     app.include_router(finance_router)
     app.include_router(recurring_router)

@@ -72,5 +72,13 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/calendar.events"
     )
 
+    # --- STT (speech-to-text) — faster-whisper
+    # The model is lazy-loaded on the first /chat/transcribe call so
+    # startup isn't blocked by a ~500MB download. Swap `whisper_model`
+    # for "tiny" / "base" / "medium" / "large-v3" as capacity grows.
+    whisper_model: str = "small"
+    whisper_compute_type: str = "int8"
+    whisper_cache_dir: Path = Path("/data/whisper-models")
+
 
 settings = Settings()
