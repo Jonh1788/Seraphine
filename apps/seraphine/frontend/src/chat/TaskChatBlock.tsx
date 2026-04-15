@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { TasksIcon, CircleIcon, CheckCircleIcon, ClockIcon, BellIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
 
@@ -46,6 +46,21 @@ function groupByDate(tasks: ChatTask[]): Map<string, ChatTask[]> {
 export function TaskChatBlock({ tasks, onOpenEditor }: TaskChatBlockProps): JSX.Element {
   // Track optimistic status overrides
   const [statusOverrides, setStatusOverrides] = useState<Record<number, string>>({});
+
+  // Fetch current status from backend on mount (persisted data may be stale)
+  useEffect(() => {
+    for (const t of tasks) {
+      if (!t.id) continue;
+      fetch(`${API_BASE}/tasks/${t.id}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data && data.status && data.status !== t.status) {
+            setStatusOverrides((prev) => ({ ...prev, [t.id]: data.status }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   const toggleStatus = useCallback(
     (taskId: number, currentStatus: string) => {
