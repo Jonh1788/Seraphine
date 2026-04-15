@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Local STT (mic input → text). Uses mlx-whisper, runs on MLX /
     # Metal on Apple Silicon. First call downloads the model weights
     # from Hugging Face to ~/.cache/huggingface/hub.
-    stt_model: str = "mlx-community/whisper-small-mlx-q4"
+    stt_model: str = "mlx-community/whisper-small-mlx"
     stt_language: str = "pt"
     # STT backend: "local" (mlx-whisper on Apple Silicon) or "remote"
     # (HTTP client for the RTX whisper service defined in spec 007).

@@ -355,11 +355,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # STT backend: local MLX Whisper on Apple Silicon or remote HTTP
     # service on the RTX box (spec 007). Toggle via SERAPHINE_STT_BACKEND.
+    # When remote is configured, local MLX is kept as fallback.
     stt: Any
+    local_stt = WhisperSTT(
+        model=settings.stt_model, language=settings.stt_language
+    )
     if settings.stt_backend == "remote":
         from seraphine.stt.remote import RemoteWhisperSTT
 
-        stt = RemoteWhisperSTT(
+        remote_stt = RemoteWhisperSTT(
             base_url=settings.stt_remote_base_url,
             language=settings.stt_language,
             timeout=settings.stt_remote_timeout,
@@ -370,27 +374,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.stt_language,
         )
         try:
-            await stt.warmup()
+            await remote_stt.warmup()
+            stt = remote_stt
+            logger.info("Remote STT online — using as primary")
         except Exception as e:
-            logger.warning("RemoteWhisperSTT warmup failed: %s", e)
+            logger.warning("RemoteWhisperSTT warmup failed, falling back to local: %s", e)
+            stt = local_stt
+        # Wrap with fallback: if remote fails at runtime, use local
+        if stt is remote_stt:
+            from seraphine.stt.fallback import FallbackSTT
+            stt = FallbackSTT(primary=remote_stt, fallback=local_stt)
+            logger.info("FallbackSTT wired (remote → local)")
     else:
-        # Local MLX Whisper. Lazy-loads mlx-whisper + model on first
-        # transcribe() call so backend startup isn't blocked.
-        stt = WhisperSTT(
-            model=settings.stt_model, language=settings.stt_language
-        )
+        stt = local_stt
         logger.info(
             "WhisperSTT wired (model=%s language=%s)",
             settings.stt_model,
             settings.stt_language,
         )
-        # Warmup: transcribe a tiny silent PCM so mlx-whisper imports +
-        # loads model weights before first real input. ~5s one-time cost.
-        try:
-            await stt.transcribe(b"\x00" * 3200, sample_rate=16000)  # 100ms silence
-            logger.info("WhisperSTT warmup complete")
-        except Exception as e:
-            logger.warning("WhisperSTT warmup failed (continuing anyway): %s", e)
+    # Warmup local MLX: transcribe tiny silent PCM so model loads eagerly.
+    try:
+        await local_stt.transcribe(b"\x00" * 3200, sample_rate=16000)
+        logger.info("Local WhisperSTT warmup complete")
+    except Exception as e:
+        logger.warning("Local WhisperSTT warmup failed (continuing anyway): %s", e)
     audio_engine = AudioEngine(llm, tts, store, stt=stt, engine=engine)
 
     # ------------------------------------------------------------------
