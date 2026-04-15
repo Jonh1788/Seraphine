@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftIcon, BellIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
+import { ArrowLeftIcon, BellIcon, CalendarIcon, ClockIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from '../finance/types';
 import { TaskEditorModal } from './TaskEditorModal';
 
@@ -155,6 +155,8 @@ function PasswordModal({ filename, busy, onCancel, onConfirm }: PasswordModalPro
 /*  New Task modal                                                     */
 /* ------------------------------------------------------------------ */
 
+const PRIO_COLORS: Record<string, string> = { low: '#4ade80', med: '#f59e0b', high: '#ef4444' };
+
 interface NewTaskModalProps {
   busy: boolean;
   onCancel: () => void;
@@ -164,6 +166,7 @@ interface NewTaskModalProps {
     due_date: string | null;
     due_time: string | null;
     priority: string | null;
+    remind: string | null;
   }) => void;
 }
 
@@ -173,16 +176,13 @@ function NewTaskModal({ busy, onCancel, onConfirm }: NewTaskModalProps): JSX.Ele
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
   const [priority, setPriority] = useState('');
+  const [remind, setRemind] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !busy) onCancel();
-    };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !busy) onCancel(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onCancel]);
@@ -197,85 +197,105 @@ function NewTaskModal({ busy, onCancel, onConfirm }: NewTaskModalProps): JSX.Ele
       due_date: dueDate || null,
       due_time: dueTime || null,
       priority: priority || null,
+      remind: remind || null,
     });
   };
+
+  const fmtDateLabel = dueDate
+    ? (() => {
+        const [, m, d] = dueDate.split('-').map(Number);
+        const months = ['','janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+        return `${d} de ${months[m] || m}`;
+      })()
+    : '';
 
   return (
     <div className="password-modal-backdrop" onClick={busy ? undefined : onCancel}>
       <form
-        className="password-modal new-task-modal"
+        className="task-editor-modal"
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
       >
-        <h4 className="password-modal__title">Nova tarefa</h4>
-        <label className="new-task-modal__label">
-          Titulo
+        <div className="te__header">
           <input
             ref={inputRef}
             type="text"
-            className="password-modal__input"
+            className="te__title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
             placeholder="O que precisa ser feito?"
             required
           />
-        </label>
-        <label className="new-task-modal__label">
-          Descricao (opcional)
-          <textarea
-            className="password-modal__input new-task-modal__textarea"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={busy}
-            placeholder="Detalhes adicionais..."
-            rows={3}
-          />
-        </label>
-        <div className="new-task-modal__row">
-          <label className="new-task-modal__label">
-            Prioridade
+          <div className="te__actions">
+            <button type="button" className="te__action" onClick={onCancel} disabled={busy}>
+              <XIcon size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="te__fields">
+          <div className="te__row">
+            <span className="te__label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+              Prioridade
+            </span>
+            {priority && <span className="te__dot" style={{ background: PRIO_COLORS[priority] }} />}
             <select
-              className="password-modal__input"
+              className="te__value te__select"
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
               disabled={busy}
+              style={{ color: PRIO_COLORS[priority] || 'var(--text)' }}
             >
-              <option value="">Nenhuma</option>
-              <option value="low">Baixa</option>
-              <option value="med">Media</option>
-              <option value="high">Alta</option>
+              <option value="">Selecionar</option>
+              <option value="low" style={{ color: '#4ade80' }}>Baixa</option>
+              <option value="med" style={{ color: '#f59e0b' }}>Media</option>
+              <option value="high" style={{ color: '#ef4444' }}>Alta</option>
             </select>
-          </label>
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
+              <CalendarIcon size={14} />
+              Data
+            </span>
+            <span className="te__value te__date-group">
+              <input ref={dateInputRef} type="date" className="te__date-input" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={busy} />
+              <span className="te__date-label" onClick={() => dateInputRef.current?.showPicker?.()}>{fmtDateLabel || 'Selecionar'}</span>
+              <span className="te__time-group">
+                <ClockIcon size={14} />
+                <input type="time" className="te__time-input" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={busy} />
+              </span>
+            </span>
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
+              <BellIcon size={14} />
+              Lembrete
+            </span>
+            <select className="te__value te__select" value={remind} onChange={(e) => setRemind(e.target.value)} disabled={busy}>
+              <option value="">Nao lembrar</option>
+              <option value="at_time">Na hora</option>
+              <option value="1h_before">1 hora antes</option>
+              <option value="1d_before">1 dia antes</option>
+            </select>
+          </div>
         </div>
-        <div className="new-task-modal__row">
-          <label className="new-task-modal__label">
-            Data de entrega
-            <input
-              type="date"
-              className="password-modal__input"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <label className="new-task-modal__label">
-            Horario
-            <input
-              type="time"
-              className="password-modal__input"
-              value={dueTime}
-              onChange={(e) => setDueTime(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-        </div>
-        <div className="password-modal__actions">
-          <button type="button" className="btn-reject" onClick={onCancel} disabled={busy}>
-            Cancelar
-          </button>
-          <button type="submit" className="btn-confirm" disabled={busy || !title.trim()}>
-            {busy ? 'Criando...' : 'Criar'}
+
+        <textarea
+          className="te__description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={busy}
+          placeholder="Escreva os detalhes..."
+        />
+
+        <div className="te__footer">
+          <span />
+          <button type="submit" className="btn-confirm" disabled={busy || !title.trim()} style={{ padding: '6px 20px', borderRadius: '8px' }}>
+            {busy ? 'Criando...' : 'Criar tarefa'}
           </button>
         </div>
       </form>
@@ -699,6 +719,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     due_date: string | null;
     due_time: string | null;
     priority: string | null;
+    remind: string | null;
   }): Promise<void> => {
     setNewTaskBusy(true);
     try {
@@ -714,6 +735,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       };
       if (data.due_time) body.due_time = data.due_time;
       if (data.priority) body.priority = data.priority;
+      if (data.remind) body.remind = data.remind;
       const res = await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
