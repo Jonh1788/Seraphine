@@ -1,5 +1,10 @@
-# Aura production stack — backend (FastAPI/uv) + frontend (nginx) +
-# Caddy as the TLS termination edge.
+# Aura production stack — backend (FastAPI/uv) + frontend (nginx).
+#
+# TLS termination lives OUTSIDE this stack: the host's system nginx
+# (+ certbot) proxies app.minha-aura.com → 127.0.0.1:8080 → this
+# compose's frontend container → backend container.
+#
+# See DEPLOY.md for the host nginx vhost snippet.
 #
 # Usage on the VPS:
 #   cp .env.prod.example .env.prod   # then fill the secrets
@@ -37,31 +42,14 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
-    expose:
-      - "80"
-    networks:
-      - aura-net
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
+    # Bind to localhost only — the host nginx is the public entry point.
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"   # HTTP/3
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - frontend
+      - "127.0.0.1:8080:80"
     networks:
       - aura-net
 
 volumes:
   aura-data:
-  caddy-data:
-  caddy-config:
 
 networks:
   aura-net:

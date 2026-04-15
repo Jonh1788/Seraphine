@@ -1,52 +1,58 @@
 # Aura — production deploy
 
+TLS lives on the **host nginx** (which already exists on this VPS for
+other apps). This compose stack runs the backend + frontend containers
+on the internal Docker network and exposes the frontend only on
+`127.0.0.1:8080`. The host nginx proxies `app.minha-aura.com` → `:8080`,
+and certbot issues the Let's Encrypt cert.
+
 ## One-time VPS setup
 
-SSH into the box and install Docker + Compose plugin:
+1. **Docker + Compose plugin** (skip if already installed):
+   ```bash
+   curl -fsSL https://get.docker.com | sh
+   docker compose version   # must be v2+
+   ```
 
-```bash
-# Docker official install (Ubuntu/Debian)
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-# log out + back in, then:
-docker compose version   # must be v2+
-```
+2. **Production env file** (never commit this):
+   ```bash
+   cd /var/www/Projeto-Seraphine/apps/aura
+   cp .env.prod.example .env.prod
+   nano .env.prod    # fill AURA_JWT_SECRET, AURA_ANTHROPIC_API_KEY,
+                     # AURA_GOOGLE_CLIENT_ID, AURA_GOOGLE_CLIENT_SECRET
 
-Create the production env file on the VPS (**never commit this**):
+   # Generate a strong JWT secret:
+   openssl rand -hex 32
+   ```
 
-```bash
-cd /var/www/Projeto-Seraphine/apps/aura
-cp .env.prod.example .env.prod
-nano .env.prod    # fill in real values
+3. **Host nginx vhost** for the public domains:
+   ```bash
+   sudo cp /var/www/Projeto-Seraphine/apps/aura/nginx-host.conf \
+           /etc/nginx/sites-available/aura
+   sudo ln -sf /etc/nginx/sites-available/aura /etc/nginx/sites-enabled/aura
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
 
-# Generate a strong JWT secret:
-openssl rand -hex 32
-```
+4. **TLS cert via certbot** (adds the HTTPS server block automatically):
+   ```bash
+   sudo certbot --nginx -d app.minha-aura.com -d minha-aura.com -d www.minha-aura.com
+   ```
 
-Update the git `post-receive` hook so every push triggers a rebuild:
+5. **Auto-deploy hook** — edit `/srv/git/seraphine.git/hooks/post-receive`:
+   ```bash
+   #!/bin/bash
+   set -e
+   DEPLOY=/var/www/Projeto-Seraphine
+   GIT_DIR=/srv/git/seraphine.git
 
-```bash
-sudo nano /srv/git/seraphine.git/hooks/post-receive
-```
+   git --work-tree=$DEPLOY --git-dir=$GIT_DIR checkout -f main
 
-```bash
-#!/bin/bash
-set -e
-DEPLOY=/var/www/Projeto-Seraphine
-GIT_DIR=/srv/git/seraphine.git
-
-git --work-tree=$DEPLOY --git-dir=$GIT_DIR checkout -f main
-
-cd $DEPLOY/apps/aura
-# Build + restart. Caddy will auto-fetch Let's Encrypt certs on first
-# run (HTTP-01 challenge on :80) — ensure ports 80/443 are open in the
-# firewall and no other process is holding them.
-docker compose up -d --build
-```
-
-```bash
-sudo chmod +x /srv/git/seraphine.git/hooks/post-receive
-```
+   cd $DEPLOY/apps/aura
+   docker compose up -d --build
+   ```
+   ```bash
+   sudo chmod +x /srv/git/seraphine.git/hooks/post-receive
+   ```
 
 ## First deploy
 
@@ -56,47 +62,43 @@ From the Mac:
 git push vps main
 ```
 
-Follow the logs on the VPS:
+Tail on the VPS:
 
 ```bash
-docker compose logs -f caddy frontend backend
+cd /var/www/Projeto-Seraphine/apps/aura
+docker compose logs -f
 ```
 
-First boot will:
-1. Build both images (~2–4 min).
-2. Caddy requests certs for `app.minha-aura.com` and `minha-aura.com`.
-3. Nginx starts serving the SPA; backend starts serving the API.
-
-Once healthy, https://app.minha-aura.com should load the UI.
+First boot builds both images (~2–4 min).
 
 ## Google OAuth
 
-Add the production callback to the Google Cloud Console OAuth client:
+Add the production callback URL to the Google Cloud Console OAuth client:
 
 ```
 https://app.minha-aura.com/google/oauth/callback
 ```
 
-(Keep the localhost one too so local dev still works.)
-
-## Data / backups
-
-SQLite lives at `/var/lib/docker/volumes/aura_aura-data/_data/aura.sqlite`.
-Back it up with:
-
-```bash
-docker compose exec backend sqlite3 /data/aura.sqlite ".backup /data/backup-$(date +%F).sqlite"
-docker compose cp backend:/data/backup-$(date +%F).sqlite ./
-```
+(Keep `http://localhost:8001/google/oauth/callback` too for local dev.)
 
 ## Operations
 
-| Task | Command |
+| Task | Command (run from `/var/www/Projeto-Seraphine/apps/aura`) |
 |---|---|
 | Tail all logs | `docker compose logs -f` |
 | Restart one service | `docker compose restart backend` |
 | Rebuild without push | `docker compose up -d --build` |
 | Shell into backend | `docker compose exec backend bash` |
-| Migrate DB manually | auto — runs on backend startup |
+| DB backup | `docker compose exec backend sqlite3 /data/aura.sqlite ".backup /data/backup-$(date +%F).sqlite" && docker compose cp backend:/data/backup-$(date +%F).sqlite ./` |
 | Stop everything | `docker compose down` (volumes kept) |
 | Wipe everything incl. data | `docker compose down -v` ⚠️ |
+
+## Troubleshooting
+
+**`502 Bad Gateway` from the browser** — the backend container is down.
+`docker compose logs backend` to see why. A common cause is a missing
+env var in `.env.prod` (the container will restart-loop).
+
+**Certbot: "challenge failed"** — check that `app.minha-aura.com`
+resolves to the VPS IP (`dig +short app.minha-aura.com`) and that
+Cloudflare proxy is OFF (grey cloud) so HTTP-01 reaches the host.
