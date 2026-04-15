@@ -14,7 +14,7 @@ import {
   isSameDay,
   monthGrid,
 } from '../google/utils';
-import { ArrowLeftIcon, CalendarIcon, FinanceIcon, TasksIcon } from '../icons/Icons';
+import { ArrowLeftIcon, BellIcon, CalendarIcon, FinanceIcon, TasksIcon } from '../icons/Icons';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -26,7 +26,7 @@ interface CalendarViewProps {
 }
 
 type ViewMode = 'month' | 'week' | 'day';
-type FilterKey = 'agenda' | 'financas' | 'outros' | 'tarefas';
+type FilterKey = 'agenda' | 'financas' | 'outros' | 'tarefas' | 'lembretes';
 
 interface CalendarItem {
   key: string;          // unique render key
@@ -51,6 +51,14 @@ interface RecurringRule {
   day_of_month: number | null;
   time: string | null;      // HH:MM
   active: boolean;
+}
+
+interface Reminder {
+  id: string;
+  message: string;
+  fire_at: string | null;
+  recurring: string | null;  // 'daily' | 'weekly' | 'hourly' | null
+  next_run: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -143,6 +151,7 @@ const CATEGORY_COLORS: Record<FilterKey, string> = {
   financas: '#4ade80',
   outros: '#42a5f5',
   tarefas: '#22d3ee',
+  lembretes: '#f59e0b',
 };
 
 const CATEGORY_LABELS: Record<FilterKey, string> = {
@@ -150,6 +159,7 @@ const CATEGORY_LABELS: Record<FilterKey, string> = {
   financas: 'Financas',
   tarefas: 'Tarefas',
   outros: 'Outros',
+  lembretes: 'Lembretes',
 };
 
 function eventColor(ev: CalendarEvent): string {
@@ -289,6 +299,95 @@ function taskToItem(task: SeraphineTask): CalendarItem | null {
   };
 }
 
+/** Expand a reminder into CalendarItems for the visible range. */
+function expandReminder(rem: Reminder, rangeStart: Date, rangeEnd: Date): CalendarItem[] {
+  const items: CalendarItem[] = [];
+  const AMBER = '#f59e0b';
+
+  if (!rem.recurring) {
+    // One-time reminder — single item on fire_at date
+    const fireStr = rem.next_run || rem.fire_at;
+    if (!fireStr) return items;
+    const fire = new Date(fireStr);
+    if (Number.isNaN(fire.getTime())) return items;
+    if (fire >= rangeStart && fire <= new Date(rangeEnd.getTime() + 86400000)) {
+      const end = new Date(fire);
+      end.setMinutes(end.getMinutes() + 30);
+      items.push({
+        key: `rem-${rem.id}`,
+        category: 'lembretes',
+        start: fire,
+        end,
+        allDay: false,
+        title: rem.message,
+        color: AMBER,
+      });
+    }
+    return items;
+  }
+
+  // Recurring reminder — expand into visible range
+  const baseStr = rem.fire_at || rem.next_run;
+  if (!baseStr) return items;
+  const base = new Date(baseStr);
+  if (Number.isNaN(base.getTime())) return items;
+
+  const intervalMs =
+    rem.recurring === 'hourly' ? 3600000 :
+    rem.recurring === 'daily' ? 86400000 :
+    rem.recurring === 'weekly' ? 7 * 86400000 : 86400000;
+
+  if (rem.recurring === 'hourly') {
+    // For hourly, just show one item per day in the range at the base minute
+    const d = new Date(rangeStart);
+    while (d <= rangeEnd) {
+      const start = new Date(d);
+      start.setHours(base.getHours(), base.getMinutes(), 0, 0);
+      const end = new Date(start);
+      end.setMinutes(end.getMinutes() + 30);
+      items.push({
+        key: `rem-${rem.id}-${toIsoDate(d)}`,
+        category: 'lembretes',
+        start,
+        end,
+        allDay: false,
+        title: rem.message,
+        color: AMBER,
+        recurring: true,
+      });
+      d.setDate(d.getDate() + 1);
+    }
+  } else {
+    // daily / weekly — step through range
+    // Find first occurrence >= rangeStart
+    let cursor = new Date(base);
+    if (cursor < rangeStart) {
+      const diff = rangeStart.getTime() - cursor.getTime();
+      const steps = Math.floor(diff / intervalMs);
+      cursor = new Date(cursor.getTime() + steps * intervalMs);
+      if (cursor < rangeStart) cursor = new Date(cursor.getTime() + intervalMs);
+    }
+    const rangeEndPlusDay = new Date(rangeEnd.getTime() + 86400000);
+    while (cursor <= rangeEndPlusDay) {
+      const end = new Date(cursor);
+      end.setMinutes(end.getMinutes() + 30);
+      items.push({
+        key: `rem-${rem.id}-${toIsoDate(cursor)}`,
+        category: 'lembretes',
+        start: new Date(cursor),
+        end,
+        allDay: false,
+        title: rem.message,
+        color: AMBER,
+        recurring: true,
+      });
+      cursor = new Date(cursor.getTime() + intervalMs);
+    }
+  }
+
+  return items;
+}
+
 /* ------------------------------------------------------------------ */
 /*  DayDetailPanel — sidebar showing selected day's items              */
 /* ------------------------------------------------------------------ */
@@ -327,6 +426,7 @@ function DayDetailPanel({
   const financeItems = dayItems.filter((it) => it.category === 'financas');
   const taskItems = dayItems.filter((it) => it.category === 'tarefas');
   const otherItems = dayItems.filter((it) => it.category === 'outros');
+  const reminderItems = dayItems.filter((it) => it.category === 'lembretes');
 
   const renderSection = (
     sectionItems: CalendarItem[],
@@ -394,6 +494,7 @@ function DayDetailPanel({
             {renderSection(financeItems, 'Financas', CATEGORY_COLORS.financas)}
             {renderSection(taskItems, 'Tarefas', CATEGORY_COLORS.tarefas)}
             {renderSection(otherItems, 'Outros', CATEGORY_COLORS.outros)}
+            {renderSection(reminderItems, 'Lembretes', CATEGORY_COLORS.lembretes)}
           </>
         )}
       </div>
@@ -787,9 +888,10 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [tasks, setTasks] = useState<SeraphineTask[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Set<FilterKey>>(
-    () => new Set(['agenda', 'financas', 'outros', 'tarefas']),
+    () => new Set(['agenda', 'financas', 'outros', 'tarefas', 'lembretes']),
   );
 
   const now = useMemo(() => new Date(), []);
@@ -907,9 +1009,29 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     }
   }, [filters]);
 
+  // Fetch reminders (once, they don't depend on range).
+  const fetchReminders = useCallback(async () => {
+    if (!filters.has('lembretes')) {
+      setReminders([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/reminders`);
+      if (!res.ok) { setReminders([]); return; }
+      const data = await res.json();
+      setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+    } catch {
+      setReminders([]);
+    }
+  }, [filters]);
+
   useEffect(() => {
     void fetchRecurring();
   }, [fetchRecurring]);
+
+  useEffect(() => {
+    void fetchReminders();
+  }, [fetchReminders]);
 
   useEffect(() => {
     void fetchEvents();
@@ -948,8 +1070,11 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     for (const rule of recurringRules) {
       list.push(...expandRecurring(rule, rangeStart, rangeEnd));
     }
+    for (const rem of reminders) {
+      list.push(...expandReminder(rem, rangeStart, rangeEnd));
+    }
     return list;
-  }, [events, financeEntries, tasks, recurringRules, rangeStart, rangeEnd]);
+  }, [events, financeEntries, tasks, recurringRules, reminders, rangeStart, rangeEnd]);
 
   // Navigation
   const goPrev = () => {
@@ -1012,6 +1137,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     { key: 'financas', label: CATEGORY_LABELS.financas, color: CATEGORY_COLORS.financas, icon: <FinanceIcon size={14} /> },
     { key: 'tarefas', label: CATEGORY_LABELS.tarefas, color: CATEGORY_COLORS.tarefas, icon: <TasksIcon size={14} /> },
     { key: 'outros', label: CATEGORY_LABELS.outros, color: CATEGORY_COLORS.outros, icon: null },
+    { key: 'lembretes', label: CATEGORY_LABELS.lembretes, color: CATEGORY_COLORS.lembretes, icon: <BellIcon size={14} /> },
   ];
 
   return (

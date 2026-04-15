@@ -87,6 +87,9 @@ export default defineConfig({
       '/push': {
         target: 'http://127.0.0.1:8000',
       },
+      '/reminders': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
   test: {

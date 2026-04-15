@@ -531,7 +531,11 @@ def create_app() -> FastAPI:
     app.include_router(push_router)
     app.include_router(tasks_router)
     app.include_router(recurring_router)
-    # NOTE: frontend vite proxy needs /tasks and /recurring added
+
+    from seraphine.reminders.routes import router as reminders_router
+
+    app.include_router(reminders_router)
+    # NOTE: frontend vite proxy needs /tasks, /recurring, /reminders added
 
     if settings.whatsapp_bridge_url:
         from seraphine.whatsapp.routes import router as whatsapp_router

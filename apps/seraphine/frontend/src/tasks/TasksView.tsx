@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
+import { ArrowLeftIcon, BellIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from '../finance/types';
 import { TaskEditorModal } from './TaskEditorModal';
 
@@ -296,6 +296,20 @@ interface RecurringRule {
   description: string | null;
 }
 
+interface ReminderData {
+  id: string;
+  message: string;
+  fire_at: string | null;
+  recurring: string | null;
+  next_run: string | null;
+}
+
+const RECURRING_LABELS: Record<string, string> = {
+  hourly: 'A cada hora',
+  daily: 'Diario',
+  weekly: 'Semanal',
+};
+
 const FREQ_LABELS: Record<string, string> = {
   daily: 'Diaria',
   weekly: 'Semanal',
@@ -309,6 +323,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [confirmedEntries, setConfirmedEntries] = useState<FinanceEntry[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
+  const [reminders, setReminders] = useState<ReminderData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -355,7 +370,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const [tasksRes, pendingEntriesRes, confirmedEntriesRes, recurringRes] = await Promise.all([
+      const [tasksRes, pendingEntriesRes, confirmedEntriesRes, recurringRes, remindersRes] = await Promise.all([
         fetch(`${API_BASE}/tasks?limit=200`).then((r) => (r.ok ? r.json() : { tasks: [] })),
         fetch(`${API_BASE}/finance/entries?status=pending_review&limit=100`).then((r) =>
           r.ok ? r.json() : { entries: [] },
@@ -366,6 +381,9 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         fetch(`${API_BASE}/recurring`).then((r) =>
           r.ok ? r.json() : { recurring: [] },
         ),
+        fetch(`${API_BASE}/reminders`).then((r) =>
+          r.ok ? r.json() : { reminders: [] },
+        ),
       ]);
       setTasks(Array.isArray(tasksRes.tasks) ? tasksRes.tasks : []);
       setEntries(Array.isArray(pendingEntriesRes.entries) ? pendingEntriesRes.entries : []);
@@ -374,6 +392,9 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       );
       setRecurringRules(
         Array.isArray(recurringRes.recurring) ? recurringRes.recurring : [],
+      );
+      setReminders(
+        Array.isArray(remindersRes.reminders) ? remindersRes.reminders : [],
       );
       // Keep overrides for keys with an in-flight mutation — clearing
       // them would flip the card back to the server's stale state while
@@ -720,6 +741,16 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       const res = await fetch(`${API_BASE}/recurring/${ruleId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setRecurringRules((prev) => prev.filter((r) => r.id !== ruleId));
+    } catch {
+      // silent — will refresh on next load
+    }
+  };
+
+  const deleteReminder = async (reminderId: string): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/reminders/${reminderId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setReminders((prev) => prev.filter((r) => r.id !== reminderId));
     } catch {
       // silent — will refresh on next load
     }
@@ -1274,6 +1305,48 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
                   onClick={() => void deleteRecurringRule(rule.id)}
                 >
                   <XIcon size={12} /> Excluir
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {reminders.length > 0 && (
+        <div className="recurring-section reminders-section">
+          <div className="recurring-section__header">
+            <span className="recurring-section__title">Lembretes Agendados</span>
+          </div>
+          <div className="recurring-section__list">
+            {reminders.map((rem) => (
+              <div key={rem.id} className="recurring-card reminder-card">
+                <div className="reminder-card__header">
+                  <BellIcon size={14} className="reminder-card__icon" />
+                  <div className="recurring-card__title">{rem.message}</div>
+                </div>
+                <div className="recurring-card__meta">
+                  {rem.next_run && (
+                    <span>
+                      {new Date(rem.next_run).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
+                  {rem.recurring && (
+                    <span className="reminder-card__freq">
+                      {RECURRING_LABELS[rem.recurring] || rem.recurring}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="recurring-card__delete"
+                  onClick={() => void deleteReminder(rem.id)}
+                >
+                  <XIcon size={12} /> Cancelar
                 </button>
               </div>
             ))}
