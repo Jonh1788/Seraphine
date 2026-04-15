@@ -150,6 +150,16 @@ class CreateReminderTool(Tool):
                 + (f", recorrente: {recurring}" if recurring else "")
                 + "."
             ),
+            metadata={
+                "reminder": {
+                    "id": rid,
+                    "message": message,
+                    "fire_at": fire_at.isoformat(),
+                    "date": fire_at.strftime("%Y-%m-%d"),
+                    "time": fire_at.strftime("%H:%M"),
+                    "recurring": recurring,
+                },
+            },
         )
 
 

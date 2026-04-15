@@ -587,6 +587,12 @@ class ConversationEngine:
                             + json.dumps(result.metadata["recurring"])
                             + "-->"
                         )
+                    if result.metadata and result.metadata.get("reminder"):
+                        accumulated.append(
+                            "\n<!--reminder-data:"
+                            + json.dumps(result.metadata["reminder"])
+                            + "-->"
+                        )
                     tool_payload: dict[str, Any] = {
                         "tool": tool_name,
                         # Anthropic adapter needs the ORIGINAL

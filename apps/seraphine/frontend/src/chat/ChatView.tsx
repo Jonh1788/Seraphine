@@ -17,6 +17,8 @@ import type { ChatTask } from './TaskChatBlock';
 import { RecurringChatBlock } from './RecurringChatBlock';
 import type { RecurringRule } from './RecurringChatBlock';
 import { TaskEditorModal } from '../tasks/TaskEditorModal';
+import { ReminderChatBlock } from './ReminderChatBlock';
+import type { ReminderData } from './ReminderChatBlock';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -63,6 +65,8 @@ interface Turn {
   tasks?: ChatTask[];
   /** Structured recurring rule from tool_result metadata. */
   recurring?: RecurringRule[];
+  /** Structured reminder data from tool_result metadata. */
+  reminders?: ReminderData[];
 }
 
 /**
@@ -350,7 +354,7 @@ export function ChatView({
               role: t.role as 'user' | 'assistant',
               content: t.content,
             };
-            // Parse embedded task data from persisted turn text
+            // Parse embedded structured data from persisted turn text
             const taskDataRe = /<!--task-data:([\s\S]*?)-->/g;
             let match: RegExpExecArray | null;
             while ((match = taskDataRe.exec(t.content)) !== null) {
@@ -358,10 +362,23 @@ export function ChatView({
                 const parsed = JSON.parse(match[1]);
                 if (parsed.tasks) {
                   turn.tasks = [...(turn.tasks || []), ...parsed.tasks];
+                } else if (parsed.id != null && parsed.title) {
+                  turn.tasks = [...(turn.tasks || []), parsed as ChatTask];
                 }
-                if (parsed.recurring) {
-                  turn.recurring = [...(turn.recurring || []), parsed.recurring];
-                }
+              } catch { /* ignore malformed */ }
+            }
+            const recurringDataRe = /<!--recurring-data:([\s\S]*?)-->/g;
+            while ((match = recurringDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                turn.recurring = [...(turn.recurring || []), parsed as RecurringRule];
+              } catch { /* ignore malformed */ }
+            }
+            const reminderDataRe = /<!--reminder-data:([\s\S]*?)-->/g;
+            while ((match = reminderDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                turn.reminders = [...(turn.reminders || []), parsed as ReminderData];
               } catch { /* ignore malformed */ }
             }
             return turn;
@@ -512,8 +529,9 @@ export function ChatView({
         // Structured task data from tool metadata — render as React component
         const taskMeta = meta && typeof meta['task'] === 'object' ? meta['task'] as Record<string, unknown> : null;
         const recurringMeta = meta && typeof meta['recurring'] === 'object' ? meta['recurring'] as Record<string, unknown> : null;
+        const reminderMeta = meta && typeof meta['reminder'] === 'object' ? meta['reminder'] as Record<string, unknown> : null;
 
-        if (tr.ok && (taskMeta || recurringMeta)) {
+        if (tr.ok && (taskMeta || recurringMeta || reminderMeta)) {
           setTurns((prev) => {
             const streamIdx = prev.findIndex((t) => t.streaming);
             const idx = streamIdx !== -1 ? streamIdx : prev.length - 1;
@@ -548,6 +566,18 @@ export function ChatView({
               turn.recurring = [...(turn.recurring || []), rule];
             }
 
+            if (reminderMeta) {
+              const reminder: ReminderData = {
+                id: String(reminderMeta['id'] ?? ''),
+                message: (reminderMeta['message'] as string) ?? '',
+                fire_at: reminderMeta['fire_at'] as string | undefined,
+                date: reminderMeta['date'] as string | undefined,
+                time: reminderMeta['time'] as string | undefined,
+                recurring: reminderMeta['recurring'] as string | null | undefined,
+              };
+              turn.reminders = [...(turn.reminders || []), reminder];
+            }
+
             next[idx] = turn;
             return next;
           });
@@ -557,7 +587,7 @@ export function ChatView({
         // into the chat without waiting for Claude to echo it.
         // Skip html_card when we already have structured task/recurring data.
         const htmlCard =
-          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta
+          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta && !reminderMeta
             ? (meta['html_card'] as string)
             : null;
         if (tr.ok && htmlCard) {
@@ -927,6 +957,8 @@ export function ChatView({
                       let raw = stripAudioTags(parsed ? parsed.response : t.content);
                       // Strip embedded task-data comments (used for history restoration)
                       raw = raw.replace(/<!--task-data:[\s\S]*?-->/g, '');
+                      raw = raw.replace(/<!--recurring-data:[\s\S]*?-->/g, '');
+                      raw = raw.replace(/<!--reminder-data:[\s\S]*?-->/g, '');
                       const cards: string[] = [];
                       // Primary: explicit <!--card--> delimiters
                       raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
@@ -963,6 +995,9 @@ export function ChatView({
                           )}
                           {t.recurring && t.recurring.map((rule, ri) => (
                             <RecurringChatBlock key={`rec-${ri}`} rule={rule} />
+                          ))}
+                          {t.reminders && t.reminders.map((rem, ri) => (
+                            <ReminderChatBlock key={`rem-${ri}`} reminder={rem} />
                           ))}
                         </>
                       );
