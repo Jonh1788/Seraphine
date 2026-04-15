@@ -1,0 +1,68 @@
+# Aura production stack — backend (FastAPI/uv) + frontend (nginx) +
+# Caddy as the TLS termination edge.
+#
+# Usage on the VPS:
+#   cp .env.prod.example .env.prod   # then fill the secrets
+#   docker compose up -d --build
+#
+# Build contexts point at the monorepo root so uv/pnpm can see the whole
+# workspace (packages/* + pnpm-workspace.yaml + uv.lock).
+
+name: aura
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: apps/aura/backend/Dockerfile
+    image: aura-backend:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env.prod
+        required: true
+    environment:
+      AURA_SQLITE_PATH: /data/aura.sqlite
+    volumes:
+      - aura-data:/data
+    expose:
+      - "8001"
+    networks:
+      - aura-net
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: apps/aura/frontend/Dockerfile
+    image: aura-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    networks:
+      - aura-net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    networks:
+      - aura-net
+
+volumes:
+  aura-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  aura-net:
+    driver: bridge

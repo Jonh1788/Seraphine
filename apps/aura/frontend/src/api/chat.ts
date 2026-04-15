@@ -82,11 +82,12 @@ export interface ConversationDetail {
 // ---------------------------------------------------------------------------
 
 export async function listConversations(limit = 50): Promise<ConversationSummary[]> {
-  const res = await request<{ conversations: ConversationSummary[] }>(
+  const res = await request<{ conversations?: ConversationSummary[] } | null>(
     "/chat/conversations",
     { query: { limit } },
   );
-  return res.conversations;
+  const rows = res?.conversations;
+  return Array.isArray(rows) ? rows : [];
 }
 
 export async function createConversation(title?: string | null): Promise<string> {

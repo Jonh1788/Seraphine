@@ -13,7 +13,9 @@ Public surface:
   (Aura).
 - ``oauth.OAuthFlow``: one-shot loopback consent flow (Seraphine).
 - ``oauth.WebOAuthFlow``: server-side web redirect consent flow (Aura).
-- ``routes.router``: FastAPI router for Seraphine's /google/* endpoints.
+- ``routes.router``: FastAPI router for Seraphine's /google/* endpoints
+  (import explicitly — it depends on ``seraphine.config`` and so is
+  only usable inside Seraphine, not Aura).
 """
 
 from google_integration.client import (
@@ -29,7 +31,11 @@ from google_integration.token_store import (
     TokenStore,
     TokenStoreProtocol,
 )
-from google_integration import routes
+
+# Note: ``routes`` is NOT re-exported here — it eagerly imports
+# ``seraphine.config`` and would break Aura's container, which doesn't
+# ship the Seraphine app. Seraphine imports it directly via
+# ``from google_integration.routes import router``.
 
 __all__ = [
     "GoogleClient",
@@ -42,5 +48,4 @@ __all__ = [
     "DBTokenStore",
     "OAuthFlow",
     "WebOAuthFlow",
-    "routes",
 ]
