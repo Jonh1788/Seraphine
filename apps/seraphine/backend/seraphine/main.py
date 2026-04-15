@@ -30,6 +30,16 @@ from seraphine.recurring.service import RecurringService
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
 
+# Top-level reference for ReminderScheduler callback (must be pickleable).
+_app_ref: FastAPI | None = None
+
+
+def _on_reminder_fire(rid: str, msg: str) -> None:
+    import asyncio as _aio
+    if _app_ref is not None:
+        from seraphine.reminders.notify import notify_reminder
+        _aio.create_task(notify_reminder(_app_ref.state, rid, msg))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -238,16 +248,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ------------------------------------------------------------------
     reminder_scheduler = None
     try:
-        import asyncio as _asyncio
+        global _app_ref
         from seraphine.reminders.scheduler import ReminderScheduler
-        from seraphine.reminders.notify import notify_reminder
 
+        _app_ref = app
         _reminders_db = str(settings.sqlite_path).replace("seraphine.sqlite", "reminders.sqlite")
         reminder_scheduler = ReminderScheduler(
             sqlite_path=_reminders_db,
-            on_fire=lambda rid, msg: _asyncio.create_task(
-                notify_reminder(app.state, rid, msg)
-            ),
+            on_fire=_on_reminder_fire,
         )
         await reminder_scheduler.start()
         logger.info("Reminder scheduler started (db=%s)", _reminders_db)

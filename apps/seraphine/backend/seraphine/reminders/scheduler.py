@@ -25,12 +25,25 @@ RECURRING_MAP: dict[str, dict[str, Any]] = {
     "weekly": {"weeks": 1},
 }
 
+# Global callback — set once by ReminderScheduler.__init__.
+# Must be top-level so APScheduler can pickle the job function reference.
+_fire_callback: Callable[[str, str], Any] | None = None
+
+
+def _fire_job(reminder_id: str, message: str) -> None:
+    """Top-level job function called by APScheduler. Delegates to the registered callback."""
+    if _fire_callback is not None:
+        _fire_callback(reminder_id, message)
+    else:
+        logger.warning("Reminder fired but no callback registered: %s", reminder_id)
+
 
 class ReminderScheduler:
     """Manage scheduled reminders backed by APScheduler + SQLite."""
 
     def __init__(self, sqlite_path: str, on_fire: Callable[[str, str], Any]) -> None:
-        self._on_fire = on_fire
+        global _fire_callback
+        _fire_callback = on_fire
         jobstores = {"default": SQLAlchemyJobStore(url=f"sqlite:///{sqlite_path}")}
         executors = {"default": AsyncIOExecutor()}
         job_defaults = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 300}
@@ -48,10 +61,6 @@ class ReminderScheduler:
     async def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
         logger.info("ReminderScheduler stopped")
-
-    def _fire(self, reminder_id: str, message: str) -> None:
-        """Called by APScheduler when a job triggers. Delegates to on_fire callback."""
-        self._on_fire(reminder_id, message)
 
     def add_reminder(
         self,
@@ -72,7 +81,7 @@ class ReminderScheduler:
             trigger = DateTrigger(run_date=fire_at, timezone=SP_TZ)
 
         self._scheduler.add_job(
-            self._fire,
+            _fire_job,
             trigger=trigger,
             args=[rid, message],
             id=rid,

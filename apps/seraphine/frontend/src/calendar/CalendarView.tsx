@@ -31,16 +31,26 @@ type FilterKey = 'agenda' | 'financas' | 'outros' | 'tarefas';
 interface CalendarItem {
   key: string;          // unique render key
   category: FilterKey;  // which filter drives visibility
-  // For time-positioned items:
   start: Date;
   end: Date;
   allDay: boolean;
   title: string;
   color: string;
-  // Optional decorations
   amount?: number;      // signed finance amount
   amountKind?: 'income' | 'expense';
   taskId?: string;      // set when this is a task item (clickable)
+  recurring?: boolean;  // true for expanded recurring rule occurrences
+}
+
+interface RecurringRule {
+  id: string;
+  title: string;
+  description: string | null;
+  frequency: 'daily' | 'weekly' | 'monthly';
+  weekday: number | null;   // 0=Mon..6=Sun
+  day_of_month: number | null;
+  time: string | null;      // HH:MM
+  active: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -216,6 +226,48 @@ function entryToItem(entry: FinanceEntry): CalendarItem {
     amount: entry.amount,
     amountKind: entry.type,
   };
+}
+
+/** Expand a recurring rule into CalendarItems for every matching day in [start, end]. */
+function expandRecurring(rule: RecurringRule, rangeStart: Date, rangeEnd: Date): CalendarItem[] {
+  const items: CalendarItem[] = [];
+  const d = new Date(rangeStart);
+  while (d <= rangeEnd) {
+    let match = false;
+    if (rule.frequency === 'daily') {
+      match = true;
+    } else if (rule.frequency === 'weekly' && rule.weekday !== null) {
+      // rule.weekday: 0=Mon..6=Sun  →  JS getDay(): 0=Sun..6=Sat
+      const jsDay = d.getDay();
+      const ruleDayJs = rule.weekday === 6 ? 0 : rule.weekday + 1;
+      match = jsDay === ruleDayJs;
+    } else if (rule.frequency === 'monthly' && rule.day_of_month !== null) {
+      match = d.getDate() === rule.day_of_month;
+    }
+    if (match) {
+      const start = new Date(d);
+      if (rule.time) {
+        const [h, m] = rule.time.split(':').map(Number);
+        start.setHours(h ?? 9, m ?? 0, 0, 0);
+      } else {
+        start.setHours(9, 0, 0, 0);
+      }
+      const end = new Date(start);
+      end.setHours(start.getHours() + 1);
+      items.push({
+        key: `rec-${rule.id}-${toIsoDate(d)}`,
+        category: 'tarefas',
+        start,
+        end,
+        allDay: true,
+        title: rule.title,
+        color: '#22d3ee',
+        recurring: true,
+      });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return items;
 }
 
 function taskToItem(task: SeraphineTask): CalendarItem | null {
@@ -734,6 +786,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [tasks, setTasks] = useState<SeraphineTask[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Set<FilterKey>>(
     () => new Set(['agenda', 'financas', 'outros', 'tarefas']),
@@ -837,6 +890,27 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     }
   }, [filters, rangeStart, rangeEnd]);
 
+  // Fetch recurring rules (once, they don't change with range).
+  const fetchRecurring = useCallback(async () => {
+    if (!filters.has('tarefas')) {
+      setRecurringRules([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/recurring`);
+      if (!res.ok) { setRecurringRules([]); return; }
+      const data = await res.json();
+      const rules = Array.isArray(data.recurring) ? data.recurring : (Array.isArray(data) ? data : []);
+      setRecurringRules(rules.filter((r: RecurringRule) => r.active));
+    } catch {
+      setRecurringRules([]);
+    }
+  }, [filters]);
+
+  useEffect(() => {
+    void fetchRecurring();
+  }, [fetchRecurring]);
+
   useEffect(() => {
     void fetchEvents();
   }, [fetchEvents]);
@@ -871,8 +945,11 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       const it = taskToItem(task);
       if (it) list.push(it);
     }
+    for (const rule of recurringRules) {
+      list.push(...expandRecurring(rule, rangeStart, rangeEnd));
+    }
     return list;
-  }, [events, financeEntries, tasks]);
+  }, [events, financeEntries, tasks, recurringRules, rangeStart, rangeEnd]);
 
   // Navigation
   const goPrev = () => {
