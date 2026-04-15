@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI
@@ -21,6 +23,9 @@ from seraphine.conversation.routes import router as conversation_router
 from google_integration.routes import router as google_router
 from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
+from seraphine.recurring import schema as recurring_schema
+from seraphine.recurring.routes import router as recurring_router
+from seraphine.recurring.service import RecurringService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -167,6 +172,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Task service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Recurring tasks — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    recurring_service = None
+    try:
+        store.register_migrator("seraphine_recurring", recurring_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        if task_service is not None:
+            recurring_service = RecurringService(store, task_service)
+            logger.info("Recurring service wired")
+    except Exception as e:
+        logger.warning("Recurring service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -246,6 +264,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         wise_client=wise_client,
         reminder_scheduler=reminder_scheduler,
         finance_service=finance_service,
+        task_service=task_service,
+        recurring_service=recurring_service,
         llm=llm,
     )
     # ------------------------------------------------------------------
@@ -397,6 +417,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.task_service = task_service
     app.state.email_scanner = email_scanner
     app.state.reminder_scheduler = reminder_scheduler
+    app.state.recurring_service = recurring_service
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
@@ -406,10 +427,47 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         whatsapp_task_detector._app_state = app.state
         app.state.whatsapp_task_detector = whatsapp_task_detector
 
+    # ------------------------------------------------------------------
+    # Background recurring materialization loop — every 10 minutes
+    # ------------------------------------------------------------------
+    materialize_task: asyncio.Task[None] | None = None
+    if recurring_service is not None:
+        async def _materialize_loop() -> None:
+            interval = 600  # 10 min
+            while True:
+                try:
+                    created = await recurring_service.materialize_due(
+                        datetime.now(timezone.utc),
+                    )
+                    if created:
+                        logger.info(
+                            "recurring: materialized %d occurrences", len(created),
+                        )
+                except Exception:
+                    logger.exception("recurring materialize loop failed")
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+
+        # Fire once at startup so boot-time misses are caught immediately.
+        try:
+            await recurring_service.materialize_due(datetime.now(timezone.utc))
+        except Exception:
+            logger.exception("initial recurring materialize failed")
+
+        materialize_task = asyncio.create_task(_materialize_loop())
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
     finally:
+        if materialize_task is not None:
+            materialize_task.cancel()
+            try:
+                await materialize_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if mcp_tools_watcher is not None:
             mcp_tools_watcher.cancel()
             try:
@@ -464,7 +522,8 @@ def create_app() -> FastAPI:
     app.include_router(finance_router)
     app.include_router(push_router)
     app.include_router(tasks_router)
-    # NOTE: frontend vite proxy needs /tasks added
+    app.include_router(recurring_router)
+    # NOTE: frontend vite proxy needs /tasks and /recurring added
 
     if settings.whatsapp_bridge_url:
         from seraphine.whatsapp.routes import router as whatsapp_router

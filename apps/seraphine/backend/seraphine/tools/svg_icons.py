@@ -180,6 +180,35 @@ CALENDAR_DAYS = _svg(
     '<path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>'
 )
 
+# ── Tasks / Recurring ───────────────────────────────────────────────────
+
+REPEAT = _svg(
+    '<polyline points="17 1 21 5 17 9"/>'
+    '<path d="M3 11V9a4 4 0 0 1 4-4h14"/>'
+    '<polyline points="7 23 3 19 7 15"/>'
+    '<path d="M21 13v2a4 4 0 0 1-4 4H3"/>'
+)
+
+CHECK_CIRCLE = _svg(
+    '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>'
+    '<polyline points="22 4 12 14.01 9 11.01"/>'
+)
+
+CLIPBOARD = _svg(
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'
+    '<rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>'
+)
+
+CIRCLE = _svg(
+    '<circle cx="12" cy="12" r="10"/>'
+)
+
+ALERT_TRIANGLE = _svg(
+    '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>'
+    '<line x1="12" x2="12" y1="9" y2="13"/>'
+    '<line x1="12" x2="12.01" y1="17" y2="17"/>'
+)
+
 # ── Mappings ─────────────────────────────────────────────────────────────
 
 CATEGORY_ICONS: dict[str, str] = {

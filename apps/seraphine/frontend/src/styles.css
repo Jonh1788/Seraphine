@@ -6440,6 +6440,117 @@ button:disabled {
   font-family: inherit;
 }
 
+.new-task-modal__row {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.new-task-modal__row > .new-task-modal__label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Task Editor Modal ─────────────────────────────────────────────── */
+
+.task-editor-modal {
+  max-width: 500px;
+  width: 92vw;
+}
+
+.task-editor-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-editor-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.task-editor-modal__close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.task-editor-modal__title-input {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.task-editor-modal__loading {
+  text-align: center;
+  color: var(--text-dim);
+  padding: var(--space-4);
+  margin: 0;
+}
+
+.task-editor-modal__error {
+  color: var(--red);
+  font-size: 13px;
+  margin: 0;
+}
+
+.task-editor-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  gap: var(--space-3);
+}
+
+.task-editor-modal__save-status {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-editor-modal__save-indicator {
+  font-size: 11px;
+  transition: color 200ms ease;
+}
+
+.task-editor-modal__save-indicator--saving {
+  color: var(--text-dim);
+}
+
+.task-editor-modal__save-indicator--saved {
+  color: #4ade80;
+}
+
+.task-editor-modal__save-indicator--error {
+  color: var(--red);
+}
+
+.task-editor-modal__danger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.task-editor-modal__confirm-text {
+  font-size: 12px;
+  color: var(--red);
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .task-editor-modal {
+    max-width: 100%;
+  }
+
+  .new-task-modal__row {
+    flex-direction: column;
+  }
+}
+
 .task-card--locked {
   cursor: default;
 }

@@ -44,6 +44,9 @@ export interface SeraphineTask {
   created_at: string;
   updated_at?: string;
   due_date?: string | null; // YYYY-MM-DD (optional user-facing deadline)
+  due_time?: string | null; // HH:MM 24h (optional, pairs with due_date)
+  priority?: string | null; // low / med / high
+  tags?: string[];
 }
 
 export const CATEGORY_COLORS: Record<string, string> = {

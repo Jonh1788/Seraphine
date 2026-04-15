@@ -64,6 +64,8 @@ def build_default_registry(
     wise_client: Any = None,
     reminder_scheduler: Any = None,
     finance_service: Any = None,
+    task_service: Any = None,
+    recurring_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -188,6 +190,14 @@ def build_default_registry(
         reg.register(BulkAddFinancialEntriesTool(finance_service))
         reg.register(ListFinancialEntriesTool(finance_service))
         reg.register(ImportFinancialPdfTool(finance_service, llm=llm))
+    if task_service is not None:
+        from seraphine.tools.tasks import CreateTaskTool
+
+        reg.register(CreateTaskTool(task_service))
+    if recurring_service is not None:
+        from seraphine.tools.recurring import CreateRecurringTaskTool
+
+        reg.register(CreateRecurringTaskTool(recurring_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":
