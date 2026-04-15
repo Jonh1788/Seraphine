@@ -471,7 +471,7 @@ export function App(): JSX.Element {
       return;
     }
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
-      const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength);
+      const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
       ws.sendBinary(slice);
     });
   };

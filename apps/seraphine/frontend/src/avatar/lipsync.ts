@@ -146,7 +146,7 @@ export async function playAudioWithLipSync(
       const f32 = u8ToFloat32(value);
       if (f32.length === 0) continue;
       const buffer = audioCtx.createBuffer(1, f32.length, 24000);
-      buffer.copyToChannel(f32, 0, 0);
+      buffer.copyToChannel(f32 as Float32Array<ArrayBuffer>, 0, 0);
       const src = audioCtx.createBufferSource();
       src.buffer = buffer;
       src.connect(analyser);

@@ -9,7 +9,7 @@ import type {
   GoogleAuthStatus,
 } from './types';
 
-const API_BASE = '';
+import { API_BASE } from '../api';
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

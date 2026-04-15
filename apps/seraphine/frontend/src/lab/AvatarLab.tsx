@@ -220,7 +220,7 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
               setSwapProgress(Math.round((received / total) * 100));
             }
           }
-          const blob = new Blob(chunks, { type: 'model/gltf-binary' });
+          const blob = new Blob(chunks as BlobPart[], { type: 'model/gltf-binary' });
           objectUrl = URL.createObjectURL(blob);
         } else {
           const blob = await resp.blob();

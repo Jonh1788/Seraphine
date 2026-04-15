@@ -6375,3 +6375,252 @@ button:disabled {
     justify-content: center;
   }
 }
+
+/* ==========================================================================
+   Rich Cards — inline chat cards for tools (finance, weather, calendar)
+   Glass morphism, uses design tokens. Backend generates HTML with these classes.
+   ========================================================================== */
+
+.rich-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
+  max-width: 480px;
+  font-size: 13px;
+  line-height: 1.6;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, var(--shadow-md);
+}
+
+/* Module accent borders */
+.rich-card--finance { border-left: 2px solid #4ade80; }
+.rich-card--weather { border-left: 2px solid #f59e0b; }
+.rich-card--calendar { border-left: 2px solid var(--accent); }
+.rich-card--tasks { border-left: 2px solid #22d3ee; }
+
+/* Header */
+.rich-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.rich-card__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.rich-card__icon--finance { background: rgba(74, 222, 128, 0.12); }
+.rich-card__icon--weather { background: rgba(245, 158, 11, 0.12); }
+.rich-card__icon--calendar { background: rgba(167, 139, 250, 0.12); }
+.rich-card__icon--tasks { background: rgba(34, 211, 238, 0.12); }
+
+.rich-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rich-card__subtitle {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Stat row (balance, temperature, etc.) */
+.rich-card__stats {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.rich-card__stat {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rich-card__stat-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+
+.rich-card__stat-value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* Divider */
+.rich-card__divider {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin: var(--space-3) 0;
+}
+
+/* Section title */
+.rich-card__section {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-2);
+}
+
+/* List item (transaction, forecast day, category, etc.) */
+.rich-card__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-sm);
+  transition: background 150ms ease;
+}
+
+.rich-card__item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.rich-card__item + .rich-card__item {
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.rich-card__item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.rich-card__item-icon--income { background: rgba(74, 222, 128, 0.12); }
+.rich-card__item-icon--expense { background: rgba(239, 68, 68, 0.12); }
+.rich-card__item-icon--neutral { background: rgba(255, 255, 255, 0.06); }
+
+.rich-card__item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rich-card__item-title {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rich-card__item-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.rich-card__item-value {
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Category bar (for finance by-category) */
+.rich-card__bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px 0;
+}
+
+.rich-card__bar-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 90px;
+}
+
+.rich-card__bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rich-card__bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 300ms ease;
+}
+
+.rich-card__bar-value {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 80px;
+  text-align: right;
+}
+
+/* Weather-specific: big temp display */
+.rich-card__big-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rich-card__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: var(--space-2);
+}
+
+.rich-card__detail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Color utilities */
+.clr-income { color: #4ade80; }
+.clr-expense { color: #ef4444; }
+.clr-balance-pos { color: #4ade80; }
+.clr-balance-neg { color: #ef4444; }
+.clr-warm { color: #f59e0b; }
+.clr-hot { color: #ef4444; }
+.clr-cool { color: #38bdf8; }
+.clr-cold { color: #818cf8; }
+.clr-accent { color: var(--accent); }
+.clr-dim { color: var(--text-dim); }
+.clr-faint { color: var(--text-faint); }
+
+/* Bar fill colors by category */
+.bar-fill--food { background: #f97316; }
+.bar-fill--transport { background: #3b82f6; }
+.bar-fill--housing { background: #a78bfa; }
+.bar-fill--health { background: #22c55e; }
+.bar-fill--entertainment { background: #f43f5e; }
+.bar-fill--education { background: #06b6d4; }
+.bar-fill--shopping { background: #ec4899; }
+.bar-fill--services { background: #8b5cf6; }
+.bar-fill--salary { background: #10b981; }
+.bar-fill--investment { background: #14b8a6; }
+.bar-fill--default { background: #64748b; }
+
+/* Footer */
+.rich-card__footer {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-faint);
+  opacity: 0.5;
+  margin-top: var(--space-3);
+}

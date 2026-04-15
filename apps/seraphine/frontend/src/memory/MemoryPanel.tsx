@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Same origin — Vite proxies /memory to the backend.
-const API_BASE = '';
+import { API_BASE } from '../api';
 
 interface Fact {
   id: string;

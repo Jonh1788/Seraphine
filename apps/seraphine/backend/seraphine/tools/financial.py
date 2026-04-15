@@ -23,8 +23,26 @@ logger = logging.getLogger(__name__)
 # Helper: build dashboard HTML card (dark theme, inline styles)
 # ---------------------------------------------------------------------------
 
-def _amount_color(value: float) -> str:
-    return "#66bb6a" if value >= 0 else "#ef5350"
+CATEGORY_BAR_COLORS: dict[str, str] = {
+    "alimentacao": "bar-fill--food",
+    "transporte": "bar-fill--transport",
+    "moradia": "bar-fill--housing",
+    "saude": "bar-fill--health",
+    "lazer": "bar-fill--entertainment",
+    "educacao": "bar-fill--education",
+    "salario": "bar-fill--salary",
+    "freelance": "bar-fill--salary",
+    "investimento": "bar-fill--investment",
+    "compras": "bar-fill--shopping",
+    "servicos": "bar-fill--services",
+}
+
+from seraphine.tools.svg_icons import (
+    CATEGORY_ICONS,
+    TRENDING_DOWN,
+    TRENDING_UP,
+    WALLET,
+)
 
 
 def _format_brl(value: float) -> str:
@@ -33,117 +51,116 @@ def _format_brl(value: float) -> str:
     return f"{sign}R$ {abs(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _attr(entry: Any, name: str, default: Any = "") -> Any:
+    """Read attribute from dataclass or dict transparently."""
+    return getattr(entry, name, default) if hasattr(entry, name) else entry.get(name, default)
+
+
 def build_dashboard_html(
     month: int,
     year: int,
     summary: dict[str, Any],
-    entries: list[dict[str, Any]],
+    entries: list[Any],
 ) -> str:
-    """Build an inline-styled HTML dashboard card."""
+    """Build a rich HTML dashboard card using CSS classes from styles.css."""
     total_income = summary.get("income", 0.0) or summary.get("total_income", 0.0)
     total_expense = summary.get("expenses", 0.0) or summary.get("total_expense", 0.0)
     balance = total_income - total_expense
-    # by_category is a list of dicts, convert to dict for HTML builder
+
     raw_cats = summary.get("by_category", [])
     if isinstance(raw_cats, list):
         categories = {c["category"]: c["total"] for c in raw_cats}
     else:
         categories = raw_cats
 
-    # Card styles (matching weather.py pattern)
-    card = (
-        'style="background:#1a1a2e;color:#e0e0e0;border-radius:12px;'
-        "padding:16px;font-family:system-ui,sans-serif;max-width:480px;"
-        'margin:8px 0;line-height:1.5"'
-    )
-    header_style = (
-        'style="font-size:1.1em;font-weight:600;margin-bottom:12px"'
-    )
-    balance_row = (
-        'style="display:flex;justify-content:space-between;'
-        'flex-wrap:wrap;gap:8px;margin-bottom:12px"'
-    )
-    balance_item = (
-        'style="text-align:center;flex:1;min-width:100px;'
-        'padding:8px;border-radius:8px;background:rgba(255,255,255,0.05)"'
-    )
-    divider = (
-        'style="border:none;border-top:1px solid rgba(255,255,255,0.1);'
-        'margin:10px 0"'
-    )
-    section_title = 'style="font-size:0.9em;opacity:0.7;margin-bottom:6px"'
-    cat_row = (
-        'style="display:flex;justify-content:space-between;'
-        'padding:3px 0;font-size:0.9em"'
-    )
-    entry_row = (
-        'style="display:flex;justify-content:space-between;'
-        'padding:4px 0;font-size:0.85em;border-bottom:1px solid rgba(255,255,255,0.05)"'
-    )
-    footer_style = (
-        'style="text-align:center;font-size:0.75em;opacity:0.4;margin-top:10px"'
-    )
-
     month_names = [
-        "", "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
+        "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
     ]
     month_label = month_names[month] if 1 <= month <= 12 else str(month)
+    balance_cls = "clr-balance-pos" if balance >= 0 else "clr-balance-neg"
 
-    # Balance section
-    balance_color = _amount_color(balance)
     html = (
-        f"<div {card}>"
-        f'  <div {header_style}>&#x1F4B0; Painel Financeiro &mdash; {month_label}/{year}</div>'
-        f"  <div {balance_row}>"
-        f'    <div {balance_item}>'
-        f'      <div style="font-size:0.8em;opacity:0.7">Receitas</div>'
-        f'      <div style="font-weight:700;color:#66bb6a">{_format_brl(total_income)}</div>'
-        f"    </div>"
-        f'    <div {balance_item}>'
-        f'      <div style="font-size:0.8em;opacity:0.7">Despesas</div>'
-        f'      <div style="font-weight:700;color:#ef5350">{_format_brl(total_expense)}</div>'
-        f"    </div>"
-        f'    <div {balance_item}>'
-        f'      <div style="font-size:0.8em;opacity:0.7">Saldo</div>'
-        f'      <div style="font-weight:700;color:{balance_color}">{_format_brl(balance)}</div>'
-        f"    </div>"
-        f"  </div>"
+        '<!--card--><div class="rich-card rich-card--finance">'
+        # Header
+        '  <div class="rich-card__header">'
+        f'    <div class="rich-card__icon rich-card__icon--finance">{WALLET}</div>'
+        '    <div>'
+        f'      <div class="rich-card__title">Painel Financeiro</div>'
+        f'      <div class="rich-card__subtitle">{month_label} {year}</div>'
+        '    </div>'
+        '  </div>'
+        # Stats row
+        '  <div class="rich-card__stats">'
+        '    <div class="rich-card__stat">'
+        '      <div class="rich-card__stat-label">Receitas</div>'
+        f'      <div class="rich-card__stat-value clr-income">{_format_brl(total_income)}</div>'
+        '    </div>'
+        '    <div class="rich-card__stat">'
+        '      <div class="rich-card__stat-label">Despesas</div>'
+        f'      <div class="rich-card__stat-value clr-expense">{_format_brl(total_expense)}</div>'
+        '    </div>'
+        '    <div class="rich-card__stat">'
+        '      <div class="rich-card__stat-label">Saldo</div>'
+        f'      <div class="rich-card__stat-value {balance_cls}">{_format_brl(balance)}</div>'
+        '    </div>'
+        '  </div>'
     )
 
-    # Top categories
+    # Categories with progress bars
     if categories:
-        html += f'<hr {divider}><div {section_title}>Gastos por categoria:</div>'
+        max_amount = max(categories.values()) if categories else 1
+        html += '<hr class="rich-card__divider">'
+        html += '<div class="rich-card__section">Gastos por categoria</div>'
         sorted_cats = sorted(categories.items(), key=lambda x: x[1], reverse=True)
         for cat_name, cat_amount in sorted_cats[:6]:
+            pct = min(100, int((cat_amount / max_amount) * 100)) if max_amount else 0
+            bar_cls = CATEGORY_BAR_COLORS.get(cat_name, "bar-fill--default")
+            from seraphine.tools.svg_icons import PIN
+            icon = CATEGORY_ICONS.get(cat_name, PIN)
             html += (
-                f"<div {cat_row}>"
-                f"  <span>{cat_name}</span>"
-                f'  <span style="color:#ef5350">{_format_brl(cat_amount)}</span>'
-                f"</div>"
+                f'<div class="rich-card__bar-row">'
+                f'  <span class="rich-card__bar-label">{icon} {cat_name}</span>'
+                f'  <div class="rich-card__bar-track">'
+                f'    <div class="rich-card__bar-fill {bar_cls}" style="width:{pct}%"></div>'
+                f'  </div>'
+                f'  <span class="rich-card__bar-value clr-expense">{_format_brl(cat_amount)}</span>'
+                f'</div>'
             )
 
     # Recent entries
     recent = entries[:8]
     if recent:
-        html += f'<hr {divider}><div {section_title}>Transacoes recentes:</div>'
+        html += '<hr class="rich-card__divider">'
+        html += '<div class="rich-card__section">Transações recentes</div>'
         for e in recent:
-            e_date = e.get("date", "")
-            e_desc = e.get("description", "")[:30]
-            e_amount = e.get("amount", 0)
-            e_type = e.get("type", "expense")
-            color = "#66bb6a" if e_type == "income" else "#ef5350"
-            sign = "+" if e_type == "income" else "-"
+            e_date = _attr(e, "date", "")
+            e_desc = str(_attr(e, "description", ""))[:35]
+            e_amount = _attr(e, "amount", 0)
+            e_type = _attr(e, "type", "expense")
+            e_cat = _attr(e, "category", "outros")
+            is_income = e_type == "income"
+            icon_cls = "rich-card__item-icon--income" if is_income else "rich-card__item-icon--expense"
+            val_cls = "clr-income" if is_income else "clr-expense"
+            sign = "+" if is_income else "-"
+            from seraphine.tools.svg_icons import PIN
+            icon = TRENDING_UP if is_income else CATEGORY_ICONS.get(e_cat, PIN)
+            # Format date as DD/MM
+            date_label = e_date
+            if e_date and len(e_date) >= 10:
+                date_label = f"{e_date[8:10]}/{e_date[5:7]}"
             html += (
-                f"<div {entry_row}>"
-                f'  <span style="opacity:0.6;min-width:60px">{e_date}</span>'
-                f"  <span style=\"flex:1;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">{e_desc}</span>"
-                f'  <span style="color:{color};font-weight:600;white-space:nowrap">{sign}{_format_brl(e_amount)}</span>'
-                f"</div>"
+                f'<div class="rich-card__item">'
+                f'  <div class="rich-card__item-icon {icon_cls}">{icon}</div>'
+                f'  <div class="rich-card__item-body">'
+                f'    <div class="rich-card__item-title">{e_desc}</div>'
+                f'    <div class="rich-card__item-meta">{date_label} · {e_cat}</div>'
+                f'  </div>'
+                f'  <div class="rich-card__item-value {val_cls}">{sign}{_format_brl(e_amount)}</div>'
+                f'</div>'
             )
 
-    html += f'<div {footer_style}>Powered by Seraphine</div>'
-    html += "</div>"
+    html += '</div><!--/card-->'
     return html
 
 
@@ -335,14 +352,39 @@ class AddFinancialEntryTool(Tool):
                 recurring_note += f", {dur} meses"
             recurring_note += ")"
 
-        type_pt = "Receita" if entry_type == "income" else "Despesa"
+        is_income = entry_type == "income"
+        type_pt = "Receita" if is_income else "Despesa"
+        icon_cls = "rich-card__item-icon--income" if is_income else "rich-card__item-icon--expense"
+        val_cls = "clr-income" if is_income else "clr-expense"
+        sign = "+" if is_income else "-"
+        from seraphine.tools.svg_icons import PIN
+        icon = TRENDING_UP if is_income else CATEGORY_ICONS.get(cat, PIN)
+        date_label = entry_date
+        if entry_date and len(entry_date) >= 10:
+            date_label = f"{entry_date[8:10]}/{entry_date[5:7]}"
+
+        card_html = (
+            '<!--card--><div class="rich-card rich-card--finance">'
+            '  <div class="rich-card__item">'
+            f'    <div class="rich-card__item-icon {icon_cls}">{icon}</div>'
+            f'    <div class="rich-card__item-body">'
+            f'      <div class="rich-card__item-title">{description}</div>'
+            f'      <div class="rich-card__item-meta">'
+            f'        {type_pt} · {cat} · {date_label}{recurring_note}'
+            f'      </div>'
+            f'    </div>'
+            f'    <div class="rich-card__item-value {val_cls}">{sign}{_format_brl(amount)}</div>'
+            f'  </div>'
+            f'</div><!--/card-->'
+        )
+
         return ToolResult(
             ok=True,
             output=(
                 f"{type_pt} registrada: {_format_brl(amount)} - {description} "
                 f"[{cat}] em {entry_date}{recurring_note}."
             ),
-            metadata={"entry_id": entry_id},
+            metadata={"entry_id": entry_id, "html_card": card_html},
         )
 
 

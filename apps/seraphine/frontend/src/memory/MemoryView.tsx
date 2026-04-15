@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeftIcon, BrainIcon } from '../icons/Icons';
 
-// Same origin — Vite proxies /memory to the backend.
-const API_BASE = '';
+import { API_BASE } from '../api';
 
 const TAB_KEYS = ['Timeline', 'Perfil', 'Facts'] as const;
 type Tab = (typeof TAB_KEYS)[number];

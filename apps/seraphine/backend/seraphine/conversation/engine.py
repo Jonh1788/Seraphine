@@ -562,6 +562,10 @@ class ConversationEngine:
                         error=result.error,
                         metadata=result.metadata or {},
                     )
+                    # Persist html_card in accumulated text so it
+                    # survives chat history reload.
+                    if result.metadata and result.metadata.get("html_card"):
+                        accumulated.append("\n" + result.metadata["html_card"])
                     tool_payload: dict[str, Any] = {
                         "tool": tool_name,
                         # Anthropic adapter needs the ORIGINAL

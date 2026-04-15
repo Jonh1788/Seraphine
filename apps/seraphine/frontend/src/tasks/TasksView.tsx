@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from '../finance/types';
 
-// Same origin — Vite proxies backend routes.
-const API_BASE = '';
+import { API_BASE } from '../api';
 
 type ColumnId = 'pending' | 'in_progress' | 'done' | 'discarded';
 

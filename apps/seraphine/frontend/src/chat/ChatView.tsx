@@ -11,6 +11,7 @@ import type {
 import type { PCMPlayback } from '../audio/playback';
 import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import { RealtimeController } from '../realtime';
+import { API_BASE } from '../api';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -328,7 +329,7 @@ export function ChatView({
   useEffect(() => {
     const convId = conversationIdRef.current;
     if (!convId) return;
-    fetch(`/conversations/${convId}/turns`)
+    fetch(`${API_BASE}/conversations/${convId}/turns`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: Array<{ id: string; role: string; content: string }>) => {
         if (data.length > 0) {
@@ -805,9 +806,31 @@ export function ChatView({
                     />
                   )}
                   {t.role === 'assistant' ? (
-                    <Markdown rehypePlugins={[rehypeRaw]}>
-                      {stripAudioTags(parsed ? parsed.response : t.content)}
-                    </Markdown>
+                    (() => {
+                      const raw = stripAudioTags(parsed ? parsed.response : t.content);
+                      // Split on <!--card--> / <!--/card--> delimiters
+                      const cardRe = /<!--card-->([\s\S]*?)<!--\/card-->/g;
+                      const cards: string[] = [];
+                      const text = raw.replace(cardRe, (_: string, inner: string) => {
+                        cards.push(inner);
+                        return '';
+                      });
+                      return (
+                        <>
+                          {text.trim() && (
+                            <Markdown rehypePlugins={[rehypeRaw]}>
+                              {text}
+                            </Markdown>
+                          )}
+                          {cards.map((html, i) => (
+                            <div
+                              key={`card-${i}`}
+                              dangerouslySetInnerHTML={{ __html: html }}
+                            />
+                          ))}
+                        </>
+                      );
+                    })()
                   ) : (
                     parsed ? parsed.response : t.content
                   )}

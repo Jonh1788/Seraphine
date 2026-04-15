@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { listEvents } from '../google/api';
 import type { CalendarEvent } from '../google/types';
 import type { FinanceEntry, SeraphineTask } from '../finance/types';
+import { API_BASE } from '../api';
 import {
   WEEKDAY_LABELS,
   chipColor,
@@ -671,7 +672,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
         start: toIsoDate(rangeStart),
         end: toIsoDate(rangeEnd),
       });
-      const res = await fetch(`/tasks/by-date-range?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/tasks/by-date-range?${params.toString()}`);
       if (!res.ok) {
         setTasks([]);
         return;

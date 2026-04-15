@@ -14,7 +14,6 @@ import {
   Quaternion,
   QuaternionKeyframeTrack,
   Scene,
-  VectorKeyframeTrack,
   WebGLRenderer,
   type AnimationAction,
   type Object3D,
@@ -144,7 +143,6 @@ interface ExpressionState {
 }
 
 export class VrmAvatarController implements AvatarAdapter {
-  private readonly canvas: HTMLCanvasElement;
   private readonly scene: Scene;
   private readonly camera: PerspectiveCamera;
   private readonly renderer: WebGLRenderer;
@@ -155,6 +153,7 @@ export class VrmAvatarController implements AvatarAdapter {
   private rafId: number | null = null;
   private disposed = false;
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
+  // @ts-expect-error write-only field kept for setEmotion() backward compat
   private _currentEmotion: string | null = null;
   private elapsed = 0;
   private nextBlinkAt: number;
@@ -231,7 +230,7 @@ export class VrmAvatarController implements AvatarAdapter {
   };
 
   constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
+    void canvas; // retained by renderer
     this.scene = new Scene();
 
     const width = canvas.width || 400;
@@ -607,7 +606,7 @@ export class VrmAvatarController implements AvatarAdapter {
     ) {
       this.audioTimeData = new Float32Array(analyser.fftSize);
     }
-    analyser.getFloatTimeDomainData(this.audioTimeData);
+    analyser.getFloatTimeDomainData(this.audioTimeData as Float32Array<ArrayBuffer>);
     let sumSq = 0;
     for (let i = 0; i < this.audioTimeData.length; i += 1) {
       const v = this.audioTimeData[i];

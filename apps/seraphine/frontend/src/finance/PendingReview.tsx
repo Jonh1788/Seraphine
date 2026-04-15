@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from './types';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from './types';
 import { CheckIcon, XIcon } from '../icons/Icons';
+import { API_BASE } from '../api';
 
 function fmtBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -153,7 +154,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
   const handleConfirm = async (id: number): Promise<void> => {
     setActioningId(id);
     try {
-      const res = await fetch(`/finance/entries/${id}/status`, {
+      const res = await fetch(`${API_BASE}/finance/entries/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'confirmed' }),
@@ -170,7 +171,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
   const handleReject = async (id: number): Promise<void> => {
     setActioningId(id);
     try {
-      const res = await fetch(`/finance/entries/${id}`, {
+      const res = await fetch(`${API_BASE}/finance/entries/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Falha ao rejeitar');
@@ -190,7 +191,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
     setTaskError(taskId, null);
     try {
       const body = params ? { params } : {};
-      const res = await fetch(`/tasks/${taskId}/execute`, {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -235,7 +236,7 @@ export function PendingReview({ entries, tasks, onRefresh }: PendingReviewProps)
     setActioningId(taskId);
     setTaskError(taskId, null);
     try {
-      const res = await fetch(`/tasks/${taskId}`, {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'rejected' }),

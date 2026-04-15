@@ -15,6 +15,17 @@ import httpx
 import truststore
 
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.svg_icons import (
+    CLOUD,
+    CLOUD_RAIN,
+    DROPLETS,
+    SUN,
+    SUNRISE,
+    SUNSET,
+    THERMOMETER,
+    UMBRELLA,
+    WIND,
+)
 
 WTTR_URL = "https://wttr.in/{city}?format=j1"
 DEFAULT_TIMEOUT = 15.0
@@ -24,37 +35,37 @@ USER_AGENT = (
 )
 
 # ---------------------------------------------------------------------------
-# Weather icon mapping (condition keyword -> emoji)
+# Weather icon mapping (condition keyword -> SVG icon)
 # ---------------------------------------------------------------------------
 WEATHER_ICONS: dict[str, str] = {
-    "clear": "\u2600\ufe0f",
-    "sunny": "\u2600\ufe0f",
-    "partly cloudy": "\U0001f324\ufe0f",
-    "partly Cloudy": "\U0001f324\ufe0f",
-    "cloudy": "\u2601\ufe0f",
-    "overcast": "\u2601\ufe0f",
-    "rain": "\U0001f327\ufe0f",
-    "light rain": "\U0001f326\ufe0f",
-    "light rain shower": "\U0001f326\ufe0f",
-    "moderate rain": "\U0001f327\ufe0f",
-    "moderate rain at times": "\U0001f327\ufe0f",
-    "heavy rain": "\U0001f327\ufe0f",
-    "heavy rain at times": "\U0001f327\ufe0f",
-    "thunderstorm": "\u26c8\ufe0f",
-    "thunder": "\u26c8\ufe0f",
-    "thundery outbreaks possible": "\u26c8\ufe0f",
-    "patchy light rain with thunder": "\u26c8\ufe0f",
-    "snow": "\u2744\ufe0f",
-    "light snow": "\u2744\ufe0f",
-    "heavy snow": "\u2744\ufe0f",
-    "sleet": "\U0001f328\ufe0f",
-    "fog": "\U0001f32b\ufe0f",
-    "mist": "\U0001f32b\ufe0f",
-    "drizzle": "\U0001f326\ufe0f",
-    "light drizzle": "\U0001f326\ufe0f",
-    "patchy light drizzle": "\U0001f326\ufe0f",
-    "patchy rain possible": "\U0001f326\ufe0f",
-    "patchy rain nearby": "\U0001f326\ufe0f",
+    "clear": SUN,
+    "sunny": SUN,
+    "partly cloudy": CLOUD,
+    "partly Cloudy": CLOUD,
+    "cloudy": CLOUD,
+    "overcast": CLOUD,
+    "rain": CLOUD_RAIN,
+    "light rain": CLOUD_RAIN,
+    "light rain shower": CLOUD_RAIN,
+    "moderate rain": CLOUD_RAIN,
+    "moderate rain at times": CLOUD_RAIN,
+    "heavy rain": CLOUD_RAIN,
+    "heavy rain at times": CLOUD_RAIN,
+    "thunderstorm": CLOUD_RAIN,
+    "thunder": CLOUD_RAIN,
+    "thundery outbreaks possible": CLOUD_RAIN,
+    "patchy light rain with thunder": CLOUD_RAIN,
+    "snow": CLOUD,
+    "light snow": CLOUD,
+    "heavy snow": CLOUD,
+    "sleet": CLOUD_RAIN,
+    "fog": CLOUD,
+    "mist": CLOUD,
+    "drizzle": CLOUD_RAIN,
+    "light drizzle": CLOUD_RAIN,
+    "patchy light drizzle": CLOUD_RAIN,
+    "patchy rain possible": CLOUD_RAIN,
+    "patchy rain nearby": CLOUD_RAIN,
 }
 
 # ---------------------------------------------------------------------------
@@ -112,7 +123,7 @@ def _get_icon(desc: str) -> str:
     for key, icon in WEATHER_ICONS.items():
         if key in lower:
             return icon
-    return "\U0001f324\ufe0f"
+    return SUN
 
 
 def _get_pt(desc: str) -> str:
@@ -135,6 +146,15 @@ def _temp_color(temp_c: int) -> str:
     if temp_c <= 35:
         return "#ffa726"  # orange/warm
     return "#ef5350"  # red/hot
+
+
+def _temp_class(temp_c: int) -> str:
+    """Return a CSS utility class for temperature color."""
+    if temp_c < 15:
+        return "clr-cool"
+    if temp_c <= 25:
+        return "clr-warm"
+    return "clr-hot"
 
 
 def _format_time_24h(time_str: str) -> str:
@@ -162,7 +182,7 @@ def build_weather_html(
     data: dict[str, Any],
     days: int = 3,
 ) -> str:
-    """Build an inline-styled HTML weather card from wttr.in JSON data."""
+    """Build a rich HTML weather card using CSS classes from styles.css."""
 
     current = data["current_condition"][0]
     forecasts = data.get("weather", [])[:days]
@@ -185,76 +205,81 @@ def build_weather_html(
         sunrise = _format_time_24h(astro.get("sunrise", ""))
         sunset = _format_time_24h(astro.get("sunset", ""))
 
-    # Card styles
-    card = (
-        'style="background:#1a1a2e;color:#e0e0e0;border-radius:12px;'
-        "padding:16px;font-family:system-ui,sans-serif;max-width:420px;"
-        'margin:8px 0;line-height:1.5"'
-    )
-    header_row = (
-        'style="display:flex;justify-content:space-between;'
-        'align-items:center;margin-bottom:4px"'
-    )
-    city_style = 'style="font-size:1.1em;font-weight:600"'
-    temp_style = (
-        f'style="font-size:1.8em;font-weight:700;color:{_temp_color(temp_c)}"'
-    )
-    desc_style = 'style="opacity:0.85;margin-bottom:8px"'
-    details_style = (
-        'style="display:flex;flex-wrap:wrap;gap:12px;font-size:0.9em;'
-        'opacity:0.8;margin-bottom:6px"'
-    )
-    divider = (
-        'style="border:none;border-top:1px solid rgba(255,255,255,0.1);'
-        'margin:10px 0"'
-    )
-    forecast_title = 'style="font-size:0.9em;opacity:0.7;margin-bottom:6px"'
-    day_row = (
-        'style="display:flex;align-items:center;justify-content:space-between;'
-        'padding:4px 0;font-size:0.9em"'
-    )
-    day_label_style = 'style="min-width:100px"'
-    rain_style = 'style="opacity:0.7;min-width:55px;text-align:right"'
+    temp_cls = _temp_class(temp_c)
+    feels_cls = _temp_class(feels_like)
 
-    # Build forecast rows
-    forecast_rows = ""
-    for fc in forecasts:
-        date_str = fc["date"]
-        try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            weekday = WEEKDAYS_PT[dt.weekday()]
-            date_label = f"{weekday} {dt.strftime('%d/%m')}"
-        except ValueError:
-            date_label = date_str
-
-        fc_max = int(fc["maxtempC"])
-        fc_min = int(fc["mintempC"])
-        fc_desc = fc.get("hourly", [{}])[0].get("weatherDesc", [{}])[0].get(
-            "value", ""
+    html = (
+        '<!--card--><div class="rich-card rich-card--weather">'
+        # Header
+        '  <div class="rich-card__header">'
+        '    <div class="rich-card__icon rich-card__icon--weather">' + icon + '</div>'
+        '    <div style="flex:1">'
+        f'      <div class="rich-card__title">{city}</div>'
+        f'      <div class="rich-card__subtitle">{desc_pt} · Sensação {feels_like}°C</div>'
+        '    </div>'
+        f'    <div class="rich-card__big-value {temp_cls}">{temp_c}°</div>'
+        '  </div>'
+        # Details row
+        '  <div class="rich-card__details">'
+        f'    <span class="rich-card__detail">{WIND} {wind} km/h</span>'
+        f'    <span class="rich-card__detail">{DROPLETS} {humidity}%</span>'
+        f'    <span class="rich-card__detail">{UMBRELLA} {precip}mm</span>'
+        f'    <span class="rich-card__detail">{THERMOMETER} UV {uv}</span>'
+    )
+    if sunrise and sunset:
+        html += (
+            f'    <span class="rich-card__detail">{SUNRISE} {sunrise}</span>'
+            f'    <span class="rich-card__detail">{SUNSET} {sunset}</span>'
         )
-        if not fc_desc and fc.get("hourly"):
-            # Try midday entry
-            mid = len(fc["hourly"]) // 2
-            fc_desc = (
-                fc["hourly"][mid].get("weatherDesc", [{}])[0].get("value", "")
+    html += '  </div>'
+
+    # Forecast days
+    if forecasts:
+        html += '<hr class="rich-card__divider">'
+        html += '<div class="rich-card__section">Próximos dias</div>'
+        for fc in forecasts:
+            date_str = fc["date"]
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                weekday = WEEKDAYS_PT[dt.weekday()]
+                date_label = f"{weekday} {dt.strftime('%d/%m')}"
+            except ValueError:
+                date_label = date_str
+
+            fc_max = int(fc["maxtempC"])
+            fc_min = int(fc["mintempC"])
+            fc_desc = fc.get("hourly", [{}])[0].get("weatherDesc", [{}])[0].get(
+                "value", ""
             )
-        fc_icon = _get_icon(fc_desc)
-        rain_pct = _max_rain_chance(fc.get("hourly", []))
+            if not fc_desc and fc.get("hourly"):
+                mid = len(fc["hourly"]) // 2
+                fc_desc = (
+                    fc["hourly"][mid].get("weatherDesc", [{}])[0].get("value", "")
+                )
+            fc_icon = _get_icon(fc_desc)
+            rain_pct = _max_rain_chance(fc.get("hourly", []))
+            min_cls = _temp_class(fc_min)
+            max_cls = _temp_class(fc_max)
 
-        forecast_rows += (
-            f"<div {day_row}>"
-            f'  <span {day_label_style}>\U0001f4c5 {date_label}</span>'
-            f"  <span>{fc_icon}</span>"
-            f'  <span><span style="color:{_temp_color(fc_min)}">{fc_min}\u00b0</span>'
-            f'   / <span style="color:{_temp_color(fc_max)}">{fc_max}\u00b0</span></span>'
-            f"  <span {rain_style}>\U0001f327\ufe0f {rain_pct}%</span>"
-            f"</div>"
-        )
+            html += (
+                f'<div class="rich-card__item">'
+                f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{fc_icon}</div>'
+                f'  <div class="rich-card__item-body">'
+                f'    <div class="rich-card__item-title">{date_label}</div>'
+                f'    <div class="rich-card__item-meta">{CLOUD_RAIN} {rain_pct}%</div>'
+                f'  </div>'
+                f'  <div class="rich-card__item-value">'
+                f'    <span class="{min_cls}">{fc_min}°</span>'
+                f'    <span class="clr-faint"> / </span>'
+                f'    <span class="{max_cls}">{fc_max}°</span>'
+                f'  </div>'
+                f'</div>'
+            )
 
     # Hourly section (only when days == 1)
-    hourly_html = ""
     if days == 1 and forecasts and forecasts[0].get("hourly"):
-        hourly_html += f'<hr {divider}><div {forecast_title}>Hoje por hora:</div>'
+        html += '<hr class="rich-card__divider">'
+        html += '<div class="rich-card__section">Hoje por hora</div>'
         for h in forecasts[0]["hourly"]:
             htime = h.get("time", "0").zfill(4)
             htime_fmt = f"{htime[:len(htime)-2]}:{htime[-2:]}"
@@ -262,48 +287,19 @@ def build_weather_html(
             h_desc = h.get("weatherDesc", [{}])[0].get("value", "")
             h_icon = _get_icon(h_desc)
             h_rain = h.get("chanceofrain", "0")
-            hourly_html += (
-                f"<div {day_row}>"
-                f'  <span {day_label_style}>\U0001f552 {htime_fmt}</span>'
-                f"  <span>{h_icon}</span>"
-                f'  <span style="color:{_temp_color(h_temp)}">{h_temp}\u00b0C</span>'
-                f"  <span {rain_style}>\U0001f327\ufe0f {h_rain}%</span>"
-                f"</div>"
+            h_cls = _temp_class(h_temp)
+            html += (
+                f'<div class="rich-card__item">'
+                f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{h_icon}</div>'
+                f'  <div class="rich-card__item-body">'
+                f'    <div class="rich-card__item-title">{htime_fmt}</div>'
+                f'    <div class="rich-card__item-meta">{UMBRELLA} {h_rain}%</div>'
+                f'  </div>'
+                f'  <div class="rich-card__item-value {h_cls}">{h_temp}°C</div>'
+                f'</div>'
             )
 
-    feels_color = _temp_color(feels_like)
-
-    html = (
-        f"<div {card}>"
-        f"  <div {header_row}>"
-        f"    <span {city_style}>{icon} {city}</span>"
-        f"    <span {temp_style}>{temp_c}\u00b0C</span>"
-        f"  </div>"
-        f'  <div {desc_style}>{desc_pt} &nbsp; Sensa\u00e7\u00e3o: '
-        f'<span style="color:{feels_color}">{feels_like}\u00b0C</span></div>'
-        f"  <div {details_style}>"
-        f"    <span>\U0001f4a8 {wind} km/h</span>"
-        f"    <span>\U0001f4a7 {humidity}%</span>"
-        f"    <span>\u2602\ufe0f {precip}mm</span>"
-        f"    <span>\U0001f321\ufe0f UV: {uv}</span>"
-    )
-    if sunrise and sunset:
-        html += (
-            f"    <span>\U0001f305 {sunrise}</span>"
-            f"    <span>\U0001f307 {sunset}</span>"
-        )
-    html += f"  </div>"
-
-    if forecast_rows:
-        html += (
-            f"  <hr {divider}>"
-            f"  <div {forecast_title}>Pr\u00f3ximos dias:</div>"
-            f"  {forecast_rows}"
-        )
-
-    html += hourly_html
-    html += "</div>"
-
+    html += '</div><!--/card-->'
     return html
 
 
@@ -458,62 +454,71 @@ class FormatWeatherCardTool(Tool):
         humidity = args.get("humidity")
         wind = args.get("wind_kmh")
 
-        # Build the HTML card
-        icon = _get_icon(current_desc) if current_desc else "🌡️"
-        temp_html = ""
-        if current_temp is not None:
-            color = _temp_color(current_temp)
-            temp_html = f'<span style="font-size:2em;font-weight:700;color:{color}">{current_temp}°C</span>'
-
+        icon = _get_icon(current_desc) if current_desc else THERMOMETER
         desc_pt = _get_pt(current_desc) if current_desc else ""
 
-        # Current conditions row
-        details = []
-        if wind:
-            details.append(f"💨 {wind} km/h")
-        if humidity:
-            details.append(f"💧 {humidity}%")
+        # Header with big temp
+        temp_html = ""
+        if current_temp is not None:
+            temp_cls = _temp_class(current_temp)
+            temp_html = f'<div class="rich-card__big-value {temp_cls}">{current_temp}°</div>'
 
-        details_html = (
-            f'<div style="display:flex;gap:16px;margin:8px 0;font-size:0.9em;opacity:0.85">'
-            + "".join(f"<span>{d}</span>" for d in details)
-            + "</div>"
-        ) if details else ""
+        subtitle_parts = []
+        if desc_pt:
+            subtitle_parts.append(desc_pt)
+
+        # Details row
+        details_html = ""
+        detail_items = []
+        if wind:
+            detail_items.append(f'<span class="rich-card__detail">{WIND} {wind} km/h</span>')
+        if humidity:
+            detail_items.append(f'<span class="rich-card__detail">{DROPLETS} {humidity}%</span>')
+        if detail_items:
+            details_html = '<div class="rich-card__details">' + "".join(detail_items) + '</div>'
 
         # Forecast rows
-        forecast_rows = ""
+        forecast_items = ""
         for day in forecast:
             d_icon = _get_icon(day.get("description", ""))
-            d_desc = _get_pt(day.get("description", ""))
             mn = day.get("min_temp", "?")
             mx = day.get("max_temp", "?")
             rain = day.get("rain_chance")
-            rain_html = f'<span>🌧️ {rain}%</span>' if rain is not None else ""
-            mn_color = _temp_color(mn) if isinstance(mn, int) else "#e0e0e0"
-            mx_color = _temp_color(mx) if isinstance(mx, int) else "#e0e0e0"
+            rain_meta = f"{UMBRELLA} {rain}%" if rain is not None else ""
+            min_cls = _temp_class(mn) if isinstance(mn, int) else "clr-dim"
+            max_cls = _temp_class(mx) if isinstance(mx, int) else "clr-dim"
 
-            forecast_rows += f"""
-            <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #2a2a4a">
-              <span style="min-width:90px;font-size:0.85em">{day.get('date', '?')}</span>
-              <span>{d_icon}</span>
-              <span style="color:{mn_color}">{mn}°</span>
-              <span style="opacity:0.5">/</span>
-              <span style="color:{mx_color}">{mx}°</span>
-              {rain_html}
-            </div>"""
+            forecast_items += (
+                f'<div class="rich-card__item">'
+                f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{d_icon}</div>'
+                f'  <div class="rich-card__item-body">'
+                f'    <div class="rich-card__item-title">{day.get("date", "?")}</div>'
+                f'    <div class="rich-card__item-meta">{rain_meta}</div>'
+                f'  </div>'
+                f'  <div class="rich-card__item-value">'
+                f'    <span class="{min_cls}">{mn}°</span>'
+                f'    <span class="clr-faint"> / </span>'
+                f'    <span class="{max_cls}">{mx}°</span>'
+                f'  </div>'
+                f'</div>'
+            )
 
-        html = f"""<div style="background:#1a1a2e;color:#e0e0e0;border-radius:12px;padding:16px;font-family:system-ui,sans-serif;max-width:420px;margin:8px 0;line-height:1.5">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-    <span style="font-size:1.1em;font-weight:600">{icon} {city}</span>
-    {temp_html}
-  </div>
-  {f'<div style="opacity:0.8;margin-bottom:4px">{desc_pt}</div>' if desc_pt else ''}
-  {details_html}
-  <div style="margin-top:12px;border-top:1px solid #2a2a4a;padding-top:8px">
-    <div style="font-weight:600;margin-bottom:6px;font-size:0.9em">Previsão:</div>
-    {forecast_rows}
-  </div>
-</div>"""
+        html = (
+            '<!--card--><div class="rich-card rich-card--weather">'
+            '  <div class="rich-card__header">'
+            f'    <div class="rich-card__icon rich-card__icon--weather">{icon}</div>'
+            f'    <div style="flex:1">'
+            f'      <div class="rich-card__title">{city}</div>'
+            f'      <div class="rich-card__subtitle">{" · ".join(subtitle_parts)}</div>'
+            f'    </div>'
+            f'    {temp_html}'
+            f'  </div>'
+            f'  {details_html}'
+            f'  <hr class="rich-card__divider">'
+            f'  <div class="rich-card__section">Previsão</div>'
+            f'  {forecast_items}'
+            f'</div><!--/card-->'
+        )
 
         summary = f"Previsão para {city}: {len(forecast)} dias."
         return ToolResult(

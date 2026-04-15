@@ -5,6 +5,7 @@ import { CategoryTable } from './CategoryTable';
 import { TransactionList } from './TransactionList';
 import { PendingReview } from './PendingReview';
 import { ArrowLeftIcon, FinanceIcon } from '../icons/Icons';
+import { API_BASE } from '../api';
 
 const TAB_KEYS = ['Visao Geral', 'Categorias', 'Transacoes', 'Pendentes'] as const;
 type Tab = (typeof TAB_KEYS)[number];
@@ -41,11 +42,11 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
     setLoading(true);
     setError(null);
     Promise.all([
-      fetch(`/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
+      fetch(`${API_BASE}/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
-      fetch(`/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
+      fetch(`${API_BASE}/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
