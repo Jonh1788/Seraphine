@@ -13,6 +13,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod clipboard;
 mod mic;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,12 +30,18 @@ pub fn run() {
         Some(Modifiers::SUPER | Modifiers::SHIFT),
         Code::KeyA,
     );
+    // SDD 017-B — on-demand clipboard assist (Cmd+Shift+V).
+    let clipboard_shortcut = Shortcut::new(
+        Some(Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyV,
+    );
 
     tauri::Builder::default()
         .manage(mic::MicState::new())
         .invoke_handler(tauri::generate_handler![
             mic::start_mic_capture,
             mic::stop_mic_capture,
+            clipboard::read_clipboard,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -69,6 +76,22 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                    } else if shortcut == &clipboard_shortcut {
+                        // SDD 017-B — read the clipboard now and hand it
+                        // to the main window so the React layer can open
+                        // the ClipboardAssistModal with suggested actions.
+                        let text = match arboard::Clipboard::new()
+                            .and_then(|mut cb| cb.get_text())
+                        {
+                            Ok(t) => t,
+                            Err(_) => String::new(),
+                        };
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                            let _ = window.emit("clipboard-assist", text);
+                        }
                     }
                 })
                 .build(),
@@ -78,6 +101,7 @@ pub fn run() {
             app.global_shortcut().register(toggle_shortcut)?;
             app.global_shortcut().register(capture_shortcut)?;
             app.global_shortcut().register(avatar_shortcut)?;
+            app.global_shortcut().register(clipboard_shortcut)?;
 
             // Build the system tray.
             let show = MenuItem::with_id(app, "show", "Mostrar", true, None::<&str>)?;

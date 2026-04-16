@@ -20,6 +20,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 cpal = "0.15"
+# SDD 017-B — clipboard read for on-demand assist modal (Cmd+Shift+V).
+# Using `arboard` directly from Rust avoids the need to pull in the
+# tauri-plugin-clipboard-manager plugin plus its extra capabilities.
+arboard = "3"
 
 [lib]
 name = "seraphine_desktop_lib"

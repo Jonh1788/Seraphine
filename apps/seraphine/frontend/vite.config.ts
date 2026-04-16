@@ -102,6 +102,12 @@ export default defineConfig({
       '/insights': {
         target: 'http://127.0.0.1:8000',
       },
+      '/notes': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/music': {
+        target: 'http://127.0.0.1:8000',
+      },
       '/push': {
         target: 'http://127.0.0.1:8000',
       },

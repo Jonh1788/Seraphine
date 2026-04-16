@@ -19,6 +19,10 @@ import type { RecurringRule } from './RecurringChatBlock';
 import { TaskEditorModal } from '../tasks/TaskEditorModal';
 import { ReminderChatBlock } from './ReminderChatBlock';
 import type { ReminderData } from './ReminderChatBlock';
+import { NoteChatBlock } from './NoteChatBlock';
+import type { NoteChatBlockData } from './NoteChatBlock';
+import { MusicChatBlock } from './MusicChatBlock';
+import type { MusicCardData } from './MusicChatBlock';
 import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
 
@@ -69,6 +73,10 @@ interface Turn {
   recurring?: RecurringRule[];
   /** Structured reminder data from tool_result metadata. */
   reminders?: ReminderData[];
+  /** Structured note data from tool_result metadata. */
+  notes?: NoteChatBlockData[];
+  /** Structured music card data from tool_result metadata. */
+  music?: MusicCardData[];
   /** Whether this turn is a daily briefing (special visual treatment). */
   briefing?: boolean;
 }
@@ -289,6 +297,18 @@ interface ChatViewProps {
   /** Hard mute toggle for the user's mic while realtime is active. */
   manualMute: boolean;
   onManualMuteToggle: () => void;
+  /**
+   * SDD 017-B — optional seed text written into the composer on mount.
+   * Used by the clipboard assist modal's "Colar no chat" action. The
+   * parent must clear the value through `onInitialTextConsumed` after
+   * we've picked it up so the same text doesn't re-inject on re-mount.
+   * When `initialAutoSend` is true the message is sent immediately
+   * (used by the assist modal's primary action buttons so the user's
+   * bubble renders correctly in the chat history).
+   */
+  initialText?: string | null;
+  initialAutoSend?: boolean;
+  onInitialTextConsumed?: () => void;
 }
 
 /** Threshold (px) the user must drag upward to lock recording */
@@ -315,6 +335,9 @@ export function ChatView({
   playback,
   manualMute,
   onManualMuteToggle,
+  initialText,
+  initialAutoSend,
+  onInitialTextConsumed,
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
@@ -327,6 +350,34 @@ export function ChatView({
       sessionStorage.removeItem('seraphine.shared');
     }
   }, []);
+
+  // SDD 017-B — seed the composer from the clipboard assist modal.
+  //  * "Colar no chat" → just fills the draft, keeps focus.
+  //  * Primary/help actions → auto-send so the user bubble is added
+  //    to the turns list (if we only forwarded through the WS, the
+  //    turn wouldn't render here).
+  useEffect(() => {
+    if (initialText == null) return;
+    if (initialAutoSend) {
+      const content = initialText;
+      setTurns((prev) => [
+        ...prev,
+        { id: `u-${Date.now()}`, role: 'user', content },
+      ]);
+      ws.send({
+        type: 'user_message',
+        conversation_id: conversationIdRef.current,
+        content,
+        speak,
+        think,
+      });
+      setDraft('');
+    } else {
+      setDraft(initialText);
+      requestAnimationFrame(() => chatInputRef.current?.focus());
+    }
+    onInitialTextConsumed?.();
+  }, [initialText, initialAutoSend, onInitialTextConsumed, ws, speak, think]);
 
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const [pendingImages, setPendingImages] = useState<{name: string; dataUrl: string}[]>([]);
@@ -387,6 +438,24 @@ export function ChatView({
               try {
                 const parsed = JSON.parse(match[1]);
                 turn.reminders = [...(turn.reminders || []), parsed as ReminderData];
+              } catch { /* ignore malformed */ }
+            }
+            const noteDataRe = /<!--note-data:([\s\S]*?)-->/g;
+            while ((match = noteDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                if (parsed && parsed.id && parsed.title) {
+                  turn.notes = [...(turn.notes || []), parsed as NoteChatBlockData];
+                }
+              } catch { /* ignore malformed */ }
+            }
+            const musicDataRe = /<!--music-data:([\s\S]*?)-->/g;
+            while ((match = musicDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                if (parsed && (parsed.title || parsed.album_art)) {
+                  turn.music = [...(turn.music || []), parsed as MusicCardData];
+                }
               } catch { /* ignore malformed */ }
             }
             return turn;
@@ -577,8 +646,13 @@ export function ChatView({
         const taskMeta = meta && typeof meta['task'] === 'object' ? meta['task'] as Record<string, unknown> : null;
         const recurringMeta = meta && typeof meta['recurring'] === 'object' ? meta['recurring'] as Record<string, unknown> : null;
         const reminderMeta = meta && typeof meta['reminder'] === 'object' ? meta['reminder'] as Record<string, unknown> : null;
+        const noteMeta = meta && typeof meta['note'] === 'object' ? meta['note'] as Record<string, unknown> : null;
+        const musicMeta =
+          meta && typeof meta['music_card'] === 'object' && meta['music_card'] !== null
+            ? (meta['music_card'] as Record<string, unknown>)
+            : null;
 
-        if (tr.ok && (taskMeta || recurringMeta || reminderMeta)) {
+        if (tr.ok && (taskMeta || recurringMeta || reminderMeta || noteMeta || musicMeta)) {
           setTurns((prev) => {
             const streamIdx = prev.findIndex((t) => t.streaming);
             const idx = streamIdx !== -1 ? streamIdx : prev.length - 1;
@@ -625,6 +699,32 @@ export function ChatView({
               turn.reminders = [...(turn.reminders || []), reminder];
             }
 
+            if (noteMeta) {
+              const rawTags = noteMeta['tags'];
+              const note: NoteChatBlockData = {
+                id: String(noteMeta['id'] ?? ''),
+                title: (noteMeta['title'] as string) ?? '',
+                content: (noteMeta['content'] as string) ?? '',
+                tags: Array.isArray(rawTags) ? rawTags.map((t) => String(t)) : [],
+              };
+              if (note.id) {
+                turn.notes = [...(turn.notes || []), note];
+              }
+            }
+
+            if (musicMeta) {
+              const music: MusicCardData = {
+                title: (musicMeta['title'] as string) ?? '',
+                artist: (musicMeta['artist'] as string) ?? '',
+                album_art: (musicMeta['album_art'] as string) ?? '',
+                is_playing: Boolean(musicMeta['is_playing']),
+                url: (musicMeta['url'] as string) ?? '',
+              };
+              if (music.title || music.album_art) {
+                turn.music = [...(turn.music || []), music];
+              }
+            }
+
             next[idx] = turn;
             return next;
           });
@@ -634,7 +734,7 @@ export function ChatView({
         // into the chat without waiting for Claude to echo it.
         // Skip html_card when we already have structured task/recurring data.
         const htmlCard =
-          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta && !reminderMeta
+          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta && !reminderMeta && !noteMeta && !musicMeta
             ? (meta['html_card'] as string)
             : null;
         if (tr.ok && htmlCard) {
@@ -1018,8 +1118,10 @@ export function ChatView({
                       raw = raw.replace(/<!--task-data:[\s\S]*?-->/g, '');
                       raw = raw.replace(/<!--recurring-data:[\s\S]*?-->/g, '');
                       raw = raw.replace(/<!--reminder-data:[\s\S]*?-->/g, '');
+                      raw = raw.replace(/<!--note-data:[\s\S]*?-->/g, '');
+                      raw = raw.replace(/<!--music-data:[\s\S]*?-->/g, '');
                       const cards: string[] = [];
-                      const hasReactTasks = (t.tasks && t.tasks.length > 0) || (t.recurring && t.recurring.length > 0) || (t.reminders && t.reminders.length > 0);
+                      const hasReactTasks = (t.tasks && t.tasks.length > 0) || (t.recurring && t.recurring.length > 0) || (t.reminders && t.reminders.length > 0) || (t.notes && t.notes.length > 0) || (t.music && t.music.length > 0);
                       // Primary: explicit <!--card--> delimiters
                       raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
                         // Skip task/recurring HTML cards when we already have React components
@@ -1062,6 +1164,24 @@ export function ChatView({
                           ))}
                           {t.reminders && t.reminders.map((rem, ri) => (
                             <ReminderChatBlock key={`rem-${ri}`} reminder={rem} />
+                          ))}
+                          {t.notes && t.notes.map((note, ni) => (
+                            <NoteChatBlock key={`note-${ni}`} note={note} />
+                          ))}
+                          {t.music && t.music.map((card, mi) => (
+                            <MusicChatBlock
+                              key={`music-${mi}`}
+                              card={card}
+                              onSendMessage={(content) => {
+                                ws.send({
+                                  type: 'user_message',
+                                  conversation_id: conversationIdRef.current,
+                                  content,
+                                  speak,
+                                  think,
+                                });
+                              }}
+                            />
                           ))}
                         </>
                       );

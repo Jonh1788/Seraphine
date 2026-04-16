@@ -20,6 +20,93 @@ from seraphine.tools.base import Tool, ToolResult
 _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 
+_YTM_NOW_PLAYING_JS = (
+    "(function(){"
+    "const v=document.querySelector('video');"
+    "const title=document.title||'';"
+    "const bar=document.querySelector('ytmusic-player-bar');"
+    "let artist='';"
+    "if(bar){"
+    " const sub=bar.querySelector('.byline.ytmusic-player-bar');"
+    " if(sub&&sub.textContent){artist=sub.textContent.trim().split('\\u2022')[0].trim();}"
+    "}"
+    "const img=document.querySelector('ytmusic-player-bar img.image')"
+    " ||document.querySelector('.image.ytmusic-player-bar')"
+    " ||document.querySelector('img.ytmusic-player-bar');"
+    "const art=img?img.src:'';"
+    "const paused=v?v.paused:true;"
+    "const url=location.href;"
+    "return JSON.stringify({title:title,artist:artist,album_art:art,"
+    "is_playing:!paused,url:url});"
+    "})()"
+)
+
+
+_YTM_PAUSE_JS = (
+    "(function(){const v=document.querySelector('video');"
+    "if(!v){return 'no-video';}v.pause();return 'paused';})()"
+)
+
+
+_YTM_PLAY_JS = (
+    "(function(){const v=document.querySelector('video');"
+    "if(!v){return 'no-video';}v.play();return 'playing';})()"
+)
+
+
+async def _ytm_run_js(js: str) -> str | None:
+    """Run JavaScript in the first Google Chrome tab matching music.youtube.com.
+
+    Returns the stringified execute result, or ``None`` when no matching tab
+    is open / Chrome is unavailable / the platform isn't macOS.
+    """
+
+    script = (
+        'tell application "Google Chrome"\n'
+        '  if not (exists window 1) then return "no-window"\n'
+        '  repeat with w in windows\n'
+        '    set tabIndex to 0\n'
+        '    repeat with t in tabs of w\n'
+        '      set tabIndex to tabIndex + 1\n'
+        '      if URL of t contains "music.youtube.com" then\n'
+        '        set jsResult to execute t javascript "' + js.replace('"', '\\"') + '"\n'
+        '        return jsResult\n'
+        '      end if\n'
+        '    end repeat\n'
+        '  end repeat\n'
+        '  return "no-ytm-tab"\n'
+        'end tell'
+    )
+    try:
+        out = await _run_osascript(script)
+    except Exception:
+        return None
+    out = (out or "").strip()
+    if not out or out in {"no-window", "no-ytm-tab"}:
+        return None
+    return out
+
+
+def _parse_now_playing_title(raw: str) -> tuple[str, str]:
+    """Best-effort split of a YTM tab title into (song, artist).
+
+    YTM titles look like ``"Song · Artist - YouTube Music"``. We strip the
+    trailing app name and split on the first middle-dot. Falls back to the
+    whole string as the song when the separator is missing.
+    """
+
+    text = (raw or "").strip()
+    for suffix in (" - YouTube Music", " — YouTube Music", " - YouTube"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    for sep in ("\u00b7", "•", " - "):
+        if sep in text:
+            song, _, artist = text.partition(sep)
+            return song.strip(), artist.strip()
+    return text, ""
+
+
 class PlayMusicTool(Tool):
     name = "play_music"
     description = (
@@ -88,10 +175,29 @@ class PlayMusicTool(Tool):
             if url:
                 await _open_in_chrome(url)
                 type_label = {"playlist": "playlist", "album": "álbum", "artist": "artista"}.get(search_type, "música")
+                # Best-effort: try to probe the newly-opened YTM tab so the
+                # chat card has title + album art. YTM takes a moment to hydrate
+                # DOM after Chrome navigates, so a single retry with a short
+                # delay usually lands on real data; if both miss we still
+                # return a minimal card so the UI renders something.
+                card = await _safe_now_playing_card(retries=2, delay=1.2)
+                if card is None:
+                    card = {
+                        "title": query,
+                        "artist": "",
+                        "album_art": "",
+                        "is_playing": True,
+                        "url": url,
+                    }
                 return ToolResult(
                     ok=True,
                     output=f"Tocando {type_label} '{query}' no YouTube Music.",
-                    metadata={"query": query, "type": search_type, "url": url},
+                    metadata={
+                        "query": query,
+                        "type": search_type,
+                        "url": url,
+                        "music_card": card,
+                    },
                 )
 
             # Fallback: open search
@@ -220,6 +326,96 @@ class LearnMusicTasteTool(Tool):
         )
 
 
+class NowPlayingTool(Tool):
+    name = "now_playing"
+    description = (
+        "Get info about the music currently playing on YouTube Music in "
+        "Google Chrome. Returns title, artist, album art, and whether "
+        "playback is active. Use when the user asks 'que musica ta "
+        "tocando?', 'qual a musica?', 'mostra a capa', etc."
+    )
+    json_schema = {"type": "object", "properties": {}}
+    requires_confirmation = False
+    category = "other"
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        card = await _safe_now_playing_card()
+        if card is None:
+            return ToolResult(
+                ok=True,
+                output="Nenhuma música tocando no YouTube Music.",
+                metadata={"music_card": None},
+            )
+        title = card.get("title") or ""
+        artist = card.get("artist") or ""
+        is_playing = bool(card.get("is_playing"))
+        if title and artist:
+            parts = [f"{title} — {artist}"]
+        elif title:
+            parts = [title]
+        else:
+            parts = ["YouTube Music"]
+        parts.append("tocando" if is_playing else "pausada")
+        return ToolResult(
+            ok=True,
+            output=" · ".join(parts),
+            metadata={"music_card": card},
+        )
+
+
+class PauseMusicTool(Tool):
+    name = "pause_music"
+    description = (
+        "Pause the music currently playing on YouTube Music in Chrome. "
+        "Use when the user says 'pausa a musica', 'para a musica', "
+        "'pausar', 'mute' (preferring pause over volume control)."
+    )
+    json_schema = {"type": "object", "properties": {}}
+    requires_confirmation = False
+    category = "other"
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        result = await _ytm_run_js(_YTM_PAUSE_JS)
+        if result is None or result == "no-video":
+            return ToolResult(
+                ok=False,
+                error="Nenhuma aba do YouTube Music aberta.",
+                metadata={"music_card": None},
+            )
+        card = await _safe_now_playing_card()
+        return ToolResult(
+            ok=True,
+            output="Música pausada.",
+            metadata={"music_card": card},
+        )
+
+
+class ResumeMusicTool(Tool):
+    name = "resume_music"
+    description = (
+        "Resume playback on YouTube Music in Chrome. Use when the user "
+        "says 'continua a musica', 'volta a musica', 'retoma', 'play'."
+    )
+    json_schema = {"type": "object", "properties": {}}
+    requires_confirmation = False
+    category = "other"
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        result = await _ytm_run_js(_YTM_PLAY_JS)
+        if result is None or result == "no-video":
+            return ToolResult(
+                ok=False,
+                error="Nenhuma aba do YouTube Music aberta.",
+                metadata={"music_card": None},
+            )
+        card = await _safe_now_playing_card()
+        return ToolResult(
+            ok=True,
+            output="Música retomada.",
+            metadata={"music_card": card},
+        )
+
+
 class OpenUrlTool(Tool):
     name = "open_url"
     description = (
@@ -258,6 +454,64 @@ class OpenUrlTool(Tool):
 
 
 # ---- Helpers ----
+
+
+async def _safe_now_playing_card(
+    *, retries: int = 1, delay: float = 0.0,
+) -> dict[str, Any] | None:
+    """Return a parsed ``music_card`` dict or ``None`` if YTM isn't available.
+
+    ``retries`` controls extra attempts after the first, separated by
+    ``delay`` seconds each. Used by ``PlayMusicTool`` to probe the tab it
+    just opened (YTM hydrates asynchronously). All errors are swallowed —
+    this helper never raises.
+    """
+
+    import json as _json
+
+    attempts = max(1, 1 + retries)
+    for i in range(attempts):
+        if i > 0 and delay > 0:
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                raise
+        try:
+            raw = await _ytm_run_js(_YTM_NOW_PLAYING_JS)
+        except Exception:
+            raw = None
+        if not raw:
+            continue
+        try:
+            parsed = _json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        title_raw = str(parsed.get("title") or "").strip()
+        artist = str(parsed.get("artist") or "").strip()
+        album_art = str(parsed.get("album_art") or "").strip()
+        url = str(parsed.get("url") or "").strip()
+        is_playing = bool(parsed.get("is_playing"))
+        # Title coming off `document.title` still has "- YouTube Music";
+        # synthesize a cleaner (song, artist) split when the sidebar
+        # artist selector missed.
+        song, derived_artist = _parse_now_playing_title(title_raw)
+        if not artist:
+            artist = derived_artist
+        if not song:
+            song = title_raw
+        card = {
+            "title": song,
+            "artist": artist,
+            "album_art": album_art,
+            "is_playing": is_playing,
+            "url": url,
+        }
+        # Require at least a title OR album art to be meaningful
+        if song or album_art:
+            return card
+    return None
 
 
 async def _open_in_chrome(url: str) -> None:

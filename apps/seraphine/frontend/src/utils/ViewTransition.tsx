@@ -60,10 +60,12 @@ export function ViewTransition({
   const reduce = useReducedMotion();
   const { variants, transition } = VARIANTS[variant];
 
+  const classes = className ? `view-transition ${className}` : 'view-transition';
+
   return (
     <motion.div
       key={transitionKey}
-      className={className}
+      className={classes}
       variants={variants}
       initial="initial"
       animate="animate"

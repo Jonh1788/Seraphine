@@ -10,7 +10,14 @@ from seraphine.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from seraphine.tools.image_fetch import FetchImageTool
 from seraphine.tools.meta import RequestSkillTool
 from seraphine.tools.shell import RunShellTool
-from seraphine.tools.browser import LearnMusicTasteTool, OpenUrlTool, PlayMusicTool
+from seraphine.tools.browser import (
+    LearnMusicTasteTool,
+    NowPlayingTool,
+    OpenUrlTool,
+    PauseMusicTool,
+    PlayMusicTool,
+    ResumeMusicTool,
+)
 from seraphine.tools.routes import RoutePlannerTool
 from seraphine.tools.news import SearchNewsTool
 from seraphine.tools.search import WebSearchTool
@@ -68,6 +75,7 @@ def build_default_registry(
     recurring_service: Any = None,
     habit_service: Any = None,
     water_service: Any = None,
+    note_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -84,6 +92,9 @@ def build_default_registry(
     reg.register(WeatherForecastTool())
     reg.register(FormatWeatherCardTool())
     reg.register(PlayMusicTool())
+    reg.register(NowPlayingTool())
+    reg.register(PauseMusicTool())
+    reg.register(ResumeMusicTool())
     reg.register(LearnMusicTasteTool(store=store))
     reg.register(OpenUrlTool())
     if skills_dir is not None:
@@ -211,6 +222,20 @@ def build_default_registry(
 
         reg.register(LogWaterTool(water_service))
         reg.register(SetupWaterTool(water_service))
+    if note_service is not None:
+        from seraphine.tools.notes import (
+            CreateNoteTool,
+            DeleteNoteTool,
+            ListNotesTool,
+            SearchNotesTool,
+            UpdateNoteTool,
+        )
+
+        reg.register(CreateNoteTool(note_service))
+        reg.register(UpdateNoteTool(note_service))
+        reg.register(DeleteNoteTool(note_service))
+        reg.register(ListNotesTool(note_service))
+        reg.register(SearchNotesTool(note_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":

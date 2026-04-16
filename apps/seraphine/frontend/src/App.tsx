@@ -14,6 +14,7 @@ import { getAuthStatus, listImportantEmails } from './google/api';
 import { notify } from './utils/notify';
 import { useFocusTimer } from './focus/useFocusTimer';
 import type { FocusPhase } from './focus/useFocusTimer';
+import { API_BASE } from './api';
 import { FocusPill } from './focus/FocusPill';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
@@ -24,6 +25,7 @@ import { MemoryView } from './memory';
 import { TasksView } from './tasks';
 import { HabitsView } from './habits';
 import { InsightsView } from './insights';
+import { NotesView } from './notes';
 import { DashboardView } from './dashboard';
 import {
   ChatIcon,
@@ -39,6 +41,7 @@ import {
   DashboardIcon,
   FlameIcon,
   LightbulbIcon,
+  NotesIcon,
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
@@ -46,8 +49,9 @@ import { SettingsDrawer } from './settings';
 import { OnboardingFlow } from './onboarding';
 import { BottomNav } from './nav';
 import type { BottomNavView } from './nav';
+import { ClipboardAssistModal, useClipboardShortcut } from './clipboard';
 
-type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -87,6 +91,7 @@ export function App(): JSX.Element {
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
+  const [initialNoteId, setInitialNoteId] = useState<string | null>(null);
   const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'subscribed' | 'error' | 'denied' | 'unsupported'>('idle');
   const [pushMsg, setPushMsg] = useState<string | null>(null);
@@ -97,6 +102,13 @@ export function App(): JSX.Element {
   const quickTaskInputRef = useRef<HTMLInputElement>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  // SDD 017-B — on-demand clipboard assist (Cmd+Shift+V).
+  const [clipboardAssist, setClipboardAssist] = useState<{ open: boolean; content: string }>({
+    open: false,
+    content: '',
+  });
+  const [pendingComposerText, setPendingComposerText] = useState<string | null>(null);
+  const [pendingComposerAutoSend, setPendingComposerAutoSend] = useState<boolean>(false);
 
   // SDD 016-B — First-run onboarding gate.
   // Existing users (those with a conversation id already persisted) are
@@ -196,7 +208,8 @@ export function App(): JSX.Element {
       view === 'memory' ||
       view === 'tasks' ||
       view === 'habits' ||
-      view === 'insights'
+      view === 'insights' ||
+      view === 'notes'
     ) {
       setActiveView(view);
       // Deep-link to a specific task card.
@@ -204,10 +217,15 @@ export function App(): JSX.Element {
       if (view === 'tasks' && focus) {
         setFocusedTaskId(focus);
       }
+      // Deep-link to a specific note.
+      const noteId = params.get('note');
+      if (view === 'notes' && noteId) {
+        setInitialNoteId(noteId);
+      }
     }
 
     // Clean URL without reload
-    if (params.has('view') || params.has('share') || params.has('focus')) {
+    if (params.has('view') || params.has('share') || params.has('focus') || params.has('note')) {
       window.history.replaceState({}, '', '/');
     }
   }, []);
@@ -253,6 +271,14 @@ export function App(): JSX.Element {
     })();
   }, []);
 
+  // SDD 017-B — register Cmd+Shift+V for clipboard assist. Uses Tauri
+  // global shortcut inside the desktop shell (Rust-emitted event) and
+  // falls back to a document-level keydown listener in the browser.
+  const handleClipboardTrigger = useCallback((text: string) => {
+    setClipboardAssist({ open: true, content: text });
+  }, []);
+  useClipboardShortcut(handleClipboardTrigger);
+
   // Tauri: listen for quick-capture event from global shortcut (Cmd+Shift+S)
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -288,6 +314,14 @@ export function App(): JSX.Element {
 
   // Pomodoro / Focus timer
   const handleFocusTransition = useCallback((from: FocusPhase, to: FocusPhase) => {
+    // SDD 017-A: when the timer enters a work phase (either fresh start
+    // from idle or returning from a break), ask the backend to pick and
+    // play focus music based on memory taste. Fire-and-forget: any
+    // failure (no YTM, offline, no service) is swallowed silently.
+    if (to === 'work' && (from === 'idle' || from === 'break' || from === 'long_break')) {
+      fetch(`${API_BASE}/music/focus-start`, { method: 'POST' }).catch(() => {});
+    }
+
     const ctrl = avatarCtrlRef.current;
     if (!ctrl) return;
     if (to === 'work' && from === 'idle') {
@@ -697,6 +731,7 @@ export function App(): JSX.Element {
       '6': 'memory',
       '7': 'habits',
       '8': 'insights',
+      '9': 'notes',
     };
 
     const onKey = (e: KeyboardEvent): void => {
@@ -776,6 +811,7 @@ export function App(): JSX.Element {
       memory: 'memory',
       habits: 'habits',
       insights: 'insights',
+      notes: 'notes',
     };
     if (viewActions[action]) {
       setActiveView(viewActions[action]);
@@ -857,6 +893,13 @@ export function App(): JSX.Element {
       label: 'Insights',
       onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'),
       active: activeView === 'insights',
+    },
+    {
+      id: 'notes',
+      icon: <NotesIcon size={22} />,
+      label: 'Notas',
+      onClick: () => setActiveView(activeView === 'notes' ? 'chat' : 'notes'),
+      active: activeView === 'notes',
     },
     {
       id: 'calendar',
@@ -1045,6 +1088,12 @@ export function App(): JSX.Element {
               {activeView === 'insights' && (
                 <InsightsView onBack={() => setActiveView('chat')} />
               )}
+              {activeView === 'notes' && (
+                <NotesView
+                  onBack={() => setActiveView('chat')}
+                  initialNoteId={initialNoteId}
+                />
+              )}
               {activeView === 'chat' && wsRef.current && (
                 <ChatView
                   ws={wsRef.current}
@@ -1056,6 +1105,12 @@ export function App(): JSX.Element {
                   onTalkEnd={handleTalkEnd}
                   onTalkCancel={handleTalkCancel}
                   avatarController={avatarCtrlRef}
+                  initialText={pendingComposerText}
+                  initialAutoSend={pendingComposerAutoSend}
+                  onInitialTextConsumed={() => {
+                    setPendingComposerText(null);
+                    setPendingComposerAutoSend(false);
+                  }}
                   realtimeActive={realtimeActive}
                   onRealtimeToggle={() => {
                     setRealtimeActive((prev) => {
@@ -1145,6 +1200,26 @@ export function App(): JSX.Element {
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onAction={handlePaletteAction}
+      />
+
+      <ClipboardAssistModal
+        open={clipboardAssist.open}
+        content={clipboardAssist.content}
+        onClose={() => setClipboardAssist({ open: false, content: '' })}
+        onSendMessage={(msg) => {
+          // Route through the chat composer so the user bubble lands
+          // in the turns list. ChatView handles the actual WS.send().
+          setPendingComposerText(msg);
+          setPendingComposerAutoSend(true);
+          setClipboardAssist({ open: false, content: '' });
+          setActiveView('chat');
+        }}
+        onInsertInComposer={(text) => {
+          setPendingComposerText(text);
+          setPendingComposerAutoSend(false);
+          setClipboardAssist({ open: false, content: '' });
+          setActiveView('chat');
+        }}
       />
 
       <AnimatePresence>

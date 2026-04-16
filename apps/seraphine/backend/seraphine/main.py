@@ -35,6 +35,11 @@ from seraphine.water.service import WaterService
 from seraphine.insights import schema as insights_schema
 from seraphine.insights.routes import router as insights_router
 from seraphine.insights.service import InsightEngine
+from seraphine.notes import schema as notes_schema
+from seraphine.notes.routes import router as notes_router
+from seraphine.notes.service import NoteService
+from seraphine.music.routes import router as music_router
+from seraphine.music.service import FocusMusicService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -228,6 +233,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Water service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Notes — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    note_service = None
+    try:
+        store.register_migrator("seraphine_notes", notes_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        note_service = NoteService(store=store)
+        logger.info("Note service wired")
+    except Exception as e:
+        logger.warning("Note service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Insights — always enabled (SQLite-backed); analysers fan out over
     # whichever of finance/tasks/habits happened to come up.
     # ------------------------------------------------------------------
@@ -327,8 +344,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         recurring_service=recurring_service,
         habit_service=habit_service,
         water_service=water_service,
+        note_service=note_service,
         llm=llm,
     )
+    # ------------------------------------------------------------------
+    # Music / focus auto-play — SDD 017-A. Non-critical: reads memory
+    # taste facts and delegates to the already-wired ``play_music`` tool.
+    # ------------------------------------------------------------------
+    music_service = None
+    try:
+        music_service = FocusMusicService(store=store, registry=tools)
+        logger.info("Music service wired (focus auto-play)")
+    except Exception as e:
+        logger.warning("Music service failed (non-critical): %s", e)
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
     # ------------------------------------------------------------------
@@ -490,6 +518,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.recurring_service = recurring_service
     app.state.habit_service = habit_service
     app.state.water_service = water_service
+    app.state.note_service = note_service
+    app.state.music_service = music_service
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
@@ -699,6 +729,8 @@ def create_app() -> FastAPI:
     app.include_router(habits_router)
     app.include_router(water_router)
     app.include_router(insights_router)
+    app.include_router(notes_router)
+    app.include_router(music_router)
 
     from seraphine.reminders.routes import router as reminders_router
 
