@@ -13,6 +13,8 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod mic;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let toggle_shortcut = Shortcut::new(
@@ -29,6 +31,11 @@ pub fn run() {
     );
 
     tauri::Builder::default()
+        .manage(mic::MicState::new())
+        .invoke_handler(tauri::generate_handler![
+            mic::start_mic_capture,
+            mic::stop_mic_capture,
+        ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(

@@ -3,8 +3,13 @@
  *
  * Uses the shared AudioContext to avoid creating a second context
  * that deadlocks CoreAudio on macOS.
+ *
+ * In Tauri (desktop) mode, delegates to TauriMicCapture which uses
+ * native CoreAudio via cpal — because WKWebView doesn't expose
+ * navigator.mediaDevices on macOS.
  */
 import { getSharedAudioContext } from './sharedContext';
+import { TauriMicCapture, isTauriMicAvailable } from './tauriMic';
 
 type ChunkListener = (pcm: Int16Array) => void;
 
@@ -18,8 +23,21 @@ export class MicCapture {
   /** Silent sink so the ScriptProcessorNode runs without playing mic audio. */
   private silentGain: GainNode | null = null;
   private listeners = new Set<ChunkListener>();
+  /** Tauri native capture — used when running inside desktop app. */
+  private tauri: TauriMicCapture | null = null;
 
   async start(): Promise<void> {
+    // Desktop (Tauri): use native Rust/cpal capture
+    if (isTauriMicAvailable()) {
+      this.tauri = new TauriMicCapture();
+      this.tauri.onChunk((pcm) => {
+        this.listeners.forEach((cb) => cb(pcm));
+      });
+      await this.tauri.start();
+      return;
+    }
+
+    // Browser: Web Audio API
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     // Reuse the shared AudioContext (never create a new one).
@@ -53,6 +71,12 @@ export class MicCapture {
   }
 
   stop(): void {
+    // Tauri path
+    if (this.tauri) {
+      void this.tauri.stop();
+      this.tauri = null;
+      return;
+    }
     // Disconnect audio nodes but do NOT close the shared AudioContext.
     this.processor?.disconnect();
     this.source?.disconnect();

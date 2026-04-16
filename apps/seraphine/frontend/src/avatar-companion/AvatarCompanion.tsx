@@ -4,6 +4,7 @@ import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 import { PCMPlayback } from '../audio/playback';
+import { MicCapture } from '../audio/micCapture';
 
 const DEFAULT_AVATAR =
   localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm';
@@ -38,9 +39,13 @@ function loadCamera(): CameraSettings {
 export function AvatarCompanion(): JSX.Element {
   const controllerRef = useRef<VrmAvatarController | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
+  const wsRef = useRef<SeraphineWS | null>(null);
+  const micRef = useRef<MicCapture | null>(null);
+  const chunkOffRef = useRef<(() => void) | null>(null);
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [camera, setCamera] = useState<CameraSettings>(loadCamera);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [talking, setTalking] = useState(false);
 
   // Apply camera to controller whenever it changes
   useEffect(() => {
@@ -115,6 +120,7 @@ export function AvatarCompanion(): JSX.Element {
 
     // Open WS — reuse same URL convention
     const ws = new SeraphineWS();
+    wsRef.current = ws;
     ws.connect();
     ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
       if (msg instanceof ArrayBuffer) {
@@ -128,6 +134,59 @@ export function AvatarCompanion(): JSX.Element {
       }
     });
   }, []);
+
+  // Push-to-talk: hold mic button or Space
+  const startTalk = useCallback(async () => {
+    const ws = wsRef.current;
+    if (!ws || talking) return;
+    if (!micRef.current) micRef.current = new MicCapture();
+    setTalking(true);
+    ws.send({ type: 'audio_start', sample_rate: 16000 });
+    try {
+      await micRef.current.start();
+    } catch (err) {
+      console.error('[companion] mic start failed:', err);
+      setTalking(false);
+      return;
+    }
+    chunkOffRef.current = micRef.current.onChunk((pcm) => {
+      const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
+      ws.sendBinary(slice);
+    });
+  }, [talking]);
+
+  const stopTalk = useCallback(() => {
+    const ws = wsRef.current;
+    chunkOffRef.current?.();
+    chunkOffRef.current = null;
+    micRef.current?.stop();
+    setTalking(false);
+    if (ws) ws.send({ type: 'audio_end' });
+  }, []);
+
+  // Space hold = push-to-talk
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent): void => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if (e.code === 'Space' && !e.repeat && !talking) {
+        e.preventDefault();
+        void startTalk();
+      }
+    };
+    const onUp = (e: KeyboardEvent): void => {
+      if (e.code === 'Space' && talking) {
+        e.preventDefault();
+        stopTalk();
+      }
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, [talking, startTalk, stopTalk]);
 
   // Shift+drag to move the window (Tauri startDragging on mousedown)
   const startDrag = useCallback(() => {
@@ -214,41 +273,43 @@ export function AvatarCompanion(): JSX.Element {
         />
       )}
 
-      {/* Open main window button (bottom-center) */}
+      {/* Mic button (bottom-center) */}
       <button
-        onClick={async () => {
-          try {
-            const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-            const main = await WebviewWindow.getByLabel('main');
-            await main?.show();
-            await main?.setFocus();
-            await main?.unminimize();
-          } catch { /* ignore */ }
-        }}
-        title="Abrir janela principal (mic funciona la)"
+        onMouseDown={() => void startTalk()}
+        onMouseUp={stopTalk}
+        onMouseLeave={() => { if (talking) stopTalk(); }}
+        title="Segure pra falar (ou Space)"
         style={{
           position: 'absolute',
-          bottom: 12,
+          bottom: 16,
           left: '50%',
           transform: 'translateX(-50%)',
-          padding: '8px 16px',
-          borderRadius: 20,
-          background: 'rgba(17, 17, 26, 0.7)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          color: '#c4b5fd',
+          width: 48,
+          height: 48,
+          borderRadius: '50%',
+          background: talking
+            ? 'linear-gradient(135deg, #a78bfa, #6366f1)'
+            : 'rgba(17, 17, 26, 0.75)',
+          border: talking ? 'none' : '1px solid rgba(255,255,255,0.15)',
+          color: talking ? '#fff' : '#c4b5fd',
           cursor: 'pointer',
-          fontSize: 12,
-          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           backdropFilter: 'blur(8px)',
-          opacity: 0.8,
-          transition: 'opacity 150ms',
+          boxShadow: talking
+            ? '0 0 24px rgba(167, 139, 250, 0.6)'
+            : '0 4px 12px rgba(0, 0, 0, 0.3)',
+          transition: 'all 150ms',
           zIndex: 15,
-          fontFamily: 'inherit',
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.8'; }}
       >
-        Abrir conversa
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="1" width="6" height="13" rx="3"/>
+          <path d="M5 10a7 7 0 0 0 14 0"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+        </svg>
       </button>
     </div>
   );
