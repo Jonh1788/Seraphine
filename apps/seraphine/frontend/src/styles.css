@@ -7493,6 +7493,63 @@ button:disabled {
   transition: width 0.4s ease;
 }
 
+/* --- Briefing task lists --- */
+
+.dashboard__briefing-top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dashboard__task-list {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dashboard__task-list-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+  margin-bottom: var(--space-2);
+}
+
+.dashboard__task-list-title--done { color: #4ade80; }
+.dashboard__task-list-title--overdue { color: #ef4444; }
+
+.dashboard__task-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.dashboard__task-item svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.dashboard__task-item--done {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.dashboard__task-item--done svg { color: #4ade80; opacity: 1; }
+
+.dashboard__task-item--overdue { color: #ef4444; }
+.dashboard__task-item--overdue svg { color: #ef4444; opacity: 1; }
+
+.dashboard__task-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Modules Grid --- */
 
 .dashboard__grid {

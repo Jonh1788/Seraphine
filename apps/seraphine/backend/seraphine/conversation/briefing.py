@@ -233,28 +233,48 @@ async def generate_dashboard_summary(
     tasks_completed = 0
     tasks_overdue = 0
     pending_titles: list[str] = []
+    completed_titles: list[str] = []
+    overdue_items: list[dict[str, str]] = []
+    now_time_str = now_br.strftime("%H:%M")
 
     if task_service is not None:
         try:
             all_pending = await task_service.list_tasks(status="pending", limit=200)
             for t in all_pending:
                 due = getattr(t, "due_date", None)
+                due_time = getattr(t, "due_time", None)
+                title = getattr(t, "title", "?")
                 if due is not None and str(due) < today_str:
+                    # Past date = overdue
                     tasks_overdue += 1
+                    overdue_items.append({
+                        "title": title,
+                        "due_date": str(due),
+                        "due_time": str(due_time)[:5] if due_time else None,
+                    })
                 elif due is not None and str(due) == today_str:
-                    tasks_total += 1
-                    pending_titles.append(getattr(t, "title", "?"))
+                    if due_time and str(due_time)[:5] < now_time_str:
+                        # Today but past time = overdue
+                        tasks_overdue += 1
+                        overdue_items.append({
+                            "title": title,
+                            "due_date": str(due),
+                            "due_time": str(due_time)[:5],
+                        })
+                    else:
+                        tasks_total += 1
+                        pending_titles.append(title)
             # Also count completed today
             all_completed = await task_service.list_tasks(status="completed", limit=200)
             for t in all_completed:
                 due = getattr(t, "due_date", None)
                 updated = getattr(t, "updated_at", None)
-                # Count as completed today if due_date is today
-                # or updated_at starts with today's date.
+                title = getattr(t, "title", "?")
                 if (due is not None and str(due) == today_str) or (
                     updated is not None and str(updated)[:10] == today_str
                 ):
                     tasks_completed += 1
+                    completed_titles.append(title)
         except Exception as exc:
             logger.warning("dashboard: task_service failed: %s", exc)
 
@@ -340,6 +360,8 @@ async def generate_dashboard_summary(
             "completed": tasks_completed,
             "overdue": tasks_overdue,
             "pending_titles": pending_titles,
+            "completed_titles": completed_titles,
+            "overdue_items": overdue_items,
         },
         "next_events": next_events,
         "finance_month": {

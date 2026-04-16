@@ -5,7 +5,15 @@ import {
   FinanceIcon,
   CalendarIcon,
   ClockIcon,
+  CircleIcon,
+  CheckCircleIcon,
 } from '../icons/Icons';
+
+interface OverdueItem {
+  title: string;
+  due_date: string;
+  due_time?: string | null;
+}
 
 interface DashboardSummary {
   greeting: string;
@@ -15,6 +23,8 @@ interface DashboardSummary {
     completed: number;
     overdue: number;
     pending_titles: string[];
+    completed_titles: string[];
+    overdue_items: OverdueItem[];
   };
   next_events: Array<{
     title: string;
@@ -167,15 +177,63 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
       {/* --- Briefing --- */}
       {tasks && (
         <div className="dashboard__briefing">
-          <div className="dashboard__briefing-label">
-            {tasks.completed} de {tasks.total} concluidos
+          <div className="dashboard__briefing-top">
+            <div className="dashboard__briefing-label">
+              {tasks.completed} de {tasks.total} concluidos
+            </div>
+            <div className="dashboard__progress-bar">
+              <div
+                className="dashboard__progress-fill"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
           </div>
-          <div className="dashboard__progress-bar">
-            <div
-              className="dashboard__progress-fill"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+
+          {/* Completed tasks */}
+          {tasks.completed_titles && tasks.completed_titles.length > 0 && (
+            <div className="dashboard__task-list">
+              <div className="dashboard__task-list-title dashboard__task-list-title--done">
+                Concluidas
+              </div>
+              {tasks.completed_titles.map((t, i) => (
+                <div key={`done-${i}`} className="dashboard__task-item dashboard__task-item--done">
+                  <CheckCircleIcon size={14} />
+                  <span>{t}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Overdue tasks */}
+          {tasks.overdue_items && tasks.overdue_items.length > 0 && (
+            <div className="dashboard__task-list">
+              <div className="dashboard__task-list-title dashboard__task-list-title--overdue">
+                Atrasadas
+              </div>
+              {tasks.overdue_items.map((item, i) => (
+                <div key={`late-${i}`} className="dashboard__task-item dashboard__task-item--overdue">
+                  <ClockIcon size={14} />
+                  <span>{item.title}</span>
+                  {item.due_time && (
+                    <span className="dashboard__task-time">{item.due_time}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Pending tasks */}
+          {tasks.pending_titles && tasks.pending_titles.length > 0 && (
+            <div className="dashboard__task-list">
+              <div className="dashboard__task-list-title">Pendentes</div>
+              {tasks.pending_titles.map((t, i) => (
+                <div key={`pend-${i}`} className="dashboard__task-item">
+                  <CircleIcon size={14} />
+                  <span>{t}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
