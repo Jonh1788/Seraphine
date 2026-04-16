@@ -30,6 +30,9 @@ export function AvatarCompanion(): JSX.Element {
   const handleReady = useCallback((ctrl: VrmAvatarController) => {
     controllerRef.current = ctrl;
 
+    // Use full-body camera preset so the avatar fits the narrow window
+    ctrl.setCameraPreset('fullBody');
+
     // Attach audio analyser for lipsync
     const playback = new PCMPlayback();
     playbackRef.current = playback;
@@ -53,10 +56,8 @@ export function AvatarCompanion(): JSX.Element {
     });
   }, []);
 
-  // Shift+drag to move the window
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!e.shiftKey) return;
-    e.preventDefault();
+  // Shift+drag to move the window (Tauri startDragging on mousedown)
+  const startDrag = useCallback(() => {
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       void getCurrentWindow().startDragging();
     }).catch(() => {});
@@ -65,6 +66,7 @@ export function AvatarCompanion(): JSX.Element {
   return (
     <div
       style={{
+        position: 'relative',
         width: '100vw',
         height: '100vh',
         background: 'transparent',
@@ -73,13 +75,26 @@ export function AvatarCompanion(): JSX.Element {
         justifyContent: 'center',
         cursor: 'default',
       }}
-      onMouseDown={onMouseDown}
     >
       <VrmAvatar
         avatarUrl={DEFAULT_AVATAR}
         width={size.w}
         height={size.h}
         onReady={handleReady}
+      />
+      {/* Transparent drag handle across the top ~40px — drag here to move */}
+      <div
+        onMouseDown={startDrag}
+        title="Arrastar"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 40,
+          cursor: 'grab',
+          zIndex: 10,
+        }}
       />
     </div>
   );
