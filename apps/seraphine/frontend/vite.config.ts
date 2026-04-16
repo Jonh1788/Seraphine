@@ -93,6 +93,9 @@ export default defineConfig({
       '/recurring': {
         target: 'http://127.0.0.1:8000',
       },
+      '/habits': {
+        target: 'http://127.0.0.1:8000',
+      },
       '/push': {
         target: 'http://127.0.0.1:8000',
       },

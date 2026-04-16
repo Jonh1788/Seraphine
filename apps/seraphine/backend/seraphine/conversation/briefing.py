@@ -210,6 +210,7 @@ async def generate_dashboard_summary(
     task_service: Any | None = None,
     finance_service: Any | None = None,
     google_client: Any | None = None,
+    habit_service: Any | None = None,
 ) -> dict:
     """Build a structured dashboard summary dict.
 
@@ -352,7 +353,16 @@ async def generate_dashboard_summary(
         except Exception as exc:
             logger.warning("dashboard: finance pending failed: %s", exc)
 
-    return {
+    # --- Habits -------------------------------------------------------
+    habits_today: dict[str, Any] | None = None
+    if habit_service is not None:
+        try:
+            habits_today = await habit_service.get_today_progress()
+        except Exception as exc:
+            logger.warning("dashboard: habit_service failed: %s", exc)
+            habits_today = None
+
+    result: dict[str, Any] = {
         "greeting": greeting,
         "date": date_label,
         "tasks_today": {
@@ -371,6 +381,9 @@ async def generate_dashboard_summary(
             "pending_review": finance_pending_review,
         },
     }
+    if habits_today is not None:
+        result["habits_today"] = habits_today
+    return result
 
 
 @router.get("/dashboard/summary")
@@ -380,4 +393,5 @@ async def dashboard_summary(request: Request) -> dict:
         task_service=getattr(request.app.state, "task_service", None),
         finance_service=getattr(request.app.state, "finance_service", None),
         google_client=getattr(request.app.state, "google_client", None),
+        habit_service=getattr(request.app.state, "habit_service", None),
     )

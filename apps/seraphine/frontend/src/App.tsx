@@ -20,6 +20,7 @@ import { WhatsAppPanel } from './whatsapp';
 import type { WhatsAppMessage } from './whatsapp';
 import { MemoryView } from './memory';
 import { TasksView } from './tasks';
+import { HabitsView } from './habits';
 import { DashboardView } from './dashboard';
 import {
   ChatIcon,
@@ -33,11 +34,12 @@ import {
   TasksIcon,
   BellIcon,
   DashboardIcon,
+  FlameIcon,
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
 
-type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -166,7 +168,8 @@ export function App(): JSX.Element {
       view === 'calendar' ||
       view === 'whatsapp' ||
       view === 'memory' ||
-      view === 'tasks'
+      view === 'tasks' ||
+      view === 'habits'
     ) {
       setActiveView(view);
       // Deep-link to a specific task card.
@@ -662,6 +665,7 @@ export function App(): JSX.Element {
       '4': 'tasks',
       '5': 'finance',
       '6': 'memory',
+      '7': 'habits',
     };
 
     const onKey = (e: KeyboardEvent): void => {
@@ -739,6 +743,7 @@ export function App(): JSX.Element {
       tasks: 'tasks',
       finance: 'finance',
       memory: 'memory',
+      habits: 'habits',
     };
     if (viewActions[action]) {
       setActiveView(viewActions[action]);
@@ -806,6 +811,13 @@ export function App(): JSX.Element {
       active: activeView === 'tasks',
       badge: tasksPendingCount > 0,
       badgeCount: tasksPendingCount,
+    },
+    {
+      id: 'habits',
+      icon: <FlameIcon size={22} />,
+      label: 'Habitos',
+      onClick: () => setActiveView(activeView === 'habits' ? 'chat' : 'habits'),
+      active: activeView === 'habits',
     },
     {
       id: 'calendar',
@@ -985,6 +997,9 @@ export function App(): JSX.Element {
               onBack={() => setActiveView('chat')}
               focusId={focusedTaskId}
             />
+          )}
+          {activeView === 'habits' && (
+            <HabitsView onBack={() => setActiveView('chat')} />
           )}
           {activeView === 'chat' && wsRef.current && (
             <ChatView

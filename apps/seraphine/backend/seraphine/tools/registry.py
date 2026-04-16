@@ -66,6 +66,7 @@ def build_default_registry(
     finance_service: Any = None,
     task_service: Any = None,
     recurring_service: Any = None,
+    habit_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -199,6 +200,11 @@ def build_default_registry(
         from seraphine.tools.recurring import CreateRecurringTaskTool
 
         reg.register(CreateRecurringTaskTool(recurring_service))
+    if habit_service is not None:
+        from seraphine.tools.habits import CreateHabitTool, ToggleHabitTool
+
+        reg.register(CreateHabitTool(habit_service))
+        reg.register(ToggleHabitTool(habit_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":

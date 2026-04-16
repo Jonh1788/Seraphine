@@ -26,6 +26,9 @@ from seraphine.ws.routes import router as ws_router
 from seraphine.recurring import schema as recurring_schema
 from seraphine.recurring.routes import router as recurring_router
 from seraphine.recurring.service import RecurringService
+from seraphine.habits import schema as habits_schema
+from seraphine.habits.routes import router as habits_router
+from seraphine.habits.service import HabitService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -195,6 +198,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Recurring service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Habits — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    habit_service = None
+    try:
+        store.register_migrator("seraphine_habits", habits_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        habit_service = HabitService(store)
+        logger.info("Habit service wired")
+    except Exception as e:
+        logger.warning("Habit service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -274,6 +289,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         finance_service=finance_service,
         task_service=task_service,
         recurring_service=recurring_service,
+        habit_service=habit_service,
         llm=llm,
     )
     # ------------------------------------------------------------------
@@ -433,6 +449,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.email_scanner = email_scanner
     app.state.reminder_scheduler = reminder_scheduler
     app.state.recurring_service = recurring_service
+    app.state.habit_service = habit_service
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
@@ -541,6 +558,7 @@ def create_app() -> FastAPI:
     app.include_router(push_router)
     app.include_router(tasks_router)
     app.include_router(recurring_router)
+    app.include_router(habits_router)
 
     from seraphine.reminders.routes import router as reminders_router
 
