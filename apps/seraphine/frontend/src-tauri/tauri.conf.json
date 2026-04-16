@@ -29,6 +29,22 @@
         "center": true,
         "visible": true,
         "url": "/"
+      },
+      {
+        "label": "quick-capture",
+        "title": "Quick Capture",
+        "width": 520,
+        "height": 220,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "center": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "focus": true,
+        "acceptFirstMouse": true,
+        "url": "/quick-capture.html"
       }
     ],
     "security": {

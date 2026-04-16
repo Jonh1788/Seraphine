@@ -36,12 +36,15 @@ pub fn run() {
                     if shortcut == &toggle_shortcut {
                         toggle_main_window(app);
                     } else if shortcut == &capture_shortcut {
-                        // Bring the window to front and emit quick-capture event.
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("quick-capture", ());
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.unminimize();
+                        // Toggle the dedicated quick-capture floating window.
+                        if let Some(window) = app.get_webview_window("quick-capture") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = window.emit("quick-capture-open", ());
+                            }
                         }
                     }
                 })
@@ -86,9 +89,15 @@ pub fn run() {
             // Close button hides instead of quitting — the app is meant
             // to live in the tray.
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                if window.label() == "main" || window.label() == "quick-capture" {
                     let _ = window.hide();
                     api.prevent_close();
+                }
+            }
+            // Auto-hide quick-capture when it loses focus (click outside)
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == "quick-capture" {
+                    let _ = window.hide();
                 }
             }
         })

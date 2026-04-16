@@ -42,6 +42,14 @@ export default defineConfig({
   optimizeDeps: {
     include: ['@ricky0123/vad-web', 'onnxruntime-web'],
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        'quick-capture': 'quick-capture.html',
+      },
+    },
+  },
   server: {
     port: 5173,
     host: '0.0.0.0',
