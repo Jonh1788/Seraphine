@@ -50,6 +50,7 @@ export function AvatarCompanion(): JSX.Element {
   const [realtimeActive, setRealtimeActive] = useState(false);
   const [ws, setWs] = useState<SeraphineWS | null>(null);
   const [playback, setPlayback] = useState<PCMPlayback | null>(null);
+  const [debugMsg, setDebugMsg] = useState<string>('');
 
   // Apply camera to controller whenever it changes
   useEffect(() => {
@@ -145,17 +146,20 @@ export function AvatarCompanion(): JSX.Element {
   const talkingRef = useRef(false);
   const startTalk = useCallback(async () => {
     const ws = wsRef.current;
-    console.log('[companion] startTalk — ws:', !!ws, 'talking:', talkingRef.current);
-    if (!ws || talkingRef.current) return;
+    setDebugMsg(`startTalk ws=${!!ws} talking=${talkingRef.current}`);
+    if (!ws || talkingRef.current) {
+      setDebugMsg(`skip: ws=${!!ws} talking=${talkingRef.current}`);
+      return;
+    }
     talkingRef.current = true;
     setTalking(true);
     if (!micRef.current) micRef.current = new MicCapture();
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     try {
       await micRef.current.start();
-      console.log('[companion] mic started ok');
+      setDebugMsg('mic ok');
     } catch (err) {
-      console.error('[companion] mic start failed:', err);
+      setDebugMsg(`MIC ERR: ${String(err).slice(0, 80)}`);
       talkingRef.current = false;
       setTalking(false);
       return;
@@ -275,6 +279,31 @@ export function AvatarCompanion(): JSX.Element {
           onReset={() => setCamera(DEFAULT_CAMERA)}
           onClose={() => setEditorOpen(false)}
         />
+      )}
+
+      {/* Debug overlay (top-center) */}
+      {debugMsg && (
+        <div
+          onClick={() => setDebugMsg('')}
+          style={{
+            position: 'absolute',
+            top: 48,
+            left: 12,
+            right: 12,
+            background: 'rgba(239, 68, 68, 0.9)',
+            color: '#fff',
+            padding: '6px 10px',
+            borderRadius: 6,
+            fontSize: 10,
+            zIndex: 20,
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            wordBreak: 'break-all',
+          }}
+          title="Click to dismiss"
+        >
+          {debugMsg}
+        </div>
       )}
 
       {/* Audio controls (bottom-center) */}
