@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { XIcon, BellIcon } from '../icons/Icons';
 import type { WaterActivityLevel, WaterProfile, WaterProfileInput } from './types';
 
@@ -95,7 +96,7 @@ export function WaterSetupModal({
     onSubmit(payload);
   };
 
-  return (
+  return createPortal(
     <div className="password-modal-backdrop" onClick={busy ? undefined : onClose}>
       <form
         className="task-editor-modal water-setup-modal"
@@ -277,6 +278,7 @@ export function WaterSetupModal({
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
