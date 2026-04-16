@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI
@@ -29,6 +29,9 @@ from seraphine.recurring.service import RecurringService
 from seraphine.habits import schema as habits_schema
 from seraphine.habits.routes import router as habits_router
 from seraphine.habits.service import HabitService
+from seraphine.water import schema as water_schema
+from seraphine.water.routes import router as water_router
+from seraphine.water.service import WaterService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -210,6 +213,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Habit service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Water tracking — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    water_service = None
+    try:
+        store.register_migrator("seraphine_water", water_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        water_service = WaterService(store)
+        logger.info("Water service wired")
+    except Exception as e:
+        logger.warning("Water service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -290,6 +305,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task_service=task_service,
         recurring_service=recurring_service,
         habit_service=habit_service,
+        water_service=water_service,
         llm=llm,
     )
     # ------------------------------------------------------------------
@@ -450,6 +466,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reminder_scheduler = reminder_scheduler
     app.state.recurring_service = recurring_service
     app.state.habit_service = habit_service
+    app.state.water_service = water_service
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
@@ -490,6 +507,66 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         materialize_task = asyncio.create_task(_materialize_loop())
 
+    # ------------------------------------------------------------------
+    # Background water reminder loop — every 10 minutes
+    # ------------------------------------------------------------------
+    water_reminder_task: asyncio.Task[None] | None = None
+    if water_service is not None:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        _SP = _ZoneInfo("America/Sao_Paulo")
+
+        async def _water_reminder_loop() -> None:
+            from seraphine.reminders.notify import notify_reminder
+
+            interval = 600  # 10 min
+            while True:
+                try:
+                    profile = await water_service.get_profile()
+                    if profile is not None and profile.reminder_enabled:
+                        now_sp = datetime.now(_SP)
+                        now_hhmm = now_sp.strftime("%H:%M")
+                        within_window = (
+                            profile.reminder_start
+                            <= now_hhmm
+                            <= profile.reminder_end
+                        )
+                        if within_window:
+                            last_intake = await water_service.last_intake_at()
+                            last_fired = (
+                                await water_service.get_last_reminder_fired_at()
+                            )
+                            now_utc = datetime.now(timezone.utc)
+                            gap = timedelta(
+                                hours=max(1, int(profile.reminder_interval_hours)),
+                            )
+                            intake_overdue = (
+                                last_intake is None
+                                or (now_utc - last_intake) >= gap
+                            )
+                            not_spammed = (
+                                last_fired is None
+                                or (now_utc - last_fired) >= gap
+                            )
+                            if intake_overdue and not_spammed:
+                                await notify_reminder(
+                                    app.state,
+                                    f"water-{now_utc.isoformat()}",
+                                    "Bora beber agua!",
+                                )
+                                await water_service.mark_reminder_fired(now_utc)
+                                logger.info(
+                                    "water reminder fired (last_intake=%s)",
+                                    last_intake,
+                                )
+                except Exception:
+                    logger.exception("water reminder loop iteration failed")
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+
+        water_reminder_task = asyncio.create_task(_water_reminder_loop())
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
@@ -498,6 +575,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             materialize_task.cancel()
             try:
                 await materialize_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if water_reminder_task is not None:
+            water_reminder_task.cancel()
+            try:
+                await water_reminder_task
             except (asyncio.CancelledError, Exception):
                 pass
         if mcp_tools_watcher is not None:
@@ -559,6 +642,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(recurring_router)
     app.include_router(habits_router)
+    app.include_router(water_router)
 
     from seraphine.reminders.routes import router as reminders_router
 

@@ -8,6 +8,7 @@ import {
   CircleIcon,
   CheckCircleIcon,
 } from '../icons/Icons';
+import { WaterWidget } from '../water';
 
 interface OverdueItem {
   title: string;
@@ -260,6 +261,9 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
           </button>
         ))}
       </div>
+
+      {/* --- Water --- */}
+      <WaterWidget />
 
       {/* --- Timeline --- */}
       <div className="dashboard__timeline">

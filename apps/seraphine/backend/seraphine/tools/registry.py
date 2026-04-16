@@ -67,6 +67,7 @@ def build_default_registry(
     task_service: Any = None,
     recurring_service: Any = None,
     habit_service: Any = None,
+    water_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -205,6 +206,11 @@ def build_default_registry(
 
         reg.register(CreateHabitTool(habit_service))
         reg.register(ToggleHabitTool(habit_service))
+    if water_service is not None:
+        from seraphine.tools.water import LogWaterTool, SetupWaterTool
+
+        reg.register(LogWaterTool(water_service))
+        reg.register(SetupWaterTool(water_service))
     # macOS screen tools — always registered (no client needed, uses subprocess)
     import sys
     if sys.platform == "darwin":
