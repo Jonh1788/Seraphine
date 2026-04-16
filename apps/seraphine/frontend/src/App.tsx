@@ -9,6 +9,10 @@ import { ApprovalPanel } from './tools';
 import type { LatencyMetrics } from './metrics';
 import { CalendarModal, EmailInboxModal } from './google';
 import { getAuthStatus, listImportantEmails } from './google/api';
+import { notify } from './utils/notify';
+import { useFocusTimer } from './focus/useFocusTimer';
+import type { FocusPhase } from './focus/useFocusTimer';
+import { FocusPill } from './focus/FocusPill';
 import { AvatarLab } from './lab';
 import { FinanceDashboard } from './finance';
 import { CalendarView } from './calendar';
@@ -30,6 +34,7 @@ import {
   BellIcon,
   DashboardIcon,
 } from './icons/Icons';
+import { CommandPalette } from './command-palette/CommandPalette';
 
 type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
 
@@ -75,6 +80,10 @@ export function App(): JSX.Element {
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'subscribed' | 'error' | 'denied' | 'unsupported'>('idle');
   const [pushMsg, setPushMsg] = useState<string | null>(null);
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(undefined);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+  const [quickNewTaskOpen, setQuickNewTaskOpen] = useState<boolean>(false);
+  const [quickTaskTitle, setQuickTaskTitle] = useState<string>('');
+  const quickTaskInputRef = useRef<HTMLInputElement>(null);
 
   // Subscribe to Web Push — exposed so a UI button can trigger it manually.
   const subscribeToPush = useCallback(async (): Promise<void> => {
@@ -225,6 +234,25 @@ export function App(): JSX.Element {
   }, [whatsappUnread, unreadCount]);
 
   const avatarCtrlRef = useRef<VrmAvatarController | null>(null);
+
+  // Pomodoro / Focus timer
+  const handleFocusTransition = useCallback((from: FocusPhase, to: FocusPhase) => {
+    const ctrl = avatarCtrlRef.current;
+    if (!ctrl) return;
+    if (to === 'work' && from === 'idle') {
+      ctrl.setExpression?.('focused', 300, 0);
+    } else if (to === 'work') {
+      ctrl.setExpression?.('focused', 300, 0);
+    } else if (to === 'break' || to === 'long_break') {
+      ctrl.setExpression?.('warm', 300, 0);
+    }
+    // After a full cycle (4 pomodoros), celebrate
+    if (from === 'long_break' && to === 'work') {
+      ctrl.setExpression?.('happy', 300, 3000);
+    }
+  }, []);
+  const [focusState, focusActions] = useFocusTimer(handleFocusTransition);
+
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playbackRef = useRef<PCMPlayback | null>(null);
@@ -293,12 +321,8 @@ export function App(): JSX.Element {
         // Proactive notification from Supertasks MCP
         const notif = msg as { message?: string; title?: string; status?: string };
         const text = notif.message || `Task "${notif.title}" ${notif.status}`;
-        // Show as a browser notification if permitted
-        if (Notification.permission === 'granted') {
-          new Notification('Seraphine', { body: text });
-        } else if (Notification.permission !== 'denied') {
-          void Notification.requestPermission();
-        }
+        // Show a native notification
+        void notify('Seraphine', text);
       } else if (type === 'whatsapp_notification') {
         const wa = msg as { fromMe?: boolean; author?: string; body?: string; chatName?: string; chatId?: string; important?: boolean; timestamp?: number };
         if (!wa.fromMe) {
@@ -312,14 +336,10 @@ export function App(): JSX.Element {
             fromMe: false,
             important: wa.important || false,
           }, ...prev].slice(0, 100));
-          // Important messages also trigger a browser notification
+          // Important messages also trigger a native notification
           if (wa.important) {
             const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
-            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-              new Notification('Seraphine — WhatsApp', { body: text });
-            } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
-              void Notification.requestPermission();
-            }
+            void notify('Seraphine -- WhatsApp', text);
           }
         }
       } else if (type === 'mood') {
@@ -602,17 +622,120 @@ export function App(): JSX.Element {
     };
   }, [status]);
 
-  // Ctrl+L shortcut to toggle Avatar Lab
+  // Unified keyboard shortcuts (Cmd+1-6, Cmd+K, Cmd+N, Ctrl+L, Escape)
+  const commandPaletteOpenRef = useRef(false);
+  commandPaletteOpenRef.current = commandPaletteOpen;
+
   useEffect(() => {
+    const isTyping = (): boolean => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable === true;
+    };
+
+    const viewMap: Record<string, ActiveView> = {
+      '1': 'dashboard',
+      '2': 'chat',
+      '3': 'calendar',
+      '4': 'tasks',
+      '5': 'finance',
+      '6': 'memory',
+    };
+
     const onKey = (e: KeyboardEvent): void => {
+      // Ctrl+L — Avatar Lab (always)
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
         e.preventDefault();
         setLabOpen((v) => !v);
+        return;
+      }
+
+      // Escape — close command palette or quick task
+      if (e.key === 'Escape') {
+        if (commandPaletteOpenRef.current) {
+          e.preventDefault();
+          setCommandPaletteOpen(false);
+          return;
+        }
+        if (quickNewTaskOpen) {
+          e.preventDefault();
+          setQuickNewTaskOpen(false);
+          return;
+        }
+        return;
+      }
+
+      if (!e.metaKey) return;
+
+      // Cmd+K — toggle command palette (always fires)
+      if (e.key === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((v) => !v);
+        return;
+      }
+
+      // Cmd+N — quick new task (always fires)
+      if (e.key === 'n') {
+        e.preventDefault();
+        setQuickNewTaskOpen(true);
+        setQuickTaskTitle('');
+        return;
+      }
+
+      // Cmd+1-6 — view switching (skip when typing in input/textarea)
+      const view = viewMap[e.key];
+      if (view && !isTyping()) {
+        e.preventDefault();
+        setActiveView(view);
+        setCommandPaletteOpen(false);
+        return;
       }
     };
+
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [quickNewTaskOpen]);
+
+  // Command palette action handler
+  const handlePaletteAction = useCallback((action: string) => {
+    const viewActions: Record<string, ActiveView> = {
+      dashboard: 'dashboard',
+      chat: 'chat',
+      calendar: 'calendar',
+      tasks: 'tasks',
+      finance: 'finance',
+      memory: 'memory',
+    };
+    if (viewActions[action]) {
+      setActiveView(viewActions[action]);
+    } else if (action === 'new-task') {
+      setQuickNewTaskOpen(true);
+      setQuickTaskTitle('');
+    } else if (action === 'focus-chat') {
+      setActiveView('chat');
+      // Focus the chat input after view renders
+      requestAnimationFrame(() => {
+        const el = document.querySelector('.chat-input__textarea, .chat-input input') as HTMLElement | null;
+        el?.focus();
+      });
+    }
   }, []);
+
+  // Quick task submit
+  const handleQuickTaskSubmit = useCallback(async () => {
+    const title = quickTaskTitle.trim();
+    if (!title) return;
+    try {
+      await fetch('/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+    } catch {
+      // Silently fail — the task list will show it on next refresh
+    }
+    setQuickNewTaskOpen(false);
+    setQuickTaskTitle('');
+  }, [quickTaskTitle]);
 
   const connected = status === 'connected';
 
@@ -692,6 +815,7 @@ export function App(): JSX.Element {
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">
+          <FocusPill state={focusState} actions={focusActions} />
           <button
             type="button"
             className={`btn-lab btn-push btn-push--${pushStatus}`}
@@ -914,6 +1038,40 @@ export function App(): JSX.Element {
           controller={avatarCtrlRef.current}
           onClose={() => setLabOpen(false)}
         />
+      )}
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onAction={handlePaletteAction}
+      />
+
+      {quickNewTaskOpen && (
+        <div className="quick-task-overlay" onClick={() => setQuickNewTaskOpen(false)}>
+          <div className="quick-task" onClick={(e) => e.stopPropagation()}>
+            <div className="quick-task__title">Nova Tarefa</div>
+            <input
+              ref={quickTaskInputRef}
+              className="quick-task__input"
+              type="text"
+              placeholder="Titulo da tarefa..."
+              value={quickTaskTitle}
+              autoFocus
+              onChange={(e) => setQuickTaskTitle(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleQuickTaskSubmit();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setQuickNewTaskOpen(false);
+                }
+              }}
+            />
+            <div className="quick-task__hint">Enter para criar, Esc para cancelar</div>
+          </div>
+        </div>
       )}
     </div>
   );
