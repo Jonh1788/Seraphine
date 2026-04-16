@@ -11,6 +11,7 @@ import * as ort from 'onnxruntime-web';
 import { MicVAD } from '@ricky0123/vad-web';
 import { getSharedAudioContext } from '../audio/sharedContext';
 import { computeRmsFloat32 } from './gating';
+import { isTauriMicAvailable } from '../audio/tauriMic';
 
 // Disable threaded wasm worker. onnxruntime-web's default path spawns
 // `new Worker(new URL('./ort-wasm-simd-threaded.mjs', ...))` for
@@ -65,6 +66,13 @@ export interface RealtimeVAD {
 export async function createRealtimeVAD(
   opts: RealtimeVADOptions,
 ): Promise<RealtimeVAD> {
+  // Desktop (Tauri): WKWebView doesn't expose getUserMedia, so use our
+  // native-capture-based VAD with energy detection instead of Silero.
+  if (isTauriMicAvailable()) {
+    const { createTauriRealtimeVAD } = await import('./tauriVad');
+    return createTauriRealtimeVAD(opts);
+  }
+
   // Share the AudioContext with mic capture + playback so macOS CoreAudio
   // stays happy with a single HAL consumer.
   const audioContext = getSharedAudioContext();
