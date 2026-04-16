@@ -30,8 +30,12 @@ export function AvatarCompanion(): JSX.Element {
   const handleReady = useCallback((ctrl: VrmAvatarController) => {
     controllerRef.current = ctrl;
 
-    // Use full-body camera preset so the avatar fits the narrow window
-    ctrl.setCameraPreset('fullBody');
+    // Bust framing tuned for the 320x480 narrow companion window
+    (ctrl as any).cameraTarget = {
+      px: 0, py: 1.42, pz: 1.3,
+      lx: 0, ly: 1.32, lz: 0,
+      fov: 28,
+    };
 
     // Attach audio analyser for lipsync
     const playback = new PCMPlayback();
