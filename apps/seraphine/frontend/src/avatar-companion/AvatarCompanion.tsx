@@ -5,6 +5,7 @@ import { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 import { PCMPlayback } from '../audio/playback';
 import { MicCapture } from '../audio/micCapture';
+import { RealtimeController } from '../realtime';
 
 const DEFAULT_AVATAR =
   localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm';
@@ -46,6 +47,9 @@ export function AvatarCompanion(): JSX.Element {
   const [camera, setCamera] = useState<CameraSettings>(loadCamera);
   const [editorOpen, setEditorOpen] = useState(false);
   const [talking, setTalking] = useState(false);
+  const [realtimeActive, setRealtimeActive] = useState(false);
+  const [ws, setWs] = useState<SeraphineWS | null>(null);
+  const [playback, setPlayback] = useState<PCMPlayback | null>(null);
 
   // Apply camera to controller whenever it changes
   useEffect(() => {
@@ -112,20 +116,21 @@ export function AvatarCompanion(): JSX.Element {
     }, 500);
 
     // Attach audio analyser for lipsync
-    const playback = new PCMPlayback();
-    playbackRef.current = playback;
-    playback.ensureCtx();
-    const analyser = playback.getAnalyser();
+    const pb = new PCMPlayback();
+    playbackRef.current = pb;
+    pb.ensureCtx();
+    const analyser = pb.getAnalyser();
     if (analyser) ctrl.attachAudioAnalyser(analyser);
+    setPlayback(pb);
 
     // Open WS — reuse same URL convention
-    const ws = new SeraphineWS();
-    wsRef.current = ws;
-    ws.connect();
-    ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
+    const wsClient = new SeraphineWS();
+    wsRef.current = wsClient;
+    wsClient.connect();
+    wsClient.onMessage((msg: ServerMessage | ArrayBuffer) => {
       if (msg instanceof ArrayBuffer) {
         // TTS audio stream chunk
-        playback.pushChunk(msg);
+        pb.pushChunk(msg);
         return;
       }
       if ((msg as ServerMessage).type === 'mood') {
@@ -133,6 +138,7 @@ export function AvatarCompanion(): JSX.Element {
         ctrl.setExpression(m.mood, 300, m.duration_ms);
       }
     });
+    setWs(wsClient);
   }, []);
 
   // Push-to-talk: hold mic button or Space
@@ -273,44 +279,89 @@ export function AvatarCompanion(): JSX.Element {
         />
       )}
 
-      {/* Mic button (bottom-center) */}
-      <button
-        onMouseDown={() => void startTalk()}
-        onMouseUp={stopTalk}
-        onMouseLeave={() => { if (talking) stopTalk(); }}
-        title="Segure pra falar (ou Space)"
-        style={{
-          position: 'absolute',
-          bottom: 16,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 48,
-          height: 48,
-          borderRadius: '50%',
-          background: talking
-            ? 'linear-gradient(135deg, #a78bfa, #6366f1)'
-            : 'rgba(17, 17, 26, 0.75)',
-          border: talking ? 'none' : '1px solid rgba(255,255,255,0.15)',
-          color: talking ? '#fff' : '#c4b5fd',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backdropFilter: 'blur(8px)',
-          boxShadow: talking
-            ? '0 0 24px rgba(167, 139, 250, 0.6)'
-            : '0 4px 12px rgba(0, 0, 0, 0.3)',
-          transition: 'all 150ms',
-          zIndex: 15,
-        }}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="9" y="1" width="6" height="13" rx="3"/>
-          <path d="M5 10a7 7 0 0 0 14 0"/>
-          <line x1="12" y1="17" x2="12" y2="21"/>
-          <line x1="8" y1="21" x2="16" y2="21"/>
-        </svg>
-      </button>
+      {/* Audio controls (bottom-center) */}
+      <div style={{
+        position: 'absolute',
+        bottom: 16,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        gap: 10,
+        zIndex: 15,
+      }}>
+        {/* Mic button (push-to-talk) */}
+        <button
+          onMouseDown={() => { if (!realtimeActive) void startTalk(); }}
+          onMouseUp={() => { if (!realtimeActive) stopTalk(); }}
+          onMouseLeave={() => { if (!realtimeActive && talking) stopTalk(); }}
+          disabled={realtimeActive}
+          title={realtimeActive ? 'Desative o realtime para usar push-to-talk' : 'Segure pra falar (ou Space)'}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            background: talking
+              ? 'linear-gradient(135deg, #a78bfa, #6366f1)'
+              : 'rgba(17, 17, 26, 0.75)',
+            border: talking ? 'none' : '1px solid rgba(255,255,255,0.15)',
+            color: talking ? '#fff' : '#c4b5fd',
+            cursor: realtimeActive ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+            opacity: realtimeActive ? 0.4 : 1,
+            boxShadow: talking ? '0 0 20px rgba(167, 139, 250, 0.6)' : '0 4px 10px rgba(0, 0, 0, 0.3)',
+            transition: 'all 150ms',
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="1" width="6" height="13" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+          </svg>
+        </button>
+
+        {/* Realtime toggle */}
+        <button
+          onClick={() => setRealtimeActive((v) => !v)}
+          title={realtimeActive ? 'Desligar conversa continua' : 'Ligar conversa continua'}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            background: realtimeActive
+              ? 'linear-gradient(135deg, #4ade80, #22c55e)'
+              : 'rgba(17, 17, 26, 0.75)',
+            border: realtimeActive ? 'none' : '1px solid rgba(255,255,255,0.15)',
+            color: realtimeActive ? '#08080d' : '#c4b5fd',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+            boxShadow: realtimeActive ? '0 0 20px rgba(74, 222, 128, 0.6)' : '0 4px 10px rgba(0, 0, 0, 0.3)',
+            transition: 'all 150ms',
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12h4l3-9 4 18 3-9h4"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* RealtimeController (hidden — just manages VAD lifecycle) */}
+      <div style={{ position: 'absolute', left: -9999, top: -9999, visibility: 'hidden' }}>
+        <RealtimeController
+          ws={ws}
+          playback={playback}
+          active={realtimeActive}
+          onToggle={() => setRealtimeActive((v) => !v)}
+          manualMute={false}
+          onManualMuteToggle={() => { /* no-op in companion */ }}
+        />
+      </div>
     </div>
   );
 }
