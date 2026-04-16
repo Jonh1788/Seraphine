@@ -139,14 +139,16 @@ export function AvatarCompanion(): JSX.Element {
   // Push-to-talk: hold Space or press mic button
   const startTalk = useCallback(async () => {
     const ws = wsRef.current;
+    console.log('[companion] startTalk — ws:', !!ws, 'talking:', talking);
     if (!ws || talking) return;
     if (!micRef.current) micRef.current = new MicCapture();
     setTalking(true);
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     try {
       await micRef.current.start();
+      console.log('[companion] mic started');
     } catch (err) {
-      console.error('Mic start failed:', err);
+      console.error('[companion] Mic start failed:', err);
       setTalking(false);
       return;
     }
@@ -165,18 +167,17 @@ export function AvatarCompanion(): JSX.Element {
     if (ws) ws.send({ type: 'audio_end' });
   }, []);
 
-  // Realtime: sends audio_start/audio_end around voice activity via VAD
+  // Realtime: continuous mic streaming (hold mic open until toggled off)
+  // The backend will VAD-detect pauses and transcribe segments.
   const toggleRealtime = useCallback(async () => {
-    const ws = wsRef.current;
-    if (!ws) return;
     if (realtimeOn) {
-      ws.send({ type: 'realtime_stop' } as any);
+      stopTalk();
       setRealtimeOn(false);
     } else {
-      ws.send({ type: 'realtime_start' } as any);
+      await startTalk();
       setRealtimeOn(true);
     }
-  }, [realtimeOn]);
+  }, [realtimeOn, startTalk, stopTalk]);
 
   // Space hold = push-to-talk
   useEffect(() => {
