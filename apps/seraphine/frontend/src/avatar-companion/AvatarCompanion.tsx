@@ -148,6 +148,20 @@ export function AvatarCompanion(): JSX.Element {
 
   // Push-to-talk: hold mic button or Space (uses ref to avoid stale closure)
   const talkingRef = useRef(false);
+  /** Accumulates the current utterance locally when using the
+   *  embedded Whisper (Tauri desktop). Reset on each startTalk. */
+  const localPcmRef = useRef<Uint8Array[]>([]);
+  const usingLocalSttRef = useRef<boolean>(false);
+
+  const isTauri = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    const w = window as unknown as {
+      __TAURI_INTERNALS__?: unknown;
+      __TAURI__?: unknown;
+    };
+    return Boolean(w.__TAURI_INTERNALS__ || w.__TAURI__);
+  };
+
   const startTalk = useCallback(async () => {
     const ws = wsRef.current;
     if (!ws || talkingRef.current) return;
@@ -168,7 +182,14 @@ export function AvatarCompanion(): JSX.Element {
       console.warn('[companion] audio resume failed:', err);
     }
     if (!micRef.current) micRef.current = new MicCapture();
-    ws.send({ type: 'audio_start', sample_rate: 16000 });
+
+    const useLocal = isTauri();
+    usingLocalSttRef.current = useLocal;
+    localPcmRef.current = [];
+
+    if (!useLocal) {
+      ws.send({ type: 'audio_start', sample_rate: 16000 });
+    }
     try {
       await micRef.current.start();
       setDebugMsg('');
@@ -179,12 +200,19 @@ export function AvatarCompanion(): JSX.Element {
       return;
     }
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
-      const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
-      ws.sendBinary(slice);
+      if (useLocal) {
+        // MicCapture reuses its Int16 buffer between callbacks — copy.
+        const bytes = new Uint8Array(pcm.byteLength);
+        bytes.set(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+        localPcmRef.current.push(bytes);
+      } else {
+        const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
+        ws.sendBinary(slice);
+      }
     });
   }, []);
 
-  const stopTalk = useCallback(() => {
+  const stopTalk = useCallback(async () => {
     const ws = wsRef.current;
     console.log('[companion] stopTalk');
     chunkOffRef.current?.();
@@ -192,7 +220,40 @@ export function AvatarCompanion(): JSX.Element {
     micRef.current?.stop();
     talkingRef.current = false;
     setTalking(false);
-    if (ws) ws.send({ type: 'audio_end' });
+    if (!ws) return;
+
+    if (!usingLocalSttRef.current) {
+      ws.send({ type: 'audio_end' });
+      return;
+    }
+
+    const chunks = localPcmRef.current;
+    localPcmRef.current = [];
+    usingLocalSttRef.current = false;
+    const total = chunks.reduce((s, c) => s + c.byteLength, 0);
+    if (total < 3200) return;
+    const pcm = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) {
+      pcm.set(c, off);
+      off += c.byteLength;
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const res = await invoke<{ text: string }>('whisper_transcribe_pcm', {
+        pcm: Array.from(pcm),
+        sampleRate: 16000,
+        language: 'pt',
+      });
+      const text = (res?.text ?? '').trim();
+      if (!text) return;
+      ws.send({ type: 'user_message', content: text, speak: true });
+    } catch (err) {
+      console.warn('[companion] local whisper failed, falling back:', err);
+      ws.send({ type: 'audio_start', sample_rate: 16000 });
+      ws.sendBinary(pcm.buffer as ArrayBuffer);
+      ws.send({ type: 'audio_end' });
+    }
   }, []);
 
   // Space = toggle mic on/off
@@ -202,7 +263,7 @@ export function AvatarCompanion(): JSX.Element {
       if (tag === 'input' || tag === 'textarea') return;
       if (e.code === 'Space' && !e.repeat && !realtimeActive) {
         e.preventDefault();
-        if (talkingRef.current) stopTalk();
+        if (talkingRef.current) void stopTalk();
         else void startTalk();
       }
     };
@@ -334,7 +395,7 @@ export function AvatarCompanion(): JSX.Element {
         <button
           onClick={() => {
             if (realtimeActive) return;
-            if (talking) stopTalk();
+            if (talking) void stopTalk();
             else void startTalk();
           }}
           disabled={realtimeActive}

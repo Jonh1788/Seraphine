@@ -70,6 +70,57 @@ function float32ToPcm16(frame: Float32Array): ArrayBuffer {
   return out.buffer;
 }
 
+/**
+ * Concatenate a list of Float32 frames into a single s16le LE byte
+ * buffer — what the embedded Whisper command expects.
+ */
+function framesToPcm16Buffer(frames: Float32Array[]): Uint8Array {
+  let total = 0;
+  for (const f of frames) total += f.length;
+  const out = new Int16Array(total);
+  let off = 0;
+  for (const f of frames) {
+    for (let i = 0; i < f.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, f[i]));
+      out[off + i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    off += f.length;
+  }
+  return new Uint8Array(out.buffer);
+}
+
+/**
+ * Embedded Whisper (whisper.cpp + Metal, shipped with the Tauri app)
+ * is the preferred STT on Mac — no backend, no network round-trip.
+ * If the Tauri runtime isn't available (plain browser) or the invoke
+ * fails (model not ready, crash), we fall back to streaming PCM to the
+ * backend the old way.
+ */
+function isTauri(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as {
+    __TAURI_INTERNALS__?: unknown;
+    __TAURI__?: unknown;
+  };
+  return Boolean(w.__TAURI_INTERNALS__ || w.__TAURI__);
+}
+
+async function transcribeLocal(pcm: Uint8Array): Promise<string | null> {
+  if (!isTauri() || pcm.byteLength < 2) return null;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const res = await invoke<{ text: string; duration_s: number }>(
+      'whisper_transcribe_pcm',
+      { pcm: Array.from(pcm), sampleRate: 16000, language: 'pt' },
+    );
+    const text = (res?.text ?? '').trim();
+    return text || null;
+  } catch (err) {
+    console.warn('[realtime] local whisper failed, falling back to backend:', err);
+    return null;
+  }
+}
+
 export function RealtimeController({
   ws,
   playback,
@@ -100,6 +151,19 @@ export function RealtimeController({
 
   const vadRef = useRef<RealtimeVAD | null>(null);
   const audioStartedRef = useRef<boolean>(false);
+  /**
+   * Accumulated Float32 frames for the current user utterance. We buffer
+   * locally so the embedded Whisper can transcribe the whole thing in one
+   * batch on speech end. Reset on segment begin/misfire.
+   */
+  const localBufferRef = useRef<Float32Array[]>([]);
+  /**
+   * Set to true when we choose to do STT locally for this segment. When
+   * true, we skip audio_start/audio_end and send a single user_message
+   * with the transcript at the end. When false, we fall back to
+   * streaming frames to the backend (legacy path).
+   */
+  const localSttRef = useRef<boolean>(false);
   const [micAnalyser, setMicAnalyser] = useState<AnalyserNode | null>(null);
   const [botAnalyser, setBotAnalyser] = useState<AnalyserNode | null>(null);
 
@@ -121,10 +185,26 @@ export function RealtimeController({
     socket.sendBinary(float32ToPcm16(frame));
   }, []);
 
-  /** Begin a new user-speech segment (audio_start + enable frame sending). */
+  /** Begin a new user-speech segment.
+   *
+   *  On Mac (Tauri), we do STT locally via the embedded Whisper — buffer
+   *  frames and send a single `user_message` with the transcript when
+   *  speech ends. In plain browsers we still send `audio_start` +
+   *  streaming frames + `audio_end` to the backend (legacy path).
+   */
   const beginUserSegment = useCallback((): void => {
     const socket = wsRef.current;
     if (!socket) return;
+    // Reset buffer for this segment regardless of path.
+    localBufferRef.current = [];
+
+    if (isTauri()) {
+      localSttRef.current = true;
+      audioStartedRef.current = true;
+      return;
+    }
+
+    localSttRef.current = false;
     socket.send({
       type: 'audio_start',
       sample_rate: 16000,
@@ -133,12 +213,42 @@ export function RealtimeController({
     audioStartedRef.current = true;
   }, []);
 
-  /** Terminate the current user-speech segment (audio_end). */
-  const endUserSegment = useCallback((): void => {
+  /** Terminate the current user-speech segment.
+   *
+   *  Local path: transcribe the buffered PCM with the embedded Whisper
+   *  and send a `user_message` with the text. Legacy path: send
+   *  `audio_end` so the backend runs its own STT.
+   */
+  const endUserSegment = useCallback(async (): Promise<void> => {
     const socket = wsRef.current;
     if (!socket || !audioStartedRef.current) return;
-    socket.send({ type: 'audio_end', conversation_id: conversationIdRef.current });
+    const useLocal = localSttRef.current;
     audioStartedRef.current = false;
+
+    if (!useLocal) {
+      socket.send({ type: 'audio_end', conversation_id: conversationIdRef.current });
+      return;
+    }
+
+    const frames = localBufferRef.current;
+    localBufferRef.current = [];
+    if (frames.length === 0) {
+      // Nothing to transcribe — drop the turn.
+      return;
+    }
+    const pcm = framesToPcm16Buffer(frames);
+    const text = await transcribeLocal(pcm);
+    if (!text) {
+      // Empty transcript — user said nothing meaningful. Skip the turn
+      // to avoid a cold LLM round-trip.
+      return;
+    }
+    socket.send({
+      type: 'user_message',
+      conversation_id: conversationIdRef.current,
+      content: text,
+      speak: true,
+    });
   }, []);
 
   /** Send an interrupt signal (barge-in or exit-while-speaking). */
@@ -213,23 +323,30 @@ export function RealtimeController({
             }
           },
           onSpeechEnd: () => {
-            // We've been streaming frames as they arrive, so there's no
-            // need to resend the fully padded buffer here — doing so would
-            // duplicate audio on the backend STT. Just close the segment.
             if (!audioStartedRef.current) return;
-            endUserSegment();
+            // Mark processing immediately so the UI shows feedback while
+            // the local Whisper transcribe runs (takes ~200-400ms).
             setState('processing');
+            void endUserSegment();
           },
           onAudioFrame: (frame) => {
-            if (stateRef.current === 'userSpeaking' && audioStartedRef.current) {
+            if (stateRef.current !== 'userSpeaking' || !audioStartedRef.current) {
+              return;
+            }
+            if (localSttRef.current) {
+              // Local STT — buffer a copy. MicVAD reuses its frame
+              // buffer across callbacks so we must snapshot.
+              localBufferRef.current.push(new Float32Array(frame));
+            } else {
               sendFrame(frame);
             }
           },
           onMisfire: () => {
             // VAD thought it heard speech but it was too short — roll back.
             if (audioStartedRef.current) {
-              endUserSegment();
+              void endUserSegment();
             }
+            localBufferRef.current = [];
             if (stateRef.current === 'userSpeaking') {
               setState('listening');
             }

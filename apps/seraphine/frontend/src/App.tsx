@@ -644,6 +644,22 @@ export function App(): JSX.Element {
     if (analyser) controller.attachAudioAnalyser(analyser);
   }, []);
 
+  /** When running inside the Tauri desktop shell we prefer the embedded
+   *  Whisper (whisper.cpp + Metal) over streaming PCM to the backend.
+   *  Keeps the STT round-trip local — no backend required on the Mac. */
+  const isTauriShell = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    const w = window as unknown as {
+      __TAURI_INTERNALS__?: unknown;
+      __TAURI__?: unknown;
+    };
+    return Boolean(w.__TAURI_INTERNALS__ || w.__TAURI__);
+  };
+
+  /** Accumulated PCM16 chunks for the current push-to-talk utterance. */
+  const localPcmChunksRef = useRef<Uint8Array[]>([]);
+  const usingLocalSttRef = useRef<boolean>(false);
+
   const handleTalkStart = async (): Promise<void> => {
     warmSharedAudioContext(); // ensure context is running from user gesture
     playbackRef.current?.ensureCtx(); // create analyser from user gesture
@@ -651,7 +667,14 @@ export function App(): JSX.Element {
     if (!ws || status !== 'connected') return;
     if (!micRef.current) micRef.current = new MicCapture();
     setTalking(true);
-    ws.send({ type: 'audio_start', sample_rate: 16000 });
+
+    const useLocal = isTauriShell();
+    usingLocalSttRef.current = useLocal;
+    localPcmChunksRef.current = [];
+
+    if (!useLocal) {
+      ws.send({ type: 'audio_start', sample_rate: 16000 });
+    }
     try {
       await micRef.current.start();
     } catch (err) {
@@ -660,18 +683,61 @@ export function App(): JSX.Element {
       return;
     }
     chunkOffRef.current = micRef.current.onChunk((pcm) => {
-      const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
-      ws.sendBinary(slice);
+      if (useLocal) {
+        // Keep a defensive copy — MicCapture reuses its buffer between
+        // callbacks. Stored as bytes so concatenation is cheap on end.
+        const bytes = new Uint8Array(pcm.byteLength);
+        bytes.set(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+        localPcmChunksRef.current.push(bytes);
+      } else {
+        const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
+        ws.sendBinary(slice);
+      }
     });
   };
 
-  const handleTalkEnd = (): void => {
+  const handleTalkEnd = async (): Promise<void> => {
     const ws = wsRef.current;
     chunkOffRef.current?.();
     chunkOffRef.current = null;
     micRef.current?.stop();
     setTalking(false);
-    if (ws && status === 'connected') {
+    if (!ws || status !== 'connected') return;
+
+    if (!usingLocalSttRef.current) {
+      ws.send({ type: 'audio_end' });
+      return;
+    }
+
+    const chunks = localPcmChunksRef.current;
+    localPcmChunksRef.current = [];
+    usingLocalSttRef.current = false;
+    const total = chunks.reduce((s, c) => s + c.byteLength, 0);
+    if (total < 3200) {
+      // <100ms of audio — likely an accidental tap. Drop the turn.
+      return;
+    }
+    const pcm = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) {
+      pcm.set(c, off);
+      off += c.byteLength;
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const res = await invoke<{ text: string }>('whisper_transcribe_pcm', {
+        pcm: Array.from(pcm),
+        sampleRate: 16000,
+        language: 'pt',
+      });
+      const text = (res?.text ?? '').trim();
+      if (!text) return;
+      ws.send({ type: 'user_message', content: text, speak: true });
+    } catch (err) {
+      console.warn('[ptt] local whisper failed, falling back to backend:', err);
+      // Fall back: send the audio via the legacy path so the turn isn't lost.
+      ws.send({ type: 'audio_start', sample_rate: 16000 });
+      ws.sendBinary(pcm.buffer as ArrayBuffer);
       ws.send({ type: 'audio_end' });
     }
   };
@@ -681,6 +747,8 @@ export function App(): JSX.Element {
     chunkOffRef.current = null;
     micRef.current?.stop();
     setTalking(false);
+    localPcmChunksRef.current = [];
+    usingLocalSttRef.current = false;
     // No audio_end sent — discard the recording
   };
 
@@ -706,7 +774,7 @@ export function App(): JSX.Element {
     const onKeyUp = (e: KeyboardEvent): void => {
       if (e.code !== 'Space' || isTyping()) return;
       e.preventDefault();
-      handleTalkEnd();
+      void handleTalkEnd();
     };
 
     window.addEventListener('keydown', onKeyDown);
