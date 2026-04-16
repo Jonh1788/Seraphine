@@ -75,6 +75,13 @@ export function WaterSetupModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onClose]);
 
+  // Lock body scroll while modal is open (restores on unmount)
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const computedGoal = useMemo(() => computeGoal(weight, activity), [weight, activity]);
 
   const handleSubmit = (e: React.FormEvent): void => {

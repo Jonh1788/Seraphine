@@ -8917,6 +8917,9 @@ body.qc-window .quick-capture {
 
 .water-setup-modal .te__fields {
   gap: var(--space-3);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .water-setup__row--block {
