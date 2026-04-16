@@ -22,10 +22,15 @@ services:
       dockerfile: apps/seraphine/backend/Dockerfile
     image: seraphine-backend:latest
     restart: unless-stopped
+    # Run as root so we can read the host's 0600-permissioned Claude
+    # credentials mount without loosening its permissions. The VPS is
+    # single-tenant and the container is network-isolated anyway.
+    user: "0:0"
     env_file:
       - path: .env.prod
         required: true
     environment:
+      HOME: /root
       SERAPHINE_SQLITE_PATH: /data/seraphine.sqlite
       SERAPHINE_CHROMA_PATH: /data/chroma
       SERAPHINE_SKILLS_DIR: /data/skills
@@ -40,7 +45,7 @@ services:
       # Mount the host's Claude Code credentials so the claude_max
       # backend can read the OAuth token. The Linux path mirrors the
       # Keychain dict on macOS (see llm_adapters/keychain.py).
-      - /root/.claude/.credentials.json:/home/seraphine/.claude/.credentials.json:ro
+      - /root/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     ports:
       - "127.0.0.1:8002:8000"
     networks:
