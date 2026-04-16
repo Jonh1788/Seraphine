@@ -13,7 +13,12 @@ dependencies = [
     "chromadb>=0.5",
     "beautifulsoup4>=4.12",
     "truststore>=0.10",
-    "mlx-whisper>=0.4.3",
+    # mlx-whisper is Apple Silicon only — gated on darwin/arm64 so the
+    # Linux Docker build doesn't choke during `uv sync`. On the Mac this
+    # still installs because the marker evaluates true. On the VPS we
+    # set SERAPHINE_STT_BACKEND=remote (or disable STT) so the module
+    # is never imported.
+    "mlx-whisper>=0.4.3 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "cryptography>=43",
     "apscheduler>=3.10,<4",
     "sqlalchemy>=2.0",

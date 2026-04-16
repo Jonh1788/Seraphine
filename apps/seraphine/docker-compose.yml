@@ -1,0 +1,54 @@
+# Seraphine production stack — backend only.
+#
+# TLS termination lives OUTSIDE this stack: the host's system nginx
+# (+ certbot) proxies sera.jonhdev.io → 127.0.0.1:8002 → backend container.
+# Frontend (Tauri desktop + iOS shell) is distributed as signed apps
+# and reads this backend via the public hostname, so we don't build/ship
+# the web frontend here.
+#
+# Usage on the VPS:
+#   cp .env.prod.example .env.prod   # then fill the secrets
+#   docker compose up -d --build
+#
+# Build context points at the monorepo root so uv can see the whole
+# workspace (packages/* + uv.lock).
+
+name: seraphine
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: apps/seraphine/backend/Dockerfile
+    image: seraphine-backend:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env.prod
+        required: true
+    environment:
+      SERAPHINE_SQLITE_PATH: /data/seraphine.sqlite
+      SERAPHINE_CHROMA_PATH: /data/chroma
+      SERAPHINE_SKILLS_DIR: /data/skills
+      SERAPHINE_GOOGLE_TOKEN_PATH: /data/google-token.json
+      SERAPHINE_LLM_BACKEND: claude_max
+      SERAPHINE_STT_BACKEND: remote
+      # mlx-whisper is Apple-Silicon only and is excluded from the
+      # Linux build. If STT is ever needed on the VPS, point
+      # SERAPHINE_STT_REMOTE_BASE_URL at a CPU faster-whisper service.
+    volumes:
+      - seraphine-data:/data
+      # Mount the host's Claude Code credentials so the claude_max
+      # backend can read the OAuth token. The Linux path mirrors the
+      # Keychain dict on macOS (see llm_adapters/keychain.py).
+      - /root/.claude/.credentials.json:/home/seraphine/.claude/.credentials.json:ro
+    ports:
+      - "127.0.0.1:8002:8000"
+    networks:
+      - seraphine-net
+
+volumes:
+  seraphine-data:
+
+networks:
+  seraphine-net:
+    driver: bridge
