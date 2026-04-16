@@ -82,7 +82,6 @@
     "longDescription": "Seraphine — voz, avatar, finanças, agenda e mais. Roda local no seu Mac.",
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "entitlements": "./Entitlements.plist",
       "exceptionDomain": "",
       "signingIdentity": "Apple Development: Jonathan Santos (68MJSVTU7A)",
       "providerShortName": "CDX69HJKGH"

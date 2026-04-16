@@ -4,27 +4,25 @@
 <plist version="1.0">
 <dict>
   <!--
-    SDD 018 — Apple HealthKit access.
-    Active only when the bundle is signed with a cert that chains to an
-    App ID registered with HealthKit capability in the Apple Developer
-    portal, and accompanied by a provisioning profile that includes this
-    device.
+    macOS Seraphine entitlements (non-sandboxed Developer ID build).
+
+    Apple's Developer portal does NOT support HealthKit on macOS App
+    IDs (platform support is iOS/visionOS/watchOS only), so the macOS
+    desktop build intentionally does NOT request the HealthKit
+    entitlement. HealthKit real data flows through the iOS companion
+    (`pnpm tauri ios build`) which has its own
+    `gen/apple/seraphine-desktop_iOS/seraphine-desktop_iOS.entitlements`
+    with HealthKit properly requested.
+
+    The Mac app uses the Swift bridge in mock mode (synthetic data) or
+    reads whatever the iPhone pushed to the backend via
+    `POST /health/snapshot`.
   -->
-  <key>com.apple.developer.healthkit</key>
-  <true/>
-  <key>com.apple.developer.healthkit.access</key>
-  <array/>
 
-  <!-- Required for Apple Development (non-App Store) code signing. The
-       application-identifier must match "<TEAM_ID>.<bundle-id>" and the
-       team-identifier must match the TEAM_ID embedded in the profile. -->
-  <key>com.apple.developer.team-identifier</key>
-  <string>CDX69HJKGH</string>
-  <key>application-identifier</key>
-  <string>CDX69HJKGH.io.jonhdev.seraphine</string>
-
-  <!-- get-task-allow must be true for Development certificates so the
-       debugger can attach. Release builds (Developer ID) flip this off. -->
+  <!-- get-task-allow must be true for Apple Development certificates
+       so the debugger can attach. For Developer ID (distribution) builds
+       this should be flipped off and Hardened Runtime entitlements
+       added. -->
   <key>get-task-allow</key>
   <true/>
 </dict>
