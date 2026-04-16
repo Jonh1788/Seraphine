@@ -146,18 +146,14 @@ export function AvatarCompanion(): JSX.Element {
   const talkingRef = useRef(false);
   const startTalk = useCallback(async () => {
     const ws = wsRef.current;
-    setDebugMsg(`startTalk ws=${!!ws} talking=${talkingRef.current}`);
-    if (!ws || talkingRef.current) {
-      setDebugMsg(`skip: ws=${!!ws} talking=${talkingRef.current}`);
-      return;
-    }
+    if (!ws || talkingRef.current) return;
     talkingRef.current = true;
     setTalking(true);
     if (!micRef.current) micRef.current = new MicCapture();
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     try {
       await micRef.current.start();
-      setDebugMsg('mic ok');
+      setDebugMsg('');
     } catch (err) {
       setDebugMsg(`MIC ERR: ${String(err).slice(0, 80)}`);
       talkingRef.current = false;
