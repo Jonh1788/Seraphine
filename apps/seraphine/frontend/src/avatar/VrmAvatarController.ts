@@ -694,6 +694,18 @@ export class VrmAvatarController implements AvatarAdapter {
     this.vrm = loadedVrm;
     this.scene.add(loadedVrm.scene);
 
+    // Log available expressions for debugging blendshape mapping
+    const em = loadedVrm.expressionManager;
+    if (em) {
+      const names: string[] = [];
+      if (em.expressions) {
+        for (const expr of em.expressions) {
+          if (expr.expressionName) names.push(expr.expressionName);
+        }
+      }
+      console.log('[VRM] Available expressions:', names.join(', ') || 'none');
+    }
+
     // Detach the spring bone manager from VRM so vrm.update() doesn't
     // run spring physics. We manage it ourselves in the render loop,
     // calling it exactly once AFTER all bone manipulation (head
