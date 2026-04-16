@@ -9,7 +9,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -19,6 +19,10 @@ pub fn run() {
         Some(Modifiers::SUPER | Modifiers::SHIFT),
         Code::Backslash,
     );
+    let capture_shortcut = Shortcut::new(
+        Some(Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyS,
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -26,17 +30,27 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed
-                        && shortcut == &toggle_shortcut
-                    {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if shortcut == &toggle_shortcut {
                         toggle_main_window(app);
+                    } else if shortcut == &capture_shortcut {
+                        // Bring the window to front and emit quick-capture event.
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("quick-capture", ());
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.unminimize();
+                        }
                     }
                 })
                 .build(),
         )
         .setup(move |app| {
-            // Register the global shortcut.
+            // Register global shortcuts.
             app.global_shortcut().register(toggle_shortcut)?;
+            app.global_shortcut().register(capture_shortcut)?;
 
             // Build the system tray.
             let show = MenuItem::with_id(app, "show", "Mostrar", true, None::<&str>)?;

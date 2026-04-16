@@ -35,6 +35,7 @@ import {
   DashboardIcon,
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
+import { QuickCapture } from './quick-capture/QuickCapture';
 
 type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
 
@@ -84,6 +85,7 @@ export function App(): JSX.Element {
   const [quickNewTaskOpen, setQuickNewTaskOpen] = useState<boolean>(false);
   const [quickTaskTitle, setQuickTaskTitle] = useState<string>('');
   const quickTaskInputRef = useRef<HTMLInputElement>(null);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState<boolean>(false);
 
   // Subscribe to Web Push — exposed so a UI button can trigger it manually.
   const subscribeToPush = useCallback(async (): Promise<void> => {
@@ -219,6 +221,25 @@ export function App(): JSX.Element {
         console.warn('[Push] startup re-register failed:', e);
       }
     })();
+  }, []);
+
+  // Tauri: listen for quick-capture event from global shortcut (Cmd+Shift+S)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => {
+        listen('quick-capture', () => {
+          setQuickCaptureOpen(true);
+        }).then((fn) => {
+          unlisten = fn;
+        });
+      })
+      .catch(() => {
+        // Not in Tauri runtime -- ignore
+      });
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   // PWA: Badging API — show unread count on app icon
@@ -625,6 +646,8 @@ export function App(): JSX.Element {
   // Unified keyboard shortcuts (Cmd+1-6, Cmd+K, Cmd+N, Ctrl+L, Escape)
   const commandPaletteOpenRef = useRef(false);
   commandPaletteOpenRef.current = commandPaletteOpen;
+  const quickCaptureOpenRef = useRef(false);
+  quickCaptureOpenRef.current = quickCaptureOpen;
 
   useEffect(() => {
     const isTyping = (): boolean => {
@@ -649,11 +672,16 @@ export function App(): JSX.Element {
         return;
       }
 
-      // Escape — close command palette or quick task
+      // Escape — close command palette, quick task, or quick capture
       if (e.key === 'Escape') {
         if (commandPaletteOpenRef.current) {
           e.preventDefault();
           setCommandPaletteOpen(false);
+          return;
+        }
+        if (quickCaptureOpenRef.current) {
+          e.preventDefault();
+          setQuickCaptureOpen(false);
           return;
         }
         if (quickNewTaskOpen) {
@@ -665,6 +693,13 @@ export function App(): JSX.Element {
       }
 
       if (!e.metaKey) return;
+
+      // Cmd+Shift+S — quick capture (dev fallback for Tauri global shortcut)
+      if (e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        setQuickCaptureOpen(true);
+        return;
+      }
 
       // Cmd+K — toggle command palette (always fires)
       if (e.key === 'k') {
@@ -1044,6 +1079,11 @@ export function App(): JSX.Element {
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onAction={handlePaletteAction}
+      />
+
+      <QuickCapture
+        open={quickCaptureOpen}
+        onClose={() => setQuickCaptureOpen(false)}
       />
 
       {quickNewTaskOpen && (

@@ -7813,6 +7813,132 @@ button:disabled {
   flex-shrink: 0;
 }
 
+/* ---------- Quick Capture (Cmd+Shift+S) ---------- */
+
+.quick-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: cmdOverlayIn 150ms ease-out;
+}
+
+.quick-capture {
+  width: 90vw;
+  max-width: 480px;
+  background: var(--bg-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-xl);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  animation: cmdPaletteIn 150ms ease-out;
+}
+
+.quick-capture__input {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  outline: none;
+  width: 100%;
+  padding: var(--space-2) 0;
+  caret-color: var(--accent);
+  font-family: inherit;
+}
+
+.quick-capture__input::placeholder {
+  color: var(--text-faint);
+}
+
+.quick-capture__row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.quick-capture__spacer {
+  flex: 1;
+}
+
+.quick-capture__date,
+.quick-capture__time {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 8px;
+  font-family: inherit;
+  outline: none;
+}
+
+.quick-capture__date:focus,
+.quick-capture__time:focus {
+  border-color: var(--accent-dim);
+}
+
+.quick-capture__prio {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms, border-color 100ms, color 100ms;
+  font-family: inherit;
+}
+
+.quick-capture__prio:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.quick-capture__prio--active.quick-capture__prio--baixa {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+
+.quick-capture__prio--active.quick-capture__prio--media {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+.quick-capture__prio--active.quick-capture__prio--alta {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.quick-capture__hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.quick-capture__success {
+  text-align: center;
+  color: #4ade80;
+  font-weight: 600;
+  font-size: 16px;
+  padding: var(--space-4);
+}
+
 /* ---------- Quick New Task Modal ---------- */
 
 .quick-task-overlay {
