@@ -177,29 +177,20 @@ export function AvatarCompanion(): JSX.Element {
     if (ws) ws.send({ type: 'audio_end' });
   }, []);
 
-  // Space hold = push-to-talk
+  // Space = toggle mic on/off
   useEffect(() => {
     const onDown = (e: KeyboardEvent): void => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
-      if (e.code === 'Space' && !e.repeat && !talking) {
+      if (e.code === 'Space' && !e.repeat && !realtimeActive) {
         e.preventDefault();
-        void startTalk();
-      }
-    };
-    const onUp = (e: KeyboardEvent): void => {
-      if (e.code === 'Space' && talking) {
-        e.preventDefault();
-        stopTalk();
+        if (talkingRef.current) stopTalk();
+        else void startTalk();
       }
     };
     window.addEventListener('keydown', onDown);
-    window.addEventListener('keyup', onUp);
-    return () => {
-      window.removeEventListener('keydown', onDown);
-      window.removeEventListener('keyup', onUp);
-    };
-  }, [talking, startTalk, stopTalk]);
+    return () => window.removeEventListener('keydown', onDown);
+  }, [realtimeActive, startTalk, stopTalk]);
 
   // Shift+drag to move the window (Tauri startDragging on mousedown)
   const startDrag = useCallback(() => {
@@ -296,13 +287,15 @@ export function AvatarCompanion(): JSX.Element {
         gap: 10,
         zIndex: 15,
       }}>
-        {/* Mic button (push-to-talk) */}
+        {/* Mic button (toggle: click to start/stop) */}
         <button
-          onMouseDown={() => { if (!realtimeActive) void startTalk(); }}
-          onMouseUp={() => { if (!realtimeActive) stopTalk(); }}
-          onMouseLeave={() => { if (!realtimeActive && talking) stopTalk(); }}
+          onClick={() => {
+            if (realtimeActive) return;
+            if (talking) stopTalk();
+            else void startTalk();
+          }}
           disabled={realtimeActive}
-          title={realtimeActive ? 'Desative o realtime para usar push-to-talk' : 'Segure pra falar (ou Space)'}
+          title={realtimeActive ? 'Desative o realtime para usar o mic' : (talking ? 'Clique para parar' : 'Clique para gravar')}
           style={{
             width: 44,
             height: 44,
