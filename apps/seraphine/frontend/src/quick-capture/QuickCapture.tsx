@@ -71,7 +71,11 @@ export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element 
 
   return (
     <div className="quick-capture-overlay" onClick={onClose}>
-      <div className="quick-capture" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="quick-capture"
+        onClick={(e) => e.stopPropagation()}
+        data-tauri-drag-region
+      >
         <input
           ref={inputRef}
           className="quick-capture__input"

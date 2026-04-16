@@ -41,6 +41,7 @@ pub fn run() {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
+                                position_quick_capture(&window);
                                 let _ = window.show();
                                 let _ = window.set_focus();
                                 let _ = window.emit("quick-capture-open", ());
@@ -129,4 +130,28 @@ fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let _ = window.unminimize();
         }
     }
+}
+
+/// Position the Quick Capture window centered horizontally, 15% from the
+/// bottom of the current monitor — ChatGPT-style floating overlay.
+fn position_quick_capture<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(Some(monitor)) = window.current_monitor() else { return };
+    let mon_size = monitor.size();
+    let mon_pos = monitor.position();
+    let scale = monitor.scale_factor();
+    let Ok(win_size) = window.outer_size() else { return };
+
+    // Convert physical pixels to logical for placement.
+    let mon_w = mon_size.width as f64 / scale;
+    let mon_h = mon_size.height as f64 / scale;
+    let mon_x = mon_pos.x as f64 / scale;
+    let mon_y = mon_pos.y as f64 / scale;
+    let win_w = win_size.width as f64 / scale;
+    let win_h = win_size.height as f64 / scale;
+
+    // Horizontally centered; vertically at 80% down (15% margin from bottom).
+    let x = mon_x + (mon_w - win_w) / 2.0;
+    let y = mon_y + mon_h - win_h - (mon_h * 0.15);
+
+    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
 }
