@@ -23,6 +23,10 @@ pub fn run() {
         Some(Modifiers::SUPER | Modifiers::SHIFT),
         Code::KeyS,
     );
+    let avatar_shortcut = Shortcut::new(
+        Some(Modifiers::SUPER | Modifiers::SHIFT),
+        Code::KeyA,
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -47,6 +51,16 @@ pub fn run() {
                                 let _ = window.emit("quick-capture-open", ());
                             }
                         }
+                    } else if shortcut == &avatar_shortcut {
+                        // Toggle the floating avatar companion window.
+                        if let Some(window) = app.get_webview_window("avatar-companion") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                position_avatar_companion(&window);
+                                let _ = window.show();
+                            }
+                        }
                     }
                 })
                 .build(),
@@ -55,6 +69,7 @@ pub fn run() {
             // Register global shortcuts.
             app.global_shortcut().register(toggle_shortcut)?;
             app.global_shortcut().register(capture_shortcut)?;
+            app.global_shortcut().register(avatar_shortcut)?;
 
             // Build the system tray.
             let show = MenuItem::with_id(app, "show", "Mostrar", true, None::<&str>)?;
@@ -90,9 +105,12 @@ pub fn run() {
             // Close button hides instead of quitting — the app is meant
             // to live in the tray.
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" || window.label() == "quick-capture" {
-                    let _ = window.hide();
-                    api.prevent_close();
+                match window.label() {
+                    "main" | "quick-capture" | "avatar-companion" => {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
+                    _ => {}
                 }
             }
             // Auto-hide quick-capture when it loses focus (click outside)
@@ -130,6 +148,29 @@ fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let _ = window.unminimize();
         }
     }
+}
+
+/// Position the Avatar Companion window in the bottom-right corner,
+/// with a small margin from the screen edges.
+fn position_avatar_companion<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(Some(monitor)) = window.current_monitor() else { return };
+    let mon_size = monitor.size();
+    let mon_pos = monitor.position();
+    let scale = monitor.scale_factor();
+    let Ok(win_size) = window.outer_size() else { return };
+
+    let mon_w = mon_size.width as f64 / scale;
+    let mon_h = mon_size.height as f64 / scale;
+    let mon_x = mon_pos.x as f64 / scale;
+    let mon_y = mon_pos.y as f64 / scale;
+    let win_w = win_size.width as f64 / scale;
+    let win_h = win_size.height as f64 / scale;
+
+    // Bottom-right corner with 24px margin.
+    let x = mon_x + mon_w - win_w - 24.0;
+    let y = mon_y + mon_h - win_h - 48.0; // slightly higher to clear the dock
+
+    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
 }
 
 /// Position the Quick Capture window centered horizontally, 15% from the

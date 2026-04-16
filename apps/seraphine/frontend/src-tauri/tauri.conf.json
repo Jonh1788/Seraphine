@@ -45,6 +45,22 @@
         "focus": true,
         "acceptFirstMouse": true,
         "url": "/quick-capture.html"
+      },
+      {
+        "label": "avatar-companion",
+        "title": "Seraphine",
+        "width": 320,
+        "height": 480,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "center": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "shadow": false,
+        "url": "/avatar-companion.html"
       }
     ],
     "security": {

@@ -47,6 +47,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         'quick-capture': 'quick-capture.html',
+        'avatar-companion': 'avatar-companion.html',
       },
     },
   },
