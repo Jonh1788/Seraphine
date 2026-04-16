@@ -190,3 +190,172 @@ async def briefing_endpoint(request: Request) -> dict[str, str]:
         store=store,
     )
     return {"briefing": text}
+
+
+# ---------------------------------------------------------------------------
+# PT-BR weekday / month names (avoids locale dependency)
+# ---------------------------------------------------------------------------
+_WEEKDAYS_PT = [
+    "segunda-feira", "terca-feira", "quarta-feira",
+    "quinta-feira", "sexta-feira", "sabado", "domingo",
+]
+_MONTHS_PT = [
+    "", "janeiro", "fevereiro", "marco", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+
+async def generate_dashboard_summary(
+    *,
+    task_service: Any | None = None,
+    finance_service: Any | None = None,
+    google_client: Any | None = None,
+) -> dict:
+    """Build a structured dashboard summary dict.
+
+    Every field degrades gracefully when its backing service is ``None``
+    or raises an exception.
+    """
+    from zoneinfo import ZoneInfo
+
+    now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    now_utc = datetime.now(timezone.utc)
+    today_str = now_br.strftime("%Y-%m-%d")
+
+    greeting = f"{_greeting(now_br.hour)}, Jonathan!"
+    date_label = (
+        f"{_WEEKDAYS_PT[now_br.weekday()]}, "
+        f"{now_br.day} de {_MONTHS_PT[now_br.month]}"
+    )
+
+    # --- Tasks --------------------------------------------------------
+    tasks_total = 0
+    tasks_completed = 0
+    tasks_overdue = 0
+    pending_titles: list[str] = []
+
+    if task_service is not None:
+        try:
+            all_pending = await task_service.list_tasks(status="pending", limit=200)
+            for t in all_pending:
+                due = getattr(t, "due_date", None)
+                if due is not None and str(due) < today_str:
+                    tasks_overdue += 1
+                elif due is not None and str(due) == today_str:
+                    tasks_total += 1
+                    pending_titles.append(getattr(t, "title", "?"))
+            # Also count completed today
+            all_completed = await task_service.list_tasks(status="completed", limit=200)
+            for t in all_completed:
+                due = getattr(t, "due_date", None)
+                updated = getattr(t, "updated_at", None)
+                # Count as completed today if due_date is today
+                # or updated_at starts with today's date.
+                if (due is not None and str(due) == today_str) or (
+                    updated is not None and str(updated)[:10] == today_str
+                ):
+                    tasks_completed += 1
+        except Exception as exc:
+            logger.warning("dashboard: task_service failed: %s", exc)
+
+    tasks_total += tasks_completed + tasks_overdue
+
+    # --- Calendar / next events --------------------------------------
+    next_events: list[dict[str, str]] = []
+
+    # Tasks with due_time today
+    for title in pending_titles:
+        # We need the actual task objects — rebuild a quick lookup
+        pass
+
+    # Collect tasks-with-time from the pending list (re-walk is cheaper
+    # than a second service call — the data is already in memory above).
+    timed_tasks: list[tuple[str, str]] = []
+    if task_service is not None:
+        try:
+            all_pending = await task_service.list_tasks(status="pending", limit=200)
+            for t in all_pending:
+                due = getattr(t, "due_date", None)
+                due_time = getattr(t, "due_time", None)
+                if due is not None and str(due) == today_str and due_time:
+                    timed_tasks.append((getattr(t, "title", "?"), str(due_time)[:5]))
+        except Exception:
+            pass
+
+    for title, tm in timed_tasks:
+        next_events.append({"title": title, "time": tm, "type": "task"})
+
+    if google_client is not None:
+        try:
+            time_max = now_utc + timedelta(hours=12)
+            events = await google_client.list_events(
+                time_min=now_utc, time_max=time_max, max_results=10,
+            )
+            for ev in events or []:
+                summary = ev.get("summary", "Sem titulo")
+                start = ev.get("start", {})
+                start_time = start.get("dateTime") or start.get("date", "")
+                tm = _format_time(start_time)
+                next_events.append({
+                    "title": summary,
+                    "time": tm,
+                    "type": "agenda",
+                })
+        except Exception as exc:
+            logger.warning("dashboard: google_client failed: %s", exc)
+
+    # Sort by time (empty-time items go last)
+    next_events.sort(key=lambda e: e.get("time") or "99:99")
+
+    # --- Finance ------------------------------------------------------
+    finance_income = 0.0
+    finance_expenses = 0.0
+    finance_balance = 0.0
+    finance_pending_review = 0
+
+    if finance_service is not None:
+        try:
+            summary = await finance_service.get_monthly_summary(
+                month=now_br.month, year=now_br.year,
+            )
+            finance_income = summary.get("income", 0.0)
+            finance_expenses = summary.get("expenses", 0.0)
+            finance_balance = summary.get("balance", 0.0)
+        except Exception as exc:
+            logger.warning("dashboard: finance summary failed: %s", exc)
+
+        try:
+            pending_entries = await finance_service.list_entries(
+                status="pending_review", limit=200,
+            )
+            finance_pending_review = len(pending_entries)
+        except Exception as exc:
+            logger.warning("dashboard: finance pending failed: %s", exc)
+
+    return {
+        "greeting": greeting,
+        "date": date_label,
+        "tasks_today": {
+            "total": tasks_total,
+            "completed": tasks_completed,
+            "overdue": tasks_overdue,
+            "pending_titles": pending_titles,
+        },
+        "next_events": next_events,
+        "finance_month": {
+            "income": finance_income,
+            "expenses": finance_expenses,
+            "balance": finance_balance,
+            "pending_review": finance_pending_review,
+        },
+    }
+
+
+@router.get("/dashboard/summary")
+async def dashboard_summary(request: Request) -> dict:
+    """Return a structured JSON dashboard summary."""
+    return await generate_dashboard_summary(
+        task_service=getattr(request.app.state, "task_service", None),
+        finance_service=getattr(request.app.state, "finance_service", None),
+        google_client=getattr(request.app.state, "google_client", None),
+    )

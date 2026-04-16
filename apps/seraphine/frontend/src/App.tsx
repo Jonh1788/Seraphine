@@ -16,6 +16,7 @@ import { WhatsAppPanel } from './whatsapp';
 import type { WhatsAppMessage } from './whatsapp';
 import { MemoryView } from './memory';
 import { TasksView } from './tasks';
+import { DashboardView } from './dashboard';
 import {
   ChatIcon,
   CalendarIcon,
@@ -27,9 +28,10 @@ import {
   BrainIcon,
   TasksIcon,
   BellIcon,
+  DashboardIcon,
 } from './icons/Icons';
 
-type ActiveView = 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -68,7 +70,7 @@ export function App(): JSX.Element {
   const [labOpen, setLabOpen] = useState<boolean>(false);
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
-  const [activeView, setActiveView] = useState<ActiveView>('chat');
+  const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'subscribed' | 'error' | 'denied' | 'unsupported'>('idle');
   const [pushMsg, setPushMsg] = useState<string | null>(null);
@@ -148,6 +150,7 @@ export function App(): JSX.Element {
     // Shortcut view routing
     const view = params.get('view');
     if (
+      view === 'dashboard' ||
       view === 'finance' ||
       view === 'calendar' ||
       view === 'whatsapp' ||
@@ -624,6 +627,13 @@ export function App(): JSX.Element {
     badgeCount?: number;
   }[] = [
     {
+      id: 'dashboard',
+      icon: <DashboardIcon size={22} />,
+      label: 'Dashboard',
+      onClick: () => setActiveView('dashboard'),
+      active: activeView === 'dashboard',
+    },
+    {
       id: 'chat',
       icon: <ChatIcon size={22} />,
       label: 'Chat',
@@ -786,6 +796,12 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="chat">
+          {activeView === 'dashboard' && (
+            <DashboardView
+              onNavigate={(view) => setActiveView(view as ActiveView)}
+              connected={connected}
+            />
+          )}
           {activeView === 'finance' && (
             <FinanceDashboard onBack={() => setActiveView('chat')} />
           )}
