@@ -11280,6 +11280,414 @@ body.qc-window .quick-capture {
   }
 }
 
+/* ---------------------------------------------------------------------
+   SDD 018 — Apple Health widget + rich-card rows + chat-block styles.
+   --------------------------------------------------------------------- */
+
+.rich-card--health { border-left: 2px solid #ef4444; }
+.rich-card--habit { border-left: 2px solid #22d3ee; }
+
+.rich-card__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.rich-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.rich-card__row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.rich-card__row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rich-card__row-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.rich-card__row-value {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.health-widget {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.health-widget__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.health-widget__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.health-widget__title svg {
+  color: #ef4444;
+}
+
+.health-widget__sync {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  background: transparent;
+  transition: background 150ms, color 150ms, transform 200ms;
+}
+
+.health-widget__sync:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  transform: rotate(30deg);
+}
+
+.health-widget__sync:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.health-widget__empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+
+.health-widget__empty-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.health-widget__empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  max-width: 240px;
+}
+
+.health-widget__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.health-widget__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.health-widget__steps-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.health-widget__metric-icon {
+  display: inline-flex;
+}
+
+.health-widget__steps-label {
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.health-widget__steps-value {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.health-widget__bar {
+  height: 8px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.health-widget__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 400ms ease;
+}
+
+.health-widget__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.health-widget__cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.health-widget__cell-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.health-widget__cell-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.health-widget__cell-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-widget__error {
+  font-size: 11px;
+  color: #ef4444;
+  padding-top: var(--space-2);
+  border-top: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.chat-block--health {
+  border-left: 2px solid #ef4444;
+  border-radius: var(--r-sm);
+  padding: var(--space-3);
+  margin-top: var(--space-2);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.chat-block__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: #ef4444;
+}
+
+.chat-block__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chat-block__subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.chat-block__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.chat-block__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.chat-block__muted {
+  color: var(--text-dim);
+}
+
+/* Dashboard timeline — overdue event marker. */
+.dashboard__timeline-item--overdue .dashboard__timeline-time {
+  color: #ef4444;
+  text-decoration: line-through;
+  text-decoration-color: rgba(239, 68, 68, 0.6);
+}
+
+.dashboard__timeline-item--overdue .dashboard__timeline-label {
+  color: var(--text-dim);
+}
+
+.dashboard__timeline-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------------
+   SDD 018 — MobileShell: minimal iOS/iPad UI for HealthKit sync.
+   --------------------------------------------------------------------- */
+
+.mobile-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: env(safe-area-inset-top) 20px env(safe-area-inset-bottom);
+  min-height: 100vh;
+  background: #0b0d17;
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+
+.mobile-shell__header {
+  padding-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mobile-shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #ef4444;
+}
+
+.mobile-shell__brand h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.mobile-shell__sync-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 200ms, transform 200ms;
+}
+
+.mobile-shell__sync-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  transform: rotate(45deg);
+}
+
+.mobile-shell__sync-btn:disabled {
+  opacity: 0.4;
+}
+
+.mobile-shell__status p {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.mobile-shell__status--ok {
+  color: #4ade80 !important;
+}
+
+.mobile-shell__status--err {
+  color: #f87171 !important;
+}
+
+.mobile-shell__status--auth {
+  color: #64748b !important;
+  font-size: 11px !important;
+}
+
+.mobile-shell__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mobile-shell__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #cbd5e1;
+}
+
+.mobile-shell__row > svg {
+  color: #22d3ee;
+  flex-shrink: 0;
+}
+
+.mobile-shell__label {
+  font-size: 11px;
+  color: #64748b;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mobile-shell__value {
+  font-size: 16px;
+  color: #f1f5f9;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.mobile-shell__empty {
+  padding: 30px 20px;
+  text-align: center;
+  color: #64748b;
+}
+
 /* Global reduced-motion override — keep animations instant for users
    who prefer reduced motion. Must be the last rule in the file so it
    wins the cascade for everything above. */

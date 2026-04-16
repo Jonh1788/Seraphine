@@ -6,18 +6,53 @@
 //! - Close button hides instead of quitting (so the app stays "alive"
 //!   while the backend keeps running). Quit is tray-only.
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod clipboard;
+mod health;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        run_mobile();
+        return;
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    run_desktop();
+}
+
+/// iOS/Android entry — minimal Tauri shell that hosts the React UI plus
+/// the HealthKit bridge commands. No tray, no global shortcuts, no
+/// microphone capture (mobile webviews handle audio natively).
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn run_mobile() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            health::health_request_authorization,
+            health::health_get_today_summary,
+            health::health_get_recent,
+            health::health_schedule_background,
+        ])
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn run_desktop() {
     let toggle_shortcut = Shortcut::new(
         Some(Modifiers::SUPER | Modifiers::SHIFT),
         Code::Backslash,
@@ -42,6 +77,9 @@ pub fn run() {
             mic::start_mic_capture,
             mic::stop_mic_capture,
             clipboard::read_clipboard,
+            health::health_request_authorization,
+            health::health_get_today_summary,
+            health::health_get_recent,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -156,6 +194,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -164,12 +203,14 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn hide_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -184,6 +225,7 @@ fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 /// Position the Avatar Companion window in the bottom-right corner,
 /// with a small margin from the screen edges.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn position_avatar_companion<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let Ok(Some(monitor)) = window.current_monitor() else { return };
     let mon_size = monitor.size();
@@ -207,6 +249,7 @@ fn position_avatar_companion<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>
 
 /// Position the Quick Capture window centered horizontally, 15% from the
 /// bottom of the current monitor — ChatGPT-style floating overlay.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn position_quick_capture<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let Ok(Some(monitor)) = window.current_monitor() else { return };
     let mon_size = monitor.size();

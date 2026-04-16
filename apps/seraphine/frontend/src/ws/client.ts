@@ -6,7 +6,16 @@ type SendListener = (msg: ClientMessage) => void;
 
 // Use the same host as the page — Vite proxies /ws to the backend.
 // Works on localhost, LAN, and through tunnels (cloudflared/ngrok).
-const DEFAULT_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/conversation`;
+// On iOS/Android (mobile webview) the page is served from a Tauri
+// custom protocol (not a real HTTP host), so fall back to the public
+// Cloudflare tunnel.
+const PUBLIC_WS = 'wss://sera.jonhdev.io/ws/conversation';
+const isMobileWebview =
+  typeof navigator !== 'undefined' &&
+  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const DEFAULT_URL = isMobileWebview
+  ? PUBLIC_WS
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/conversation`;
 const BACKOFF_MS = [1000, 2000, 5000];
 
 export class SeraphineWS {

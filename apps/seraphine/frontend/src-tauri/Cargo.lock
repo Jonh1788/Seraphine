@@ -3615,6 +3615,7 @@ name = "seraphine-desktop"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "chrono",
  "cpal",
  "log",
  "serde",

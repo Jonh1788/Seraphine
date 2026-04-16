@@ -66,6 +66,16 @@ def _hash_id(*parts: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
+def _format_hours(minutes: float) -> str:
+    total = int(round(float(minutes)))
+    h, m = divmod(total, 60)
+    if h == 0:
+        return f"{m}min"
+    if m == 0:
+        return f"{h}h"
+    return f"{h}h{m:02d}"
+
+
 def _fmt_brl(amount: float) -> str:
     # BRL formatting with comma decimals + dot thousands, PT-BR style.
     sign = "-" if amount < 0 else ""
@@ -150,11 +160,13 @@ class InsightEngine:
         finance_service: Any = None,
         task_service: Any = None,
         habit_service: Any = None,
+        health_service: Any = None,
     ) -> None:
         self._store = store
         self._finance = finance_service
         self._tasks = task_service
         self._habits = habit_service
+        self._health = health_service
 
     # ------------------------------------------------------------------
     # Public API
@@ -184,6 +196,12 @@ class InsightEngine:
                 all_insights.extend(await self.analyze_habits())
             except Exception:
                 logger.exception("analyze_habits failed")
+
+        if self._health is not None:
+            try:
+                all_insights.extend(await self.analyze_health())
+            except Exception:
+                logger.exception("analyze_health failed")
 
         if all_insights:
             try:
@@ -383,6 +401,157 @@ class InsightEngine:
                         created_at=_now_iso(),
                     )
                 )
+        return out
+
+    async def analyze_health(self) -> list[Insight]:
+        """Surface sleep/steps/RHR trends over the trailing week.
+
+        All thresholds are intentionally conservative so insights don't
+        nag on noise. When there are fewer than 3 days with data the
+        analyser returns an empty list.
+        """
+        if self._health is None:
+            return []
+        try:
+            snapshots = await self._health.get_recent(days=14)
+        except Exception:
+            logger.exception("health get_recent failed")
+            return []
+
+        if len(snapshots) < 3:
+            return []
+
+        today = _today_sp()
+        period = today.isoformat()
+        out: list[Insight] = []
+
+        # Split into last-7 vs previous-7 windows for delta comparisons.
+        last_week = [s for s in snapshots if s.date > (today - timedelta(days=7)).isoformat()]
+        prev_week = [s for s in snapshots if s.date <= (today - timedelta(days=7)).isoformat()]
+
+        # ── Sleep drop ────────────────────────────────────────────────
+        last_sleep = [s.sleep_minutes for s in last_week if s.sleep_minutes]
+        prev_sleep = [s.sleep_minutes for s in prev_week if s.sleep_minutes]
+        if len(last_sleep) >= 3 and len(prev_sleep) >= 3:
+            last_avg = sum(last_sleep) / len(last_sleep)
+            prev_avg = sum(prev_sleep) / len(prev_sleep)
+            if prev_avg > 0 and (prev_avg - last_avg) >= 60:
+                drop_hours = (prev_avg - last_avg) / 60
+                out.append(
+                    Insight(
+                        id=_hash_id("health", "sleep-drop", period),
+                        type="health",
+                        severity="warning",
+                        title=(
+                            f"Seu sono caiu {drop_hours:.1f}h esta semana"
+                        ),
+                        description=(
+                            f"Voce dormiu em media "
+                            f"{_format_hours(last_avg)} nos ultimos 7 dias, "
+                            f"{drop_hours:.1f}h abaixo da semana anterior "
+                            f"({_format_hours(prev_avg)}). Que tal dormir "
+                            f"mais cedo hoje?"
+                        ),
+                        data={
+                            "last_avg_min": round(last_avg, 1),
+                            "prev_avg_min": round(prev_avg, 1),
+                            "drop_hours": round(drop_hours, 2),
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        # ── Steps drop ────────────────────────────────────────────────
+        last_steps = [s.steps for s in last_week if s.steps]
+        prev_steps = [s.steps for s in prev_week if s.steps]
+        if len(last_steps) >= 3 and len(prev_steps) >= 3:
+            last_avg = sum(last_steps) / len(last_steps)
+            prev_avg = sum(prev_steps) / len(prev_steps)
+            if prev_avg >= 2000 and last_avg > 0:
+                delta = (last_avg - prev_avg) / prev_avg
+                if delta <= -0.25:
+                    pct = int(round(abs(delta) * 100))
+                    out.append(
+                        Insight(
+                            id=_hash_id("health", "steps-drop", period),
+                            type="health",
+                            severity="info",
+                            title=f"Voce caminhou {pct}% menos esta semana",
+                            description=(
+                                f"Sua media de passos caiu de "
+                                f"{int(round(prev_avg)):,} pra "
+                                f"{int(round(last_avg)):,} por dia. "
+                                f"Bora dar uma volta?"
+                            ).replace(",", "."),
+                            data={
+                                "last_avg": int(round(last_avg)),
+                                "prev_avg": int(round(prev_avg)),
+                                "delta_pct": round(delta, 4),
+                                "period": period,
+                            },
+                            created_at=_now_iso(),
+                        )
+                    )
+
+        # ── Resting HR rise ──────────────────────────────────────────
+        last_rhr = [s.resting_heart_rate for s in last_week if s.resting_heart_rate]
+        prev_rhr = [s.resting_heart_rate for s in prev_week if s.resting_heart_rate]
+        if len(last_rhr) >= 3 and len(prev_rhr) >= 3:
+            last_avg = sum(last_rhr) / len(last_rhr)
+            prev_avg = sum(prev_rhr) / len(prev_rhr)
+            if (last_avg - prev_avg) >= 5:
+                out.append(
+                    Insight(
+                        id=_hash_id("health", "rhr-rise", period),
+                        type="health",
+                        severity="warning",
+                        title=(
+                            f"FC de repouso subiu "
+                            f"{int(round(last_avg - prev_avg))} bpm"
+                        ),
+                        description=(
+                            f"Sua frequencia cardiaca de repouso esta em "
+                            f"{int(round(last_avg))} bpm (era "
+                            f"{int(round(prev_avg))} bpm). Pode ser "
+                            f"estresse, pouco sono ou cansaco acumulado."
+                        ),
+                        data={
+                            "last_avg_bpm": round(last_avg, 1),
+                            "prev_avg_bpm": round(prev_avg, 1),
+                            "delta_bpm": round(last_avg - prev_avg, 1),
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        # ── Goal streak (10k steps N days in a row) ──────────────────
+        streak = 0
+        for s in sorted(snapshots, key=lambda x: x.date, reverse=True):
+            if s.steps >= 10_000:
+                streak += 1
+            else:
+                break
+        if streak >= 3:
+            out.append(
+                Insight(
+                    id=_hash_id("health", "steps-streak", period, streak),
+                    type="health",
+                    severity="positive",
+                    title=f"{streak} dias seguidos batendo 10k passos",
+                    description=(
+                        f"Voce bateu a meta de 10.000 passos {streak} "
+                        f"dias seguidos. Segue o ritmo!"
+                    ),
+                    data={
+                        "streak_days": streak,
+                        "period": period,
+                    },
+                    created_at=_now_iso(),
+                )
+            )
+
         return out
 
     # ------------------------------------------------------------------

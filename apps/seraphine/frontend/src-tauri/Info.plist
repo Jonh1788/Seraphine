@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    SDD 018 — HealthKit usage descriptions. Shown in the macOS system
+    prompt when the app first requests access. Keep language friendly
+    and specific.
+  -->
+  <key>NSHealthShareUsageDescription</key>
+  <string>Seraphine usa dados do Apple Saude para mostrar resumos diarios de passos, sono, treinos e frequencia cardiaca na sua assistente pessoal.</string>
+  <key>NSHealthUpdateUsageDescription</key>
+  <string>Seraphine pode registrar habitos concluidos no Apple Saude para manter suas metas sincronizadas.</string>
+</dict>
+</plist>

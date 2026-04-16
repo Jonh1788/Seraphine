@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    SDD 018 — Apple HealthKit access.
+    Active only when the bundle is signed with a cert that chains to an
+    App ID registered with HealthKit capability in the Apple Developer
+    portal, and accompanied by a provisioning profile that includes this
+    device.
+  -->
+  <key>com.apple.developer.healthkit</key>
+  <true/>
+  <key>com.apple.developer.healthkit.access</key>
+  <array/>
+
+  <!-- Required for Apple Development (non-App Store) code signing. The
+       application-identifier must match "<TEAM_ID>.<bundle-id>" and the
+       team-identifier must match the TEAM_ID embedded in the profile. -->
+  <key>com.apple.developer.team-identifier</key>
+  <string>CDX69HJKGH</string>
+  <key>application-identifier</key>
+  <string>CDX69HJKGH.io.jonhdev.seraphine</string>
+
+  <!-- get-task-allow must be true for Development certificates so the
+       debugger can attach. Release builds (Developer ID) flip this off. -->
+  <key>get-task-allow</key>
+  <true/>
+</dict>
+</plist>

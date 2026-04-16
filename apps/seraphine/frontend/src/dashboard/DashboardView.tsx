@@ -9,6 +9,7 @@ import {
   CheckCircleIcon,
 } from '../icons/Icons';
 import { WaterWidget } from '../water';
+import { HealthWidget } from '../health';
 import {
   InsightsDashboardWidget,
   WeeklyReportCard,
@@ -53,6 +54,14 @@ interface DashboardViewProps {
 
 function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+/** Returns true when `eventTime` (HH:MM) is earlier than `nowHHMM`.
+ *  Safe for empty/invalid values (returns false). */
+function isPastTime(eventTime: string, nowHHMM: string): boolean {
+  if (!eventTime || eventTime.length < 4) return false;
+  if (!nowHHMM || nowHHMM.length < 4) return false;
+  return eventTime.slice(0, 5) < nowHHMM.slice(0, 5);
 }
 
 const WEEKLY_REPORT_LS_KEY = 'seraphine.weeklyReportShown';
@@ -333,6 +342,9 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
       {/* --- Water --- */}
       <WaterWidget />
 
+      {/* --- Health (Apple HealthKit) --- */}
+      <HealthWidget />
+
       {/* --- Insights --- */}
       <InsightsDashboardWidget onNavigate={() => onNavigate('insights')} />
 
@@ -345,16 +357,25 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
         {events.length === 0 ? (
           <div className="dashboard__timeline-empty">Nenhum evento hoje</div>
         ) : (
-          events.slice(0, 5).map((ev, i) => (
-            <div key={i} className="dashboard__timeline-item">
-              <span className="dashboard__timeline-time">{ev.time}</span>
-              <span
-                className="dashboard__timeline-dot"
-                style={{ background: dotColor[ev.type] ?? '#a78bfa' }}
-              />
-              <span className="dashboard__timeline-label">{ev.title}</span>
-            </div>
-          ))
+          events.slice(0, 5).map((ev, i) => {
+            const overdue = isPastTime(ev.time, clock);
+            return (
+              <div
+                key={i}
+                className={`dashboard__timeline-item${overdue ? ' dashboard__timeline-item--overdue' : ''}`}
+              >
+                <span className="dashboard__timeline-time">{ev.time}</span>
+                <span
+                  className="dashboard__timeline-dot"
+                  style={{ background: overdue ? '#ef4444' : (dotColor[ev.type] ?? '#a78bfa') }}
+                />
+                <span className="dashboard__timeline-label">{ev.title}</span>
+                {overdue && (
+                  <span className="dashboard__timeline-badge">atrasada</span>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

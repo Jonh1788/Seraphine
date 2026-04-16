@@ -32,6 +32,9 @@ from seraphine.habits.service import HabitService
 from seraphine.water import schema as water_schema
 from seraphine.water.routes import router as water_router
 from seraphine.water.service import WaterService
+from seraphine.health import schema as health_schema
+from seraphine.health.routes import router as health_router
+from seraphine.health.service import HealthService
 from seraphine.insights import schema as insights_schema
 from seraphine.insights.routes import router as insights_router
 from seraphine.insights.service import InsightEngine
@@ -233,6 +236,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Water service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Apple Health — always enabled (SQLite-backed; data ingested from
+    # the Tauri HealthKit bridge via POST /health/snapshot).
+    # ------------------------------------------------------------------
+    health_service = None
+    try:
+        store.register_migrator("seraphine_health", health_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        health_service = HealthService(store, habit_service=habit_service)
+        logger.info("Health service wired")
+    except Exception as e:
+        logger.warning("Health service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Notes — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     note_service = None
@@ -257,6 +273,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             finance_service=finance_service,
             task_service=task_service,
             habit_service=habit_service,
+            health_service=health_service,
         )
         logger.info("Insight engine wired")
     except Exception as e:
@@ -344,6 +361,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         recurring_service=recurring_service,
         habit_service=habit_service,
         water_service=water_service,
+        health_service=health_service,
         note_service=note_service,
         llm=llm,
     )
@@ -518,6 +536,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.recurring_service = recurring_service
     app.state.habit_service = habit_service
     app.state.water_service = water_service
+    app.state.health_service = health_service
     app.state.note_service = note_service
     app.state.music_service = music_service
     app.state.insight_engine = insight_engine
@@ -728,6 +747,7 @@ def create_app() -> FastAPI:
     app.include_router(recurring_router)
     app.include_router(habits_router)
     app.include_router(water_router)
+    app.include_router(health_router)
     app.include_router(insights_router)
     app.include_router(notes_router)
     app.include_router(music_router)

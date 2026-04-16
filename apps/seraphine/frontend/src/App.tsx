@@ -113,8 +113,15 @@ export function App(): JSX.Element {
   // SDD 016-B — First-run onboarding gate.
   // Existing users (those with a conversation id already persisted) are
   // auto-migrated to onboarded=true so this release is invisible to them.
+  // SDD 018 — iOS/Android mobile webview also skips onboarding: the
+  // mobile shell is intended as a HealthKit companion to the Mac app,
+  // not a first-run experience. UX for mobile is handled separately.
   const [onboarded, setOnboarded] = useState<boolean>(() => {
     try {
+      if (typeof navigator !== 'undefined' &&
+          /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        return true;
+      }
       if (localStorage.getItem('seraphine.onboarded') === 'true') return true;
       if (localStorage.getItem('seraphine_conversation_id')) {
         localStorage.setItem('seraphine.onboarded', 'true');

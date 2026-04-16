@@ -75,6 +75,7 @@ def build_default_registry(
     recurring_service: Any = None,
     habit_service: Any = None,
     water_service: Any = None,
+    health_service: Any = None,
     note_service: Any = None,
     tts: Any = None,
     llm: Any = None,
@@ -222,6 +223,11 @@ def build_default_registry(
 
         reg.register(LogWaterTool(water_service))
         reg.register(SetupWaterTool(water_service))
+    if health_service is not None:
+        from seraphine.tools.health import HealthSummaryTool, HealthTrendTool
+
+        reg.register(HealthSummaryTool(health_service))
+        reg.register(HealthTrendTool(health_service))
     if note_service is not None:
         from seraphine.tools.notes import (
             CreateNoteTool,

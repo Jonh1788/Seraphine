@@ -57,7 +57,13 @@ export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element 
     }, 500);
   }, [title, dueDate, dueTime, priority, onClose]);
 
-  if (!open) return null;
+  // Desktop-only: mobile webviews (iOS/Android) don't have the global
+  // Cmd+Shift+S shortcut and the UX for a floating capture overlay
+  // doesn't translate to touch. Skip rendering on mobile entirely.
+  const isMobileWebview =
+    typeof navigator !== 'undefined' &&
+    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (!open || isMobileWebview) return null;
 
   if (success) {
     return (
