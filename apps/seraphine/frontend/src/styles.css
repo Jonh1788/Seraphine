@@ -4271,7 +4271,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  z-index: 1000;
+  z-index: 9999;
   animation: cardFadeIn 180ms ease;
 }
 
