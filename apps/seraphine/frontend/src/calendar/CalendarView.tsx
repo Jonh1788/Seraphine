@@ -15,6 +15,7 @@ import {
   monthGrid,
 } from '../google/utils';
 import { ArrowLeftIcon, BellIcon, CalendarIcon, FinanceIcon, TasksIcon } from '../icons/Icons';
+import { Skeleton, useDelayedFlag } from '../utils';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -890,6 +891,8 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(false);
+  const [firstLoaded, setFirstLoaded] = useState(false);
+  const delayedFirstLoading = useDelayedFlag(!firstLoaded && loading, 100);
   const [filters, setFilters] = useState<Set<FilterKey>>(
     () => new Set(['agenda', 'financas', 'outros', 'tarefas', 'lembretes']),
   );
@@ -922,6 +925,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       setEvents(MOCK_EVENTS);
     } finally {
       setLoading(false);
+      setFirstLoaded(true);
     }
   }, [rangeStart, rangeEnd]);
 
@@ -1243,39 +1247,47 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       </div>
 
       {/* Grid */}
-      {viewMode === 'month' && (
-        <div className="calendar-view__month-layout">
-          <MonthGrid
-            date={currentDate}
-            items={items}
-            filters={filters}
-            selectedDay={selectedDay}
-            onDayClick={handleDayClick}
-            onItemClick={handleItemClick}
-          />
-          <DayDetailPanel
-            selectedDay={selectedDay}
-            items={items}
-            filters={filters}
-            onItemClick={handleItemClick}
-          />
+      {delayedFirstLoading ? (
+        <div className="calendar-skeleton-grid" aria-hidden="true">
+          <Skeleton variant="card" height={40} count={35} />
         </div>
-      )}
-      {viewMode === 'week' && (
-        <WeekView
-          date={currentDate}
-          items={items}
-          filters={filters}
-          onItemClick={handleItemClick}
-        />
-      )}
-      {viewMode === 'day' && (
-        <DayView
-          date={currentDate}
-          items={items}
-          filters={filters}
-          onItemClick={handleItemClick}
-        />
+      ) : (
+        <>
+          {viewMode === 'month' && (
+            <div className="calendar-view__month-layout">
+              <MonthGrid
+                date={currentDate}
+                items={items}
+                filters={filters}
+                selectedDay={selectedDay}
+                onDayClick={handleDayClick}
+                onItemClick={handleItemClick}
+              />
+              <DayDetailPanel
+                selectedDay={selectedDay}
+                items={items}
+                filters={filters}
+                onItemClick={handleItemClick}
+              />
+            </div>
+          )}
+          {viewMode === 'week' && (
+            <WeekView
+              date={currentDate}
+              items={items}
+              filters={filters}
+              onItemClick={handleItemClick}
+            />
+          )}
+          {viewMode === 'day' && (
+            <DayView
+              date={currentDate}
+              items={items}
+              filters={filters}
+              onItemClick={handleItemClick}
+            />
+          )}
+        </>
       )}
     </div>
   );

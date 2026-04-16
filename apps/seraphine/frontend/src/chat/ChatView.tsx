@@ -19,6 +19,8 @@ import type { RecurringRule } from './RecurringChatBlock';
 import { TaskEditorModal } from '../tasks/TaskEditorModal';
 import { ReminderChatBlock } from './ReminderChatBlock';
 import type { ReminderData } from './ReminderChatBlock';
+import { ChatSkeleton } from './ChatSkeleton';
+import { useDelayedFlag } from '../utils';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -331,6 +333,8 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Ref to the chat text input for the compress-on-send micro-animation. */
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   /** Track MCP approval decisions: taskId -> 'approved' | 'rejected' */
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, McpAction>>(new Map());
@@ -341,6 +345,8 @@ export function ChatView({
     localStorage.getItem(CONV_KEY) || undefined
   );
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(!!conversationIdRef.current);
+  const delayedHistoryLoading = useDelayedFlag(historyLoading, 100);
 
   // Restore chat history from backend on mount
   useEffect(() => {
@@ -387,7 +393,8 @@ export function ChatView({
           }));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
   }, []);
 
   // Daily briefing: fetch on first session of the day
@@ -723,6 +730,13 @@ export function ChatView({
     });
     setDraft('');
     setPendingImages([]);
+
+    // SDD 016-D: briefly compress the input pill as a send feedback pulse.
+    const el = chatInputRef.current;
+    if (el) {
+      el.classList.add('chat__input--sending');
+      setTimeout(() => el.classList.remove('chat__input--sending'), 150);
+    }
   };
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -838,6 +852,10 @@ export function ChatView({
     toggle.setAttribute('data-current-status', isDone ? 'completed' : 'pending');
     toggle.setAttribute('data-next-status', isDone ? 'pending' : 'completed');
 
+    // SDD 016-D: bounce the check icon briefly.
+    toggle.classList.add('task-chat-card__toggle--bouncing');
+    setTimeout(() => toggle.classList.remove('task-chat-card__toggle--bouncing'), 320);
+
     if (titleEl) {
       if (isDone) titleEl.classList.add('task-chat-card__title--done');
       else titleEl.classList.remove('task-chat-card__title--done');
@@ -950,7 +968,8 @@ export function ChatView({
         </div>
       )}
       <div ref={messagesRef} className="chat__messages" role="log" aria-live="polite">
-        {turns.length === 0 && (
+        {delayedHistoryLoading && turns.length === 0 && <ChatSkeleton />}
+        {!delayedHistoryLoading && !historyLoading && turns.length === 0 && (
           <div className="chat__empty">
             <strong>Comece a conversa</strong>
             Digite uma mensagem ou segure o microfone pra falar.
@@ -1182,6 +1201,7 @@ export function ChatView({
               </svg>
             </button>
             <input
+              ref={chatInputRef}
               type="text"
               className="chat__input"
               aria-label="Mensagem"

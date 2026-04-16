@@ -6,6 +6,7 @@ import { TransactionList } from './TransactionList';
 import { PendingReview } from './PendingReview';
 import { ArrowLeftIcon, FinanceIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
+import { Skeleton, useDelayedFlag } from '../utils';
 
 const TAB_KEYS = ['Visao Geral', 'Categorias', 'Transacoes', 'Pendentes'] as const;
 type Tab = (typeof TAB_KEYS)[number];
@@ -30,6 +31,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const delayedLoading = useDelayedFlag(loading, 100);
   const [error, setError] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<FinanceEntry[]>([]);
   const [pendingTasks, setPendingTasks] = useState<SeraphineTask[]>([]);
@@ -199,8 +201,10 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
           <PendingReview entries={pendingEntries} tasks={pendingTasks} onRefresh={refresh} />
         )}
 
-        {activeTab !== 'Pendentes' && loading && (
-          <div className="finance-loading">Carregando...</div>
+        {activeTab !== 'Pendentes' && loading && delayedLoading && (
+          <div className="finance-skeleton">
+            <Skeleton variant="card" count={4} />
+          </div>
         )}
 
         {activeTab !== 'Pendentes' && !loading && error && (

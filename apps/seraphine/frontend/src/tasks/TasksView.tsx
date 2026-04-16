@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, BellIcon, CalendarIcon, ClockIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from '../finance/types';
 import { TaskEditorModal } from './TaskEditorModal';
+import { Skeleton, useDelayedFlag } from '../utils';
 
 import { API_BASE } from '../api';
 
@@ -345,6 +346,8 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [reminders, setReminders] = useState<ReminderData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [firstLoaded, setFirstLoaded] = useState(false);
+  const delayedFirstLoading = useDelayedFlag(!firstLoaded && loading, 100);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -431,6 +434,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       setError(String(e));
     } finally {
       setLoading(false);
+      setFirstLoaded(true);
     }
   }, []);
 
@@ -819,9 +823,14 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     ghost.style.width = `${rect.width}px`;
     ghost.style.pointerEvents = 'none';
     ghost.style.zIndex = '9999';
-    ghost.style.opacity = '0.9';
-    ghost.style.transform = 'rotate(1.5deg)';
-    ghost.style.boxShadow = '0 10px 24px rgba(0, 0, 0, 0.4)';
+    ghost.style.opacity = '0.92';
+    // SDD 016-D: stronger drag elevation — slight scale + tilt + layered
+    // shadow/glow. Keep small to preserve hit-test accuracy.
+    ghost.style.transform = 'scale(1.03) rotate(1deg)';
+    // Shadow is also reinforced by the .task-card__ghost CSS rule; this
+    // inline value is a fallback that matches var(--shadow-lg) and adds a
+    // subtle accent tint.
+    ghost.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(167, 139, 250, 0.18)';
     document.body.appendChild(ghost);
     return ghost;
   };
@@ -1280,30 +1289,40 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         </div>
       )}
 
-      <div className="tasks-kanban">
-        {COLUMNS.map((col) => {
-          const cards = byColumn[col.id];
-          const isOver = dragOver === col.id;
-          return (
-            <div
-              key={col.id}
-              className={`tasks-column${isOver ? ' drag-over' : ''}`}
-              data-column-id={col.id}
-            >
-              <div className="tasks-column__header">
-                <span className="tasks-column__title">{col.title}</span>
-                <span className="tasks-column__count">{cards.length}</span>
-              </div>
-              <div className="tasks-column__body">
-                {cards.length === 0 && !loading && (
-                  <div className="tasks-column__empty">Sem itens</div>
-                )}
-                {cards.map((c) => renderCard(c))}
-              </div>
+      {delayedFirstLoading ? (
+        <div className="tasks-skeleton" aria-hidden="true">
+          {COLUMNS.map((col) => (
+            <div key={col.id} className="tasks-skeleton__column">
+              <Skeleton variant="card" height={60} count={3} />
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="tasks-kanban">
+          {COLUMNS.map((col) => {
+            const cards = byColumn[col.id];
+            const isOver = dragOver === col.id;
+            return (
+              <div
+                key={col.id}
+                className={`tasks-column${isOver ? ' drag-over' : ''}`}
+                data-column-id={col.id}
+              >
+                <div className="tasks-column__header">
+                  <span className="tasks-column__title">{col.title}</span>
+                  <span className="tasks-column__count">{cards.length}</span>
+                </div>
+                <div className="tasks-column__body">
+                  {cards.length === 0 && !loading && (
+                    <div className="tasks-column__empty">Sem itens</div>
+                  )}
+                  {cards.map((c) => renderCard(c))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {recurringRules.length > 0 && (
         <div className="recurring-section">

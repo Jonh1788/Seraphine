@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { seedOnboarded } from './_helpers';
 
 test.describe('AudioContext lifecycle', () => {
+  test.beforeEach(async ({ page }) => {
+    await seedOnboarded(page);
+  });
+
   test('no AudioContext errors on page load (before user gesture)', async ({ page }) => {
     const errors: string[] = [];
     page.on('console', (msg) => {

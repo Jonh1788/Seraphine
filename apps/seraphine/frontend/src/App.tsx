@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { SeraphineWS } from './ws/client';
+import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
 import type { VrmAvatarController } from './avatar/VrmAvatarController';
@@ -40,6 +42,10 @@ import {
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
+import { SettingsDrawer } from './settings';
+import { OnboardingFlow } from './onboarding';
+import { BottomNav } from './nav';
+import type { BottomNavView } from './nav';
 
 type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights';
 
@@ -90,6 +96,24 @@ export function App(): JSX.Element {
   const [quickTaskTitle, setQuickTaskTitle] = useState<string>('');
   const quickTaskInputRef = useRef<HTMLInputElement>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+
+  // SDD 016-B — First-run onboarding gate.
+  // Existing users (those with a conversation id already persisted) are
+  // auto-migrated to onboarded=true so this release is invisible to them.
+  const [onboarded, setOnboarded] = useState<boolean>(() => {
+    try {
+      if (localStorage.getItem('seraphine.onboarded') === 'true') return true;
+      if (localStorage.getItem('seraphine_conversation_id')) {
+        localStorage.setItem('seraphine.onboarded', 'true');
+        return true;
+      }
+      return false;
+    } catch {
+      // localStorage unavailable — skip onboarding to avoid a permanent block.
+      return true;
+    }
+  });
 
   // Subscribe to Web Push — exposed so a UI button can trigger it manually.
   const subscribeToPush = useCallback(async (): Promise<void> => {
@@ -624,6 +648,9 @@ export function App(): JSX.Element {
   talkingRef.current = talking;
 
   useEffect(() => {
+    // SDD 016-B — do not attach push-to-talk while onboarding is on-screen.
+    if (!onboarded) return;
+
     const isTyping = (): boolean => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       return tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable === true;
@@ -647,7 +674,7 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [status]);
+  }, [status, onboarded]);
 
   // Unified keyboard shortcuts (Cmd+1-6, Cmd+K, Cmd+N, Ctrl+L, Escape)
   const commandPaletteOpenRef = useRef(false);
@@ -939,7 +966,7 @@ export function App(): JSX.Element {
             className="nav-rail__btn"
             title="Configuracoes"
             aria-label="Configuracoes"
-            onClick={() => setMobileMenuOpen((v) => !v)}
+            onClick={() => setSettingsOpen(true)}
           >
             <SettingsIcon size={22} />
           </button>
@@ -979,77 +1006,81 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="chat">
-          {activeView === 'dashboard' && (
-            <DashboardView
-              onNavigate={(view) => setActiveView(view as ActiveView)}
-              connected={connected}
-            />
-          )}
-          {activeView === 'finance' && (
-            <FinanceDashboard onBack={() => setActiveView('chat')} />
-          )}
-          {activeView === 'calendar' && (
-            <CalendarView
-              onBack={() => setActiveView('chat')}
-              onNavigateToTask={handleNavigateToTask}
-            />
-          )}
-          {activeView === 'whatsapp' && (
-            <WhatsAppPanel
-              messages={whatsappMessages}
-              onBack={() => setActiveView('chat')}
-              onNavigate={(view) => setActiveView(view)}
-            />
-          )}
-          {activeView === 'memory' && (
-            <MemoryView onBack={() => setActiveView('chat')} />
-          )}
-          {activeView === 'tasks' && (
-            <TasksView
-              onBack={() => setActiveView('chat')}
-              focusId={focusedTaskId}
-            />
-          )}
-          {activeView === 'habits' && (
-            <HabitsView onBack={() => setActiveView('chat')} />
-          )}
-          {activeView === 'insights' && (
-            <InsightsView onBack={() => setActiveView('chat')} />
-          )}
-          {activeView === 'chat' && wsRef.current && (
-            <ChatView
-              ws={wsRef.current}
-              status={status}
-              speak={speak}
-              think={think}
-              talking={talking}
-              onTalkStart={handleTalkStart}
-              onTalkEnd={handleTalkEnd}
-              onTalkCancel={handleTalkCancel}
-              avatarController={avatarCtrlRef}
-              realtimeActive={realtimeActive}
-              onRealtimeToggle={() => {
-                setRealtimeActive((prev) => {
-                  const next = !prev;
-                  if (!next) {
-                    // Leaving realtime: ensure any in-flight TTS is stopped
-                    // and the backend drops the outstanding turn.
-                    playbackRef.current?.stop();
-                    wsRef.current?.send({ type: 'interrupt' });
-                  } else {
-                    // Entering realtime: ensure AudioContext is primed
-                    // from the click gesture.
-                    warmSharedAudioContext();
-                    playbackRef.current?.ensureCtx();
-                  }
-                  return next;
-                });
-              }}
-              playback={playbackRef.current}
-              manualMute={manualMute}
-              onManualMuteToggle={() => setManualMute((v) => !v)}
-            />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            <ViewTransition key={activeView} transitionKey={activeView}>
+              {activeView === 'dashboard' && (
+                <DashboardView
+                  onNavigate={(view) => setActiveView(view as ActiveView)}
+                  connected={connected}
+                />
+              )}
+              {activeView === 'finance' && (
+                <FinanceDashboard onBack={() => setActiveView('chat')} />
+              )}
+              {activeView === 'calendar' && (
+                <CalendarView
+                  onBack={() => setActiveView('chat')}
+                  onNavigateToTask={handleNavigateToTask}
+                />
+              )}
+              {activeView === 'whatsapp' && (
+                <WhatsAppPanel
+                  messages={whatsappMessages}
+                  onBack={() => setActiveView('chat')}
+                  onNavigate={(view) => setActiveView(view)}
+                />
+              )}
+              {activeView === 'memory' && (
+                <MemoryView onBack={() => setActiveView('chat')} />
+              )}
+              {activeView === 'tasks' && (
+                <TasksView
+                  onBack={() => setActiveView('chat')}
+                  focusId={focusedTaskId}
+                />
+              )}
+              {activeView === 'habits' && (
+                <HabitsView onBack={() => setActiveView('chat')} />
+              )}
+              {activeView === 'insights' && (
+                <InsightsView onBack={() => setActiveView('chat')} />
+              )}
+              {activeView === 'chat' && wsRef.current && (
+                <ChatView
+                  ws={wsRef.current}
+                  status={status}
+                  speak={speak}
+                  think={think}
+                  talking={talking}
+                  onTalkStart={handleTalkStart}
+                  onTalkEnd={handleTalkEnd}
+                  onTalkCancel={handleTalkCancel}
+                  avatarController={avatarCtrlRef}
+                  realtimeActive={realtimeActive}
+                  onRealtimeToggle={() => {
+                    setRealtimeActive((prev) => {
+                      const next = !prev;
+                      if (!next) {
+                        // Leaving realtime: ensure any in-flight TTS is stopped
+                        // and the backend drops the outstanding turn.
+                        playbackRef.current?.stop();
+                        wsRef.current?.send({ type: 'interrupt' });
+                      } else {
+                        // Entering realtime: ensure AudioContext is primed
+                        // from the click gesture.
+                        warmSharedAudioContext();
+                        playbackRef.current?.ensureCtx();
+                      }
+                      return next;
+                    });
+                  }}
+                  playback={playbackRef.current}
+                  manualMute={manualMute}
+                  onManualMuteToggle={() => setManualMute((v) => !v)}
+                />
+              )}
+            </ViewTransition>
+          </AnimatePresence>
         </section>
       </div>
 
@@ -1087,6 +1118,11 @@ export function App(): JSX.Element {
         ))}
       </div>
 
+      <BottomNav
+        activeView={activeView}
+        onNavigate={(view: BottomNavView) => setActiveView(view as ActiveView)}
+      />
+
       <CalendarModal
         open={calendarOpen}
         onClose={() => setCalendarOpen(false)}
@@ -1111,10 +1147,35 @@ export function App(): JSX.Element {
         onAction={handlePaletteAction}
       />
 
-      <QuickCapture
-        open={quickCaptureOpen}
-        onClose={() => setQuickCaptureOpen(false)}
+      <AnimatePresence>
+        {quickCaptureOpen && (
+          <ViewTransition key="quickcapture" transitionKey="qc" variant="scale">
+            <QuickCapture
+              open={quickCaptureOpen}
+              onClose={() => setQuickCaptureOpen(false)}
+            />
+          </ViewTransition>
+        )}
+      </AnimatePresence>
+
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
+
+      {!onboarded && (
+        <OnboardingFlow
+          onComplete={() => {
+            try {
+              localStorage.setItem('seraphine.onboarded', 'true');
+            } catch {
+              // ignore — gate is in-memory anyway
+            }
+            setOnboarded(true);
+            setActiveView('chat');
+          }}
+        />
+      )}
 
       {quickNewTaskOpen && (
         <div className="quick-task-overlay" onClick={() => setQuickNewTaskOpen(false)}>

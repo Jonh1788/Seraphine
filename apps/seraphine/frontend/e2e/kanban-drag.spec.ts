@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { seedOnboarded } from './_helpers';
 
 // Verifies the pointer-based Kanban drag in TasksView.tsx. Playwright's
 // locator.dragTo simulates pointermove steps, which drives our handlers
@@ -7,6 +8,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Kanban drag-and-drop', () => {
   test.beforeEach(async ({ page }) => {
+    await seedOnboarded(page);
     // Capture outgoing PATCHes for assertions. Also neuter the Service
     // Worker so it can't intercept / cache our stubbed /tasks responses —
     // the PWA SW serves `/tasks` via stale-while-revalidate in production
