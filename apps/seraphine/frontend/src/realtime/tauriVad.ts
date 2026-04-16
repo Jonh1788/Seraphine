@@ -1,34 +1,56 @@
 /**
- * Tauri-compatible VAD that works on PCM chunks from TauriMicCapture
- * (the Web VAD uses getUserMedia, which is unavailable in WKWebView).
- *
- * Uses energy-based detection with hysteresis + hold times. Not as
- * accurate as Silero but good enough for push-to-talk style realtime.
+ * Tauri-compatible VAD using Silero ONNX directly on PCM from
+ * TauriMicCapture. Matches the quality of @ricky0123/vad-web's MicVAD
+ * but skips getUserMedia (unavailable in WKWebView).
  */
 
+import * as ort from 'onnxruntime-web';
 import { MicCapture } from '../audio/micCapture';
 import type { RealtimeVAD, RealtimeVADOptions } from './vad';
 
 const SAMPLE_RATE = 16000;
-const FRAME_SIZE = 512;                  // Silero-style frame
-const MS_PER_FRAME = (FRAME_SIZE / SAMPLE_RATE) * 1000; // ~32ms
-const SPEECH_RMS_THRESHOLD = 0.015;      // ~-36dBFS
-const SILENCE_RMS_THRESHOLD = 0.008;     // lower bound for hysteresis
-const MIN_SPEECH_FRAMES = Math.ceil(200 / MS_PER_FRAME);  // 200ms
-const REDEMPTION_FRAMES = Math.ceil(750 / MS_PER_FRAME);  // 750ms
-const PRE_SPEECH_FRAMES = Math.ceil(64 / MS_PER_FRAME);   // 64ms pre-roll
+const FRAME_SIZE = 512;                   // Silero legacy uses 512 samples at 16kHz
+const MS_PER_FRAME = (FRAME_SIZE / SAMPLE_RATE) * 1000; // 32ms
+
+// Silero thresholds (same as @ricky0123/vad-web defaults)
+const POSITIVE_SPEECH_THRESHOLD = 0.7;
+const NEGATIVE_SPEECH_THRESHOLD = 0.3;
+
+const MIN_SPEECH_FRAMES = Math.ceil(200 / MS_PER_FRAME);   // 200ms
+const REDEMPTION_FRAMES = Math.ceil(750 / MS_PER_FRAME);   // 750ms
+const PRE_SPEECH_FRAMES = Math.ceil(64 / MS_PER_FRAME);    // 64ms
+
+// Silero legacy model I/O
+// Inputs: input (f32[1, 512]), h (f32[2, 1, 64]), c (f32[2, 1, 64]), sr (i64 scalar)
+// Outputs: output (probability), hn, cn (new states)
+
+let modelPromise: Promise<ort.InferenceSession> | null = null;
+function getModel(): Promise<ort.InferenceSession> {
+  if (!modelPromise) {
+    // ORT env already configured in realtime/vad.ts (wasm paths etc.)
+    modelPromise = ort.InferenceSession.create('/vad/silero_vad_legacy.onnx', {
+      executionProviders: ['wasm'],
+    });
+  }
+  return modelPromise;
+}
 
 export async function createTauriRealtimeVAD(
   opts: RealtimeVADOptions,
 ): Promise<RealtimeVAD> {
+  const session = await getModel();
   const mic = new MicCapture();
   let listening = false;
   let suspended = false;
   let offChunk: (() => void) | null = null;
 
-  // Sliding window of recent frames for pre-roll padding
+  // LSTM state (persists across frames)
+  let h = new Float32Array(2 * 1 * 64);
+  let c = new Float32Array(2 * 1 * 64);
+  const sr = BigInt64Array.from([BigInt(SAMPLE_RATE)]);
+
+  // Pre-roll sliding window
   const preBuffer: Float32Array[] = [];
-  // Current utterance buffer (active during speech)
   let utterance: Float32Array[] = [];
 
   let inSpeech = false;
@@ -50,26 +72,47 @@ export async function createTauriRealtimeVAD(
     return Math.sqrt(sum / frame.length);
   };
 
-  const processFrame = (frame: Float32Array): void => {
+  const runSilero = async (frame: Float32Array): Promise<number> => {
+    const inputs = {
+      input: new ort.Tensor('float32', frame, [1, FRAME_SIZE]),
+      h: new ort.Tensor('float32', h, [2, 1, 64]),
+      c: new ort.Tensor('float32', c, [2, 1, 64]),
+      sr: new ort.Tensor('int64', sr, []),
+    };
+    const results = await session.run(inputs);
+    // Update state
+    h = new Float32Array((results.hn.data as Float32Array).buffer.slice(0) as ArrayBuffer);
+    c = new Float32Array((results.cn.data as Float32Array).buffer.slice(0) as ArrayBuffer);
+    const prob = (results.output.data as Float32Array)[0];
+    return prob;
+  };
+
+  const processFrame = async (frame: Float32Array): Promise<void> => {
     if (suspended) return;
 
     const energy = rms(frame);
     micRmsSmoothed = micRmsSmoothed * 0.7 + energy * 0.3;
 
-    // Always fire audio frame callback (for waveform vis)
     if (opts.onAudioFrame) {
       try { opts.onAudioFrame(frame); } catch (err) { console.error('[tauri-vad] frame:', err); }
     }
 
+    // Run Silero inference
+    let prob: number;
+    try {
+      prob = await runSilero(frame);
+    } catch (err) {
+      console.error('[tauri-vad] silero inference failed:', err);
+      return;
+    }
+
     if (!inSpeech) {
-      // Not in speech — check for speech start
-      if (energy > SPEECH_RMS_THRESHOLD) {
+      if (prob > POSITIVE_SPEECH_THRESHOLD) {
         speechFrames += 1;
         preBuffer.push(frame);
         if (preBuffer.length > PRE_SPEECH_FRAMES) preBuffer.shift();
 
         if (speechFrames >= MIN_SPEECH_FRAMES) {
-          // Confirmed speech start
           inSpeech = true;
           silenceFrames = 0;
           utterance = [...preBuffer];
@@ -77,7 +120,6 @@ export async function createTauriRealtimeVAD(
           try { opts.onSpeechStart(); } catch (err) { console.error('[tauri-vad] speechStart:', err); }
         }
       } else {
-        // Below threshold — reset counter, slide pre-buffer
         if (speechFrames > 0 && speechFrames < MIN_SPEECH_FRAMES) {
           try { opts.onMisfire?.(); } catch { /* ignore */ }
         }
@@ -86,13 +128,11 @@ export async function createTauriRealtimeVAD(
         if (preBuffer.length > PRE_SPEECH_FRAMES) preBuffer.shift();
       }
     } else {
-      // In speech — accumulate and check for speech end
       utterance.push(frame);
 
-      if (energy < SILENCE_RMS_THRESHOLD) {
+      if (prob < NEGATIVE_SPEECH_THRESHOLD) {
         silenceFrames += 1;
         if (silenceFrames >= REDEMPTION_FRAMES) {
-          // Speech ended
           const total = utterance.reduce((n, f) => n + f.length, 0);
           const audio = new Float32Array(total);
           let off = 0;
@@ -107,14 +147,24 @@ export async function createTauriRealtimeVAD(
           try { opts.onSpeechEnd(audio); } catch (err) { console.error('[tauri-vad] speechEnd:', err); }
         }
       } else {
-        // Still hearing voice — reset silence counter
         silenceFrames = 0;
       }
     }
   };
 
-  // Accumulator: chunks from Tauri may be larger/smaller than FRAME_SIZE,
-  // so we split/merge into exact 512-sample frames.
+  // Serialize frame processing to avoid overlapping async runs
+  let processing = false;
+  const pending: Float32Array[] = [];
+  const pump = async (): Promise<void> => {
+    if (processing) return;
+    processing = true;
+    while (pending.length > 0) {
+      const frame = pending.shift()!;
+      await processFrame(frame);
+    }
+    processing = false;
+  };
+
   let accumulator: Float32Array = new Float32Array(0);
   const pushChunk = (pcm: Int16Array): void => {
     const floats = i16ToFloat32(pcm);
@@ -123,15 +173,19 @@ export async function createTauriRealtimeVAD(
     merged.set(floats, accumulator.length);
     let off = 0;
     while (merged.length - off >= FRAME_SIZE) {
-      processFrame(merged.slice(off, off + FRAME_SIZE));
+      pending.push(merged.slice(off, off + FRAME_SIZE));
       off += FRAME_SIZE;
     }
     accumulator = merged.slice(off);
+    void pump();
   };
 
   return {
     start: async () => {
       if (listening) return;
+      // Reset LSTM state
+      h = new Float32Array(2 * 1 * 64);
+      c = new Float32Array(2 * 1 * 64);
       await mic.start();
       offChunk = mic.onChunk(pushChunk);
       listening = true;
@@ -143,12 +197,13 @@ export async function createTauriRealtimeVAD(
       mic.stop();
       preBuffer.length = 0;
       utterance = [];
+      pending.length = 0;
       accumulator = new Float32Array(0);
       inSpeech = false;
       speechFrames = 0;
       silenceFrames = 0;
     },
-    getAnalyser: () => null,  // No analyser node in Tauri path (waveform disabled)
+    getAnalyser: () => null,
     isListening: () => listening,
     suspendForPlayback: () => {
       suspended = true;
