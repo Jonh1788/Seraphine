@@ -58,7 +58,7 @@
         "center": false,
         "visible": false,
         "skipTaskbar": true,
-        "focus": false,
+        "focus": true,
         "shadow": false,
         "url": "/avatar-companion.html"
       }

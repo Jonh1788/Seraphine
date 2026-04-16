@@ -59,6 +59,7 @@ pub fn run() {
                             } else {
                                 position_avatar_companion(&window);
                                 let _ = window.show();
+                                let _ = window.set_focus();
                             }
                         }
                     }
