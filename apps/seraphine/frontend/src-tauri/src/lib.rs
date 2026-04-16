@@ -20,6 +20,7 @@ mod clipboard;
 mod health;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
+mod whisper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -43,6 +44,9 @@ fn run_mobile() {
             health::health_request_authorization,
             health::health_get_today_summary,
             health::health_get_recent,
+            whisper::whisper_status,
+            whisper::whisper_prepare,
+            whisper::whisper_transcribe_pcm,
             health::health_schedule_background,
         ])
         .plugin(tauri_plugin_notification::init())
@@ -80,6 +84,9 @@ fn run_desktop() {
             health::health_request_authorization,
             health::health_get_today_summary,
             health::health_get_recent,
+            whisper::whisper_status,
+            whisper::whisper_prepare,
+            whisper::whisper_transcribe_pcm,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -140,6 +147,27 @@ fn run_desktop() {
             app.global_shortcut().register(capture_shortcut)?;
             app.global_shortcut().register(avatar_shortcut)?;
             app.global_shortcut().register(clipboard_shortcut)?;
+
+            // Kick off Whisper model download + context warmup in the
+            // background so the first voice input is instant. Errors are
+            // swallowed; the frontend can retry via whisper_prepare.
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match whisper::whisper_prepare().await {
+                    Ok(status) => {
+                        log::info!(
+                            "whisper ready: {} ({} MB)",
+                            status.model_id,
+                            status.model_size_bytes / 1_000_000,
+                        );
+                        let _ = app_handle.emit("whisper-ready", status);
+                    }
+                    Err(e) => {
+                        log::warn!("whisper prepare failed: {e}");
+                        let _ = app_handle.emit("whisper-error", e);
+                    }
+                }
+            });
 
             // Build the system tray.
             let show = MenuItem::with_id(app, "show", "Mostrar", true, None::<&str>)?;

@@ -13,19 +13,39 @@ fn main() {
 
 fn compile_healthkit_bridge() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let swift_src = manifest_dir.join("swift").join("HealthKitBridge.swift");
-    if !swift_src.exists() {
+    let swift_dir = manifest_dir.join("swift");
+    if !swift_dir.exists() {
         println!(
-            "cargo:warning=Swift HealthKit bridge not found at {}",
-            swift_src.display()
+            "cargo:warning=Swift bridge dir not found at {}",
+            swift_dir.display()
+        );
+        return;
+    }
+
+    // Compile every .swift file in the swift/ directory into one static
+    // lib. Adding a new bridge (SpeechBridge, etc.) is as simple as
+    // dropping the file alongside HealthKitBridge.swift.
+    let mut swift_srcs: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(&swift_dir)
+        .unwrap_or_else(|e| panic!("read swift dir {}: {e}", swift_dir.display()))
+    {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("swift") {
+            println!("cargo:rerun-if-changed={}", path.display());
+            swift_srcs.push(path);
+        }
+    }
+    if swift_srcs.is_empty() {
+        println!(
+            "cargo:warning=no .swift files found under {}",
+            swift_dir.display()
         );
         return;
     }
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let lib_path = out_dir.join("libseraphine_healthkit.a");
-
-    println!("cargo:rerun-if-changed={}", swift_src.display());
 
     // Resolve the Rust target triple to a Swift target + SDK. On iOS,
     // we also need to pass `-sdk <path>` so swiftc picks up UIKit/
@@ -62,10 +82,11 @@ fn compile_healthkit_bridge() {
         cmd.args(["-sdk", &path]);
     }
 
+    cmd.arg("-o").arg(&lib_path);
+    for src in &swift_srcs {
+        cmd.arg(src);
+    }
     let status = cmd
-        .arg("-o")
-        .arg(&lib_path)
-        .arg(&swift_src)
         .status()
         .expect("failed to invoke swiftc — ensure Xcode command-line tools are installed");
 
@@ -77,6 +98,9 @@ fn compile_healthkit_bridge() {
     println!("cargo:rustc-link-lib=static=seraphine_healthkit");
     println!("cargo:rustc-link-lib=framework=HealthKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
+    // SpeechBridge.swift needs Speech + AVFoundation.
+    println!("cargo:rustc-link-lib=framework=Speech");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
     // Swift runtime: macOS has it at /usr/lib/swift; iOS bundles it
     // into the app via Xcode. Only need to hint the linker on macOS.
     if sdk_name_opt.is_none() {

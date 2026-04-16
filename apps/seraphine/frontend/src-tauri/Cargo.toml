@@ -24,6 +24,13 @@ log = "0.4"
 # SDD 018 — HealthKit bridge uses chrono for date math in the mock
 # generator; the real Swift bridge will handle its own dates server-side.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Native STT embedded in the app — whisper.cpp bindings with Metal
+# acceleration on Apple Silicon. No Python runtime, no external
+# backend, no network round-trip. Model files are downloaded on
+# first use to ~/Library/Caches/seraphine/ so the shipped binary
+# stays small.
+whisper-rs = { version = "0.14", features = ["metal"] }
+dirs = "5"
 
 # Desktop-only dependencies — mic capture (cpal), clipboard (arboard),
 # global shortcuts, tray. iOS has its own equivalents via UIKit and
