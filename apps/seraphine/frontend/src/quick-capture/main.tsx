@@ -7,6 +7,9 @@ import { createRoot } from 'react-dom/client';
 import { QuickCapture } from './QuickCapture';
 import '../styles.css';
 
+// Tag the body so CSS can skip the full-screen overlay in this window.
+document.body.classList.add('qc-window');
+
 function QuickCaptureWindow(): JSX.Element {
   const handleClose = async (): Promise<void> => {
     try {

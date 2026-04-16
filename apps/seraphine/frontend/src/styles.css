@@ -7828,6 +7828,20 @@ button:disabled {
   animation: cmdOverlayIn 150ms ease-out;
 }
 
+/* Dedicated Tauri window: skip the full-screen overlay — the window
+   itself is transparent, so the card floats directly on the desktop. */
+body.qc-window { background: transparent; }
+body.qc-window .quick-capture-overlay {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: none;
+}
+body.qc-window .quick-capture {
+  width: calc(100vw - 16px);
+  max-width: 100%;
+}
+
 .quick-capture {
   width: 90vw;
   max-width: 480px;
