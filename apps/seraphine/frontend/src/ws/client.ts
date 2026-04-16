@@ -4,16 +4,22 @@ type StatusListener = (status: 'connected' | 'disconnected') => void;
 type MessageListener = (msg: ServerMessage | ArrayBuffer) => void;
 type SendListener = (msg: ClientMessage) => void;
 
-// Use the same host as the page — Vite proxies /ws to the backend.
-// Works on localhost, LAN, and through tunnels (cloudflared/ngrok).
-// On iOS/Android (mobile webview) the page is served from a Tauri
-// custom protocol (not a real HTTP host), so fall back to the public
-// Cloudflare tunnel.
+// Inside the Tauri shell (Mac desktop build, iOS app) the page is
+// served from a custom protocol (`tauri://localhost`), not a real HTTP
+// host — so relative WS URLs go nowhere useful. In that case we always
+// target the public Cloudflare-fronted backend. In plain browsers
+// (vite dev) we still use the current host so the Vite proxy forwards
+// `/ws/*` into the local backend.
 const PUBLIC_WS = 'wss://sera.jonhdev.io/ws/conversation';
-const isMobileWebview =
-  typeof navigator !== 'undefined' &&
-  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const DEFAULT_URL = isMobileWebview
+const isTauriRuntime =
+  typeof window !== 'undefined' &&
+  Boolean(
+    (window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown })
+      .__TAURI_INTERNALS__ ||
+      (window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown })
+        .__TAURI__,
+  );
+const DEFAULT_URL = isTauriRuntime
   ? PUBLIC_WS
   : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/conversation`;
 const BACKOFF_MS = [1000, 2000, 5000];
