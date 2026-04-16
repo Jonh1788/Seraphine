@@ -243,7 +243,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         store.register_migrator("seraphine_health", health_schema.migrate)
         await store.ensure_schema()  # idempotent
-        health_service = HealthService(store, habit_service=habit_service)
+        health_service = HealthService(
+            store,
+            habit_service=habit_service,
+            water_service=water_service,
+        )
         logger.info("Health service wired")
     except Exception as e:
         logger.warning("Health service failed (non-critical): %s", e)

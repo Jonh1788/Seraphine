@@ -169,9 +169,11 @@ class HealthService:
         store: Store,
         *,
         habit_service: Any = None,
+        water_service: Any = None,
     ) -> None:
         self._store = store
         self._habit_service = habit_service
+        self._water_service = water_service
 
     # ------------------------------------------------------------------
     # Ingest
@@ -269,6 +271,15 @@ class HealthService:
             await self._auto_complete_habits(snapshot)
         except Exception:
             logger.exception("auto_complete_habits failed for %s", d_iso)
+
+        # Best-effort water profile sync — when a new weight arrives from
+        # HealthKit we update the hydration goal so the user doesn't have
+        # to retype it. Only runs when a water profile already exists
+        # (first-time setup still happens through the UI).
+        try:
+            await self._sync_water_profile(snapshot)
+        except Exception:
+            logger.exception("sync_water_profile failed for %s", d_iso)
 
         return snapshot
 
@@ -537,3 +548,55 @@ class HealthService:
             if kw in title:
                 return h
         return None
+
+    # ------------------------------------------------------------------
+    # Water profile auto-sync
+    # ------------------------------------------------------------------
+
+    # Minimum weight delta to trigger a profile update. Under this, skip
+    # to avoid writing/recalculating the goal on tiny day-to-day noise.
+    _WATER_WEIGHT_DELTA_KG = 0.3
+
+    async def _sync_water_profile(self, snapshot: HealthSnapshot) -> None:
+        """Update the user's water profile weight when HealthKit reports a
+        new one.
+
+        Skipped when:
+          - No water service is wired.
+          - The snapshot has no weight.
+          - No profile exists yet (first-run setup stays in the UI).
+          - Weight changed by less than ``_WATER_WEIGHT_DELTA_KG``.
+        """
+        svc = self._water_service
+        if svc is None or snapshot.weight_kg is None:
+            return
+        try:
+            profile = await svc.get_profile()
+        except Exception:
+            logger.exception("sync_water_profile: get_profile failed")
+            return
+        if profile is None:
+            return  # Don't bootstrap from health alone.
+        try:
+            current = float(profile.weight_kg)
+            new = float(snapshot.weight_kg)
+        except (TypeError, ValueError):
+            return
+        if abs(current - new) < self._WATER_WEIGHT_DELTA_KG:
+            return
+        try:
+            await svc.set_profile(
+                weight_kg=new,
+                activity_level=profile.activity_level,
+                height_cm=profile.height_cm,
+                reminder_enabled=profile.reminder_enabled,
+                reminder_start=profile.reminder_start,
+                reminder_end=profile.reminder_end,
+                reminder_interval_hours=profile.reminder_interval_hours,
+            )
+            logger.info(
+                "water profile weight synced from health: %.1f → %.1f kg",
+                current, new,
+            )
+        except Exception:
+            logger.exception("sync_water_profile: set_profile failed")

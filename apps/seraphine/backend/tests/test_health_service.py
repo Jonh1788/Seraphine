@@ -20,6 +20,8 @@ from seraphine.health.models import HealthSnapshot
 from seraphine.health.service import HealthService
 from seraphine.memory.store import MemoryStore
 from seraphine.tools.health import HealthSummaryTool, HealthTrendTool
+from seraphine.water import schema as water_schema
+from seraphine.water.service import WaterService
 
 
 _SP_TZ = ZoneInfo("America/Sao_Paulo")
@@ -39,6 +41,7 @@ async def store(tmp_path: Path) -> MemoryStore:
     s = MemoryStore(tmp_path / "health.sqlite")
     s.register_migrator("seraphine_health", health_schema.migrate)
     s.register_migrator("seraphine_habits", habits_schema.migrate)
+    s.register_migrator("seraphine_water", water_schema.migrate)
     await s.ensure_schema()
     return s
 
@@ -49,8 +52,19 @@ async def habit_service(store: MemoryStore) -> HabitService:
 
 
 @pytest.fixture
-async def service(store: MemoryStore, habit_service: HabitService) -> HealthService:
-    return HealthService(store, habit_service=habit_service)
+async def water_service(store: MemoryStore) -> WaterService:
+    return WaterService(store)
+
+
+@pytest.fixture
+async def service(
+    store: MemoryStore,
+    habit_service: HabitService,
+    water_service: WaterService,
+) -> HealthService:
+    return HealthService(
+        store, habit_service=habit_service, water_service=water_service,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -373,3 +387,63 @@ async def test_health_trend_tool_validates_metric(service: HealthService) -> Non
     assert not result.ok
     result2 = await tool.execute({"metric": "bogus", "days": 7})
     assert not result2.ok
+
+
+# ---------------------------------------------------------------------------
+# Water profile auto-sync
+# ---------------------------------------------------------------------------
+
+
+async def test_water_sync_updates_weight_when_profile_exists(
+    service: HealthService, water_service: WaterService,
+) -> None:
+    await water_service.set_profile(weight_kg=70.0, activity_level="moderate")
+    today = _today_sp().isoformat()
+    await service.store_snapshot(date=today, weight_kg=72.5)
+    profile = await water_service.get_profile()
+    assert profile is not None
+    assert profile.weight_kg == pytest.approx(72.5)
+    # Goal recomputed from new weight (72.5 × 35ml/kg = 2537 → clamped).
+    assert profile.daily_goal_ml == WaterService.compute_goal(72.5, "moderate")
+
+
+async def test_water_sync_skips_when_no_profile(
+    service: HealthService, water_service: WaterService,
+) -> None:
+    today = _today_sp().isoformat()
+    await service.store_snapshot(date=today, weight_kg=75.0)
+    profile = await water_service.get_profile()
+    assert profile is None  # service won't bootstrap on its own
+
+
+async def test_water_sync_skips_tiny_delta(
+    service: HealthService, water_service: WaterService,
+) -> None:
+    await water_service.set_profile(weight_kg=70.0, activity_level="moderate")
+    today = _today_sp().isoformat()
+    await service.store_snapshot(date=today, weight_kg=70.1)  # < 0.3 kg
+    profile = await water_service.get_profile()
+    assert profile is not None
+    assert profile.weight_kg == pytest.approx(70.0)  # unchanged
+
+
+async def test_water_sync_preserves_other_settings(
+    service: HealthService, water_service: WaterService,
+) -> None:
+    await water_service.set_profile(
+        weight_kg=70.0,
+        activity_level="active",
+        height_cm=175.0,
+        reminder_start="07:00",
+        reminder_end="23:00",
+        reminder_interval_hours=3,
+    )
+    today = _today_sp().isoformat()
+    await service.store_snapshot(date=today, weight_kg=74.5)
+    profile = await water_service.get_profile()
+    assert profile is not None
+    assert profile.activity_level == "active"
+    assert profile.height_cm == pytest.approx(175.0)
+    assert profile.reminder_start == "07:00"
+    assert profile.reminder_end == "23:00"
+    assert profile.reminder_interval_hours == 3
