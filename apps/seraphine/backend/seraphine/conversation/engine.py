@@ -99,48 +99,51 @@ DEFAULT_SYSTEM_PROMPT = (
     "already said what you're doing, just do it silently."
 )
 
-_EMOTION_TAGS_INSTRUCTION = (
-    " "
-    "ElevenLabs v3 audio tags are active: you MUST include at least one "
-    "emotion or delivery tag per reply. They will be rendered as real "
-    "acted audio (not read as text). Use 1-3 tags per reply — enough "
-    "to sound expressive but not overloaded. "
+# Always injected — controls avatar facial expressions regardless of TTS.
+_AVATAR_EXPRESSION_INSTRUCTION = (
+    "\n\nAVATAR EXPRESSION TAGS:\n"
+    "You MUST include emotion tags in brackets in your replies. These "
+    "control the avatar's facial expressions in real-time. Use 1-3 per reply. "
     "IMPORTANT: each tag must be a SINGLE word in its own brackets. "
-    "CORRECT: '[happy] Oi! [laughs] Que legal!'. "
-    "WRONG: '[warm, happy]' or '[happy/excited]' — these break the TTS. Tags must appear in "
-    "square brackets on a single line, e.g. '[laughs] Nossa, isso é "
-    "ótimo!', 'Tem certeza? [whispers] Isso fica entre a gente.', "
-    "'[sighs] Vou tentar de novo...'. "
-    "Available action tags: [laughs], [giggles], [chuckles], [sighs], "
-    "[gasps], [whispers], [cries], [screams]. "
-    "Available delivery/emotion tags (these change the avatar's face): "
-    "[happy] — smile, warm eyes. "
-    "[excited] — sparkly eyes, big smile. "
-    "[sad] — sorrowful, droopy brows. "
-    "[angry] — furrowed brows, tense. "
-    "[surprised] — wide eyes, open mouth. "
-    "[sarcastic] — half-smile, raised eyebrow. "
-    "[curious] — raised brows, head tilt. "
-    "[serious] — focused, slight frown. "
-    "[confident] — chin up, subtle smile. "
-    "[shy] — averted eyes, slight blush. "
-    "[warm] — gentle smile, soft eyes (use for greetings, comfort). "
-    "[soft] — relaxed, calm (use for whispers, gentle moments). "
-    "[thinking] — squint, head tilt (use while processing). "
-    "[exhausted] — droopy, heavy lids (use for sympathy about tiredness). "
-    "[sulky] — pouty, slight frown. "
-    "[sparkly] — star eyes, delighted (use for amazing news). "
-    "[confused] — spiral eyes, tilted head. "
-    "[wink] — one eye blink, flirty smile. "
-    "[pout] — pursed lips, cute sulk. "
+    "CORRECT: '[happy] Oi! Que legal!' or '[wink] Sabia que ia gostar.'\n"
+    "WRONG: '[warm, happy]' or '[happy/excited]'.\n"
+    "Available expression tags:\n"
+    "[happy] — smile, warm eyes.\n"
+    "[excited] — sparkly eyes, big smile.\n"
+    "[sad] — sorrowful, droopy brows.\n"
+    "[angry] — furrowed brows, tense.\n"
+    "[surprised] — wide eyes, open mouth.\n"
+    "[sarcastic] — half-smile, raised eyebrow.\n"
+    "[curious] — raised brows, head tilt.\n"
+    "[serious] — focused, slight frown.\n"
+    "[confident] — chin up, subtle smile.\n"
+    "[shy] — averted eyes, slight blush.\n"
+    "[warm] — gentle smile, soft eyes (greetings, comfort).\n"
+    "[soft] — relaxed, calm.\n"
+    "[thinking] — squint, head tilt.\n"
+    "[exhausted] — droopy, heavy lids.\n"
+    "[sulky] — pouty, slight frown.\n"
+    "[sparkly] — star eyes, delighted (amazing news).\n"
+    "[confused] — spiral eyes, tilted head.\n"
+    "[wink] — one eye blink, flirty smile.\n"
+    "[pout] — pursed lips, cute sulk.\n"
+    "[worried] — concerned brows, slight frown.\n"
     "USE THEM GENEROUSLY — they make you feel alive. Vary your expressions, "
     "don't always use [happy]. Match the emotion to the context: [shy] when "
     "receiving compliments, [excited] for good news, [sarcastic] for jokes, "
     "[worried] for concerning topics, [confident] when giving advice. "
-    "Do NOT use tags inside tool arguments. Do NOT narrate the tag "
-    "('eu rio' is redundant if you already emitted [laughs]). The "
-    "chat UI strips the tags from the rendered text, so the user sees "
-    "the clean sentence and hears the expressive audio."
+    "Do NOT use tags inside tool arguments. The chat UI strips the tags "
+    "from the rendered text, so the user sees clean text."
+)
+
+# Only injected when ElevenLabs v3 TTS is active — adds audio action tags.
+_TTS_ACTION_TAGS_INSTRUCTION = (
+    "\n\nTTS ACTION TAGS (ElevenLabs v3 active):\n"
+    "In addition to expression tags, you can use action tags that are "
+    "rendered as real acted audio: [laughs], [giggles], [chuckles], "
+    "[sighs], [gasps], [whispers], [cries], [screams]. "
+    "Do NOT narrate the action ('eu rio' is redundant if you already "
+    "emitted [laughs])."
 )
 
 
@@ -164,15 +167,17 @@ def _build_date_context() -> str:
         f"e 30' (or 'duas e meia da tarde'). Weekdays also by name: "
         f"'terça-feira', not 'ter'."
     )
-    # Teach audio tags only when ElevenLabs v3 is actually the active
-    # TTS backend. Other TTS models treat `[laughs]` as literal text
-    # and would read "colchetes laughs colchetes" — exactly what we
-    # don't want.
+    # Avatar expression tags are always active (they control facial
+    # expressions regardless of TTS backend).
+    base += _AVATAR_EXPRESSION_INSTRUCTION
+
+    # TTS action tags (laughs, sighs, etc.) only when ElevenLabs v3 is
+    # active — other TTS models would read "[laughs]" as literal text.
     if (
         settings.tts_backend == "elevenlabs"
         and "v3" in settings.elevenlabs_model_id.lower()
     ):
-        return base + _EMOTION_TAGS_INSTRUCTION
+        base += _TTS_ACTION_TAGS_INSTRUCTION
     return base
 
 
