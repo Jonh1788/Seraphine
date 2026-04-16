@@ -77,6 +77,35 @@ export function AvatarCompanion(): JSX.Element {
     // Apply saved camera settings
     (ctrl as any).cameraTarget = { ...camera };
 
+    // Boost rendering sharpness — small window needs high DPR.
+    // Default is devicePixelRatio (usually 2 on Retina); we force 3x
+    // for super-crisp edges on the small companion window.
+    const renderer = (ctrl as any).renderer;
+    if (renderer?.setPixelRatio) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
+    }
+
+    // Max anisotropic filtering on all VRM textures (sharp textures at angles)
+    setTimeout(() => {
+      const vrm = (ctrl as any).vrm;
+      if (!vrm || !renderer) return;
+      const maxAniso = renderer.capabilities.getMaxAnisotropy();
+      vrm.scene.traverse((obj: any) => {
+        const mat = obj.material;
+        if (!mat) return;
+        const materials = Array.isArray(mat) ? mat : [mat];
+        for (const m of materials) {
+          for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) {
+            const tex = m[key];
+            if (tex) {
+              tex.anisotropy = maxAniso;
+              tex.needsUpdate = true;
+            }
+          }
+        }
+      });
+    }, 500);
+
     // Attach audio analyser for lipsync
     const playback = new PCMPlayback();
     playbackRef.current = playback;
