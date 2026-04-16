@@ -9,6 +9,12 @@ import {
   CheckCircleIcon,
 } from '../icons/Icons';
 import { WaterWidget } from '../water';
+import {
+  InsightsDashboardWidget,
+  WeeklyReportCard,
+  getWeeklyReport,
+} from '../insights';
+import type { WeeklyReport } from '../insights';
 
 interface OverdueItem {
   title: string;
@@ -49,12 +55,31 @@ function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+const WEEKLY_REPORT_LS_KEY = 'seraphine.weeklyReportShown';
+
+/** Returns the ISO date (YYYY-MM-DD) of the Monday of the current week,
+ *  using LOCAL date components so late-Monday-in-SP doesn't roll into
+ *  Tuesday's UTC date via toISOString(). */
+function currentMondayISO(): string {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun .. 6=Sat
+  // Distance back to Monday. When today is Sunday (0), Monday was 6 days ago.
+  const daysSinceMon = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysSinceMon);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function DashboardView({ onNavigate, connected }: DashboardViewProps): JSX.Element {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [clock, setClock] = useState<string>(() => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   });
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -91,6 +116,41 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
       if (clockRef.current) clearInterval(clockRef.current);
     };
   }, []);
+
+  // Weekly report gate: show once per Monday on first dashboard visit.
+  useEffect(() => {
+    if (new Date().getDay() !== 1) return;
+    const mondayIso = currentMondayISO();
+    let shownFor: string | null = null;
+    try {
+      shownFor = localStorage.getItem(WEEKLY_REPORT_LS_KEY);
+    } catch {
+      // localStorage may be unavailable — fall through and show.
+    }
+    if (shownFor === mondayIso) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const report = await getWeeklyReport();
+        if (!cancelled) setWeeklyReport(report);
+      } catch {
+        // Backend not ready / network error — silently skip.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleWeeklyDismiss = (): void => {
+    setWeeklyReport(null);
+    try {
+      localStorage.setItem(WEEKLY_REPORT_LS_KEY, currentMondayISO());
+    } catch {
+      // best-effort; a fresh load may re-show the report.
+    }
+  };
 
   const tasks = data?.tasks_today;
   const finance = data?.finance_month;
@@ -174,6 +234,14 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
           />
         </div>
       </div>
+
+      {/* --- Weekly Report (Mondays only) --- */}
+      {weeklyReport && (
+        <WeeklyReportCard
+          report={weeklyReport}
+          onDismiss={handleWeeklyDismiss}
+        />
+      )}
 
       {/* --- Briefing --- */}
       {tasks && (
@@ -264,6 +332,9 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
 
       {/* --- Water --- */}
       <WaterWidget />
+
+      {/* --- Insights --- */}
+      <InsightsDashboardWidget onNavigate={() => onNavigate('insights')} />
 
       {/* --- Timeline --- */}
       <div className="dashboard__timeline">

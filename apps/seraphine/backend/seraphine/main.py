@@ -32,6 +32,9 @@ from seraphine.habits.service import HabitService
 from seraphine.water import schema as water_schema
 from seraphine.water.routes import router as water_router
 from seraphine.water.service import WaterService
+from seraphine.insights import schema as insights_schema
+from seraphine.insights.routes import router as insights_router
+from seraphine.insights.service import InsightEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -225,6 +228,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Water service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Insights — always enabled (SQLite-backed); analysers fan out over
+    # whichever of finance/tasks/habits happened to come up.
+    # ------------------------------------------------------------------
+    insight_engine = None
+    try:
+        store.register_migrator("seraphine_insights", insights_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        insight_engine = InsightEngine(
+            store,
+            finance_service=finance_service,
+            task_service=task_service,
+            habit_service=habit_service,
+        )
+        logger.info("Insight engine wired")
+    except Exception as e:
+        logger.warning("Insight engine failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Wise (TransferWise) integration — optional
     # ------------------------------------------------------------------
     wise_client = None
@@ -334,7 +355,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await mcp_client.aclose()
             mcp_client = None
 
-    engine = ConversationEngine(llm, store, memory=memory, tools=tools)
+    engine = ConversationEngine(
+        llm, store, memory=memory, tools=tools, insight_engine=insight_engine,
+    )
 
     if settings.tts_backend == "elevenlabs":
         from seraphine.tts.elevenlabs import ElevenLabsAdapter
@@ -467,6 +490,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.recurring_service = recurring_service
     app.state.habit_service = habit_service
     app.state.water_service = water_service
+    app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
@@ -567,6 +591,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         water_reminder_task = asyncio.create_task(_water_reminder_loop())
 
+    # ------------------------------------------------------------------
+    # Background insights refresh loop — every 6 hours.
+    # Runs once at startup so /insights is warm on first request.
+    # ------------------------------------------------------------------
+    insights_refresh_task: asyncio.Task[None] | None = None
+    if insight_engine is not None:
+        async def _insights_refresh_loop() -> None:
+            interval = 6 * 60 * 60  # 6 hours
+            while True:
+                try:
+                    await insight_engine.refresh_all()
+                except Exception:
+                    logger.exception("insights refresh loop iteration failed")
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+
+        try:
+            await insight_engine.refresh_all()
+        except Exception:
+            logger.exception("initial insights refresh failed")
+
+        insights_refresh_task = asyncio.create_task(_insights_refresh_loop())
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
@@ -581,6 +630,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             water_reminder_task.cancel()
             try:
                 await water_reminder_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if insights_refresh_task is not None:
+            insights_refresh_task.cancel()
+            try:
+                await insights_refresh_task
             except (asyncio.CancelledError, Exception):
                 pass
         if mcp_tools_watcher is not None:
@@ -643,6 +698,7 @@ def create_app() -> FastAPI:
     app.include_router(recurring_router)
     app.include_router(habits_router)
     app.include_router(water_router)
+    app.include_router(insights_router)
 
     from seraphine.reminders.routes import router as reminders_router
 

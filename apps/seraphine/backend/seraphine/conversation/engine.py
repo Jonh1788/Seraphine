@@ -295,12 +295,14 @@ class ConversationEngine:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         memory: MemoryManager | None = None,
         tools: ToolRegistry | None = None,
+        insight_engine: Any | None = None,
     ) -> None:
         self.llm = llm
         self.store = store
         self.system_prompt = system_prompt
         self.memory = memory
         self.tools = tools
+        self.insight_engine = insight_engine
         self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
         self._turn_counter: int = 0
 
@@ -462,6 +464,25 @@ class ConversationEngine:
                 messages.append(ChatMessage(role="system", content=emo_ctx))
         except Exception as e:
             logger.debug("build_emotional_context failed: %s", e)
+
+        # 015-C: inject proactive nudges (top-3 active insights, <=48h)
+        try:
+            if self.insight_engine is not None:
+                nudges = await self.insight_engine.pending_nudges(
+                    cap=3, max_age_hours=48,
+                )
+                if nudges:
+                    lines: list[str] = [
+                        "PROACTIVE NUDGES (mention naturally if relevant,"
+                        " do not force):",
+                    ]
+                    for n in nudges:
+                        lines.append(f"- [{n.severity}] {n.title}: {n.description}")
+                    messages.append(
+                        ChatMessage(role="system", content="\n".join(lines)),
+                    )
+        except Exception as e:
+            logger.debug("insight nudges injection failed: %s", e)
 
         recall_block = await self._build_recall_block(content)
         if recall_block:

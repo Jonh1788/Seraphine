@@ -7,6 +7,7 @@ import {
   FinanceIcon,
   BrainIcon,
   FlameIcon,
+  LightbulbIcon,
   PlusIcon,
   SearchIcon,
 } from '../icons/Icons';
@@ -27,6 +28,7 @@ const COMMANDS: Command[] = [
   { id: 'finance', label: 'Abrir Financas', keywords: ['dinheiro', 'gastos', 'receita'], shortcut: 'Cmd+5', icon: <FinanceIcon size={18} /> },
   { id: 'memory', label: 'Abrir Memorias', keywords: ['lembrar', 'fatos'], shortcut: 'Cmd+6', icon: <BrainIcon size={18} /> },
   { id: 'habits', label: 'Abrir Habitos', keywords: ['habito', 'rotina', 'streak'], shortcut: 'Cmd+7', icon: <FlameIcon size={18} /> },
+  { id: 'insights', label: 'Abrir Insights', keywords: ['padroes', 'analise', 'dicas'], shortcut: 'Cmd+8', icon: <LightbulbIcon size={18} /> },
   { id: 'new-task', label: 'Nova Tarefa', keywords: ['criar', 'adicionar', 'todo'], shortcut: 'Cmd+N', icon: <PlusIcon size={18} /> },
   { id: 'focus-chat', label: 'Perguntar a Seraphine', keywords: ['falar', 'digitar'], shortcut: '', icon: <ChatIcon size={18} /> },
 ];
