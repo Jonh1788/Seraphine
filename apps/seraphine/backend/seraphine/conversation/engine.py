@@ -11,8 +11,18 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from llm_adapters.types import ChatMessage, LLMUnavailableError, Token
+from seraphine.memory.emotional_context import (
+    build_emotional_context,
+    detect_emotion,
+    record_emotional_context,
+)
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
+from seraphine.memory.style_analyzer import (
+    STYLE_ANALYSIS_EVERY_N,
+    analyze_and_update_style,
+    build_style_context,
+)
 from seraphine.tools.base import ToolResult
 from seraphine.tools.registry import ToolRegistry
 
@@ -218,6 +228,13 @@ class ToolResultEvent(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+class MoodEvent(BaseModel):
+    type: Literal["mood"] = "mood"
+    mood: str
+    intensity: float
+    duration_ms: int
+
+
 StreamEvent = Union[
     TokenEvent,
     TurnEndEvent,
@@ -225,6 +242,7 @@ StreamEvent = Union[
     ErrorEvent,
     ToolRequestEvent,
     ToolResultEvent,
+    MoodEvent,
 ]
 
 
@@ -401,6 +419,23 @@ class ConversationEngine:
 
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
         messages.append(ChatMessage(role="system", content=_build_date_context()))
+
+        # 011-A: inject communication style context
+        try:
+            style_ctx = await build_style_context(self.store)
+            if style_ctx:
+                messages.append(ChatMessage(role="system", content=style_ctx))
+        except Exception as e:
+            logger.debug("build_style_context failed: %s", e)
+
+        # 011-C: inject emotional context
+        try:
+            emo_ctx = await build_emotional_context(self.store)
+            if emo_ctx:
+                messages.append(ChatMessage(role="system", content=emo_ctx))
+        except Exception as e:
+            logger.debug("build_emotional_context failed: %s", e)
+
         recall_block = await self._build_recall_block(content)
         if recall_block:
             messages.append(ChatMessage(role="system", content=recall_block))
@@ -473,6 +508,9 @@ class ConversationEngine:
                     request_id = str(uuid.uuid4())
                     turn_requests.append(request_id)
                     tool = self.tools.get(tool_name)
+
+                    # Mood: thinking while tool executes (persistent)
+                    yield MoodEvent(mood="thinking", intensity=0.6, duration_ms=0)
 
                     if tool is None:
                         result = ToolResult(ok=False, error=f"unknown tool: {tool_name}")
@@ -571,6 +609,11 @@ class ConversationEngine:
                         error=result.error,
                         metadata=result.metadata or {},
                     )
+                    # Mood: react to tool outcome
+                    if result.ok:
+                        yield MoodEvent(mood="happy", intensity=0.7, duration_ms=2000)
+                    else:
+                        yield MoodEvent(mood="surprised", intensity=0.8, duration_ms=1500)
                     # Persist html_card in accumulated text so it
                     # survives chat history reload.
                     if result.metadata and result.metadata.get("html_card"):
@@ -662,7 +705,21 @@ class ConversationEngine:
 
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)
+        yield MoodEvent(mood="neutral", intensity=0, duration_ms=0)
         yield TurnEndEvent(conversation_id=conversation_id, turn_id=turn_id)
+
+        # 011-C: detect emotion from user message (keyword-based, no LLM)
+        try:
+            emotion = detect_emotion(content)
+            if emotion is not None:
+                await record_emotional_context(
+                    self.store,
+                    sentiment=emotion["sentiment"],
+                    topic=emotion["topic"],
+                    summary=emotion["summary"],
+                )
+        except Exception as e:
+            logger.debug("emotion detection/recording failed: %s", e)
 
         if self.memory is not None:
             try:
@@ -676,6 +733,9 @@ class ConversationEngine:
             self._turn_counter += 1
             if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
                 asyncio.create_task(self._auto_reflect())
+            # 011-A: style analysis every N turns (background, non-blocking)
+            if self._turn_counter % STYLE_ANALYSIS_EVERY_N == 0:
+                asyncio.create_task(self._auto_style_analysis())
 
     def _pick_model(
         self,
@@ -716,3 +776,12 @@ class ConversationEngine:
                 logger.info("auto-reflect: learned %d new fact(s)", n)
         except Exception as e:
             logger.warning("auto-reflect failed: %s", e)
+
+    async def _auto_style_analysis(self) -> None:
+        """011-A: background style analysis every N turns."""
+        try:
+            result = await analyze_and_update_style(self.store, self.llm)
+            if result:
+                logger.info("auto-style: updated to %s", result)
+        except Exception as e:
+            logger.warning("auto-style failed: %s", e)

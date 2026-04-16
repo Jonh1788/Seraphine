@@ -54,6 +54,20 @@ export const EMOTION_MAP: Record<string, EmotionMapping> = {
     expressions: [{ expression: "relaxed", weight: 0.3 }],
     headTilt: { x: 0.04, y: 0.06 },
   },
+  focused: {
+    expressions: [
+      { expression: "angry", weight: 0.15 },
+      { expression: "relaxed", weight: 0.3 },
+    ],
+    headTilt: { x: 0.03, y: 0.04 },
+  },
+  worried: {
+    expressions: [
+      { expression: "sad", weight: 0.35 },
+      { expression: "surprised", weight: 0.15 },
+    ],
+    headTilt: { x: -0.03 },
+  },
   laughing: { expressions: [{ expression: "happy", weight: 1.0 }] },
   neutral: { expressions: [] },
 };

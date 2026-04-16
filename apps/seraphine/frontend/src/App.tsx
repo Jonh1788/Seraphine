@@ -319,6 +319,13 @@ export function App(): JSX.Element {
             }
           }
         }
+      } else if (type === 'mood') {
+        const m = msg as { mood?: string; intensity?: number; duration_ms?: number };
+        const mood = m.mood || 'neutral';
+        const durationMs = m.duration_ms ?? 0;
+        try {
+          avatarCtrlRef.current?.setExpression?.(mood, 300, durationMs);
+        } catch { /* controller may not be ready */ }
       } else if (type === 'transcription') {
         // STT latency: audio_end to transcription
         if (tsAudioEndRef.current) {
@@ -444,6 +451,73 @@ export function App(): JSX.Element {
       clearInterval(timer);
     };
   }, [activeView]);
+
+  // Idle detection: after 5 minutes of no interaction, set avatar to 'soft'.
+  // Any interaction resets to neutral.
+  useEffect(() => {
+    const IDLE_MS = 5 * 60 * 1000;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetIdle = (): void => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        try {
+          avatarCtrlRef.current?.setExpression?.('soft', 600, 0);
+        } catch { /* controller may not be ready */ }
+      }, IDLE_MS);
+    };
+
+    const onActivity = (): void => {
+      resetIdle();
+    };
+
+    window.addEventListener('keydown', onActivity);
+    window.addEventListener('mousemove', onActivity);
+    window.addEventListener('click', onActivity);
+    window.addEventListener('touchstart', onActivity);
+    resetIdle();
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      window.removeEventListener('keydown', onActivity);
+      window.removeEventListener('mousemove', onActivity);
+      window.removeEventListener('click', onActivity);
+      window.removeEventListener('touchstart', onActivity);
+    };
+  }, []);
+
+  // Task-aware mood on mount: set initial expression based on task state.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/tasks?status=pending&limit=200');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        const today = new Date().toISOString().slice(0, 10);
+        const overdue = tasks.filter(
+          (t: { due_date?: string | null }) =>
+            t.due_date && t.due_date < today,
+        );
+
+        if (cancelled) return;
+        const ctrl = avatarCtrlRef.current;
+        if (!ctrl) return;
+
+        if (overdue.length > 3) {
+          ctrl.setExpression?.('worried', 400, 0);
+        } else if (tasks.length === 0) {
+          ctrl.setExpression?.('happy', 300, 3000);
+        } else {
+          ctrl.setExpression?.('warm', 300, 2000);
+        }
+      } catch {
+        // Network error on mount — ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Attach the playback's AnalyserNode into the avatar controller so
   // the RAF loop can drive lipsync visemes from the running audio.

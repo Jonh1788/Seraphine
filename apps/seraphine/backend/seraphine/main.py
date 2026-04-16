@@ -525,10 +525,13 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    from seraphine.conversation.briefing import router as briefing_router
+
     app.include_router(conversation_router)
     app.include_router(memory_router)
     app.include_router(ws_router)
     app.include_router(google_router)
+    app.include_router(briefing_router)
 
     from mod_finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router

@@ -874,6 +874,17 @@ button:disabled {
   border-radius: 16px 16px 16px 4px;
 }
 
+/* Daily briefing — subtle gradient + left accent border */
+.bubble--briefing .bubble__content {
+  background: linear-gradient(
+    135deg,
+    rgba(167, 139, 250, 0.08) 0%,
+    rgba(56, 189, 248, 0.06) 100%
+  );
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-left: 3px solid var(--accent);
+}
+
 .bubble--error .bubble__content {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.3);

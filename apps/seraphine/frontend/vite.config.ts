@@ -90,6 +90,9 @@ export default defineConfig({
       '/reminders': {
         target: 'http://127.0.0.1:8000',
       },
+      '/briefing': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
   test: {

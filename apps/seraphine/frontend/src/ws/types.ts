@@ -135,6 +135,13 @@ export interface McpApprovalResponseMessage {
   comment?: string;
 }
 
+export interface MoodMessage {
+  type: 'mood';
+  mood: string;
+  intensity: number;
+  duration_ms: number;
+}
+
 export interface WhatsAppNotificationMessage {
   type: 'whatsapp_notification';
   event: string;
@@ -170,5 +177,6 @@ export type ServerMessage =
   | NotificationMessage
   | ReminderMessage
   | McpApprovalRequestMessage
+  | MoodMessage
   | WhatsAppNotificationMessage;
 

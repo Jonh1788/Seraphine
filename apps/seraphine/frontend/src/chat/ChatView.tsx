@@ -67,6 +67,8 @@ interface Turn {
   recurring?: RecurringRule[];
   /** Structured reminder data from tool_result metadata. */
   reminders?: ReminderData[];
+  /** Whether this turn is a daily briefing (special visual treatment). */
+  briefing?: boolean;
 }
 
 /**
@@ -387,6 +389,44 @@ export function ChatView({
       })
       .catch(() => {});
   }, []);
+
+  // Daily briefing: fetch on first session of the day
+  useEffect(() => {
+    const BRIEFING_KEY = 'seraphine.lastBriefingDate';
+    const today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(BRIEFING_KEY) === today) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/briefing`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const text = data.briefing;
+        if (!text || cancelled) return;
+
+        localStorage.setItem(BRIEFING_KEY, today);
+
+        setTurns((prev) => [
+          {
+            id: `briefing-${Date.now()}`,
+            role: 'assistant',
+            content: text,
+            briefing: true,
+          },
+          ...prev,
+        ]);
+
+        // Set warm mood for 3 seconds
+        try {
+          avatarController?.current?.setExpression?.('warm', 300, 3000);
+        } catch { /* controller may not be ready */ }
+      } catch {
+        // Network error fetching briefing -- skip silently
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [avatarController]);
 
   // Timer ref for resetting avatar to idle after turn_end
   const avatarResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -921,7 +961,7 @@ export function ChatView({
             t.role === 'assistant' ? parseThinking(t.content) : null;
 
           return (
-            <div key={t.id} className={`bubble bubble--${t.role}`}>
+            <div key={t.id} className={`bubble bubble--${t.role}${t.briefing ? ' bubble--briefing' : ''}`}>
               <div className="bubble__avatar">
                 {t.role === 'user' ? 'V' : t.role === 'assistant' ? 'S' : '!'}
               </div>
