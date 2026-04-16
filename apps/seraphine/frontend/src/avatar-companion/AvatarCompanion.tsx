@@ -116,12 +116,16 @@ export function AvatarCompanion(): JSX.Element {
       });
     }, 500);
 
-    // Attach audio analyser for lipsync
+    // Attach audio analyser for lipsync.
+    // NOTE: we must NOT create the AudioContext during mount. WKWebView
+    // locks contexts created outside a user gesture into a permanently
+    // suspended state — the AnalyserNode still produces data so lipsync
+    // moves, but ctx.currentTime never advances so scheduled buffers
+    // never play. getAnalyser(cb) queues the callback; the ctx is
+    // created on the first Space press inside startTalk().
     const pb = new PCMPlayback();
     playbackRef.current = pb;
-    pb.ensureCtx();
-    const analyser = pb.getAnalyser();
-    if (analyser) ctrl.attachAudioAnalyser(analyser);
+    pb.getAnalyser((analyser) => ctrl.attachAudioAnalyser(analyser));
     setPlayback(pb);
 
     // Open WS — reuse same URL convention
@@ -149,6 +153,20 @@ export function AvatarCompanion(): JSX.Element {
     if (!ws || talkingRef.current) return;
     talkingRef.current = true;
     setTalking(true);
+    // Resume the PCMPlayback's AudioContext on every user gesture.
+    // WKWebView forces new contexts into `suspended` when they're created
+    // outside a user gesture (our mount effect), so without this resume
+    // the TTS buffers scheduled on ctx.currentTime accumulate but never
+    // actually play.
+    try {
+      const pb = playbackRef.current;
+      const ctx = pb?.ensureCtx();
+      if (ctx && ctx.state !== 'running') {
+        await ctx.resume();
+      }
+    } catch (err) {
+      console.warn('[companion] audio resume failed:', err);
+    }
     if (!micRef.current) micRef.current = new MicCapture();
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     try {

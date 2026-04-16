@@ -330,28 +330,23 @@ class AnthropicClient:
         # a conversation stays hot. System must be a list of blocks for
         # cache_control to attach to it. Cache on the last tool applies
         # to the entire tools array including everything before it.
+        # We enable cache unconditionally now — the official Anthropic API
+        # handles it natively, and CLIProxyAPI (the common localhost proxy)
+        # passes `cache_control` through to the upstream. If the upstream
+        # ever rejects the field we'll get a clear 400 at request time.
         if system:
-            # When using CLIProxyAPI, cache_control may not be supported.
-            # Detect proxy by checking if base_url is localhost (not api.anthropic.com).
-            use_cache = "api.anthropic.com" in self.base_url
-            if use_cache:
-                body["system"] = [
-                    {
-                        "type": "text",
-                        "text": system,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ]
-            else:
-                body["system"] = system  # plain string, no cache_control
+            body["system"] = [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         converted_tools = _convert_tools(tools)
         if converted_tools:
-            if use_cache:
-                tools_with_cache = [dict(t) for t in converted_tools]
-                tools_with_cache[-1]["cache_control"] = {"type": "ephemeral"}
-                body["tools"] = tools_with_cache
-            else:
-                body["tools"] = converted_tools
+            tools_with_cache = [dict(t) for t in converted_tools]
+            tools_with_cache[-1]["cache_control"] = {"type": "ephemeral"}
+            body["tools"] = tools_with_cache
         if think:
             body["thinking"] = {"type": "enabled", "budget_tokens": 4000}
             # Anthropic rejects non-1.0 temperature when extended thinking is on.
