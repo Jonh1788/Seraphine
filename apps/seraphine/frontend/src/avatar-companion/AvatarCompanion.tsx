@@ -141,17 +141,22 @@ export function AvatarCompanion(): JSX.Element {
     setWs(wsClient);
   }, []);
 
-  // Push-to-talk: hold mic button or Space
+  // Push-to-talk: hold mic button or Space (uses ref to avoid stale closure)
+  const talkingRef = useRef(false);
   const startTalk = useCallback(async () => {
     const ws = wsRef.current;
-    if (!ws || talking) return;
-    if (!micRef.current) micRef.current = new MicCapture();
+    console.log('[companion] startTalk — ws:', !!ws, 'talking:', talkingRef.current);
+    if (!ws || talkingRef.current) return;
+    talkingRef.current = true;
     setTalking(true);
+    if (!micRef.current) micRef.current = new MicCapture();
     ws.send({ type: 'audio_start', sample_rate: 16000 });
     try {
       await micRef.current.start();
+      console.log('[companion] mic started ok');
     } catch (err) {
       console.error('[companion] mic start failed:', err);
+      talkingRef.current = false;
       setTalking(false);
       return;
     }
@@ -159,13 +164,15 @@ export function AvatarCompanion(): JSX.Element {
       const slice = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
       ws.sendBinary(slice);
     });
-  }, [talking]);
+  }, []);
 
   const stopTalk = useCallback(() => {
     const ws = wsRef.current;
+    console.log('[companion] stopTalk');
     chunkOffRef.current?.();
     chunkOffRef.current = null;
     micRef.current?.stop();
+    talkingRef.current = false;
     setTalking(false);
     if (ws) ws.send({ type: 'audio_end' });
   }, []);
