@@ -621,6 +621,8 @@ export class VrmAvatarController implements AvatarAdapter {
     em.setValue("aa", w.aa);
     em.setValue("ih", w.ih);
     em.setValue("ou", w.ou);
+    em.setValue("ee", w.ee);
+    em.setValue("oh", w.oh);
   }
 
   /** Attach the AnalyserNode from the audio playback pipeline so the

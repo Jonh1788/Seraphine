@@ -10,6 +10,8 @@ export interface VisemeWeights {
   aa: number;
   ih: number;
   ou: number;
+  ee: number;
+  oh: number;
   closed: number;
 }
 
@@ -23,47 +25,59 @@ function clamp01(v: number): number {
   return v;
 }
 
+// Viseme cycle: rotate through mouth shapes to simulate speech variety.
+// Each entry defines relative weights — scaled by current RMS amplitude.
+const VISEME_CYCLE = [
+  { aa: 1.0, ih: 0.0, ou: 0.0, ee: 0.0, oh: 0.0 },
+  { aa: 0.2, ih: 0.7, ou: 0.0, ee: 0.1, oh: 0.0 },
+  { aa: 0.0, ih: 0.0, ou: 0.6, ee: 0.0, oh: 0.4 },
+  { aa: 0.0, ih: 0.2, ou: 0.0, ee: 0.8, oh: 0.0 },
+  { aa: 0.6, ih: 0.0, ou: 0.0, ee: 0.0, oh: 0.4 },
+  { aa: 0.0, ih: 0.5, ou: 0.3, ee: 0.0, oh: 0.2 },
+  { aa: 0.3, ih: 0.0, ou: 0.0, ee: 0.5, oh: 0.2 },
+  { aa: 0.0, ih: 0.0, ou: 0.7, ee: 0.3, oh: 0.0 },
+];
+const CYCLE_SPEED = 8; // shapes per second — natural speech cadence
+
 /**
  * Map an RMS envelope value to viseme weights.
- * Pure and deterministic. Weights are normalized so aa+ih+ou+closed === 1
- * and aa+ih+ou <= 1.
+ * Uses a time-based cycle to rotate through different mouth shapes,
+ * giving variety instead of the same shape for the same volume level.
+ * All 5 visemes (aa, ih, ou, ee, oh) are used.
  */
 export function envelopeToVisemes(
   rms: number,
   thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ): VisemeWeights {
   const r = Math.max(0, rms);
-  const { closed, aa, ih } = thresholds;
+  const { closed: closedTh } = thresholds;
 
-  let aaW = 0;
-  let ihW = 0;
-  let ouW = 0;
-
-  if (r < closed) {
-    // fully closed
-  } else if (r < aa) {
-    // blend toward aa linearly across [closed, aa)
-    const t = (r - closed) / (aa - closed);
-    aaW = clamp01(t);
-  } else if (r < ih) {
-    // blend toward ih linearly across [aa, ih)
-    const t = (r - aa) / (ih - aa);
-    aaW = clamp01(1 - t);
-    ihW = clamp01(t);
-  } else {
-    ouW = 1;
+  if (r < closedTh) {
+    return { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, closed: 1 };
   }
 
-  const sum = aaW + ihW + ouW;
-  const capped = sum > 1 ? 1 : sum;
-  if (sum > 1) {
-    const k = 1 / sum;
-    aaW *= k;
-    ihW *= k;
-    ouW *= k;
-  }
-  const closedW = 1 - capped;
-  return { aa: aaW, ih: ihW, ou: ouW, closed: closedW };
+  // Amplitude factor: how open the mouth should be (0-1)
+  const amplitude = clamp01((r - closedTh) / (1 - closedTh));
+
+  // Pick viseme shape from cycle based on time
+  const now = performance.now() / 1000;
+  const cyclePos = (now * CYCLE_SPEED) % VISEME_CYCLE.length;
+  const idx = Math.floor(cyclePos);
+  const frac = cyclePos - idx;
+  const curr = VISEME_CYCLE[idx];
+  const next = VISEME_CYCLE[(idx + 1) % VISEME_CYCLE.length];
+
+  // Lerp between current and next shape for smooth transitions
+  const aaW = (curr.aa * (1 - frac) + next.aa * frac) * amplitude;
+  const ihW = (curr.ih * (1 - frac) + next.ih * frac) * amplitude;
+  const ouW = (curr.ou * (1 - frac) + next.ou * frac) * amplitude;
+  const eeW = (curr.ee * (1 - frac) + next.ee * frac) * amplitude;
+  const ohW = (curr.oh * (1 - frac) + next.oh * frac) * amplitude;
+
+  const sum = aaW + ihW + ouW + eeW + ohW;
+  const closedW = clamp01(1 - sum);
+
+  return { aa: aaW, ih: ihW, ou: ouW, ee: eeW, oh: ohW, closed: closedW };
 }
 
 function u8ToFloat32(chunk: Uint8Array): Float32Array {
