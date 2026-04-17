@@ -171,3 +171,189 @@ pub fn read_clipboard_local() -> Result<String, String> {
         Err(_) => Ok(String::new()),
     }
 }
+
+// ---------------------------------------------------------------------------
+// 034 — Native Mac integrations: osascript, shortcuts, open
+// ---------------------------------------------------------------------------
+
+/// Run arbitrary AppleScript. Returns stdout. 15s timeout.
+#[tauri::command]
+pub fn osascript_local(script: String) -> Result<String, String> {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let out = Command::new("/usr/bin/osascript")
+            .arg("-e")
+            .arg(&script)
+            .output();
+        let _ = tx.send(out);
+    });
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(Ok(out)) => {
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).to_string())
+            }
+        }
+        Ok(Err(e)) => Err(format!("spawn failed: {}", e)),
+        Err(_) => Err("timeout".into()),
+    }
+}
+
+/// Run a named Shortcut (Shortcuts.app). Optional input piped in.
+#[tauri::command]
+pub fn shortcuts_run_local(name: String, input: Option<String>) -> Result<String, String> {
+    let mut cmd = Command::new("/usr/bin/shortcuts");
+    cmd.arg("run").arg(&name);
+    let output = if let Some(body) = input {
+        use std::io::Write;
+        use std::process::Stdio;
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(body.as_bytes());
+        }
+        child.wait_with_output().map_err(|e| format!("wait failed: {}", e))?
+    } else {
+        cmd.output().map_err(|e| format!("spawn failed: {}", e))?
+    };
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+/// `open` wrapper — launches file/folder/URL with the default app.
+#[tauri::command]
+pub fn open_path_local(target: String) -> Result<(), String> {
+    let expanded = expand_path(&target);
+    let final_target: String = if target.starts_with("http://") || target.starts_with("https://") {
+        target
+    } else {
+        expanded.to_string_lossy().to_string()
+    };
+    Command::new("/usr/bin/open")
+        .arg(&final_target)
+        .status()
+        .map_err(|e| format!("open failed: {}", e))
+        .and_then(|s| if s.success() { Ok(()) } else { Err("open exit != 0".into()) })
+}
+
+// ---------------------------------------------------------------------------
+// 035 — Screen automation (cliclick) + 042 active app
+// ---------------------------------------------------------------------------
+
+fn cliclick() -> &'static str {
+    // Homebrew paths (Apple Silicon first, then Intel).
+    if Path::new("/opt/homebrew/bin/cliclick").exists() {
+        "/opt/homebrew/bin/cliclick"
+    } else if Path::new("/usr/local/bin/cliclick").exists() {
+        "/usr/local/bin/cliclick"
+    } else {
+        "cliclick"
+    }
+}
+
+#[tauri::command]
+pub fn screen_click_local(x: f64, y: f64, button: Option<String>) -> Result<(), String> {
+    let btn = button.unwrap_or_else(|| "left".to_string());
+    let verb = match btn.as_str() {
+        "right" => "rc",
+        "double" => "dc",
+        _ => "c",
+    };
+    let arg = format!("{}:{},{}", verb, x.round() as i32, y.round() as i32);
+    let status = Command::new(cliclick())
+        .arg(&arg)
+        .status()
+        .map_err(|e| format!("cliclick missing? {}", e))?;
+    if status.success() { Ok(()) } else { Err("cliclick exit != 0".into()) }
+}
+
+#[tauri::command]
+pub fn screen_type_local(text: String) -> Result<(), String> {
+    let arg = format!("t:{}", text);
+    let status = Command::new(cliclick())
+        .arg(&arg)
+        .status()
+        .map_err(|e| format!("cliclick missing? {}", e))?;
+    if status.success() { Ok(()) } else { Err("cliclick exit != 0".into()) }
+}
+
+#[tauri::command]
+pub fn screen_key_local(combo: String) -> Result<(), String> {
+    // combo format "cmd+w", "cmd+shift+t". cliclick uses kd:/ku: per key.
+    let parts: Vec<&str> = combo.split('+').map(|s| s.trim()).collect();
+    if parts.is_empty() { return Err("empty combo".into()); }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let key = key[0];
+
+    let mut args: Vec<String> = Vec::new();
+    for m in mods {
+        let token = match m.to_lowercase().as_str() {
+            "cmd" | "command" => "cmd",
+            "ctrl" | "control" => "ctrl",
+            "alt" | "option" | "opt" => "alt",
+            "shift" => "shift",
+            _ => return Err(format!("unknown modifier: {}", m)),
+        };
+        args.push(format!("kd:{}", token));
+    }
+    args.push(format!("kp:{}", key.to_lowercase()));
+    for m in mods.iter().rev() {
+        let token = match m.to_lowercase().as_str() {
+            "cmd" | "command" => "cmd",
+            "ctrl" | "control" => "ctrl",
+            "alt" | "option" | "opt" => "alt",
+            "shift" => "shift",
+            _ => unreachable!(),
+        };
+        args.push(format!("ku:{}", token));
+    }
+
+    let status = Command::new(cliclick())
+        .args(&args)
+        .status()
+        .map_err(|e| format!("cliclick missing? {}", e))?;
+    if status.success() { Ok(()) } else { Err("cliclick exit != 0".into()) }
+}
+
+#[derive(Serialize)]
+pub struct ActiveApp {
+    pub app_name: String,
+    pub window_title: String,
+}
+
+#[tauri::command]
+pub fn active_app_local() -> Result<ActiveApp, String> {
+    let script = r#"
+    tell application "System Events"
+        set frontApp to first application process whose frontmost is true
+        set appName to name of frontApp
+        set winTitle to ""
+        try
+            set winTitle to name of front window of frontApp
+        end try
+        return appName & "|" & winTitle
+    end tell
+    "#;
+    let out = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("osascript spawn: {}", e))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).to_string());
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let (app_name, window_title) = match raw.split_once('|') {
+        Some((a, w)) => (a.to_string(), w.to_string()),
+        None => (raw.clone(), String::new()),
+    };
+    Ok(ActiveApp { app_name, window_title })
+}

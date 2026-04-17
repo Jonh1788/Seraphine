@@ -97,6 +97,16 @@ fn run_desktop() {
             mac_tools::screen_capture_local,
             mac_tools::write_clipboard_local,
             mac_tools::read_clipboard_local,
+            // 034 native integrations
+            mac_tools::osascript_local,
+            mac_tools::shortcuts_run_local,
+            mac_tools::open_path_local,
+            // 035 screen automation
+            mac_tools::screen_click_local,
+            mac_tools::screen_type_local,
+            mac_tools::screen_key_local,
+            // 042 active app
+            mac_tools::active_app_local,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())

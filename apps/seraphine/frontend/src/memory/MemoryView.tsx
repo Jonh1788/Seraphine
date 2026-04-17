@@ -3,7 +3,7 @@ import { ArrowLeftIcon, BrainIcon } from '../icons/Icons';
 
 import { API_BASE } from '../api';
 
-const TAB_KEYS = ['Timeline', 'Perfil', 'Facts'] as const;
+const TAB_KEYS = ['Timeline', 'Perfil', 'Facts', 'Tudo'] as const;
 type Tab = (typeof TAB_KEYS)[number];
 
 interface Fact {
@@ -155,7 +155,12 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState<string | null>(null);
   const [newFact, setNewFact] = useState('');
-  const loadedRef = useRef<Record<Tab, boolean>>({ Timeline: false, Perfil: false, Facts: false });
+  const loadedRef = useRef<Record<Tab, boolean>>({ Timeline: false, Perfil: false, Facts: false, Tudo: false });
+  // 038 — Memory browser state
+  const [browserCounts, setBrowserCounts] = useState<Record<string, number>>({});
+  const [browserTable, setBrowserTable] = useState<string>('facts');
+  const [browserRows, setBrowserRows] = useState<Array<Record<string, unknown>>>([]);
+  const [browserLoading, setBrowserLoading] = useState(false);
 
   const fetchTimeline = useCallback(async () => {
     setTimelineLoading(true);
@@ -213,6 +218,38 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     }
   }, []);
 
+  const fetchBrowserOverview = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/memory/browser`);
+      if (!res.ok) return;
+      const data = await res.json() as { counts: Record<string, number> };
+      setBrowserCounts(data.counts || {});
+    } catch { /* */ }
+  }, []);
+
+  const fetchBrowserTable = useCallback(async (table: string) => {
+    setBrowserLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/memory/browser/${table}?limit=50`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { rows: Array<Record<string, unknown>> };
+      setBrowserRows(data.rows || []);
+    } catch {
+      setBrowserRows([]);
+    } finally {
+      setBrowserLoading(false);
+    }
+  }, []);
+
+  const forgetRow = useCallback(async (table: string, id: string) => {
+    if (!window.confirm(`Remover esse item de ${table}?`)) return;
+    try {
+      await fetch(`${API_BASE}/memory/browser/${table}/${id}`, { method: 'DELETE' });
+      await fetchBrowserTable(table);
+      await fetchBrowserOverview();
+    } catch { /* */ }
+  }, [fetchBrowserTable, fetchBrowserOverview]);
+
   // Load data lazily per tab, once.
   useEffect(() => {
     if (activeTab === 'Timeline' && !loadedRef.current.Timeline) {
@@ -224,6 +261,10 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     } else if (activeTab === 'Facts' && !loadedRef.current.Facts) {
       loadedRef.current.Facts = true;
       void fetchFacts();
+    } else if (activeTab === 'Tudo' && !loadedRef.current.Tudo) {
+      loadedRef.current.Tudo = true;
+      void fetchBrowserOverview();
+      void fetchBrowserTable(browserTable);
     }
   }, [activeTab, fetchTimeline, fetchProfile, fetchFacts]);
 
@@ -418,6 +459,57 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === 'Tudo' && (
+          <div className="memory-browser">
+            <div className="memory-browser__sidebar">
+              {Object.entries(browserCounts).map(([name, count]) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={
+                    'memory-browser__item' +
+                    (browserTable === name ? ' memory-browser__item--active' : '')
+                  }
+                  onClick={() => {
+                    setBrowserTable(name);
+                    void fetchBrowserTable(name);
+                  }}
+                >
+                  <span>{name}</span>
+                  <span className="memory-browser__count">{count}</span>
+                </button>
+              ))}
+            </div>
+            <div className="memory-browser__content">
+              {browserLoading && <div className="memory-loading">Carregando…</div>}
+              {!browserLoading && browserRows.length === 0 && (
+                <div className="memory-empty">Vazio</div>
+              )}
+              {!browserLoading && browserRows.map((row, i) => {
+                const id = String(row.id ?? i);
+                return (
+                  <div key={id} className="memory-browser__row">
+                    <div className="memory-browser__row-body">
+                      <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12 }}>
+                        {JSON.stringify(row, null, 2)}
+                      </pre>
+                    </div>
+                    {Boolean(row.id) && (
+                      <button
+                        type="button"
+                        className="memory-browser__forget"
+                        onClick={() => void forgetRow(browserTable, String(row.id))}
+                      >
+                        esquecer
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>

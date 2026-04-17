@@ -935,7 +935,7 @@ export function ChatView({
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+      if (file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = () => {
           if (typeof reader.result === 'string') {
@@ -945,6 +945,14 @@ export function ChatView({
           }
         };
         reader.readAsDataURL(file);
+      } else if (file.type === 'application/pdf') {
+        // 039 — PDFs: inline a hint that points at the local path so
+        // the LLM calls document_read on the file (via Mac proxy).
+        // The browser doesn't expose the host path, so we just mention
+        // the name; user can clarify or drop the full path in text.
+        setDraft((prev) =>
+          prev + (prev ? '\n' : '') + `[PDF: ${file.name}] — chama document_read quando pedir pra resumir`,
+        );
       }
     }
   }, []);

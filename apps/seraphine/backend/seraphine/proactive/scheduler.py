@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from llm_adapters.types import ChatMessage
@@ -117,8 +118,63 @@ class ProactiveScheduler:
             "cron", day_of_week="mon", hour=6, minute=30,
             name="metalearning",
         )
+        # 040 — track runs so the inspector UI can show last status.
+        self._sched.add_listener(
+            self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR,
+        )
         self._sched.start()
         logger.info("proactive scheduler started")
+
+    def _on_job_event(self, event: Any) -> None:
+        name = getattr(event, "job_id", "?")
+        ok = event.exception is None if hasattr(event, "exception") else True
+        err = str(event.exception) if getattr(event, "exception", None) else None
+        entry = {
+            "name": name,
+            "finished_at": datetime.now(TZ).isoformat(),
+            "ok": ok,
+            "error": err,
+        }
+        store = getattr(self.app_state, "store", None)
+        if store is None:
+            return
+        import asyncio as _aio
+        try:
+            loop = _aio.get_event_loop()
+            loop.create_task(store.add_event(
+                event_type="scheduler_run",
+                summary=f"{name} {'OK' if ok else 'ERROR'}",
+                source="proactive",
+                metadata=entry,
+            ))
+        except Exception:
+            pass
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        """040 inspector: snapshot of current jobs with next run time."""
+        out: list[dict[str, Any]] = []
+        for job in self._sched.get_jobs():
+            next_run = getattr(job, "next_run_time", None)
+            out.append({
+                "id": job.id,
+                "name": job.name,
+                "next_run_time": next_run.isoformat() if next_run else None,
+                "trigger": str(job.trigger),
+            })
+        return out
+
+    async def run_job_now(self, name: str) -> bool:
+        """040 inspector: dispatch a job immediately (by name or id)."""
+        for job in self._sched.get_jobs():
+            if job.id == name or job.name == name:
+                func = job.func
+                if callable(func):
+                    maybe = func()
+                    import inspect as _i
+                    if _i.iscoroutine(maybe):
+                        await maybe
+                return True
+        return False
 
     def stop(self) -> None:
         if self._sched.running:

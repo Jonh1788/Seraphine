@@ -22,7 +22,20 @@ from seraphine.tools.routes import RoutePlannerTool
 from seraphine.tools.news import SearchNewsTool
 from seraphine.tools.search import WebSearchTool
 from seraphine.tools.weather import FormatWeatherCardTool, WeatherForecastTool
+from seraphine.tools.dev import (
+    EditFileTool,
+    GitDiffTool,
+    GitStatusTool,
+    RunTestsTool,
+    SearchCodeTool,
+)
 from seraphine.tools.document import DocumentReadTool
+from seraphine.tools.native_mac import (
+    ActiveAppTool,
+    OpenPathTool,
+    OsascriptTool,
+    ShortcutsRunTool,
+)
 from seraphine.tools.web import WebFetchTool
 
 
@@ -89,6 +102,17 @@ def build_default_registry(
     reg.register(WebFetchTool())
     reg.register(WebSearchTool())
     reg.register(DocumentReadTool())
+    # 034 Native Mac
+    reg.register(OsascriptTool())
+    reg.register(ShortcutsRunTool())
+    reg.register(OpenPathTool())
+    reg.register(ActiveAppTool())
+    # 036 Dev sidekick
+    reg.register(GitStatusTool())
+    reg.register(GitDiffTool())
+    reg.register(EditFileTool())
+    reg.register(RunTestsTool())
+    reg.register(SearchCodeTool())
     reg.register(FetchImageTool())
     reg.register(SearchNewsTool())
     reg.register(RoutePlannerTool())

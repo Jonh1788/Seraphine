@@ -154,6 +154,106 @@ async def get_profile(request: Request) -> dict[str, Any]:
     return {"profile": profile}
 
 
+@router.get("/browser")
+async def memory_browser_overview(request: Request) -> dict[str, Any]:
+    """038 — Summary of every memory table for the browser UI."""
+    store = request.app.state.store
+    import asyncio as _aio
+
+    def _counts() -> dict[str, int]:
+        with store._connect() as conn:
+            tables = [
+                "facts", "conversation_narratives", "decisions",
+                "people", "person_mentions",
+                "open_loops", "discoveries", "finance_nudges",
+                "anticipation_rules", "voice_memos",
+            ]
+            counts: dict[str, int] = {}
+            for t in tables:
+                try:
+                    row = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()
+                    counts[t] = int(row[0]) if row else 0
+                except Exception:
+                    counts[t] = 0
+            return counts
+
+    return {"counts": await _aio.to_thread(_counts)}
+
+
+@router.get("/browser/{table}")
+async def memory_browser_table(
+    table: str, request: Request, limit: int = 50, offset: int = 0,
+) -> dict[str, Any]:
+    store = request.app.state.store
+    allowed = {
+        "facts", "conversation_narratives", "decisions", "people",
+        "person_mentions", "open_loops", "discoveries",
+        "finance_nudges", "anticipation_rules", "voice_memos",
+    }
+    if table not in allowed:
+        raise HTTPException(status_code=404, detail="unknown table")
+
+    import asyncio as _aio
+
+    def _rows() -> list[dict[str, Any]]:
+        with store._connect() as conn:
+            cols = [c[1] for c in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            rows = conn.execute(
+                f"SELECT * FROM {table} ORDER BY created_at DESC NULLS LAST "
+                f"LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
+
+    try:
+        data = await _aio.to_thread(_rows)
+    except Exception as e:
+        # Some tables may not have `created_at` column — fallback.
+        def _simple() -> list[dict[str, Any]]:
+            with store._connect() as conn:
+                cols = [c[1] for c in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+                rows = conn.execute(
+                    f"SELECT * FROM {table} LIMIT ? OFFSET ?",
+                    (limit, offset),
+                ).fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+        data = await _aio.to_thread(_simple)
+
+    return {"table": table, "rows": data, "limit": limit, "offset": offset}
+
+
+@router.delete("/browser/{table}/{row_id}")
+async def memory_browser_delete(
+    table: str, row_id: str, request: Request,
+) -> dict[str, Any]:
+    store = request.app.state.store
+    allowed = {
+        "facts", "conversation_narratives", "decisions", "people",
+        "person_mentions", "open_loops", "discoveries",
+        "finance_nudges", "anticipation_rules", "voice_memos",
+    }
+    if table not in allowed:
+        raise HTTPException(status_code=404, detail="unknown table")
+
+    import asyncio as _aio
+
+    def _delete() -> int:
+        with store._connect() as conn:
+            cur = conn.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+            return cur.rowcount or 0
+
+    deleted = await _aio.to_thread(_delete)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="row not found")
+    await store.add_event(
+        event_type="memory_forget",
+        summary=f"Forgot {table}/{row_id}",
+        source="user",
+        metadata={"table": table, "id": row_id},
+    )
+    return {"deleted": deleted}
+
+
 @router.post("/profile/rebuild")
 async def rebuild_profile(request: Request) -> dict[str, Any]:
     """Force an LLM-powered rebuild of the profile. Synchronous —
