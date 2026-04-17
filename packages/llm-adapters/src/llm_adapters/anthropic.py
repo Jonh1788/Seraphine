@@ -269,12 +269,28 @@ class AnthropicClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_tokens = max_tokens
+        # anthropic-beta: quando passamos por CLIProxyAPI, ele sobrescreve
+        # totalmente os flags baseline se o cliente mandar os próprios
+        # (ver claude_executor.go:903-905). Enviamos um set mínimo que:
+        # (1) herda a quota de Claude Code CLI nativo (claude-code-20250219),
+        # (2) usa thinking interleaved moderno (interleaved-thinking-*),
+        # (3) habilita prompt caching,
+        # (4) OMITE `redact-thinking-2026-02-12` — sem ele o servidor retorna
+        #     `thinking_delta` com texto legível em vez de `signature_delta`
+        #     opaco, que a UI não sabe renderizar.
+        # Contra api.anthropic.com direto, esses flags só são aditivos e
+        # inócuos (nenhum afeta modelos sem opt-in server-side).
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout,
             headers={
                 "x-api-key": api_key,
                 "anthropic-version": _ANTHROPIC_VERSION,
+                "anthropic-beta": (
+                    "claude-code-20250219,"
+                    "interleaved-thinking-2025-05-14,"
+                    "prompt-caching-scope-2026-01-05"
+                ),
                 "content-type": "application/json",
             },
         )
