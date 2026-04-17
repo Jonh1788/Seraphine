@@ -574,6 +574,19 @@ async def conversation_ws(ws: WebSocket) -> None:
         mcp_callback = await _setup_mcp_notifications(ws)
         # Deliver any unread notifications that arrived while the frontend was closed
         await _deliver_pending_notifications(ws)
+        # 022-D: fire-and-forget proactive opener. Non-blocking so the
+        # LLM call doesn't delay the welcome handshake. If the opener
+        # fires, we also stream it through TTS so the user actually
+        # hears her voice when she greets them.
+        async def _opener_task() -> None:
+            from seraphine.conversation.sentences import strip_markdown_for_tts
+            from seraphine.openers import maybe_emit_opener
+            text = await maybe_emit_opener(ws, ws.app.state)
+            if text:
+                cleaned = strip_markdown_for_tts(text, strip_audio_tags=_strip_audio_tags)
+                if cleaned.strip():
+                    await _enqueue_speech(ws, cleaned, turn_id=f"opener-{id(ws)}")
+        asyncio.create_task(_opener_task())
         while True:
             message = await ws.receive()
             if message.get("type") == "websocket.disconnect":

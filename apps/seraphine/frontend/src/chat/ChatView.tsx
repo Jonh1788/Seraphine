@@ -586,6 +586,25 @@ export function ChatView({
           next[idx] = { ...next[idx], content: next[idx].content + msg.text };
           return next;
         });
+      } else if (msg.type === 'assistant_opener') {
+        // 022-D: Seraphine opened the conversation on her own. Insert
+        // as an assistant turn (no streaming state — it arrives whole).
+        const openerText = (msg as { text?: string }).text ?? '';
+        if (!openerText) return;
+        const tagRe = new RegExp(AVATAR_TAG_RE.source, AVATAR_TAG_RE.flags);
+        let tagMatch: RegExpExecArray | null;
+        while ((tagMatch = tagRe.exec(openerText)) !== null) {
+          triggerAvatarFromTag(tagMatch[1]);
+        }
+        setTurns((prev) => [
+          ...prev,
+          {
+            id: `opener-${Date.now()}`,
+            role: 'assistant',
+            content: openerText,
+            streaming: false,
+          },
+        ]);
       } else if (msg.type === 'turn_end') {
         const turnId = msg.turn_id;
         setTurns((prev) =>

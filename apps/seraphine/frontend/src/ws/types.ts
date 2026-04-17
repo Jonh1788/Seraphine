@@ -45,6 +45,14 @@ export interface TurnEndMessage {
   turn_id: string;
 }
 
+// 022-D — proactive opener emitted by the backend when the WS connects
+// after a quiet period. The frontend inserts it as an assistant turn
+// and plays TTS through the normal path.
+export interface AssistantOpenerMessage {
+  type: 'assistant_opener';
+  text: string;
+}
+
 // Phase 2 — voice I/O
 export interface AudioStartMessage {
   type: 'audio_start';
@@ -169,6 +177,7 @@ export type ServerMessage =
   | ErrorMessage
   | TokenMessage
   | TurnEndMessage
+  | AssistantOpenerMessage
   | TtsStartMessage
   | TtsEndMessage
   | TranscriptionMessage

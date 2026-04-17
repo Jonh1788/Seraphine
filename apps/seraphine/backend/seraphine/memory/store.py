@@ -154,6 +154,17 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
           fact_count  INTEGER NOT NULL,
           updated_at  TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS open_loops (
+          id             TEXT PRIMARY KEY,
+          text           TEXT NOT NULL,
+          owner          TEXT NOT NULL CHECK (owner IN ('user', 'assistant')),
+          created_at     TEXT NOT NULL,
+          resolved_at    TEXT,
+          resolution     TEXT,
+          injection_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_open_loops_status
+          ON open_loops(resolved_at, created_at DESC);
         """
     )
     # `seraphine_tasks` schema (and its due_date / user_id ALTERs) has
@@ -710,6 +721,71 @@ class MemoryStore(Store):
                 )
 
         await asyncio.to_thread(_work)
+
+    async def add_open_loop(self, text: str, owner: str = "user") -> str:
+        loop_id = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO open_loops"
+                    " (id, text, owner, created_at, injection_count)"
+                    " VALUES (?, ?, ?, ?, 0)",
+                    (loop_id, text, owner, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return loop_id
+
+    async def list_open_loops(self, *, only_open: bool = True, limit: int = 10) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                sql = (
+                    "SELECT id, text, owner, created_at, resolved_at,"
+                    " resolution, injection_count FROM open_loops"
+                )
+                if only_open:
+                    sql += " WHERE resolved_at IS NULL"
+                sql += " ORDER BY created_at DESC LIMIT ?"
+                rows = conn.execute(sql, (limit,)).fetchall()
+            return [
+                {
+                    "id": r[0], "text": r[1], "owner": r[2],
+                    "created_at": r[3], "resolved_at": r[4],
+                    "resolution": r[5], "injection_count": r[6],
+                }
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def resolve_open_loop(self, loop_id: str, resolution: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE open_loops SET resolved_at = ?, resolution = ?"
+                    " WHERE id = ?",
+                    (_now(), resolution, loop_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def bump_open_loop_injection(self, loop_id: str) -> int:
+        """Increment the injection counter and return the new value."""
+        def _work() -> int:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE open_loops SET injection_count = injection_count + 1"
+                    " WHERE id = ?",
+                    (loop_id,),
+                )
+                row = conn.execute(
+                    "SELECT injection_count FROM open_loops WHERE id = ?",
+                    (loop_id,),
+                ).fetchone()
+                return int(row[0]) if row else 0
+
+        return await asyncio.to_thread(_work)
 
     async def list_push_subscriptions(self) -> list[dict[str, str]]:
         def _work() -> list[dict[str, str]]:

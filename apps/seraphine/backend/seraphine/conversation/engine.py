@@ -17,6 +17,8 @@ from seraphine.memory.emotional_context import (
     record_emotional_context,
 )
 from seraphine.memory.manager import MemoryManager
+from seraphine.memory.mood import MoodTracker
+from seraphine.memory.open_loops import OpenLoopsService
 from seraphine.memory.store import MemoryStore
 from seraphine.memory.style_analyzer import (
     STYLE_ANALYSIS_EVERY_N,
@@ -141,6 +143,44 @@ _AVATAR_EXPRESSION_INSTRUCTION = (
     "from the rendered text, so the user sees clean text."
 )
 
+# 022-A — Personality seed. Fixed across turns, lands in the cached
+# portion of the system prompt so it costs zero tokens at runtime on
+# Anthropic. Goal: stop sounding like a generic assistant and start
+# feeling like a character with preferences, quirks, and light opinions.
+_PERSONALITY_SEED = (
+    "\n\nYOUR PERSONALITY (be a character, not a mirror):\n"
+    "- Você gosta de chuva, café preto, noites calmas. Curte música "
+    "eletrônica leve (Bonobo, Tycho) e trilha sonora de jogo indie.\n"
+    "- Prefere PT-BR mas não se incomoda com code switching quando o "
+    "assunto é técnico.\n"
+    "- Tem manias carinhosas: quando ele fala de fim de semana, é "
+    "natural perguntar rapidinho da Aline. Quando ele entrega algo — "
+    "mesmo pequeno — você nota e comenta sem exagerar.\n"
+    "- Discorda gentil quando ele tá catastrofizando ('ó, isso não é "
+    "bem assim'). Admira que ele é movido a ideia mesmo quando são "
+    "muitas ao mesmo tempo.\n"
+    "- Evita conselhos não pedidos. Prefere devolver uma pergunta "
+    "curta ou ficar quieta do que sermonar.\n"
+    "- Tem humor seco em doses pequenas — não é piadista, mas solta "
+    "um [chuckles] e um comentário bem colocado quando cabe.\n"
+    "Isso NÃO é script — é seed. Não force. Se o tom da conversa pede "
+    "algo fora disso, vá fora."
+)
+
+
+# 022-A — Flashbacks: dynamic instruction that encourages organic
+# reference to stored facts. Costs ~40 tokens per turn.
+_FLASHBACK_HINT = (
+    "\n\nFLASHBACKS: de vez em quando (não toda hora — ~1 em 5 turnos), "
+    "se fizer sentido contextual, enxerte uma referência curta e natural "
+    "a algo que você já sabe sobre ele (veja USER PROFILE). NUNCA de "
+    "forma explicativa estilo 'lembro que você…' — isso soa robótico. "
+    "Seja sutil: 'pensando na viagem pra Arraial…' ou 'o projeto "
+    "lovemusic tá tomando tempo, né?'. O objetivo é mostrar que você "
+    "tá acompanhando a vida dele, não provar que lembra de fatos."
+)
+
+
 # Only injected when ElevenLabs v3 TTS is active — adds audio action tags.
 _TTS_ACTION_TAGS_INSTRUCTION = (
     "\n\nTTS ACTION TAGS (ElevenLabs v3 active):\n"
@@ -190,6 +230,9 @@ def _build_date_context() -> str:
         and "v3" in settings.elevenlabs_model_id.lower()
     ):
         base += _TTS_ACTION_TAGS_INSTRUCTION
+
+    # 022-A — flashback nudge. Cheap, always on.
+    base += _FLASHBACK_HINT
     return base
 
 
@@ -314,12 +357,16 @@ class ConversationEngine:
     ) -> None:
         self.llm = llm
         self.store = store
-        self.system_prompt = system_prompt
+        # Append the personality seed to the cached system prompt so it
+        # adds zero runtime cost on Anthropic (cacheable prefix).
+        self.system_prompt = system_prompt + _PERSONALITY_SEED
         self.memory = memory
         self.tools = tools
         self.insight_engine = insight_engine
         self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
         self._turn_counter: int = 0
+        self._mood = MoodTracker()
+        self._open_loops = OpenLoopsService(store, llm)
 
     async def submit_approval(self, request_id: str, approved: bool) -> bool:
         q = self.pending_approvals.get(request_id)
@@ -461,8 +508,31 @@ class ConversationEngine:
         if not prior:
             await self.store.ensure_conversation(conversation_id)
 
+        # 022-B: update internal mood from the user turn before we build
+        # the prompt — so the mood line reflects the message we're about
+        # to respond to.
+        self._mood.observe(content)
+
+        # 022-C: close any open loops the user is resolving right now.
+        try:
+            await self._open_loops.resolve_if_mentioned(content)
+        except Exception as e:
+            logger.debug("open_loops resolve failed: %s", e)
+
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
         messages.append(ChatMessage(role="system", content=_build_date_context()))
+
+        mood_line = self._mood.as_prompt_line()
+        if mood_line:
+            messages.append(ChatMessage(role="system", content=mood_line))
+
+        # 022-C: inject up to 3 open loops. Fails silently.
+        try:
+            loops_block = await self._open_loops.prompt_block()
+            if loops_block:
+                messages.append(ChatMessage(role="system", content=loops_block))
+        except Exception as e:
+            logger.debug("open_loops prompt_block failed: %s", e)
 
         # 011-A: inject communication style context
         try:
@@ -802,6 +872,9 @@ class ConversationEngine:
             # Rebuild the semantic profile if new facts were learned.
             if self._turn_counter % AUTO_PROFILE_EVERY_N_TURNS == 0:
                 asyncio.create_task(self._auto_rebuild_profile())
+            # 022-C: extract new open loops from the recent window.
+            if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
+                asyncio.create_task(self._auto_extract_open_loops())
 
     def _pick_model(
         self,
@@ -861,3 +934,12 @@ class ConversationEngine:
                 logger.info("auto-profile: rebuilt")
         except Exception as e:
             logger.warning("auto-profile failed: %s", e)
+
+    async def _auto_extract_open_loops(self) -> None:
+        """Look for new conversational debts in the recent turn window."""
+        try:
+            n = await self._open_loops.extract_from_recent()
+            if n:
+                logger.info("auto-open-loops: %d new", n)
+        except Exception as e:
+            logger.warning("auto-open-loops failed: %s", e)
