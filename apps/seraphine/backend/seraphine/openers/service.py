@@ -173,7 +173,11 @@ class OpenerService:
         acc: list[str] = []
         try:
             async for tok in self.llm.chat(
-                [ChatMessage(role="system", content=prompt)],
+                [
+                    ChatMessage(role="system", content=prompt),
+                    # Anthropic requires at least one user message.
+                    ChatMessage(role="user", content="Gere o opener agora."),
+                ],
                 temperature=0.85,
             ):
                 if tok.text:

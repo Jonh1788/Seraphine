@@ -36,7 +36,7 @@ dirs = "5"
 # global shortcuts, tray. iOS has its own equivalents via UIKit and
 # requires none of these crates.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 cpal = "0.15"
 arboard = "3"

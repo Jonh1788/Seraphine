@@ -175,8 +175,12 @@ fn run_desktop() {
             let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/tray.png"
+            ))?;
             let _tray = TrayIconBuilder::with_id("seraphine-tray")
-                .icon(app.default_window_icon().cloned().unwrap())
+                .icon(tray_icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
