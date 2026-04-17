@@ -4,7 +4,7 @@ import asyncio
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -163,6 +163,49 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
           resolution     TEXT,
           injection_count INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS conversation_narratives (
+          id              TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          text            TEXT NOT NULL,
+          turn_count      INTEGER NOT NULL,
+          started_at      TEXT NOT NULL,
+          ended_at        TEXT NOT NULL,
+          created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_narratives_created
+          ON conversation_narratives(created_at DESC);
+        CREATE TABLE IF NOT EXISTS decisions (
+          id              TEXT PRIMARY KEY,
+          subject         TEXT NOT NULL,
+          choice          TEXT NOT NULL,
+          alternatives    TEXT,
+          created_at      TEXT NOT NULL,
+          followed_up_at  TEXT,
+          outcome         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_decisions_followup
+          ON decisions(followed_up_at, created_at DESC);
+        CREATE TABLE IF NOT EXISTS people (
+          id                TEXT PRIMARY KEY,
+          name              TEXT UNIQUE NOT NULL,
+          relation          TEXT,
+          first_seen_at     TEXT NOT NULL,
+          last_mentioned_at TEXT NOT NULL,
+          mention_count     INTEGER NOT NULL DEFAULT 1,
+          tags              TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_people_last
+          ON people(last_mentioned_at DESC);
+        CREATE TABLE IF NOT EXISTS person_mentions (
+          id           TEXT PRIMARY KEY,
+          person_id    TEXT NOT NULL REFERENCES people(id),
+          turn_id      TEXT,
+          context      TEXT NOT NULL,
+          sentiment    TEXT,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mentions_person
+          ON person_mentions(person_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_open_loops_status
           ON open_loops(resolved_at, created_at DESC);
         """
@@ -784,6 +827,216 @@ class MemoryStore(Store):
                     (loop_id,),
                 ).fetchone()
                 return int(row[0]) if row else 0
+
+        return await asyncio.to_thread(_work)
+
+    async def add_narrative(
+        self, conversation_id: str, text: str, turn_count: int,
+        started_at: str, ended_at: str,
+    ) -> str:
+        nid = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO conversation_narratives"
+                    " (id, conversation_id, text, turn_count, started_at, ended_at, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (nid, conversation_id, text, turn_count, started_at, ended_at, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return nid
+
+    async def list_narratives(self, limit: int = 10) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, conversation_id, text, turn_count, started_at,"
+                    " ended_at, created_at"
+                    " FROM conversation_narratives"
+                    " ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {
+                    "id": r[0], "conversation_id": r[1], "text": r[2],
+                    "turn_count": r[3], "started_at": r[4], "ended_at": r[5],
+                    "created_at": r[6],
+                }
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def narrative_exists_for_conv(self, conversation_id: str) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM conversation_narratives"
+                    " WHERE conversation_id = ? LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+            return row is not None
+
+        return await asyncio.to_thread(_work)
+
+    async def add_decision(
+        self, subject: str, choice: str, alternatives: str | None = None,
+    ) -> str:
+        did = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO decisions"
+                    " (id, subject, choice, alternatives, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (did, subject, choice, alternatives, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return did
+
+    async def list_unfollowed_decisions(self, min_age_days: int = 3) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=min_age_days)).isoformat()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, subject, choice, alternatives, created_at"
+                    " FROM decisions"
+                    " WHERE followed_up_at IS NULL"
+                    " AND created_at < ?"
+                    " ORDER BY created_at DESC LIMIT 10",
+                    (cutoff,),
+                ).fetchall()
+            return [
+                {
+                    "id": r[0], "subject": r[1], "choice": r[2],
+                    "alternatives": r[3], "created_at": r[4],
+                }
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def mark_decision_followed(
+        self, decision_id: str, outcome: str,
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE decisions SET followed_up_at = ?, outcome = ?"
+                    " WHERE id = ?",
+                    (_now(), outcome, decision_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def upsert_person(
+        self, name: str, *, relation: str | None = None,
+    ) -> str:
+        """Return the person's id (creates if absent, updates otherwise)."""
+        pid = str(uuid.uuid4())
+        now = _now()
+
+        def _work() -> str:
+            nonlocal pid
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id, relation FROM people WHERE lower(name) = lower(?)",
+                    (name,),
+                ).fetchone()
+                if row:
+                    pid = row[0]
+                    if relation and not row[1]:
+                        conn.execute(
+                            "UPDATE people SET relation = ?, "
+                            "last_mentioned_at = ?, "
+                            "mention_count = mention_count + 1 WHERE id = ?",
+                            (relation, now, pid),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE people SET last_mentioned_at = ?, "
+                            "mention_count = mention_count + 1 WHERE id = ?",
+                            (now, pid),
+                        )
+                else:
+                    conn.execute(
+                        "INSERT INTO people (id, name, relation, "
+                        "first_seen_at, last_mentioned_at, mention_count) "
+                        "VALUES (?, ?, ?, ?, ?, 1)",
+                        (pid, name, relation, now, now),
+                    )
+            return pid
+
+        return await asyncio.to_thread(_work)
+
+    async def add_person_mention(
+        self, person_id: str, context: str, *, sentiment: str | None = None,
+        turn_id: str | None = None,
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO person_mentions "
+                    "(id, person_id, turn_id, context, sentiment, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), person_id, turn_id, context,
+                     sentiment, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def list_people(self, limit: int = 30) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, name, relation, first_seen_at, "
+                    "last_mentioned_at, mention_count, tags "
+                    "FROM people ORDER BY last_mentioned_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {"id": r[0], "name": r[1], "relation": r[2],
+                 "first_seen_at": r[3], "last_mentioned_at": r[4],
+                 "mention_count": r[5],
+                 "tags": json.loads(r[6]) if r[6] else []}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def get_person_by_name(self, name: str) -> dict[str, Any] | None:
+        def _work() -> dict[str, Any] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id, name, relation, last_mentioned_at, mention_count"
+                    " FROM people WHERE lower(name) = lower(?)",
+                    (name,),
+                ).fetchone()
+            if not row:
+                return None
+            return {"id": row[0], "name": row[1], "relation": row[2],
+                    "last_mentioned_at": row[3], "mention_count": row[4]}
+
+        return await asyncio.to_thread(_work)
+
+    async def list_person_mentions(
+        self, person_id: str, limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT context, sentiment, created_at FROM person_mentions"
+                    " WHERE person_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (person_id, limit),
+                ).fetchall()
+            return [
+                {"context": r[0], "sentiment": r[1], "created_at": r[2]}
+                for r in rows
+            ]
 
         return await asyncio.to_thread(_work)
 

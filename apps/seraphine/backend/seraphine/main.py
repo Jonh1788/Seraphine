@@ -548,6 +548,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
+    # 023-A: wire app_state into engine so ambient block can read
+    # google_client / health_service / task_service lazily per turn.
+    engine.attach_app_state(app.state)
+
     # Patch task detector with live app_state now that it's ready
     if whatsapp_task_detector is not None:
         whatsapp_task_detector._app_state = app.state
@@ -669,10 +673,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         insights_refresh_task = asyncio.create_task(_insights_refresh_loop())
 
+    # 024 — proactive scheduler (day review, stalled tasks, weekly)
+    proactive_scheduler = None
+    try:
+        from seraphine.proactive import ProactiveScheduler
+        proactive_scheduler = ProactiveScheduler(
+            app.state,
+            enabled=settings.proactive_enabled,
+        )
+        proactive_scheduler.start()
+        app.state.proactive_scheduler = proactive_scheduler
+    except Exception:
+        logger.exception("proactive scheduler failed to start")
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
     finally:
+        if proactive_scheduler is not None:
+            try:
+                proactive_scheduler.stop()
+            except Exception:
+                pass
         if materialize_task is not None:
             materialize_task.cancel()
             try:

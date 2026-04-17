@@ -103,6 +103,10 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
 
+    # 024 — proactive scheduler kill switch. Silences day-review,
+    # weekly reflection, and stalled-task jobs when False.
+    proactive_enabled: bool = True
+
     # Bootstrap / service orchestration — consumed by seraphine.bootstrap
     cloudflared_tunnel_id: str = ""  # empty = skip tunnel startup
 

@@ -214,11 +214,15 @@ class OpenLoopsService:
         for loop in picked:
             await self.store.bump_open_loop_injection(loop["id"])
 
+        from seraphine.conversation.temporal import humanize
+
         lines = [
             "OPEN LOOPS (coisas em aberto entre vocês — mencione com"
             " naturalidade se o contexto for relevante, NÃO force):",
         ]
         for loop in picked:
             who = "Ele" if loop["owner"] == "user" else "Você"
-            lines.append(f"- {who}: {loop['text']}")
+            when = humanize(loop["created_at"]) if loop.get("created_at") else ""
+            suffix = f" ({when})" if when else ""
+            lines.append(f"- {who}{suffix}: {loop['text']}")
         return "\n".join(lines)

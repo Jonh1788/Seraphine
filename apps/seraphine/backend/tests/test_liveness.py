@@ -22,7 +22,11 @@ def test_mood_concerned_from_tired_user() -> None:
 
 def test_mood_playful_needs_multiple_signals() -> None:
     t = MoodTracker()
-    assert t.observe("kk ok") is None  # single signal — too weak
+    # Use a long message to avoid the late-night "cozy" heuristic.
+    weak = t.observe("kk ok essa é uma mensagem com mais de oitenta caracteres pra não cair na regra de madrugada cozy e ficar single signal mesmo kk")
+    # either None (default) or cozy is acceptable — the point is it's
+    # NOT playful with a single signal.
+    assert weak is None or weak.mood != "playful"
     t = MoodTracker()
     state = t.observe("kkkk adorei demais que massa")
     assert state is not None
@@ -33,9 +37,14 @@ def test_mood_decays_to_default_after_neutral_streak() -> None:
     t = MoodTracker()
     t.observe("to exausto")
     assert t.current() is not None
-    # 3 neutral turns should force decay.
+    # 3 neutral turns should force decay. Use a long message to avoid
+    # the late-night "cozy" heuristic triggering during CI after midnight.
+    neutral = (
+        "qual o clima de sao paulo hoje? estou curioso sobre os detalhes "
+        "meteorológicos dessa manhã só pra ter uma ideia geral"
+    )
     for _ in range(3):
-        t.observe("qual o clima de sao paulo")
+        t.observe(neutral)
     assert t.current() is None
 
 

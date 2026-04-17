@@ -19,6 +19,7 @@ from seraphine.memory.emotional_context import (
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.mood import MoodTracker
 from seraphine.memory.open_loops import OpenLoopsService
+from seraphine.memory.people import PeopleService
 from seraphine.memory.store import MemoryStore
 from seraphine.memory.style_analyzer import (
     STYLE_ANALYSIS_EVERY_N,
@@ -253,6 +254,9 @@ AUTO_REFLECT_EVERY_N_TURNS = 3
 # Rebuild the semantic user profile in background every N assistant turns.
 # Skipped if the fact count hasn't changed since the last build.
 AUTO_PROFILE_EVERY_N_TURNS = 6
+# 026-A — narrative summary cadence. Runs in background; skipped if
+# the current conversation already has a narrative or is too short.
+AUTO_NARRATIVE_EVERY_N_TURNS = 12
 
 
 class TurnCancelled(Exception):
@@ -367,6 +371,14 @@ class ConversationEngine:
         self._turn_counter: int = 0
         self._mood = MoodTracker()
         self._open_loops = OpenLoopsService(store, llm)
+        self._people = PeopleService(store)
+        # Populated lazily by main.py after lifespan wires other services
+        # (google_client, health_service, task_service). Used by
+        # 023 ambient block.
+        self._app_state: Any = None
+
+    def attach_app_state(self, app_state: Any) -> None:
+        self._app_state = app_state
 
     async def submit_approval(self, request_id: str, approved: bool) -> bool:
         q = self.pending_approvals.get(request_id)
@@ -519,12 +531,34 @@ class ConversationEngine:
         except Exception as e:
             logger.debug("open_loops resolve failed: %s", e)
 
+        # 029: log any people mentioned in this turn.
+        try:
+            await self._people.process_user_turn(content)
+        except Exception as e:
+            logger.debug("people.process_user_turn failed: %s", e)
+
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
         messages.append(ChatMessage(role="system", content=_build_date_context()))
 
         mood_line = self._mood.as_prompt_line()
         if mood_line:
             messages.append(ChatMessage(role="system", content=mood_line))
+
+        # 023-A: ambient context block (next event, health, tasks).
+        if self._app_state is not None:
+            try:
+                from seraphine.conversation.ambient import build_ambient_block
+                ambient = await build_ambient_block(self._app_state)
+                if ambient:
+                    messages.append(ChatMessage(role="system", content=ambient))
+            except Exception as e:
+                logger.debug("ambient block failed: %s", e)
+
+        # 023-B: prosody hint — populated from audio_meta on user_message.
+        prosody_line = getattr(self, "_current_prosody_hint", None)
+        if prosody_line:
+            messages.append(ChatMessage(role="system", content=prosody_line))
+            self._current_prosody_hint = None
 
         # 022-C: inject up to 3 open loops. Fails silently.
         try:
@@ -533,6 +567,15 @@ class ConversationEngine:
                 messages.append(ChatMessage(role="system", content=loops_block))
         except Exception as e:
             logger.debug("open_loops prompt_block failed: %s", e)
+
+        # 029: if the user just mentioned a known person, inject social
+        # history so replies can reference past threads naturally.
+        try:
+            people_ctx = await self._people.context_for_mentions(content)
+            if people_ctx:
+                messages.append(ChatMessage(role="system", content=people_ctx))
+        except Exception as e:
+            logger.debug("people.context_for_mentions failed: %s", e)
 
         # 011-A: inject communication style context
         try:
@@ -890,6 +933,9 @@ class ConversationEngine:
             # 022-C: extract new open loops from the recent window.
             if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
                 asyncio.create_task(self._auto_extract_open_loops())
+            # 026-A: narrative summary of the current conversation.
+            if conversation_id is not None and self._turn_counter % AUTO_NARRATIVE_EVERY_N_TURNS == 0:
+                asyncio.create_task(self._auto_narrative(conversation_id))
 
     def _pick_model(
         self,
@@ -958,3 +1004,16 @@ class ConversationEngine:
                 logger.info("auto-open-loops: %d new", n)
         except Exception as e:
             logger.warning("auto-open-loops failed: %s", e)
+
+    async def _auto_narrative(self, conversation_id: str) -> None:
+        """Write a diary-style narrative if the conversation is long
+        enough and hasn't been summarized yet."""
+        try:
+            from seraphine.memory.narratives import NarrativeService
+            wrote = await NarrativeService(self.store, self.llm).maybe_summarize(
+                conversation_id,
+            )
+            if wrote:
+                logger.info("auto-narrative: summary stored")
+        except Exception as e:
+            logger.warning("auto-narrative failed: %s", e)

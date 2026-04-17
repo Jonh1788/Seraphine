@@ -270,7 +270,65 @@ export class VrmAvatarController implements AvatarAdapter {
   }
 
   private scheduleBlink(now: number): number {
-    return now + 3 + Math.random() * 3;
+    // 025-A: exponential-ish distribution for more natural cadence.
+    // Median ~4s, tail up to ~10s. 10% chance of a quick "double blink".
+    const base = 2 + Math.random() ** 2 * 8;
+    if (Math.random() < 0.1 && now > 1) {
+      // very soon follow-up blink after the upcoming one — the main
+      // blink loop will re-schedule; here we just tighten the next gap.
+      return now + 0.25;
+    }
+    return now + base;
+  }
+
+  /** 025-B: external trigger when the user returns after a long absence.
+   *  Small attention turn + soft smile bump. */
+  triggerReturnAttention(): void {
+    try {
+      this.setExpression('happy', 200, 800);
+      // Small head-forward refocus: override idle look toward centre.
+      this.idleLookTarget = { x: 0.02, y: 0, z: 0 };
+    } catch { /* controller may still be initializing */ }
+  }
+
+  /** 025-B: brief glance in a direction — used when a push notification
+   *  arrives so she "looks" at the toast. */
+  triggerGlance(direction: 'top' | 'bottom' | 'left' | 'right'): void {
+    const mapping: Record<string, {x: number; y: number}> = {
+      top: { x: -0.3, y: 0 },
+      bottom: { x: 0.3, y: 0 },
+      left: { x: 0, y: 0.3 },
+      right: { x: 0, y: -0.3 },
+    };
+    const m = mapping[direction];
+    if (!m) return;
+    this.idleLookTarget = { x: m.x, y: m.y, z: 0 };
+    // Return to centre after ~600ms.
+    setTimeout(() => {
+      this.idleLookTarget = { x: 0, y: 0, z: 0 };
+    }, 600);
+  }
+
+  /** 025-B: long-pause micro-action. Picks randomly between yawn, look
+   *  at clock, smile. No-op if speaking. */
+  triggerIdleReaction(): void {
+    if (this._isSpeaking) return;
+    const r = Math.random();
+    try {
+      if (r < 0.33) {
+        // Yawn slow
+        this.setExpression('exhausted', 600, 1500);
+      } else if (r < 0.66) {
+        // Look at imaginary clock (slight right tilt)
+        this.idleLookTarget = { x: 0.05, y: 0.18, z: 0 };
+        setTimeout(() => {
+          this.idleLookTarget = { x: 0, y: 0, z: 0 };
+        }, 900);
+      } else {
+        // Soft smile
+        this.setExpression('warm', 400, 1800);
+      }
+    } catch { /* ignore */ }
   }
 
   /** Pick a random idle head-look direction. Weighted so most of the

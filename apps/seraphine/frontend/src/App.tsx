@@ -366,7 +366,23 @@ export function App(): JSX.Element {
     }
     const ws = new SeraphineWS();
     wsRef.current = ws;
-    const offStatus = ws.onStatus((s) => setStatus(s));
+    // 025-B: track last disconnect time so we can fire the "return
+    // attention" animation if the user was away for > 10 min.
+    let lastDisconnectAt = 0;
+    const offStatus = ws.onStatus((s) => {
+      if (s === 'disconnected') {
+        lastDisconnectAt = Date.now();
+      } else if (s === 'connected' && lastDisconnectAt) {
+        const awayMs = Date.now() - lastDisconnectAt;
+        if (awayMs > 10 * 60 * 1000) {
+          try {
+            avatarCtrlRef.current?.triggerReturnAttention?.();
+          } catch { /* */ }
+        }
+        lastDisconnectAt = 0;
+      }
+      setStatus(s);
+    });
     const offMsg = ws.onMessage((msg) => {
       const now = performance.now();
       if (msg instanceof ArrayBuffer) {
@@ -438,6 +454,42 @@ export function App(): JSX.Element {
             const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
             void notify('Seraphine -- WhatsApp', text);
           }
+        }
+      } else if (type === 'avatar_action') {
+        // 032-B — embodied reaction. Map action name to
+        // expression + gesture pair on the avatar.
+        const action = (msg as { action?: string }).action;
+        const ctrl = avatarCtrlRef.current;
+        if (!action || !ctrl) {
+          // no-op
+        } else {
+          try {
+            switch (action) {
+              case 'breathe_with_user':
+                ctrl.setExpression?.('soft', 800, 4000);
+                break;
+              case 'raise_hand':
+              case 'high_five':
+              case 'wave_goodbye':
+                ctrl.playGesture?.('wave');
+                ctrl.setExpression?.('happy', 300, 1200);
+                break;
+              case 'stretch':
+                ctrl.setExpression?.('warm', 400, 2000);
+                break;
+              case 'yawn_slow':
+                ctrl.setExpression?.('exhausted', 600, 2500);
+                break;
+              case 'smile_encouraging':
+                ctrl.setExpression?.('happy', 300, 1500);
+                ctrl.playGesture?.('nod');
+                break;
+              case 'hug_gesture':
+                ctrl.setExpression?.('warm', 400, 2000);
+                ctrl.playGesture?.('bow');
+                break;
+            }
+          } catch { /* avatar not ready yet */ }
         }
       } else if (type === 'mood') {
         const m = msg as { mood?: string; intensity?: number; duration_ms?: number };
@@ -573,17 +625,35 @@ export function App(): JSX.Element {
   }, [activeView]);
 
   // Idle detection: after 5 minutes of no interaction, set avatar to 'soft'.
-  // Any interaction resets to neutral.
+  // Any interaction resets to neutral. 025-B layers micro-reactions
+  // (yawn / look at clock / smile) every 4-7 min on top of the soft mood.
   useEffect(() => {
     const IDLE_MS = 5 * 60 * 1000;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let microReactionTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleMicroReaction = (): void => {
+      if (microReactionTimer) clearTimeout(microReactionTimer);
+      const delay = (4 + Math.random() * 3) * 60 * 1000; // 4–7 min
+      microReactionTimer = setTimeout(() => {
+        try {
+          avatarCtrlRef.current?.triggerIdleReaction?.();
+        } catch { /* */ }
+        scheduleMicroReaction();
+      }, delay);
+    };
 
     const resetIdle = (): void => {
       if (idleTimer) clearTimeout(idleTimer);
+      if (microReactionTimer) {
+        clearTimeout(microReactionTimer);
+        microReactionTimer = null;
+      }
       idleTimer = setTimeout(() => {
         try {
           avatarCtrlRef.current?.setExpression?.('soft', 600, 0);
         } catch { /* controller may not be ready */ }
+        scheduleMicroReaction();
       }, IDLE_MS);
     };
 
@@ -599,6 +669,7 @@ export function App(): JSX.Element {
 
     return () => {
       if (idleTimer) clearTimeout(idleTimer);
+      if (microReactionTimer) clearTimeout(microReactionTimer);
       window.removeEventListener('keydown', onActivity);
       window.removeEventListener('mousemove', onActivity);
       window.removeEventListener('click', onActivity);

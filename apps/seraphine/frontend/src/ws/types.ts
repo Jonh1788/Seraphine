@@ -53,6 +53,21 @@ export interface AssistantOpenerMessage {
   text: string;
 }
 
+// 032-B — embodied reaction: backend detected a trigger phrase in the
+// user's message and wants the avatar to do a quick animation.
+export interface AvatarActionMessage {
+  type: 'avatar_action';
+  action:
+    | 'breathe_with_user'
+    | 'raise_hand'
+    | 'high_five'
+    | 'wave_goodbye'
+    | 'stretch'
+    | 'yawn_slow'
+    | 'smile_encouraging'
+    | 'hug_gesture';
+}
+
 // Phase 2 — voice I/O
 export interface AudioStartMessage {
   type: 'audio_start';
@@ -178,6 +193,7 @@ export type ServerMessage =
   | TokenMessage
   | TurnEndMessage
   | AssistantOpenerMessage
+  | AvatarActionMessage
   | TtsStartMessage
   | TtsEndMessage
   | TranscriptionMessage

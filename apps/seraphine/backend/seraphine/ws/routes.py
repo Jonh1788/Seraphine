@@ -570,6 +570,15 @@ async def conversation_ws(ws: WebSocket) -> None:
 
     mcp_callback: Any = None
     audio_buf = bytearray()
+
+    # Register with the global set so proactive broadcasters can push
+    # to any connected client.
+    ws_clients: set = getattr(ws.app.state, "ws_clients", set())
+    try:
+        ws_clients.add(ws)
+    except Exception:
+        pass
+
     try:
         mcp_callback = await _setup_mcp_notifications(ws)
         # Deliver any unread notifications that arrived while the frontend was closed
@@ -631,6 +640,31 @@ async def conversation_ws(ws: WebSocket) -> None:
                 speak = bool(payload.get("speak", False))
                 think = bool(payload.get("think", False))
                 images = payload.get("images") or None
+                audio_meta = payload.get("audio_meta") or None
+
+                # 023-B: translate prosody into a prompt hint — engine will
+                # pick it up on the next turn build.
+                if audio_meta:
+                    try:
+                        from seraphine.conversation.ambient import prosody_hint
+                        hint = prosody_hint(audio_meta)
+                        if hint:
+                            engine._current_prosody_hint = hint  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+
+                # 032-B: embodied reactions — fire the avatar animation
+                # BEFORE the LLM starts so user sees immediate acknowledgment.
+                try:
+                    from seraphine.conversation.embodied import detect_embodied_action
+                    action = detect_embodied_action(content)
+                    if action:
+                        await ws.send_json({
+                            "type": "avatar_action",
+                            "action": action,
+                        })
+                except Exception:
+                    pass
 
                 # Sentence-level streaming TTS state. The reply is queued
                 # on the per-WS speech queue so it serializes behind any
@@ -1018,6 +1052,10 @@ async def conversation_ws(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WS disconnected: %s", client)
     finally:
+        try:
+            ws_clients.discard(ws)
+        except Exception:
+            pass
         # Unregister the MCP callback so dead WebSockets don't accumulate
         # in the listener's callback list.
         if mcp_callback is not None:
