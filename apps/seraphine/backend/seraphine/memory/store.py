@@ -230,6 +230,19 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_voice_memos_created
           ON voice_memos(created_at DESC);
+        CREATE TABLE IF NOT EXISTS desktop_notes (
+          id           TEXT PRIMARY KEY,
+          text         TEXT NOT NULL,
+          color        TEXT NOT NULL DEFAULT 'yellow',
+          x            INTEGER NOT NULL DEFAULT 120,
+          y            INTEGER NOT NULL DEFAULT 120,
+          width        INTEGER NOT NULL DEFAULT 220,
+          height       INTEGER NOT NULL DEFAULT 140,
+          created_at   TEXT NOT NULL,
+          dismissed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_desktop_notes_active
+          ON desktop_notes(dismissed_at, created_at DESC);
         CREATE TABLE IF NOT EXISTS finance_nudges (
           id           TEXT PRIMARY KEY,
           category     TEXT NOT NULL,
@@ -1353,6 +1366,80 @@ class MemoryStore(Store):
                 return None
 
         return await asyncio.to_thread(_work)
+
+    async def create_desktop_note(
+        self, *, text: str, color: str = "yellow",
+        x: int = 120, y: int = 120,
+    ) -> dict[str, Any]:
+        nid = str(uuid.uuid4())
+        now = _now()
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO desktop_notes"
+                    " (id, text, color, x, y, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (nid, text, color, x, y, now),
+                )
+
+        await asyncio.to_thread(_work)
+        return {"id": nid, "text": text, "color": color, "x": x, "y": y,
+                "created_at": now}
+
+    async def list_desktop_notes(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                sql = (
+                    "SELECT id, text, color, x, y, width, height, created_at,"
+                    " dismissed_at FROM desktop_notes"
+                )
+                if not include_dismissed:
+                    sql += " WHERE dismissed_at IS NULL"
+                sql += " ORDER BY created_at DESC"
+                rows = conn.execute(sql).fetchall()
+            return [
+                {"id": r[0], "text": r[1], "color": r[2],
+                 "x": r[3], "y": r[4], "width": r[5], "height": r[6],
+                 "created_at": r[7], "dismissed_at": r[8]}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def update_desktop_note(
+        self, note_id: str, *, x: int | None = None, y: int | None = None,
+        text: str | None = None,
+    ) -> None:
+        def _work() -> None:
+            parts: list[str] = []
+            params: list[Any] = []
+            if x is not None:
+                parts.append("x = ?"); params.append(x)
+            if y is not None:
+                parts.append("y = ?"); params.append(y)
+            if text is not None:
+                parts.append("text = ?"); params.append(text)
+            if not parts:
+                return
+            params.append(note_id)
+            with self._connect() as conn:
+                conn.execute(
+                    f"UPDATE desktop_notes SET {', '.join(parts)} WHERE id = ?",
+                    params,
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def dismiss_desktop_note(self, note_id: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE desktop_notes SET dismissed_at = ? WHERE id = ?",
+                    (_now(), note_id),
+                )
+
+        await asyncio.to_thread(_work)
 
     async def list_push_subscriptions(self) -> list[dict[str, str]]:
         def _work() -> list[dict[str, str]]:

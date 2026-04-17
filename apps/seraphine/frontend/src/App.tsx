@@ -46,6 +46,7 @@ import {
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
 import { VoiceMemoModal } from './voice-memo/VoiceMemoModal';
+import { StickyNotesOverlay } from './sticky-notes/StickyNotes';
 import { SettingsDrawer } from './settings';
 import { OnboardingFlow } from './onboarding';
 import { BottomNav } from './nav';
@@ -1418,6 +1419,7 @@ export function App(): JSX.Element {
       </AnimatePresence>
 
       <VoiceMemoModal open={voiceMemoOpen} onClose={() => setVoiceMemoOpen(false)} />
+      <StickyNotesOverlay />
 
       <SettingsDrawer
         open={settingsOpen}

@@ -49,8 +49,8 @@
       {
         "label": "avatar-companion",
         "title": "Seraphine",
-        "width": 320,
-        "height": 480,
+        "width": 200,
+        "height": 260,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
@@ -58,8 +58,9 @@
         "center": false,
         "visible": false,
         "skipTaskbar": true,
-        "focus": true,
+        "focus": false,
         "shadow": false,
+        "visibleOnAllWorkspaces": true,
         "url": "/avatar-companion.html"
       }
     ],

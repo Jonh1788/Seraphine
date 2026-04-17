@@ -6,6 +6,7 @@ import type { ServerMessage } from '../ws/types';
 import { PCMPlayback } from '../audio/playback';
 import { MicCapture } from '../audio/micCapture';
 import { RealtimeController } from '../realtime';
+import { BubbleLayer, bubbles } from './BubbleLayer';
 
 const DEFAULT_AVATAR =
   localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm';
@@ -84,6 +85,22 @@ export function AvatarCompanion(): JSX.Element {
   const handleReady = useCallback((ctrl: VrmAvatarController) => {
     controllerRef.current = ctrl;
 
+    // 050 — Start the active-app reactor so she reacts to what you
+    // have focused on the Mac (VS Code, Slack, Spotify, etc).
+    void import('./activeAppReactor').then(({ ActiveAppReactor }) => {
+      const reactor = new ActiveAppReactor(ctrl as any);
+      reactor.start();
+      (ctrl as any).__appReactor = reactor;
+    }).catch(() => {/* not in Tauri */});
+
+    // 056 — Ambient visual state: polls pending memory signals and
+    // adjusts idle expression accordingly. Also forwards mood events.
+    void import('./AmbientVisualState').then(({ AmbientVisualState }) => {
+      const amb = new AmbientVisualState(ctrl as any);
+      amb.start();
+      (ctrl as any).__ambient = amb;
+    }).catch(() => {/* */});
+
     // Apply saved camera settings
     (ctrl as any).cameraTarget = { ...camera };
 
@@ -138,9 +155,42 @@ export function AvatarCompanion(): JSX.Element {
         pb.pushChunk(msg);
         return;
       }
-      if ((msg as ServerMessage).type === 'mood') {
+      const typed = msg as unknown as { type?: string; [k: string]: unknown };
+      if (typed.type === 'mood') {
         const m = msg as { mood: string; intensity: number; duration_ms: number };
-        ctrl.setExpression(m.mood, 300, m.duration_ms);
+        const amb = (ctrl as any).__ambient;
+        if (amb && typeof amb.onMood === 'function') {
+          amb.onMood(m.mood, m.duration_ms);
+        } else {
+          ctrl.setExpression(m.mood, 300, m.duration_ms);
+        }
+      }
+      // 051 — surface proactive events as bubbles
+      if (typed.type === 'assistant_opener') {
+        const stripped = String(typed.text ?? '').replace(/\[[a-z]+\]/gi, '').trim();
+        if (stripped) {
+          bubbles.push({
+            text: stripped.slice(0, 200),
+            priority: 'normal',
+            durationMs: 6000,
+          });
+        }
+      } else if (typed.type === 'notification') {
+        const text = String((typed as any).message ?? (typed as any).title ?? '');
+        if (text) {
+          bubbles.push({
+            text: text.slice(0, 160),
+            priority: 'normal',
+            durationMs: 5000,
+          });
+        }
+      } else if (typed.type === 'remote_approval') {
+        bubbles.push({
+          text: `aprovação pendente: ${String((typed as any).host ?? 'host')}`,
+          priority: 'high',
+          durationMs: 60000,
+          sticky: true,
+        });
       }
     });
     setWs(wsClient);
@@ -278,8 +328,57 @@ export function AvatarCompanion(): JSX.Element {
     }).catch(() => {});
   }, []);
 
+  // 053 — double-click the avatar to toggle the main window visibility.
+  const handleDoubleClick = useCallback(() => {
+    void import('@tauri-apps/api/core').then(async ({ invoke }) => {
+      try { await invoke('toggle_main_window'); } catch { /* */ }
+      // Fallback: find and show the main window directly.
+      const { getAllWebviewWindows } = await import('@tauri-apps/api/webviewWindow');
+      const all = await getAllWebviewWindows();
+      const main = all.find((w) => w.label === 'main');
+      if (!main) return;
+      const visible = await main.isVisible().catch(() => false);
+      if (visible) await main.hide();
+      else {
+        await main.show();
+        await main.setFocus();
+      }
+    }).catch(() => {});
+  }, []);
+
+  // 053 — drop files onto the avatar to trigger actions.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      void listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
+        const paths = event.payload?.paths || [];
+        if (paths.length === 0) return;
+        const first = paths[0];
+        const ext = first.split('.').pop()?.toLowerCase() || '';
+        const ws = wsRef.current;
+        if (!ws) return;
+        let prompt = '';
+        if (ext === 'pdf') {
+          prompt = `Lê pra mim o PDF em ${first} e me conta o mais importante.`;
+        } else if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
+          prompt = `Vi essa imagem: ${first}. O que você percebe?`;
+        } else {
+          prompt = `Dá uma olhada nesse arquivo em ${first}.`;
+        }
+        ws.send({ type: 'user_message', content: prompt } as never);
+        bubbles.push({
+          text: `peguei: ${first.split('/').pop() || first}`,
+          priority: 'normal',
+          durationMs: 4000,
+        });
+      }).then((fn) => { unlisten = fn; });
+    }).catch(() => {});
+    return () => { unlisten?.(); };
+  }, []);
+
   return (
     <div
+      onDoubleClick={handleDoubleClick}
       style={{
         position: 'relative',
         width: '100vw',
@@ -291,6 +390,7 @@ export function AvatarCompanion(): JSX.Element {
         cursor: 'default',
       }}
     >
+      <BubbleLayer />
       <VrmAvatar
         avatarUrl={DEFAULT_AVATAR}
         width={size.w}

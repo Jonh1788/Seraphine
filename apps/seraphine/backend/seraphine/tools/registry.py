@@ -30,6 +30,7 @@ from seraphine.tools.dev import (
     SearchCodeTool,
 )
 from seraphine.tools.document import DocumentReadTool
+from seraphine.tools.sticky import StickyNoteTool
 from seraphine.tools.native_mac import (
     ActiveAppTool,
     OpenPathTool,
@@ -107,6 +108,9 @@ def build_default_registry(
     reg.register(ShortcutsRunTool())
     reg.register(OpenPathTool())
     reg.register(ActiveAppTool())
+    # 055 Sticky notes
+    if store is not None:
+        reg.register(StickyNoteTool(store))
     # 036 Dev sidekick
     reg.register(GitStatusTool())
     reg.register(GitDiffTool())

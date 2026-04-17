@@ -773,6 +773,9 @@ def create_app() -> FastAPI:
     from seraphine.proactive.routes import router as proactive_router
     app.include_router(proactive_router)
 
+    from seraphine.notes_routes import router as desktop_notes_router
+    app.include_router(desktop_notes_router)
+
     from mod_finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router
     from mod_tasks.routes import router as tasks_router
