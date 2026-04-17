@@ -32,6 +32,7 @@ class ReadFileTool(Tool):
     }
     requires_confirmation = False
     category = "filesystem"
+    proxy_to_client = True  # 033 — act on the Mac's filesystem
 
     def __init__(self, allowed_roots: list[Path]) -> None:
         self.allowed_roots = [Path(r) for r in allowed_roots]
@@ -57,6 +58,7 @@ class ListDirTool(Tool):
     }
     requires_confirmation = False
     category = "filesystem"
+    proxy_to_client = True  # 033 — act on the Mac's filesystem
 
     def __init__(self, allowed_roots: list[Path]) -> None:
         self.allowed_roots = [Path(r) for r in allowed_roots]
@@ -88,6 +90,7 @@ class WriteFileTool(Tool):
     }
     requires_confirmation = True
     category = "filesystem"
+    proxy_to_client = True  # 033 — Mac filesystem write
 
     def __init__(self, allowed_roots: list[Path]) -> None:
         self.allowed_roots = [Path(r) for r in allowed_roots]

@@ -998,6 +998,29 @@ async def conversation_ws(ws: WebSocket) -> None:
                     except Exception as e:  # pragma: no cover
                         logger.warning("audio speak_done wait failed: %s", e)
                 audio_buf = bytearray()
+            elif mtype == "tool_proxy_response":
+                # 033 — Tauri client finished executing a proxied tool.
+                broker = getattr(ws.app.state, "proxy_broker", None)
+                if broker is None:
+                    continue
+                request_id = str(payload.get("request_id", ""))
+                if not request_id:
+                    continue
+                from seraphine.tools.base import ToolResult
+                result = ToolResult(
+                    ok=bool(payload.get("ok", False)),
+                    output=payload.get("output"),
+                    error=payload.get("error"),
+                    metadata=payload.get("metadata") or {},
+                )
+                broker.resolve(request_id, result)
+            elif mtype == "client_hello":
+                # 033 — client identifies itself so the proxy broker can
+                # target Tauri-specific clients first.
+                try:
+                    ws._is_tauri = bool(payload.get("is_tauri"))  # type: ignore[attr-defined]
+                except Exception:
+                    pass
             elif mtype == "mcp_approval_response":
                 mcp_client = getattr(ws.app.state, "mcp_client", None)
                 if mcp_client is None:

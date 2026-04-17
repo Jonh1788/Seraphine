@@ -22,6 +22,9 @@ class RunShellTool(Tool):
     }
     requires_confirmation = True
     category = "shell"
+    # 033 — when Mac client is connected, forward to local shell
+    # instead of the VPS container.
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         command = str(args.get("command", ""))

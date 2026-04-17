@@ -382,6 +382,22 @@ export function App(): JSX.Element {
     }
     const ws = new SeraphineWS();
     wsRef.current = ws;
+
+    // 033 — attach tool proxy handler so Mac-local tools work again.
+    let detachProxy: (() => void) | null = null;
+    (async () => {
+      try {
+        const { attachToolProxy, sendClientHello } = await import('./tool-proxy');
+        detachProxy = attachToolProxy(ws);
+        // Re-identify on every connect so a reconnected WS still knows
+        // we're the Tauri client.
+        ws.onStatus((s) => {
+          if (s === 'connected') {
+            try { sendClientHello(ws); } catch { /* */ }
+          }
+        });
+      } catch { /* not Tauri, skip */ }
+    })();
     // 025-B: track last disconnect time so we can fire the "return
     // attention" animation if the user was away for > 10 min.
     let lastDisconnectAt = 0;
@@ -542,6 +558,7 @@ export function App(): JSX.Element {
       offStatus();
       offMsg();
       offSend();
+      detachProxy?.();
       chunkOffRef.current?.();
       micRef.current?.stop();
       playbackRef.current?.dispose();

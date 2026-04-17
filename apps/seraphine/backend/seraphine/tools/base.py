@@ -24,6 +24,11 @@ class Tool(ABC):
     json_schema: dict[str, Any]
     requires_confirmation: bool = True
     category: ToolCategory = "other"
+    # 033 — If True and a Tauri/Mac client is connected, the dispatcher
+    # proxies execution to the client instead of running `execute` on
+    # the server. Used for Mac-local capabilities (screen, shell,
+    # filesystem, clipboard) when backend lives on the VPS.
+    proxy_to_client: bool = False
 
     @abstractmethod
     async def execute(self, args: dict[str, Any]) -> ToolResult:

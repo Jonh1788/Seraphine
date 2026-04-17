@@ -19,6 +19,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod clipboard;
 mod health;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod mac_tools;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
 mod whisper;
 
@@ -87,6 +89,14 @@ fn run_desktop() {
             whisper::whisper_status,
             whisper::whisper_prepare,
             whisper::whisper_transcribe_pcm,
+            // 033 — Mac-local tool proxy commands
+            mac_tools::run_shell_local,
+            mac_tools::read_file_local,
+            mac_tools::write_file_local,
+            mac_tools::list_dir_local,
+            mac_tools::screen_capture_local,
+            mac_tools::write_clipboard_local,
+            mac_tools::read_clipboard_local,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())

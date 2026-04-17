@@ -522,6 +522,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.store = store
     app.state.stt = stt
     app.state.llm = llm
+    # 033 — proxy broker for tool_proxy_request/response round-trips.
+    from seraphine.ws.proxy_broker import ProxyBroker
+    app.state.proxy_broker = ProxyBroker()
     app.state.embeddings = embeddings
     app.state.memory = memory
     app.state.engine = engine

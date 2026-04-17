@@ -31,6 +31,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # stays small.
 whisper-rs = { version = "0.14", features = ["metal"] }
 dirs = "5"
+base64 = "0.22"
 
 # Desktop-only dependencies — mic capture (cpal), clipboard (arboard),
 # global shortcuts, tray. iOS has its own equivalents via UIKit and

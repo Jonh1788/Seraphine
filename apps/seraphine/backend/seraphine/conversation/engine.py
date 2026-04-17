@@ -260,6 +260,57 @@ AUTO_PROFILE_EVERY_N_TURNS = 6
 AUTO_NARRATIVE_EVERY_N_TURNS = 12
 
 
+_PROXY_TIMEOUT_SECONDS = 90.0
+
+
+async def _proxy_tool_via_client(
+    app_state: Any, tool_name: str, tool_args: dict[str, Any],
+) -> "ToolResult":
+    """033 — Ship a tool_call to the Tauri client, wait for the reply.
+
+    Assumes `app_state.proxy_broker` exists (instantiated at lifespan).
+    Returns a failure ToolResult if no client is connected or timeout
+    is reached.
+    """
+    from seraphine.tools.base import ToolResult
+    from seraphine.ws.proxy_broker import ProxyBroker
+
+    broker: ProxyBroker | None = getattr(app_state, "proxy_broker", None)
+    if broker is None:
+        return ToolResult(
+            ok=False,
+            error="proxy broker not configured",
+        )
+    ws = broker.any_client(app_state)
+    if ws is None:
+        return ToolResult(
+            ok=False,
+            error=(
+                f"tool '{tool_name}' needs a Mac client but no Tauri "
+                "WebSocket is connected"
+            ),
+        )
+
+    request_id = broker.new_request_id()
+    fut = broker.register(request_id)
+    try:
+        await ws.send_json({
+            "type": "tool_proxy_request",
+            "request_id": request_id,
+            "tool": tool_name,
+            "args": tool_args,
+        })
+    except Exception as e:
+        broker.cancel(request_id, f"send failed: {e}")
+        return ToolResult(ok=False, error=f"send failed: {e}")
+
+    try:
+        return await asyncio.wait_for(fut, timeout=_PROXY_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        broker.cancel(request_id, "client did not respond in time")
+        return ToolResult(ok=False, error="client did not respond in time")
+
+
 class TurnCancelled(Exception):
     """Raised inside the engine loop when the active turn's ``cancel_event``
     has been signalled. Callers surface this as a ``TurnCancelledEvent``
@@ -826,7 +877,15 @@ class ConversationEngine:
 
                     if approved:
                         try:
-                            result = await tool.execute(tool_args)
+                            if (
+                                getattr(tool, "proxy_to_client", False)
+                                and self._app_state is not None
+                            ):
+                                result = await _proxy_tool_via_client(
+                                    self._app_state, tool_name, tool_args,
+                                )
+                            else:
+                                result = await tool.execute(tool_args)
                         except Exception as e:
                             result = ToolResult(ok=False, error=str(e))
                     else:

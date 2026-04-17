@@ -124,6 +124,7 @@ class ScreenCaptureTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         try:
@@ -160,6 +161,7 @@ class ScreenClickTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         x = args.get("x")
@@ -212,6 +214,7 @@ class ScreenTypeTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         text = args.get("text", "")
@@ -254,6 +257,7 @@ class ScreenKeyTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     # Map friendly names to cliclick key codes
     _KEY_MAP = {
@@ -353,6 +357,7 @@ class ScreenCopyToClipboardTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         text = args.get("text", "")
@@ -391,6 +396,7 @@ class ScreenReadClipboardTool(Tool):
     }
     requires_confirmation = False
     category = "system"
+    proxy_to_client = True
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         try:
