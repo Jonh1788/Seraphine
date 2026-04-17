@@ -14,7 +14,11 @@ class CreateDeckTool(Tool):
         "Generate a spaced-repetition deck for a topic the user wants to "
         "learn. Creates flashcards in the DB; they'll surface via "
         "bubbles/openers when due. Use when he says 'quero aprender X', "
-        "'me ensina Y', 'cria cards sobre Z'."
+        "'me ensina Y', 'cria cards sobre Z'. "
+        "IMPORTANT: after the tool succeeds, DO NOT list the card "
+        "questions in chat. Review happens in the dedicated Flashcards "
+        "tab (card-shaped icon in the sidebar) which has flip + SM-2 "
+        "rating buttons. Just invite the user to open it."
     )
     json_schema = {
         "type": "object",
@@ -39,16 +43,25 @@ class CreateDeckTool(Tool):
             return ToolResult(ok=False, error="deck generation failed")
         return ToolResult(
             ok=True,
-            output=f"deck '{topic}' criado: {len(cards)} cards",
-            metadata={"topic": topic, "count": len(cards)},
+            output=(
+                f"Deck '{topic}' criado com {len(cards)} cards. "
+                f"Abra a aba Flashcards (sidebar, ícone de cartão) pra "
+                f"revisar — a review tem flip, rating SM-2 (Again/Hard/"
+                f"Good/Easy) e agenda o próximo intervalo automaticamente. "
+                f"NÃO liste as perguntas no chat, só convide ele a abrir."
+            ),
+            metadata={"topic": topic, "count": len(cards), "open_view": "flashcards"},
         )
 
 
 class ListDueTool(Tool):
     name = "flashcard_list_due"
     description = (
-        "List flashcards due for review today. Use when the user asks to "
-        "'revisar', 'estudar', 'praticar'."
+        "Check how many flashcards are due for review today. Use when "
+        "the user asks to 'revisar', 'estudar', 'praticar'. "
+        "IMPORTANT: do NOT list cards in chat. Review is done in the "
+        "Flashcards tab; this tool just reports the count and should "
+        "nudge the user to open the tab."
     )
     json_schema = {
         "type": "object",
@@ -65,11 +78,19 @@ class ListDueTool(Tool):
         limit = int(args.get("limit") or 10)
         cards = await FlashcardsService(self.store, self.llm).list_due(limit=limit)
         if not cards:
-            return ToolResult(ok=True, output="Nenhum card vencido agora.")
-        lines = [f"{len(cards)} card(s) pra revisar:"]
-        for c in cards[:10]:
-            lines.append(f"- [{c['topic']}] {c['front']}")
+            return ToolResult(
+                ok=True,
+                output="Nenhum card vencido agora.",
+                metadata={"count": 0},
+            )
+        topics = sorted({c["topic"] for c in cards})
         return ToolResult(
-            ok=True, output="\n".join(lines),
-            metadata={"cards": cards},
+            ok=True,
+            output=(
+                f"{len(cards)} card(s) vencido(s) pra revisar "
+                f"(tópicos: {', '.join(topics[:5])}). "
+                f"Diga ao usuário pra abrir a aba Flashcards pra revisar. "
+                f"NÃO liste as perguntas aqui — a review é na UI dedicada."
+            ),
+            metadata={"count": len(cards), "topics": topics, "open_view": "flashcards"},
         )

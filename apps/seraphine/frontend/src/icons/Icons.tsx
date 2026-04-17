@@ -153,6 +153,15 @@ export function BrainIcon({ size = 24, className = '' }: IconProps) {
   );
 }
 
+export function FlashcardIcon({ size = 24, className = '' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <rect x="3" y="7" width="16" height="12" rx="2" />
+      <path d="M7 3h14v12" />
+    </svg>
+  );
+}
+
 export function ImagesIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
