@@ -16,6 +16,7 @@ from seraphine.memory.emotional_context import (
     detect_emotion,
     record_emotional_context,
 )
+from seraphine.conversation.attention import AttentionModel
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.mood import MoodTracker
 from seraphine.memory.open_loops import OpenLoopsService
@@ -370,6 +371,7 @@ class ConversationEngine:
         self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
         self._turn_counter: int = 0
         self._mood = MoodTracker()
+        self._attention = AttentionModel()
         self._open_loops = OpenLoopsService(store, llm)
         self._people = PeopleService(store)
         # Populated lazily by main.py after lifespan wires other services
@@ -523,7 +525,13 @@ class ConversationEngine:
         # 022-B: update internal mood from the user turn before we build
         # the prompt — so the mood line reflects the message we're about
         # to respond to.
-        self._mood.observe(content)
+        mood_state = self._mood.observe(content)
+
+        # 028-A: update attention state. Reads the prosody hint stored
+        # by the WS handler (if any).
+        prosody_meta = getattr(self, "_current_audio_meta", None)
+        mood_label = mood_state.mood if mood_state else None
+        self._attention.observe(content, audio_meta=prosody_meta, mood=mood_label)
 
         # 022-C: close any open loops the user is resolving right now.
         try:
@@ -544,6 +552,17 @@ class ConversationEngine:
         if mood_line:
             messages.append(ChatMessage(role="system", content=mood_line))
 
+        # 027-C: music-offer nudge on mood transition (one-shot per mood).
+        music_line = self._mood.music_suggestion_line()
+        if music_line:
+            messages.append(ChatMessage(role="system", content=music_line))
+
+        # 028-A: attention hint. Either deep_focus or stressed overrides
+        # several injection behaviors below.
+        attention_line = self._attention.as_prompt_line()
+        if attention_line:
+            messages.append(ChatMessage(role="system", content=attention_line))
+
         # 023-A: ambient context block (next event, health, tasks).
         if self._app_state is not None:
             try:
@@ -560,13 +579,16 @@ class ConversationEngine:
             messages.append(ChatMessage(role="system", content=prosody_line))
             self._current_prosody_hint = None
 
-        # 022-C: inject up to 3 open loops. Fails silently.
-        try:
-            loops_block = await self._open_loops.prompt_block()
-            if loops_block:
-                messages.append(ChatMessage(role="system", content=loops_block))
-        except Exception as e:
-            logger.debug("open_loops prompt_block failed: %s", e)
+        # 022-C: inject up to 3 open loops — but skip when attention
+        # says to stay out of the way (deep_focus / stressed). Pestering
+        # during those states is counter-productive.
+        if not self._attention.should_suppress_nudges():
+            try:
+                loops_block = await self._open_loops.prompt_block()
+                if loops_block:
+                    messages.append(ChatMessage(role="system", content=loops_block))
+            except Exception as e:
+                logger.debug("open_loops prompt_block failed: %s", e)
 
         # 029: if the user just mentioned a known person, inject social
         # history so replies can reference past threads naturally.

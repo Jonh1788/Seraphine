@@ -206,6 +206,30 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_mentions_person
           ON person_mentions(person_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS discoveries (
+          id           TEXT PRIMARY KEY,
+          topic        TEXT NOT NULL,
+          headline     TEXT NOT NULL,
+          url          TEXT,
+          summary      TEXT,
+          mentioned    INTEGER NOT NULL DEFAULT 0,
+          mentioned_at TEXT,
+          score        REAL NOT NULL DEFAULT 0.5,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_discoveries_status
+          ON discoveries(mentioned, score DESC, created_at DESC);
+        CREATE TABLE IF NOT EXISTS voice_memos (
+          id              TEXT PRIMARY KEY,
+          transcript      TEXT NOT NULL,
+          classification  TEXT NOT NULL,
+          archived_to     TEXT,
+          archived_id     TEXT,
+          created_at      TEXT NOT NULL,
+          reverted_at     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_voice_memos_created
+          ON voice_memos(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_open_loops_status
           ON open_loops(resolved_at, created_at DESC);
         """
@@ -1037,6 +1061,63 @@ class MemoryStore(Store):
                 {"context": r[0], "sentiment": r[1], "created_at": r[2]}
                 for r in rows
             ]
+
+        return await asyncio.to_thread(_work)
+
+    async def add_discovery(
+        self, *, topic: str, headline: str, url: str | None,
+        summary: str | None = None, score: float = 0.5,
+    ) -> str:
+        did = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO discoveries"
+                    " (id, topic, headline, url, summary, score, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (did, topic, headline, url, summary, score, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return did
+
+    async def list_pending_discoveries(self, limit: int = 5) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, topic, headline, url, summary, score, created_at"
+                    " FROM discoveries WHERE mentioned = 0"
+                    " ORDER BY score DESC, created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {"id": r[0], "topic": r[1], "headline": r[2], "url": r[3],
+                 "summary": r[4], "score": r[5], "created_at": r[6]}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def mark_discovery_mentioned(self, discovery_id: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE discoveries SET mentioned = 1, mentioned_at = ?"
+                    " WHERE id = ?",
+                    (_now(), discovery_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def discovery_url_exists(self, url: str) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM discoveries WHERE url = ? LIMIT 1",
+                    (url,),
+                ).fetchone()
+            return row is not None
 
         return await asyncio.to_thread(_work)
 

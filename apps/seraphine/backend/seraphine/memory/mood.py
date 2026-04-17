@@ -101,6 +101,9 @@ class MoodTracker:
         # Count of consecutive neutral turns — after enough, the mood
         # decays back to default even before TTL expiry.
         self._neutral_streak = 0
+        # 027-C: track which mood we already suggested music for so we
+        # don't nag on every turn.
+        self._music_offered_for: Mood | None = None
 
     def observe(self, user_text: str) -> MoodState | None:
         """Update the state based on a new user turn. Returns the
@@ -139,3 +142,34 @@ class MoodTracker:
     def as_prompt_line(self) -> str | None:
         state = self.current()
         return state.as_prompt_line() if state else None
+
+    def music_suggestion_line(self) -> str | None:
+        """027-C — If mood just transitioned into a music-friendly
+        state and we haven't offered yet, return a prompt nudge that
+        encourages her to propose a playlist (once)."""
+        state = self.current()
+        if state is None:
+            return None
+        if self._music_offered_for == state.mood:
+            return None  # already offered for this mood
+        suggestions = {
+            "focused": (
+                "lofi / instrumental de fundo (Bonobo, Tycho, post-rock leve). "
+                "Oferece sem insistir — 'posso botar um lofi de fundo?'"
+            ),
+            "cozy": (
+                "trilha calma (piano ambient, Nils Frahm, chill downtempo). "
+                "Sutil — 'quer um som baixinho aí?'"
+            ),
+            "playful": (
+                "algo alegre que ele já curtiu antes. Checa o fact store "
+                "pra pegar artista favorito; senão sugere eletrônico leve."
+            ),
+        }
+        if state.mood not in suggestions:
+            return None
+        self._music_offered_for = state.mood
+        return (
+            f"MÚSICA (oferta única, mood={state.mood}): {suggestions[state.mood]} "
+            "Use play_music se ele aceitar. Se o contexto não pedir, ignore."
+        )

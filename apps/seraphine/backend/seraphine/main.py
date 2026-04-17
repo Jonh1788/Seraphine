@@ -763,6 +763,9 @@ def create_app() -> FastAPI:
     app.include_router(google_router)
     app.include_router(briefing_router)
 
+    from seraphine.voice_memo_routes import router as voice_memo_router
+    app.include_router(voice_memo_router)
+
     from mod_finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router
     from mod_tasks.routes import router as tasks_router

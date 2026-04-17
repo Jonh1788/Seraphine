@@ -92,6 +92,13 @@ class ProactiveScheduler:
             "cron", hour=self._day_review_hour, minute=0,
             name="day_review",
         )
+        # 030-A: daily curiosity cycle. Run mid-morning so discoveries
+        # are fresh when the user starts the day.
+        self._sched.add_job(
+            self._tick_curiosity,
+            "cron", hour=9, minute=0,
+            name="curiosity",
+        )
         self._sched.start()
         logger.info("proactive scheduler started")
 
@@ -149,6 +156,20 @@ class ProactiveScheduler:
             self._last_day_review_date = today
         except Exception as e:
             logger.warning("tick_day_review: %s", e)
+
+    async def _tick_curiosity(self) -> None:
+        try:
+            llm = getattr(self.app_state, "llm", None)
+            store = getattr(self.app_state, "store", None)
+            tools = getattr(self.app_state, "tools", None)
+            if llm is None or store is None:
+                return
+            from seraphine.curiosity import CuriosityService
+            n = await CuriosityService(store, llm, tools).tick()
+            if n:
+                logger.info("curiosity tick: %d new", n)
+        except Exception as e:
+            logger.warning("tick_curiosity: %s", e)
 
     async def _tick_weekly_reflection(self) -> None:
         try:

@@ -151,7 +151,49 @@ class OpenerService:
             lines.append(f"    · {loop['text']}")
         return "\n" + "\n".join(lines)
 
-    async def generate(self, minutes_since: int) -> str | None:
+    async def _context_email_section(self, app_state: Any) -> str:
+        """027-A — if there are recent important emails, mention count.
+        Only surfaces during morning openers to avoid nagging."""
+        gc = getattr(app_state, "google_client", None) if app_state else None
+        if gc is None:
+            return ""
+        now = datetime.now(_TZ)
+        if not (6 <= now.hour <= 11):
+            return ""  # only mornings
+        try:
+            if not await gc.is_authed():
+                return ""
+            msgs = await gc.list_messages(q="is:unread is:important newer_than:2d", max_results=5)
+        except Exception:
+            return ""
+        if not msgs:
+            return ""
+        top = msgs[0]
+        return (
+            f"\n- email importante não lido: '{top.get('subject', 'sem assunto')}' "
+            f"de {top.get('from', '')}"
+            + (f" (+{len(msgs) - 1} outros)" if len(msgs) > 1 else "")
+        )
+
+    async def _context_discovery_section(self) -> tuple[str, str | None]:
+        """Return (prompt_text, discovery_id) — the id lets the caller
+        mark it as mentioned after emission."""
+        try:
+            rows = await self.store.list_pending_discoveries(limit=1)
+        except Exception:
+            return "", None
+        if not rows:
+            return "", None
+        d = rows[0]
+        text = (
+            f"\n- descoberta curiosa (tópico: {d['topic']}): "
+            f"{d['headline']}"
+        )
+        if d.get("summary"):
+            text += f" — {d['summary']}"
+        return text, d["id"]
+
+    async def generate(self, minutes_since: int, app_state: Any | None = None) -> str | None:
         """Call the LLM with context. Returns the opener text, or None
         if the model said SKIP or the call failed."""
         if self.llm is None:
@@ -159,6 +201,8 @@ class OpenerService:
         now = datetime.now(_TZ)
         tasks_section = await self._context_tasks_section()
         loops_section = await self._context_open_loops_section()
+        discovery_section, discovery_id = await self._context_discovery_section()
+        email_section = await self._context_email_section(app_state)
 
         prompt = _OPENER_PROMPT_TEMPLATE.format(
             minutes_since=minutes_since,
@@ -167,7 +211,7 @@ class OpenerService:
             mm=f"{now.minute:02d}",
             weekday=_weekday_pt(now),
             tasks_section=tasks_section,
-            opener_extras=loops_section,
+            opener_extras=loops_section + discovery_section + email_section,
         )
 
         acc: list[str] = []
@@ -196,6 +240,12 @@ class OpenerService:
         if len(text) > 280:
             text = text[:280].rstrip() + "…"
         self._last_opener_at = now
+        # Mark the surfaced discovery so it doesn't reappear.
+        if discovery_id:
+            try:
+                await self.store.mark_discovery_mentioned(discovery_id)
+            except Exception:
+                pass
         return text
 
 
@@ -216,7 +266,7 @@ async def maybe_emit_opener(ws: Any, app_state: Any) -> str | None:
         ok, minutes = await service.should_open()
         if not ok:
             return None
-        opener = await service.generate(minutes)
+        opener = await service.generate(minutes, app_state=app_state)
         if not opener:
             return None
         await ws.send_json({

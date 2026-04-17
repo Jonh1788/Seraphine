@@ -22,6 +22,7 @@ from seraphine.tools.routes import RoutePlannerTool
 from seraphine.tools.news import SearchNewsTool
 from seraphine.tools.search import WebSearchTool
 from seraphine.tools.weather import FormatWeatherCardTool, WeatherForecastTool
+from seraphine.tools.document import DocumentReadTool
 from seraphine.tools.web import WebFetchTool
 
 
@@ -87,6 +88,7 @@ def build_default_registry(
     reg.register(RunShellTool())
     reg.register(WebFetchTool())
     reg.register(WebSearchTool())
+    reg.register(DocumentReadTool())
     reg.register(FetchImageTool())
     reg.register(SearchNewsTool())
     reg.register(RoutePlannerTool())

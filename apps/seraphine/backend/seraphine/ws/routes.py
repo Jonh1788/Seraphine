@@ -643,15 +643,19 @@ async def conversation_ws(ws: WebSocket) -> None:
                 audio_meta = payload.get("audio_meta") or None
 
                 # 023-B: translate prosody into a prompt hint — engine will
-                # pick it up on the next turn build.
+                # pick it up on the next turn build. Also stash raw meta
+                # so the attention model (028-A) can read it.
                 if audio_meta:
                     try:
                         from seraphine.conversation.ambient import prosody_hint
                         hint = prosody_hint(audio_meta)
                         if hint:
                             engine._current_prosody_hint = hint  # type: ignore[attr-defined]
+                        engine._current_audio_meta = audio_meta  # type: ignore[attr-defined]
                     except Exception:
                         pass
+                else:
+                    engine._current_audio_meta = None  # type: ignore[attr-defined]
 
                 # 032-B: embodied reactions — fire the avatar animation
                 # BEFORE the LLM starts so user sees immediate acknowledgment.
