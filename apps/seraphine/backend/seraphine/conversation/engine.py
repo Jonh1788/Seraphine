@@ -384,7 +384,7 @@ class ConversationEngine:
             logger.warning("recall failed: %s", e)
             recalled = []
         try:
-            facts = await self.memory.store.list_facts(limit=10)
+            facts = await self.memory.store.list_facts(limit=30)
         except Exception as e:  # pragma: no cover
             logger.warning("list_facts failed: %s", e)
             facts = []
@@ -572,6 +572,21 @@ class ConversationEngine:
         recall_block = await self._build_recall_block(content)
         if recall_block:
             messages.append(ChatMessage(role="system", content=recall_block))
+
+        # Inject the semantic profile (identity, work, contacts, goals…)
+        # so stable biographical context is always in reach — list_facts
+        # alone only surfaces the most recent N and can miss things like
+        # "Casada com Aline" once dozens of newer facts stack on top.
+        try:
+            from seraphine.memory.profile import UserProfile
+            profile_summary = await UserProfile(self.store).get_profile_summary()
+            if profile_summary and profile_summary != "No profile data yet.":
+                messages.append(ChatMessage(
+                    role="system",
+                    content=f"USER PROFILE:\n{profile_summary}",
+                ))
+        except Exception as e:
+            logger.debug("profile injection failed: %s", e)
 
         # Use compaction-aware context building
         compacted = await self._compact_context(conversation_id, prior)
