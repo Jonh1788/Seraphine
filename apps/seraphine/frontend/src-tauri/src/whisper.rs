@@ -26,10 +26,13 @@ use whisper_rs::{
 // Model registry
 // ---------------------------------------------------------------------------
 
-/// Small quantised multilingual model. 150 MB, good PT-BR, fast.
-const DEFAULT_MODEL_ID: &str = "ggml-small-q5_1";
+/// Small full-precision multilingual model. 488 MB FP16, good PT-BR.
+/// Versao quantizada (q5_1, 181MB) trocada para FP16 a pedido — perde
+/// alguma velocidade no M4 Max (negligivel em frases curtas) mas
+/// melhora precisao especialmente em sotaques e palavras tecnicas.
+const DEFAULT_MODEL_ID: &str = "ggml-small";
 const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin";
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
 
 // ---------------------------------------------------------------------------
 // Lazy-initialised singleton — load the context once per process.

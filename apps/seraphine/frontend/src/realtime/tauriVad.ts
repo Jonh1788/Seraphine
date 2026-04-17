@@ -57,6 +57,12 @@ export async function createTauriRealtimeVAD(
   let speechFrames = 0;
   let silenceFrames = 0;
   let micRmsSmoothed = 0;
+  // Debug: log a cada ~3s (~94 frames de 32ms) o estado do VAD pra
+  // diagnosticar "eterno Ouvindo". Se rms=0 → mic não chega aqui.
+  // Se rms>0 mas prob~0 → Silero não detecta. Se prob alto sem trigger
+  // → threshold/redemption mal calibrado.
+  let diagFrames = 0;
+  let diagMaxProb = 0;
 
   const i16ToFloat32 = (pcm: Int16Array): Float32Array => {
     const out = new Float32Array(pcm.length);
@@ -80,9 +86,13 @@ export async function createTauriRealtimeVAD(
       sr: new ort.Tensor('int64', sr, []),
     };
     const results = await session.run(inputs);
-    // Update state
-    h = new Float32Array((results.hn.data as Float32Array).buffer.slice(0) as ArrayBuffer);
-    c = new Float32Array((results.cn.data as Float32Array).buffer.slice(0) as ArrayBuffer);
+    // Update state. ORT-Web tensors podem apontar pra um WASM arena
+    // compartilhado — usar .buffer.slice() pegava a heap inteira,
+    // gerando arrays com tamanho errado e estado LSTM corrompido (Silero
+    // ficava com prob ~0 pra sempre, eterno "Ouvindo"). .slice(0) no
+    // próprio Float32Array copia respeitando byteOffset/length corretos.
+    h = (results.hn.data as Float32Array).slice(0);
+    c = (results.cn.data as Float32Array).slice(0);
     const prob = (results.output.data as Float32Array)[0];
     return prob;
   };
@@ -104,6 +114,16 @@ export async function createTauriRealtimeVAD(
     } catch (err) {
       console.error('[tauri-vad] silero inference failed:', err);
       return;
+    }
+
+    diagFrames += 1;
+    if (prob > diagMaxProb) diagMaxProb = prob;
+    if (diagFrames >= 94) {
+      console.log(
+        `[tauri-vad] diag: rms=${micRmsSmoothed.toFixed(4)} maxProb=${diagMaxProb.toFixed(3)} inSpeech=${inSpeech}`,
+      );
+      diagFrames = 0;
+      diagMaxProb = 0;
     }
 
     if (!inSpeech) {

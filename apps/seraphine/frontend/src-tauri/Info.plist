@@ -12,5 +12,14 @@
   <string>Seraphine usa dados do Apple Saude para mostrar resumos diarios de passos, sono, treinos e frequencia cardiaca na sua assistente pessoal.</string>
   <key>NSHealthUpdateUsageDescription</key>
   <string>Seraphine pode registrar habitos concluidos no Apple Saude para manter suas metas sincronizadas.</string>
+
+  <!--
+    Microphone — necessario para o modo realtime (VAD Silero + Whisper
+    embarcado). Sem essa key o macOS NAO mostra o prompt de permissao,
+    cpal abre o stream mas recebe so zeros, e a Silero nunca detecta
+    voz (fica eterno em "Ouvindo").
+  -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Seraphine ouve seu microfone no modo conversa por voz para entender o que voce diz e responder.</string>
 </dict>
 </plist>
