@@ -2614,6 +2614,89 @@ button:disabled {
   overflow: hidden;
 }
 
+/* ---------- Confirm dialog ---------- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  animation: fadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-dialog {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  animation: modalScaleIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.confirm-dialog__title {
+  margin: 0 0 var(--space-2);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.confirm-dialog__message {
+  margin: 0 0 var(--space-5);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.confirm-dialog__btn {
+  padding: 8px 18px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, opacity 120ms;
+}
+
+.confirm-dialog__btn--cancel {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+}
+.confirm-dialog__btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.confirm-dialog__btn--confirm {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+}
+.confirm-dialog__btn--confirm:hover {
+  opacity: 0.85;
+}
+
+.confirm-dialog__btn--danger {
+  background: var(--danger);
+}
+
 /* ---------- Calendar modal ---------- */
 
 .calendar-modal {
@@ -10660,6 +10743,23 @@ body.qc-window .quick-capture {
 .skeleton--card { height: 80px; width: 100%; border-radius: var(--r-md); }
 .skeleton--circle { border-radius: 50%; width: 40px; height: 40px; }
 .skeleton--custom { display: block; }
+
+/* Flashcards / Images skeleton */
+.fc-skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-highlight) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer var(--skeleton-duration) infinite linear;
+  border-radius: var(--r-sm);
+}
+.fc-skeleton--line {
+  border-radius: var(--r-sm);
+}
 
 @keyframes shimmer {
   0%   { background-position: 200% 0; }

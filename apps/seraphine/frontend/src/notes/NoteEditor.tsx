@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import { TrashIcon, XIcon } from '../icons/Icons';
+import { useConfirm } from '../ui';
 import type { Note } from './types';
 
 interface NoteEditorProps {
@@ -17,6 +18,7 @@ interface NoteEditorProps {
  * "Excluir" prompts a native confirm before firing.
  */
 export function NoteEditor({ note, busy, onSave, onDelete }: NoteEditorProps): JSX.Element {
+  const confirm = useConfirm();
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [tags, setTags] = useState<string[]>(note.tags);
@@ -75,9 +77,14 @@ export function NoteEditor({ note, busy, onSave, onDelete }: NoteEditorProps): J
     onSave({ title: cleanTitle, content, tags });
   };
 
-  const handleDelete = (): void => {
+  const handleDelete = async (): Promise<void> => {
     if (busy) return;
-    const ok = window.confirm(`Excluir a nota "${note.title}"?`);
+    const ok = await confirm({
+      title: 'Excluir nota?',
+      message: `A nota "${note.title}" sera excluida permanentemente.`,
+      confirmLabel: 'Excluir',
+      variant: 'danger',
+    });
     if (ok) onDelete();
   };
 

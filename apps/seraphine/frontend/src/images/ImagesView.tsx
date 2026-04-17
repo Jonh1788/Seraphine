@@ -1,5 +1,5 @@
 /**
- * 068 — Gallery of generated images.
+ * 068 -- Gallery of generated images.
  *
  * Lists everything in /images, click to open full-size in a lightbox.
  * Accessible from main app sidebar.
@@ -21,26 +21,51 @@ interface ImagesViewProps {
   onBack: () => void;
 }
 
+type ViewStatus = 'loading' | 'error' | 'empty' | 'loaded';
+
 export function ImagesView({ onBack }: ImagesViewProps): JSX.Element {
   const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [viewStatus, setViewStatus] = useState<ViewStatus>('loading');
+  const [errorMsg, setErrorMsg] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const fetchImages = useCallback(async () => {
-    setLoading(true);
+    setViewStatus('loading');
+    setErrorMsg('');
     try {
       const res = await fetch(`${API_BASE}/images?limit=100`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { images: GeneratedImage[] };
-      setImages(data.images || []);
+      const imgs = data.images || [];
+      setImages(imgs);
+      setViewStatus(imgs.length > 0 ? 'loaded' : 'empty');
     } catch {
       setImages([]);
-    } finally {
-      setLoading(false);
+      setErrorMsg('Nao consegui carregar as imagens.');
+      setViewStatus('error');
     }
   }, []);
 
   useEffect(() => { void fetchImages(); }, [fetchImages]);
+
+  const renderSkeleton = (): JSX.Element => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+      gap: 12,
+    }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="fc-skeleton"
+          style={{
+            borderRadius: 10,
+            aspectRatio: '4 / 3',
+          }}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto' }}>
@@ -66,55 +91,76 @@ export function ImagesView({ onBack }: ImagesViewProps): JSX.Element {
             cursor: 'pointer', fontSize: 13, marginLeft: 'auto',
           }}
         >
-          {loading ? 'atualizando…' : 'atualizar'}
+          {viewStatus === 'loading' ? 'atualizando...' : 'atualizar'}
         </button>
       </div>
 
-      {images.length === 0 && !loading && (
-        <div style={{ opacity: 0.6, textAlign: 'center', paddingTop: 60 }}>
-          Nenhuma imagem ainda. Peça uma na conversa: "gera uma ilustração de…"
+      {viewStatus === 'loading' && renderSkeleton()}
+
+      {viewStatus === 'error' && (
+        <div style={{ textAlign: 'center', padding: 60 }}>
+          <div style={{ color: 'var(--danger)', marginBottom: 12 }}>{errorMsg}</div>
+          <button
+            type="button"
+            onClick={() => void fetchImages()}
+            style={{
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.15)',
+              color: 'inherit', padding: '6px 12px', borderRadius: 8,
+              cursor: 'pointer', fontSize: 13,
+            }}
+          >
+            Tentar de novo
+          </button>
         </div>
       )}
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-        gap: 12,
-      }}>
-        {images.map((img) => {
-          const src = `${API_BASE}/images/${img.id}`;
-          return (
-            <div
-              key={img.id}
-              onClick={() => setLightbox(src)}
-              style={{
-                position: 'relative',
-                background: 'rgba(255,255,255,0.04)',
-                borderRadius: 10,
-                overflow: 'hidden',
-                cursor: 'zoom-in',
-                aspectRatio: '4 / 3',
-              }}
-            >
-              <img
-                src={src}
-                alt={img.prompt}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-              <div style={{
-                position: 'absolute', inset: 'auto 0 0 0',
-                padding: '8px 10px',
-                background: 'linear-gradient(to top, rgba(0,0,0,0.75), transparent)',
-                fontSize: 11,
-                color: 'white',
-              }}>
-                {img.prompt.slice(0, 80)}
-                {img.prompt.length > 80 ? '…' : ''}
+      {viewStatus === 'empty' && (
+        <div style={{ opacity: 0.6, textAlign: 'center', paddingTop: 60 }}>
+          Nenhuma imagem ainda. Peca no chat: "Gera uma imagem de X".
+        </div>
+      )}
+
+      {viewStatus === 'loaded' && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+          gap: 12,
+        }}>
+          {images.map((img) => {
+            const src = `${API_BASE}/images/${img.id}`;
+            return (
+              <div
+                key={img.id}
+                onClick={() => setLightbox(src)}
+                style={{
+                  position: 'relative',
+                  background: 'rgba(255,255,255,0.04)',
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  cursor: 'zoom-in',
+                  aspectRatio: '4 / 3',
+                }}
+              >
+                <img
+                  src={src}
+                  alt={img.prompt}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+                <div style={{
+                  position: 'absolute', inset: 'auto 0 0 0',
+                  padding: '8px 10px',
+                  background: 'linear-gradient(to top, rgba(0,0,0,0.75), transparent)',
+                  fontSize: 11,
+                  color: 'white',
+                }}>
+                  {img.prompt.slice(0, 80)}
+                  {img.prompt.length > 80 ? '...' : ''}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {lightbox && (
         <div

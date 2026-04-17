@@ -1,5 +1,5 @@
 /**
- * 067 — Flashcard review session UI.
+ * 067 -- Flashcard review session UI.
  *
  * Pulls due cards, shows one at a time. User clicks to flip, then
  * rates 0..5. SM-2 applies on the server (/flashcards/review),
@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../api';
+import { useConfirm } from '../ui';
 
 interface Card {
   id: string;
@@ -17,6 +18,7 @@ interface Card {
   interval_days: number;
   ease: number;
   reps: number;
+  next_due_at?: string;
 }
 
 interface FlashcardsViewProps {
@@ -24,18 +26,23 @@ interface FlashcardsViewProps {
 }
 
 const RATINGS: Array<{ value: number; label: string; color: string; hint: string }> = [
-  { value: 0, label: 'Again',  color: '#ef4444', hint: 'não lembrei' },
+  { value: 0, label: 'Again',  color: '#ef4444', hint: 'nao lembrei' },
   { value: 3, label: 'Hard',   color: '#f59e0b', hint: 'lembrei com dificuldade' },
   { value: 4, label: 'Good',   color: '#10b981', hint: 'lembrei normal' },
-  { value: 5, label: 'Easy',   color: '#3b82f6', hint: 'fácil demais' },
+  { value: 5, label: 'Easy',   color: '#3b82f6', hint: 'facil demais' },
 ];
 
+type ViewStatus = 'loading' | 'error' | 'empty' | 'loaded';
+
 export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
+  const confirm = useConfirm();
   const [queue, setQueue] = useState<Card[]>([]);
   const [current, setCurrent] = useState<Card | null>(null);
   const [flipped, setFlipped] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [viewStatus, setViewStatus] = useState<ViewStatus>('loading');
+  const [errorMsg, setErrorMsg] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
   const [deckTopic, setDeckTopic] = useState('');
   const [stats, setStats] = useState<{ reviewed: number; correct: number }>({
     reviewed: 0, correct: 0,
@@ -43,19 +50,22 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   const loadedRef = useRef(false);
 
   const fetchDue = useCallback(async () => {
-    setLoading(true);
+    setViewStatus('loading');
+    setErrorMsg('');
     try {
       const res = await fetch(`${API_BASE}/flashcards/due?limit=50`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { cards: Card[] };
-      setQueue(data.cards || []);
-      setCurrent(data.cards[0] || null);
+      const cards = data.cards || [];
+      setQueue(cards);
+      setCurrent(cards[0] || null);
       setFlipped(false);
-    } catch {
+      setViewStatus(cards.length > 0 ? 'loaded' : 'empty');
+    } catch (err) {
       setQueue([]);
       setCurrent(null);
-    } finally {
-      setLoading(false);
+      setErrorMsg('Nao consegui carregar os flashcards.');
+      setViewStatus('error');
     }
   }, []);
 
@@ -68,12 +78,20 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   const rate = useCallback(async (rating: number) => {
     if (!current) return;
     try {
-      await fetch(`${API_BASE}/flashcards/review`, {
+      const res = await fetch(`${API_BASE}/flashcards/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ card_id: current.id, rating }),
       });
-    } catch { /* */ }
+      if (res.ok) {
+        try {
+          const updated = await res.json() as Partial<Card>;
+          if (updated.ease !== undefined || updated.reps !== undefined) {
+            setCurrent((c) => c ? { ...c, ...updated } : c);
+          }
+        } catch { /* response may be empty */ }
+      }
+    } catch { /* network error -- still advance */ }
     setStats((p) => ({
       reviewed: p.reviewed + 1,
       correct: p.correct + (rating >= 3 ? 1 : 0),
@@ -82,11 +100,18 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     setQueue(next);
     setCurrent(next[0] || null);
     setFlipped(false);
+    if (next.length === 0) setViewStatus('empty');
   }, [current, queue]);
 
   const forget = useCallback(async () => {
     if (!current) return;
-    if (!window.confirm(`Apagar esse card?\n\n"${current.front.slice(0, 100)}"`)) return;
+    const ok = await confirm({
+      title: 'Apagar card?',
+      message: 'Esse card sera removido da revisao.',
+      confirmLabel: 'Apagar',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await fetch(`${API_BASE}/flashcards/${current.id}`, { method: 'DELETE' });
     } catch { /* */ }
@@ -94,12 +119,19 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     setQueue(next);
     setCurrent(next[0] || null);
     setFlipped(false);
-  }, [current, queue]);
+    if (next.length === 0) setViewStatus('empty');
+  }, [current, queue, confirm]);
 
   const forgetTopic = useCallback(async () => {
     if (!current) return;
     const topic = current.topic;
-    if (!window.confirm(`Apagar TODOS os cards do deck "${topic}"?`)) return;
+    const ok = await confirm({
+      title: 'Apagar deck?',
+      message: 'Todos os cards e progresso de revisao serao removidos.',
+      confirmLabel: 'Apagar',
+      variant: 'danger',
+    });
+    if (!ok) return;
     const toDelete = queue.filter((c) => c.topic === topic);
     try {
       await Promise.all(
@@ -112,11 +144,11 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     setQueue(remaining);
     setCurrent(remaining[0] || null);
     setFlipped(false);
-  }, [current, queue]);
+    if (remaining.length === 0) setViewStatus('empty');
+  }, [current, queue, confirm]);
 
   const skip = useCallback(() => {
     if (!current) return;
-    // Move to the back of the queue without rating.
     const [first, ...rest] = queue;
     const next = [...rest, first];
     setQueue(next);
@@ -128,17 +160,19 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     const topic = deckTopic.trim();
     if (!topic || creating) return;
     setCreating(true);
+    setCreateError('');
     try {
       const res = await fetch(`${API_BASE}/flashcards/decks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, count: 10 }),
       });
-      if (res.ok) {
-        setDeckTopic('');
-        await fetchDue();
-      }
-    } catch { /* */ } finally {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDeckTopic('');
+      await fetchDue();
+    } catch {
+      setCreateError('Falha ao criar deck. Tente de novo.');
+    } finally {
       setCreating(false);
     }
   }, [deckTopic, creating, fetchDue]);
@@ -147,7 +181,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     const onKey = (ev: KeyboardEvent): void => {
       if (!current) return;
       const target = ev.target as HTMLElement;
-      if (target && target.tagName === 'INPUT') return;  // let deck input type
+      if (target && target.tagName === 'INPUT') return;
       if (ev.code === 'Space') {
         ev.preventDefault();
         setFlipped((p) => !p);
@@ -168,6 +202,21 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, [current, flipped, rate, forget, skip]);
 
+  // Shimmer skeleton for loading
+  const renderSkeleton = (): JSX.Element => (
+    <div style={{
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 16,
+      padding: '40px 32px',
+      minHeight: 260,
+    }}>
+      <div className="fc-skeleton fc-skeleton--line" style={{ width: '30%', height: 12, marginBottom: 16 }} />
+      <div className="fc-skeleton fc-skeleton--line" style={{ width: '80%', height: 20, marginBottom: 12 }} />
+      <div className="fc-skeleton fc-skeleton--line" style={{ width: '60%', height: 20 }} />
+    </div>
+  );
+
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
@@ -178,7 +227,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
         <h2 style={{ margin: 0, fontSize: 18 }}>Flashcards</h2>
         <div style={{ marginLeft: 'auto', fontSize: 13, opacity: 0.7 }}>
           {stats.reviewed > 0 && (
-            <>sessão: {stats.correct}/{stats.reviewed} acertados · </>
+            <>sessao: {stats.correct}/{stats.reviewed} acertados -- </>
           )}
           {queue.length} restantes
         </div>
@@ -189,7 +238,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
           type="text"
           value={deckTopic}
           onChange={(e) => setDeckTopic(e.target.value)}
-          placeholder="novo deck sobre… (ex: Rust ownership)"
+          placeholder="novo deck sobre... (ex: Rust ownership)"
           onKeyDown={(e) => { if (e.key === 'Enter') void createDeck(); }}
           style={{
             flex: 1, padding: '10px 14px',
@@ -203,17 +252,29 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
           disabled={!deckTopic.trim() || creating}
           style={btnPrimary}
         >
-          {creating ? 'gerando…' : '+ deck'}
+          {creating ? 'gerando...' : '+ deck'}
         </button>
       </div>
+      {createError && (
+        <div style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 16 }}>{createError}</div>
+      )}
 
-      {loading && <div style={{ textAlign: 'center', opacity: 0.6 }}>carregando…</div>}
+      {viewStatus === 'loading' && renderSkeleton()}
 
-      {!loading && !current && (
+      {viewStatus === 'error' && (
+        <div style={{ textAlign: 'center', padding: 60 }}>
+          <div style={{ color: 'var(--danger)', marginBottom: 12 }}>{errorMsg}</div>
+          <button type="button" onClick={() => void fetchDue()} style={btnSecondary}>
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
+      {viewStatus === 'empty' && !current && (
         <div style={{ textAlign: 'center', padding: 60, opacity: 0.6 }}>
           {stats.reviewed > 0
-            ? `Sessão concluída: ${stats.correct}/${stats.reviewed} ✨`
-            : 'Nenhum card vencido. Cria um deck novo acima.'}
+            ? `Sessao concluida: ${stats.correct}/${stats.reviewed}`
+            : 'Nenhum card pra revisar agora. Use o chat pra criar um deck: "Crie um deck sobre X".'}
         </div>
       )}
 
@@ -240,7 +301,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); skip(); }}
                 style={cardBtnStyle}
-                title="pular (→ ou S)"
+                title="pular (-> ou S)"
               >pular</button>
               <button
                 type="button"
@@ -252,7 +313,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void forgetTopic(); }}
                 style={cardBtnStyle}
-                title="apagar todo o deck deste tópico"
+                title="apagar todo o deck deste topico"
               >apagar deck</button>
             </div>
           </div>
@@ -291,7 +352,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                     onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.97)')}
                     onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                     onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                    title={`${r.hint} — tecla ${idx + 1}`}
+                    title={`${r.hint} -- tecla ${idx + 1}`}
                   >
                     {r.label}
                     <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 400, marginTop: 2 }}>
@@ -305,7 +366,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
 
           {!flipped && (
             <div style={{ marginTop: 'auto', opacity: 0.5, fontSize: 12, textAlign: 'center' }}>
-              espaço ou clique pra ver resposta
+              espaco ou clique pra ver resposta
             </div>
           )}
         </div>

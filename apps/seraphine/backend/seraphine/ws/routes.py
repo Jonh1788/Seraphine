@@ -328,6 +328,17 @@ async def _speak_full(
 #                         return
 
 
+def _should_strip_audio_tags() -> bool:
+    """Whether to strip ElevenLabs audio tags before TTS.
+
+    v3 renders tags as real emotion; other models would say them literally.
+    """
+    return not (
+        _settings.tts_backend == "elevenlabs"
+        and "v3" in _settings.elevenlabs_model_id.lower()
+    )
+
+
 async def _setup_mcp_notifications(ws: WebSocket) -> Any:
     """Register this WS for MCP task event push notifications.
 
@@ -437,7 +448,7 @@ async def _setup_mcp_notifications(ws: WebSocket) -> Any:
         tts = getattr(ws.app.state, "tts", None)
         if tts is not None:
             try:
-                cleaned = strip_markdown_for_tts(message_text, strip_audio_tags=_strip_audio_tags)
+                cleaned = strip_markdown_for_tts(message_text, strip_audio_tags=_should_strip_audio_tags())
                 if cleaned:
                     await _enqueue_speech(ws, cleaned, turn_id)
             except Exception as exc:

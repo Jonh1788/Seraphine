@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { MobileShell } from './MobileShell';
 import { ThemeProvider } from './theme';
+import { ConfirmProvider } from './ui';
 import './styles.css';
 
 // Apply persisted theme before first paint to avoid flash.
@@ -36,7 +37,9 @@ document.documentElement.dataset.ua = (navigator.userAgent || '').slice(0, 140);
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ThemeProvider>
-      {isMobileWebview ? <MobileShell /> : <App />}
+      <ConfirmProvider>
+        {isMobileWebview ? <MobileShell /> : <App />}
+      </ConfirmProvider>
     </ThemeProvider>
   </React.StrictMode>,
 );

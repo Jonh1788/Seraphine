@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeftIcon, BrainIcon } from '../icons/Icons';
+import { useConfirm } from '../ui';
 
 import { API_BASE } from '../api';
 
@@ -138,6 +139,7 @@ function ProfileCard({ title, data }: ProfileCardProps): JSX.Element | null {
 }
 
 export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<Tab>('Timeline');
 
   // Timeline
@@ -242,13 +244,19 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
   }, []);
 
   const forgetRow = useCallback(async (table: string, id: string) => {
-    if (!window.confirm(`Remover esse item de ${table}?`)) return;
+    const ok = await confirm({
+      title: 'Remover item?',
+      message: `Esse registro sera removido de "${table}".`,
+      confirmLabel: 'Remover',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await fetch(`${API_BASE}/memory/browser/${table}/${id}`, { method: 'DELETE' });
       await fetchBrowserTable(table);
       await fetchBrowserOverview();
     } catch { /* */ }
-  }, [fetchBrowserTable, fetchBrowserOverview]);
+  }, [fetchBrowserTable, fetchBrowserOverview, confirm]);
 
   // Load data lazily per tab, once.
   useEffect(() => {
