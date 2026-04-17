@@ -132,12 +132,14 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
       variant: 'danger',
     });
     if (!ok) return;
-    const toDelete = queue.filter((c) => c.topic === topic);
+    // Usa o endpoint do backend que apaga TODOS os cards do topic
+    // (incluindo futuros fora do queue). Loopar só o queue local
+    // deixava cards com next_due_at no futuro intactos e o deck
+    // "ressuscitava" nos próximos dias.
     try {
-      await Promise.all(
-        toDelete.map((c) =>
-          fetch(`${API_BASE}/flashcards/${c.id}`, { method: 'DELETE' }),
-        ),
+      await fetch(
+        `${API_BASE}/flashcards/decks?topic=${encodeURIComponent(topic)}`,
+        { method: 'DELETE' },
       );
     } catch { /* */ }
     const remaining = queue.filter((c) => c.topic !== topic);

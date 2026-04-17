@@ -50,6 +50,26 @@ async def review(payload: ReviewIn, request: Request) -> dict[str, Any]:
     return {"card": result}
 
 
+@router.delete("/decks")
+async def delete_deck(topic: str, request: Request) -> dict[str, Any]:
+    """Apaga TODOS os cards de um topic (inclui futuros, não só os due).
+    Topic vem via query (?topic=...) pra lidar com espaços/acentos sem
+    quebrar o path."""
+    store = request.app.state.store
+    topic_s = (topic or "").strip()
+    if not topic_s:
+        raise HTTPException(status_code=400, detail="topic required")
+    import asyncio as _aio
+
+    def _work() -> int:
+        with store._connect() as conn:
+            cur = conn.execute("DELETE FROM flashcards WHERE topic = ?", (topic_s,))
+            return cur.rowcount or 0
+
+    deleted = await _aio.to_thread(_work)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.delete("/{card_id}")
 async def delete_card(card_id: str, request: Request) -> dict[str, Any]:
     store = request.app.state.store
