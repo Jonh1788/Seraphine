@@ -1,4 +1,4 @@
-# Seraphine production stack — backend only.
+# Seraphine production stack — backend + cliproxy sidecar.
 #
 # TLS termination lives OUTSIDE this stack: the host's system nginx
 # (+ certbot) proxies sera.jonhdev.io → 127.0.0.1:8002 → backend container.
@@ -6,9 +6,17 @@
 # and reads this backend via the public hostname, so we don't build/ship
 # the web frontend here.
 #
+# CLIProxyAPI roda como sidecar pra dar refresh automático do token
+# Claude Max OAuth e mascarar headers como Claude Code CLI nativo
+# (X-App: cli + User-Agent claude-cli). Sem ele, tokens expiram a cada
+# ~5h e ninguém renova porque o container não tem o `claude` CLI rodando
+# pra refresh background.
+#
 # Usage on the VPS:
 #   cp .env.prod.example .env.prod   # then fill the secrets
 #   docker compose up -d --build
+#   docker exec -it seraphine-cliproxy-1 ./CLIProxyAPI --login claude
+#   # siga a URL, autorize, cole o code de volta no terminal
 #
 # Build context points at the monorepo root so uv can see the whole
 # workspace (packages/* + uv.lock).
@@ -22,9 +30,9 @@ services:
       dockerfile: apps/seraphine/backend/Dockerfile
     image: seraphine-backend:latest
     restart: unless-stopped
-    # Run as root so we can read the host's 0600-permissioned Claude
-    # credentials mount without loosening its permissions. The VPS is
-    # single-tenant and the container is network-isolated anyway.
+    # Run as root so the keychain.py fallback can still read the
+    # 0600-permissioned credentials file if SERAPHINE_LLM_BACKEND is
+    # ever flipped back to claude_max. Container is network-isolated.
     user: "0:0"
     env_file:
       - path: .env.prod
@@ -35,24 +43,42 @@ services:
       SERAPHINE_CHROMA_PATH: /data/chroma
       SERAPHINE_SKILLS_DIR: /data/skills
       SERAPHINE_GOOGLE_TOKEN_PATH: /data/google-token.json
-      SERAPHINE_LLM_BACKEND: claude_max
+      SERAPHINE_LLM_BACKEND: anthropic
+      SERAPHINE_ANTHROPIC_BASE_URL: http://cliproxy:8317
+      # SERAPHINE_ANTHROPIC_API_KEY vem do .env.prod (== a api-key do
+      # cliproxy/config.yaml; o backend usa esse valor no header
+      # x-api-key/Authorization contra o sidecar).
       SERAPHINE_STT_BACKEND: remote
-      # mlx-whisper is Apple-Silicon only and is excluded from the
-      # Linux build. If STT is ever needed on the VPS, point
-      # SERAPHINE_STT_REMOTE_BASE_URL at a CPU faster-whisper service.
     volumes:
       - seraphine-data:/data
-      # Mount the host's Claude Code credentials so the claude_max
-      # backend can read the OAuth token. The Linux path mirrors the
-      # Keychain dict on macOS (see llm_adapters/keychain.py).
+      # Mantém credentials montadas (read-only) só pro fallback do
+      # claude_max backend caso a gente reverta. O cliproxy não usa
+      # esse arquivo — tem o auth-dir próprio dele.
       - /root/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+    depends_on:
+      cliproxy:
+        condition: service_started
     ports:
       - "127.0.0.1:8002:8000"
     networks:
       - seraphine-net
 
+  cliproxy:
+    image: eceasy/cli-proxy-api:latest
+    pull_policy: always
+    restart: unless-stopped
+    volumes:
+      - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - cliproxy-auths:/root/.cli-proxy-api
+      - ./cliproxy/logs:/CLIProxyAPI/logs
+    expose:
+      - "8317"
+    networks:
+      - seraphine-net
+
 volumes:
   seraphine-data:
+  cliproxy-auths:
 
 networks:
   seraphine-net:

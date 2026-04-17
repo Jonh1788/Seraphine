@@ -1,0 +1,23 @@
+# CLIProxyAPI config — sidecar para Seraphine backend.
+#
+# Roda como serviço cliproxy no docker-compose. Backend bate em
+# http://cliproxy:8317/v1/messages com o api-key abaixo no header
+# Authorization: Bearer.
+#
+# Auth Claude OAuth vive em /root/.cli-proxy-api (volume nomeado
+# cliproxy-auths). Pra registrar a primeira vez:
+#   docker exec -it seraphine-cliproxy-1 ./CLIProxyAPI --login claude
+
+host: ""
+port: 8317
+auth-dir: "/root/.cli-proxy-api"
+
+# API keys que o backend usa pra autenticar contra o proxy.
+# Trocar se vazar — só a Seraphine usa.
+api-keys:
+  - "68d680de777936001e15ef1655d28c6d75c9cb888cc53112"
+
+debug: false
+
+routing:
+  strategy: "round-robin"
