@@ -26,6 +26,7 @@ import { TasksView } from './tasks';
 import { HabitsView } from './habits';
 import { InsightsView } from './insights';
 import { NotesView } from './notes';
+import { ImagesView } from './images/ImagesView';
 import { DashboardView } from './dashboard';
 import {
   ChatIcon,
@@ -36,6 +37,7 @@ import {
   SettingsIcon,
   FlaskIcon,
   BrainIcon,
+  ImagesIcon,
   TasksIcon,
   BellIcon,
   DashboardIcon,
@@ -53,7 +55,7 @@ import { BottomNav } from './nav';
 import type { BottomNavView } from './nav';
 import { ClipboardAssistModal, useClipboardShortcut } from './clipboard';
 
-type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -1122,6 +1124,13 @@ export function App(): JSX.Element {
       onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'),
       active: activeView === 'memory',
     },
+    {
+      id: 'images',
+      icon: <ImagesIcon size={22} />,
+      label: 'Imagens',
+      onClick: () => setActiveView(activeView === 'images' ? 'chat' : 'images'),
+      active: activeView === 'images',
+    },
   ];
 
   return (
@@ -1278,6 +1287,9 @@ export function App(): JSX.Element {
                   onBack={() => setActiveView('chat')}
                   initialNoteId={initialNoteId}
                 />
+              )}
+              {activeView === 'images' && (
+                <ImagesView onBack={() => setActiveView('chat')} />
               )}
               {activeView === 'chat' && wsRef.current && (
                 <ChatView

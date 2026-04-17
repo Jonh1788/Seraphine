@@ -1169,7 +1169,25 @@ export function ChatView({
                       return (
                         <>
                           {raw.trim() && (
-                            <Markdown rehypePlugins={[rehypeRaw]}>
+                            <Markdown
+                              rehypePlugins={[rehypeRaw]}
+                              components={{
+                                img: ({ src, alt }) => (
+                                  <img
+                                    src={src}
+                                    alt={alt || ''}
+                                    style={{
+                                      maxWidth: '100%',
+                                      maxHeight: 400,
+                                      borderRadius: 10,
+                                      cursor: 'zoom-in',
+                                      margin: '8px 0',
+                                    }}
+                                    onClick={() => setLightboxSrc(src || '')}
+                                  />
+                                ),
+                              }}
+                            >
                               {raw}
                             </Markdown>
                           )}

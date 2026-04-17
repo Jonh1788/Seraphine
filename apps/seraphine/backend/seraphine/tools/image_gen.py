@@ -15,7 +15,9 @@ class GenerateImageTool(Tool):
         "Generate an image from a text prompt (Fal.ai FLUX). Use for "
         "moodboards, visual ideas, illustrations. Default fast + cheap. "
         "Pass quality='high' only when explicitly asked for final quality. "
-        "Style can prefix the prompt: photo / illustration / icon / abstract."
+        "Style can prefix the prompt: photo / illustration / icon / abstract. "
+        "IMPORTANT: after the tool returns, include the markdown image "
+        "tag exactly as shown in the output so the user sees it inline."
     )
     json_schema = {
         "type": "object",
@@ -43,11 +45,19 @@ class GenerateImageTool(Tool):
             result = await svc.generate(prompt, style=style, quality=quality)
         except Exception as e:
             return ToolResult(ok=False, error=str(e))
+        public_url = f"https://sera.jonhdev.io/images/{result['id']}"
+        markdown = f"![{prompt[:80]}]({public_url})"
         return ToolResult(
             ok=True,
             output=(
-                f"imagem gerada — {result['id']} | custo ~${result['cost_usd']:.3f}. "
-                f"Servida em /images/{result['id']}."
+                f"imagem gerada (custo ~${result['cost_usd']:.3f}). "
+                f"Responda ao usuário incluindo este markdown exato:\n\n"
+                f"{markdown}\n"
             ),
-            metadata={"image_id": result["id"], "url": result["url"]},
+            metadata={
+                "image_id": result["id"],
+                "url": result["url"],
+                "public_url": public_url,
+                "markdown": markdown,
+            },
         )
