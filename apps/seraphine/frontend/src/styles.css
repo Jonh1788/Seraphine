@@ -8926,15 +8926,11 @@ body.qc-window .quick-capture {
   letter-spacing: 0.5px;
 }
 
-/* Popover. Background sólido (não backdrop-filter) porque WebKit quebra
-   backdrop-filter quando há transform em algum ancestor — o blur vaza
-   pro conteúdo do próprio popover, deixando o timer e os botões
-   ilegíveis. Animação só com opacity, sem transform, pelo mesmo
-   motivo. */
+/* Popover. Renderizado via React Portal pra escapar do stacking context
+   da .topbar (que tem backdrop-filter). Posição vem inline (top/right
+   em viewport coords); aqui só não-posicionais. */
 .focus-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   z-index: 100;
   min-width: 220px;
   padding: var(--space-4);
