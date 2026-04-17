@@ -31,6 +31,13 @@ from seraphine.tools.dev import (
 )
 from seraphine.tools.document import DocumentReadTool
 from seraphine.tools.sticky import StickyNoteTool
+from seraphine.tools.flashcards import CreateDeckTool, ListDueTool
+from seraphine.tools.image_gen import GenerateImageTool
+from seraphine.tools.background import (
+    CancelBackgroundTaskTool,
+    ListBackgroundTasksTool,
+    StartBackgroundTaskTool,
+)
 from seraphine.tools.native_mac import (
     ActiveAppTool,
     OpenPathTool,
@@ -111,6 +118,18 @@ def build_default_registry(
     # 055 Sticky notes
     if store is not None:
         reg.register(StickyNoteTool(store))
+    # 067 flashcards
+    if store is not None and llm is not None:
+        reg.register(CreateDeckTool(store, llm))
+        reg.register(ListDueTool(store, llm))
+    # 068 image generation
+    if store is not None:
+        reg.register(GenerateImageTool(store))
+    # 073 background tasks
+    if store is not None and llm is not None:
+        reg.register(StartBackgroundTaskTool(store, llm, tool_registry=reg))
+        reg.register(ListBackgroundTasksTool(store))
+        reg.register(CancelBackgroundTaskTool(store))
     # 036 Dev sidekick
     reg.register(GitStatusTool())
     reg.register(GitDiffTool())

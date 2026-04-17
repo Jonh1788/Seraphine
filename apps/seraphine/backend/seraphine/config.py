@@ -107,6 +107,14 @@ class Settings(BaseSettings):
     # weekly reflection, and stalled-task jobs when False.
     proactive_enabled: bool = True
 
+    # 068 — image generation (Fal.ai FLUX default).
+    image_provider: str = "fal"
+    fal_api_key: str = ""
+    image_model_fast: str = "fal-ai/flux/schnell"
+    image_model_hq: str = "fal-ai/flux-pro/v1.1"
+    image_daily_budget_usd: float = 5.0
+    image_storage_dir: str = "~/.seraphine/images"
+
     # Bootstrap / service orchestration — consumed by seraphine.bootstrap
     cloudflared_tunnel_id: str = ""  # empty = skip tunnel startup
 

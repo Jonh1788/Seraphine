@@ -151,6 +151,18 @@ class OpenerService:
             lines.append(f"    · {loop['text']}")
         return "\n" + "\n".join(lines)
 
+    async def _context_flashcards_section(self) -> str:
+        """067 — show count of due flashcards, opener can offer review."""
+        try:
+            from seraphine.flashcards.service import FlashcardsService
+            svc = FlashcardsService(self.store, self.llm)
+            count = await svc.due_count()
+        except Exception:
+            return ""
+        if count < 3:
+            return ""
+        return f"\n- {count} flashcard(s) vencidos pra revisar hoje"
+
     async def _context_finance_section(self) -> tuple[str, str | None]:
         """030-B — top finance anomaly, if any. One-shot per nudge."""
         try:
@@ -215,6 +227,7 @@ class OpenerService:
         discovery_section, discovery_id = await self._context_discovery_section()
         finance_section, finance_nudge_id = await self._context_finance_section()
         email_section = await self._context_email_section(app_state)
+        flashcards_section = await self._context_flashcards_section()
 
         prompt = _OPENER_PROMPT_TEMPLATE.format(
             minutes_since=minutes_since,
@@ -224,7 +237,8 @@ class OpenerService:
             weekday=_weekday_pt(now),
             tasks_section=tasks_section,
             opener_extras=(
-                loops_section + discovery_section + finance_section + email_section
+                loops_section + discovery_section + finance_section
+                + email_section + flashcards_section
             ),
         )
 

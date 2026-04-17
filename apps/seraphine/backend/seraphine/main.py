@@ -525,6 +525,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 033 — proxy broker for tool_proxy_request/response round-trips.
     from seraphine.ws.proxy_broker import ProxyBroker
     app.state.proxy_broker = ProxyBroker()
+    # 073 — background task manager.
+    from seraphine.background_tasks import BackgroundTaskManager
+    app.state.background_manager = BackgroundTaskManager(store, llm, tools)
     app.state.embeddings = embeddings
     app.state.memory = memory
     app.state.engine = engine
@@ -775,6 +778,15 @@ def create_app() -> FastAPI:
 
     from seraphine.notes_routes import router as desktop_notes_router
     app.include_router(desktop_notes_router)
+
+    from seraphine.flashcards.routes import router as flashcards_router
+    app.include_router(flashcards_router)
+
+    from seraphine.images.routes import router as images_router
+    app.include_router(images_router)
+
+    from seraphine.background_tasks.routes import router as bg_tasks_router
+    app.include_router(bg_tasks_router)
 
     from mod_finance.routes import router as finance_router
     from seraphine.push.routes import router as push_router

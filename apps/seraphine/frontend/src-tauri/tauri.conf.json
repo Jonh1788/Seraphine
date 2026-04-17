@@ -49,8 +49,8 @@
       {
         "label": "avatar-companion",
         "title": "Seraphine",
-        "width": 200,
-        "height": 260,
+        "width": 280,
+        "height": 360,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,

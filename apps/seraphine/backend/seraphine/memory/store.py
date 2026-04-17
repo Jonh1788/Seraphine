@@ -243,6 +243,51 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_desktop_notes_active
           ON desktop_notes(dismissed_at, created_at DESC);
+        CREATE TABLE IF NOT EXISTS flashcards (
+          id               TEXT PRIMARY KEY,
+          topic            TEXT NOT NULL,
+          front            TEXT NOT NULL,
+          back             TEXT NOT NULL,
+          interval_days    INTEGER NOT NULL DEFAULT 1,
+          ease             REAL NOT NULL DEFAULT 2.5,
+          reps             INTEGER NOT NULL DEFAULT 0,
+          last_reviewed_at TEXT,
+          next_due_at      TEXT NOT NULL,
+          created_at       TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_flashcards_due
+          ON flashcards(next_due_at);
+        CREATE TABLE IF NOT EXISTS flashcard_reviews (
+          id         TEXT PRIMARY KEY,
+          card_id    TEXT NOT NULL,
+          rating     INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS generated_images (
+          id         TEXT PRIMARY KEY,
+          prompt     TEXT NOT NULL,
+          model      TEXT NOT NULL,
+          provider   TEXT NOT NULL,
+          url        TEXT,
+          local_path TEXT,
+          cost_usd   REAL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_images_created
+          ON generated_images(created_at DESC);
+        CREATE TABLE IF NOT EXISTS background_tasks (
+          id           TEXT PRIMARY KEY,
+          goal         TEXT NOT NULL,
+          status       TEXT NOT NULL,
+          progress     TEXT,
+          iterations   INTEGER NOT NULL DEFAULT 0,
+          result       TEXT,
+          started_at   TEXT NOT NULL,
+          finished_at  TEXT,
+          max_duration_min INTEGER NOT NULL DEFAULT 30
+        );
+        CREATE INDEX IF NOT EXISTS idx_bgtasks_status
+          ON background_tasks(status, started_at DESC);
         CREATE TABLE IF NOT EXISTS finance_nudges (
           id           TEXT PRIMARY KEY,
           category     TEXT NOT NULL,
