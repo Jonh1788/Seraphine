@@ -409,6 +409,11 @@ export function App(): JSX.Element {
         }
       } else if (type === 'tts_end') {
         tsTtsStartRef.current = 0;
+        // Flush any sub-threshold residue in the PCM accumulator so the
+        // tail of the last sentence actually gets scheduled. Without
+        // this, small final chunks stay stuck in accumBytes and never
+        // play.
+        playbackRef.current?.flushPending?.();
       } else if (type === 'notification') {
         // Proactive notification from Supertasks MCP
         const notif = msg as { message?: string; title?: string; status?: string };
