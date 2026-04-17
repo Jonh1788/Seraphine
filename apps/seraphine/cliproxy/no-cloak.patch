@@ -1,0 +1,20 @@
+diff --git a/internal/runtime/executor/claude_executor.go b/internal/runtime/executor/claude_executor.go
+index 0311827..2d7b297 100644
+--- a/internal/runtime/executor/claude_executor.go
++++ b/internal/runtime/executor/claude_executor.go
+@@ -1697,6 +1697,15 @@ IMPORTANT: this context may or may not be relevant to your tasks. You should not
+ // applyCloaking applies cloaking transformations to the payload based on config and client.
+ // Cloaking includes: system prompt injection, fake user ID, and sensitive word obfuscation.
+ func applyCloaking(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, payload []byte, model string, apiKey string) []byte {
++	// Seraphine opt-out: when the client sends "X-CPA-No-Cloak: 1",
++	// skip cloaking entirely. Cloaking injects dynamic content
++	// (fake user id, timestamps) which invalidates `cache_control`
++	// prefixes and causes 0 cache hits across identical calls.
++	if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
++		if ginCtx.Request.Header.Get("X-CPA-No-Cloak") == "1" {
++			return payload
++		}
++	}
+ 	clientUserAgent := getClientUserAgent(ctx)
+ 	// Enable cch signing for OAuth tokens by default (not just experimental flag).
+ 	oauthToken := isClaudeOAuthToken(apiKey)

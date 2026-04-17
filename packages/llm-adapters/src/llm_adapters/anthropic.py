@@ -291,6 +291,12 @@ class AnthropicClient:
                     "interleaved-thinking-2025-05-14,"
                     "prompt-caching-scope-2026-01-05"
                 ),
+                # Opt-out do cloaking do CLIProxy patchado (Dockerfile em
+                # apps/seraphine/cliproxy/). Sem isso o proxy injeta
+                # user_id/timestamp dinâmicos no system prompt e invalida
+                # cache_control em todas as calls. Header é ignorado
+                # quando falamos com api.anthropic.com direto.
+                "x-cpa-no-cloak": "1",
                 "content-type": "application/json",
             },
         )

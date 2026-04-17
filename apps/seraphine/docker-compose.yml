@@ -64,8 +64,10 @@ services:
       - seraphine-net
 
   cliproxy:
-    image: eceasy/cli-proxy-api:latest
-    pull_policy: always
+    build:
+      context: ./cliproxy
+      dockerfile: Dockerfile
+    image: seraphine-cliproxy:latest
     restart: unless-stopped
     volumes:
       - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml:ro
