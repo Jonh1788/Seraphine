@@ -24,7 +24,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
 import { resolveEmotion, EMOTION_MAP, type EmotionMapping } from "./expressions";
-import { GesturePlayer, GESTURE_LIBRARY } from "./gestures";
+import { GesturePlayer, GESTURE_LIBRARY, type GestureDefinition } from "./gestures";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
 
@@ -148,6 +148,7 @@ export class VrmAvatarController implements AvatarAdapter {
   private readonly renderer: WebGLRenderer;
   private readonly clock: Clock;
   private vrm: VRM | null = null;
+  private poseLocked = false;
   /** Spring bone manager detached from VRM so we control when it updates. */
   private springBoneManager: any = null;
   private rafId: number | null = null;
@@ -431,7 +432,7 @@ export class VrmAvatarController implements AvatarAdapter {
       this.rafId = requestAnimationFrame(loop);
       const delta = this.clock.getDelta();
       this.elapsed += delta;
-      this.updateCamera(delta);
+      if (!this.poseLocked) this.updateCamera(delta);
       this.updateIdle(delta);
       this.updateLipsync();
       this.mixer?.update(delta);
@@ -440,7 +441,12 @@ export class VrmAvatarController implements AvatarAdapter {
       // are detached, see loadAvatar). We must run humanoid.update()
       // first so normalized→raw bone sync happens before we overlay
       // our custom rotations.
-      this.vrm?.update(delta);
+      // In pose mode, skip vrm.update() entirely: the normalized→raw
+      // sync would overwrite manual bone rotations from TransformControls.
+      // Expression updates are paused too (acceptable for animation editing).
+      if (!this.poseLocked) {
+        this.vrm?.update(delta);
+      }
 
       // Step 2: Apply chest/spine/head rotation + gesture bones AFTER
       // humanoid sync so our values are the final word on those bones.
@@ -509,6 +515,7 @@ export class VrmAvatarController implements AvatarAdapter {
   private updateIdle(delta?: number): void {
     const vrm = this.vrm;
     if (!vrm) return;
+    if (this.poseLocked) return;
     const dt = delta ?? 0.016;
 
     // When an external animation (Mixamo FBX/GLB) is playing, skip
@@ -945,6 +952,11 @@ export class VrmAvatarController implements AvatarAdapter {
     return this.gesturePlayer.play(def);
   }
 
+  /** Play an arbitrary gesture definition (used by the Gesture Editor). */
+  playGestureDef(def: GestureDefinition): Promise<void> {
+    return this.gesturePlayer.play(def);
+  }
+
   // -------------------------------------------------------------------------
   // External animation system (Mixamo FBX / GLB)
   // -------------------------------------------------------------------------
@@ -1172,6 +1184,7 @@ export class VrmAvatarController implements AvatarAdapter {
   private applyPostUpdate(): void {
     const vrm = this.vrm;
     if (!vrm) return;
+    if (this.poseLocked) return;
 
     // --- Chest breathing + spine sway (must be after humanoid sync) ---
     if (!this.externalAnimPlaying) {
@@ -1339,6 +1352,100 @@ export class VrmAvatarController implements AvatarAdapter {
       }
       j.settings.stiffness = base.stiffness * multiplier;
       j.settings.gravityPower = base.gravityPower * multiplier;
+    }
+  }
+
+  // ── Pose mode (Animation Lab) ─────────────────────────────────
+
+  /** Freeze idle/rest updates so the user can manipulate bones freely. */
+  enterPoseMode(): void {
+    this.poseLocked = true;
+    this.gesturePlayer.cancel();
+    if (this.mixer) this.mixer.timeScale = 0;
+  }
+
+  exitPoseMode(): void {
+    this.poseLocked = false;
+    if (this.mixer) this.mixer.timeScale = 1;
+  }
+
+  /** Accessors for Animation Lab (scene graph manipulation). */
+  getScene(): Scene { return this.scene; }
+  getCamera(): PerspectiveCamera { return this.camera; }
+  getRenderer(): WebGLRenderer { return this.renderer; }
+  getVrm(): VRM | null { return this.vrm; }
+
+  /** Rest quaternions for bones that have applyRestPose(). */
+  private static readonly REST_BONES: Record<string, Euler> = {
+    leftUpperArm: new Euler(0, 0, MathUtils.degToRad(78)),
+    rightUpperArm: new Euler(0, 0, -MathUtils.degToRad(78)),
+    leftLowerArm: new Euler(0, MathUtils.degToRad(8), 0),
+    rightLowerArm: new Euler(0, -MathUtils.degToRad(8), 0),
+  };
+
+  private static readonly _restQuats: Record<string, Quaternion> = (() => {
+    const out: Record<string, Quaternion> = {};
+    for (const [k, euler] of Object.entries(VrmAvatarController.REST_BONES)) {
+      out[k] = new Quaternion().setFromEuler(euler);
+    }
+    return out;
+  })();
+
+  /** Return delta rotation (relative to rest pose) for a bone. */
+  getBoneDelta(boneName: string): { x: number; y: number; z: number } {
+    const vrm = this.vrm;
+    if (!vrm) return { x: 0, y: 0, z: 0 };
+    const node = vrm.humanoid?.getRawBoneNode(boneName as any) as Object3D | null | undefined;
+    if (!node) return { x: 0, y: 0, z: 0 };
+    const rest = VrmAvatarController._restQuats[boneName];
+    let deltaQ: Quaternion;
+    if (rest) {
+      deltaQ = rest.clone().invert().multiply(node.quaternion.clone());
+    } else {
+      deltaQ = node.quaternion.clone();
+    }
+    const euler = new Euler().setFromQuaternion(deltaQ, 'XYZ');
+    return { x: euler.x, y: euler.y, z: euler.z };
+  }
+
+  /** Apply a delta rotation on top of rest pose. */
+  setBoneDelta(boneName: string, delta: { x: number; y: number; z: number }): void {
+    const vrm = this.vrm;
+    if (!vrm) return;
+    const node = vrm.humanoid?.getRawBoneNode(boneName as any) as Object3D | null | undefined;
+    if (!node) return;
+    const rest = VrmAvatarController._restQuats[boneName];
+    const deltaQ = new Quaternion().setFromEuler(new Euler(delta.x, delta.y, delta.z, 'XYZ'));
+    if (rest) {
+      node.quaternion.copy(rest).multiply(deltaQ);
+    } else {
+      node.quaternion.copy(deltaQ);
+    }
+  }
+
+  /** Reset all humanoid bones to rest pose (no idle offsets). */
+  resetAllBonesToRest(): void {
+    const vrm = this.vrm;
+    if (!vrm) return;
+    this.applyRestPose();
+    vrm.update(0);
+    // Clear non-rest bones to identity
+    const nonRest = [
+      'head', 'neck', 'chest', 'spine', 'hips',
+      'leftShoulder', 'rightShoulder',
+      'leftHand', 'rightHand',
+      'leftUpperLeg', 'rightUpperLeg',
+      'leftLowerLeg', 'rightLowerLeg',
+      'leftFoot', 'rightFoot',
+    ];
+    for (const bn of nonRest) {
+      const node = vrm.humanoid?.getRawBoneNode(bn as any) as Object3D | null | undefined;
+      if (node) node.quaternion.identity();
+    }
+    // Rest-pose bones
+    for (const [bn, q] of Object.entries(VrmAvatarController._restQuats)) {
+      const node = vrm.humanoid?.getRawBoneNode(bn as any) as Object3D | null | undefined;
+      if (node) node.quaternion.copy(q);
     }
   }
 

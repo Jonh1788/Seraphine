@@ -16,7 +16,7 @@ import { useFocusTimer } from './focus/useFocusTimer';
 import type { FocusPhase } from './focus/useFocusTimer';
 import { API_BASE } from './api';
 import { FocusPill } from './focus/FocusPill';
-import { AvatarLab } from './lab';
+import { AvatarLab, AnimationLab } from './lab';
 import { FinanceDashboard } from './finance';
 import { CalendarView } from './calendar';
 import { WhatsAppPanel } from './whatsapp';
@@ -94,6 +94,7 @@ export function App(): JSX.Element {
   const [inboxOpen, setInboxOpen] = useState<boolean>(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [labOpen, setLabOpen] = useState<boolean>(false);
+  const [animLabOpen, setAnimLabOpen] = useState<boolean>(false);
   const [whatsappUnread, setWhatsappUnread] = useState<number>(0);
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
@@ -931,6 +932,13 @@ export function App(): JSX.Element {
         return;
       }
 
+      // Cmd+Shift+P — Animation Lab
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'p') {
+        e.preventDefault();
+        setAnimLabOpen((v) => !v);
+        return;
+      }
+
       // Escape — close command palette, quick task, or quick capture
       if (e.key === 'Escape') {
         if (commandPaletteOpenRef.current) {
@@ -988,6 +996,13 @@ export function App(): JSX.Element {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [quickNewTaskOpen]);
+
+  // Listen for custom event from AvatarLab "open animation lab" button
+  useEffect(() => {
+    const handler = () => setAnimLabOpen(true);
+    window.addEventListener('seraphine:open-animation-lab', handler);
+    return () => window.removeEventListener('seraphine:open-animation-lab', handler);
+  }, []);
 
   // Command palette action handler
   const handlePaletteAction = useCallback((action: string) => {
@@ -1402,6 +1417,13 @@ export function App(): JSX.Element {
         <AvatarLab
           controller={avatarCtrlRef.current}
           onClose={() => setLabOpen(false)}
+        />
+      )}
+
+      {animLabOpen && (
+        <AnimationLab
+          controller={avatarCtrlRef.current}
+          onClose={() => setAnimLabOpen(false)}
         />
       )}
 

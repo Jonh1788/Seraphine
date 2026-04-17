@@ -120,6 +120,9 @@ export default defineConfig({
       '/dashboard': {
         target: 'http://127.0.0.1:8000',
       },
+      '/lab': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
   test: {

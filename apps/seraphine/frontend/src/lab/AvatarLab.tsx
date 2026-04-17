@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import { ANIMATION_LIBRARY, type AnimationEntry } from '../avatar/animations';
+import { GestureEditor } from './GestureEditor';
 
 /** Predefined emotion presets with Portuguese labels. */
 const PRESETS: { label: string; icon: string; emotion: string }[] = [
@@ -330,14 +331,26 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
         {/* Header */}
         <div className="avatar-lab__header">
           <h2 className="avatar-lab__title">Avatar Laboratory</h2>
-          <button
-            type="button"
-            className="avatar-lab__close"
-            aria-label="Fechar"
-            onClick={onClose}
-          >
-            &times;
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="avatar-lab__btn"
+              onClick={() => {
+                onClose();
+                window.dispatchEvent(new CustomEvent('seraphine:open-animation-lab'));
+              }}
+            >
+              Animation Lab
+            </button>
+            <button
+              type="button"
+              className="avatar-lab__close"
+              aria-label="Fechar"
+              onClick={onClose}
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="avatar-lab__body">
@@ -522,6 +535,9 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                 ))}
               </div>
             </section>
+
+            {/* Gesture Editor */}
+            <GestureEditor controller={controller} />
 
             {/* Animations */}
             <section className="avatar-lab__section">

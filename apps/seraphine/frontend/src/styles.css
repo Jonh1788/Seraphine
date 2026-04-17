@@ -3364,6 +3364,9 @@ button:disabled {
   border-radius: var(--r-md);
   background: var(--bg-0);
   overflow: hidden;
+  position: sticky;
+  top: 0;
+  align-self: start;
 }
 
 /* When the avatar canvas is reparented into the lab, fill the area */
@@ -3706,6 +3709,647 @@ button:disabled {
   .avatar-lab__preview {
     display: none;
   }
+}
+
+/* --- Gesture Editor --- */
+
+.gesture-editor__toggle {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+.gesture-editor__chevron {
+  font-size: 14px;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.gesture-editor__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gesture-editor__label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.gesture-editor__select {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text);
+  outline: none;
+}
+
+.gesture-editor__select--bone {
+  min-width: 120px;
+}
+
+.gesture-editor__source {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.gesture-editor__slider {
+  flex: 1;
+  min-width: 100px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  outline: none;
+  cursor: pointer;
+}
+
+.gesture-editor__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.gesture-editor__kf-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.gesture-editor__keyframe {
+  padding: var(--space-3);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gesture-editor__kf-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gesture-editor__kf-time {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.gesture-editor__kf-del {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gesture-editor__kf-del:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.gesture-editor__axis-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 60px 28px;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gesture-editor__axis-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.gesture-editor__axis-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  outline: none;
+  cursor: pointer;
+}
+
+.gesture-editor__axis-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.gesture-editor__num {
+  width: 60px;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  outline: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gesture-editor__num--time {
+  width: 50px;
+}
+
+.gesture-editor__deg-sign {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.gesture-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.gesture-editor__play {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.gesture-editor__feedback {
+  font-size: 12px;
+  color: var(--accent-hi);
+  padding: 4px 0;
+}
+
+/* --- Gesture Timeline (dopesheet) --- */
+
+.gesture-timeline {
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.gesture-timeline__svg {
+  display: block;
+  user-select: none;
+}
+
+.gesture-timeline__tick-label,
+.gesture-timeline__track-label {
+  font-family: inherit;
+  pointer-events: none;
+}
+
+/* --- Gesture Inspector --- */
+
+.gesture-inspector {
+  padding: var(--space-3);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gesture-inspector__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gesture-inspector__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-right: auto;
+}
+
+.gesture-inspector__btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.gesture-inspector__btn:hover {
+  background: var(--bg-1);
+}
+
+.gesture-inspector__btn--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.gesture-inspector__btn--danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.gesture-inspector__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gesture-inspector__empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: var(--space-2) 0;
+  margin: 0;
+}
+
+/* ---------- Animation Lab ---------- */
+
+.anim-lab {
+  max-width: 100vw;
+  width: 100%;
+  max-height: 100vh;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0;
+}
+
+.anim-lab__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.anim-lab__header-left,
+.anim-lab__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.anim-lab__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-hi);
+  white-space: nowrap;
+}
+
+.anim-lab__dur-slider {
+  width: 80px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  cursor: pointer;
+}
+
+.anim-lab__dur-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.anim-lab__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+}
+
+.anim-lab__btn:hover {
+  background: var(--bg-2);
+  border-color: var(--accent-dim);
+}
+
+.anim-lab__btn--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.anim-lab__btn--sm {
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
+.anim-lab__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.anim-lab__close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.anim-lab__close:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.anim-lab__body {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.anim-lab__viewport {
+  position: relative;
+  background: var(--bg-0);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.anim-lab__viewport canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.anim-lab__gizmo-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 10;
+}
+
+.anim-lab__gizmo-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.anim-lab__gizmo-btn--active {
+  background: var(--accent-dim);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.anim-lab__sidebar {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.anim-lab__bone-list {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.anim-lab__section-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.anim-lab__bone-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.anim-lab__bone-item {
+  padding: 3px 8px;
+  font-size: 11px;
+  text-align: left;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.anim-lab__bone-item:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.anim-lab__bone-item--sel {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+.anim-lab__bone-item--kf::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.anim-lab__inspector {
+  padding: 8px;
+  flex: 1;
+}
+
+.anim-lab__insp-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 48px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.anim-lab__insp-axis {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.anim-lab__insp-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  cursor: pointer;
+}
+
+.anim-lab__insp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.anim-lab__insp-val {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.anim-lab__timeline-area {
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  flex-shrink: 0;
+}
+
+.anim-lab__timeline-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.anim-timeline {
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.anim-timeline__svg {
+  display: block;
+  user-select: none;
+}
+
+.anim-timeline__label {
+  font-family: inherit;
+  pointer-events: none;
+}
+
+.anim-timeline__rubberband {
+  fill: var(--accent);
+  fill-opacity: 0.15;
+  stroke: var(--accent);
+  stroke-opacity: 0.8;
+  stroke-width: 1;
+  stroke-dasharray: 4,2;
+  pointer-events: none;
+}
+
+.anim-lab__fcurve-area {
+  border-top: 1px solid var(--border);
+  padding: 8px;
+  flex-shrink: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.anim-fcurve {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.anim-fcurve__axis {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.anim-fcurve__axis-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.anim-fcurve__svg {
+  background: var(--bg-3);
+  border-radius: var(--r-sm);
+}
+
+.anim-fcurve__empty {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 12px;
+  text-align: center;
+}
+
+.anim-lab__feedback {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  background: var(--accent-dim);
+  color: #fff;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  pointer-events: none;
+  animation: fadeIn 150ms ease;
 }
 
 /* WhatsApp notification badge */
