@@ -207,6 +207,9 @@ COMPACTION_KEEP_RECENT = 20
 # Run reflect() automatically every N assistant turns to let Seraphine
 # learn facts about the user on her own.
 AUTO_REFLECT_EVERY_N_TURNS = 3
+# Rebuild the semantic user profile in background every N assistant turns.
+# Skipped if the fact count hasn't changed since the last build.
+AUTO_PROFILE_EVERY_N_TURNS = 6
 
 
 class TurnCancelled(Exception):
@@ -796,6 +799,9 @@ class ConversationEngine:
             # 011-A: style analysis every N turns (background, non-blocking)
             if self._turn_counter % STYLE_ANALYSIS_EVERY_N == 0:
                 asyncio.create_task(self._auto_style_analysis())
+            # Rebuild the semantic profile if new facts were learned.
+            if self._turn_counter % AUTO_PROFILE_EVERY_N_TURNS == 0:
+                asyncio.create_task(self._auto_rebuild_profile())
 
     def _pick_model(
         self,
@@ -845,3 +851,13 @@ class ConversationEngine:
                 logger.info("auto-style: updated to %s", result)
         except Exception as e:
             logger.warning("auto-style failed: %s", e)
+
+    async def _auto_rebuild_profile(self) -> None:
+        """Rebuild the cached semantic user profile in background."""
+        try:
+            from seraphine.memory.profile import UserProfile
+            changed = await UserProfile(self.store, self.llm).rebuild_if_stale()
+            if changed:
+                logger.info("auto-profile: rebuilt")
+        except Exception as e:
+            logger.warning("auto-profile failed: %s", e)

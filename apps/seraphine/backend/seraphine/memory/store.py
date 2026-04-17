@@ -148,6 +148,12 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
           auth       TEXT NOT NULL,
           created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS user_profile (
+          id          INTEGER PRIMARY KEY CHECK (id = 1),
+          data_json   TEXT NOT NULL,
+          fact_count  INTEGER NOT NULL,
+          updated_at  TEXT NOT NULL
+        );
         """
     )
     # `seraphine_tasks` schema (and its due_date / user_id ALTERs) has
@@ -673,6 +679,37 @@ class MemoryStore(Store):
                 return cur.rowcount or 0
 
         return await asyncio.to_thread(_work)
+
+    async def get_user_profile(self) -> dict[str, Any] | None:
+        def _work() -> dict[str, Any] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT data_json, fact_count, updated_at FROM user_profile WHERE id = 1"
+                ).fetchone()
+            if not row:
+                return None
+            try:
+                data = json.loads(row[0])
+            except (json.JSONDecodeError, TypeError):
+                return None
+            return {"data": data, "fact_count": row[1], "updated_at": row[2]}
+
+        return await asyncio.to_thread(_work)
+
+    async def set_user_profile(self, data: dict[str, Any], fact_count: int) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO user_profile (id, data_json, fact_count, updated_at)"
+                    " VALUES (1, ?, ?, ?)"
+                    " ON CONFLICT(id) DO UPDATE SET"
+                    "   data_json = excluded.data_json,"
+                    "   fact_count = excluded.fact_count,"
+                    "   updated_at = excluded.updated_at",
+                    (json.dumps(data, ensure_ascii=False), fact_count, _now()),
+                )
+
+        await asyncio.to_thread(_work)
 
     async def list_push_subscriptions(self) -> list[dict[str, str]]:
         def _work() -> list[dict[str, str]]:

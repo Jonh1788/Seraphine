@@ -28,9 +28,12 @@ type ProfileSection = Record<string, unknown>;
 interface Profile {
   identity?: ProfileSection;
   preferences?: ProfileSection;
-  recent_activity?: ProfileSection;
-  contacts?: ProfileSection;
+  work?: ProfileSection;
+  contacts?: ProfileSection | unknown[];
   finances?: ProfileSection;
+  health?: ProfileSection;
+  goals?: unknown[];
+  activity?: ProfileSection;
   [key: string]: unknown;
 }
 
@@ -107,12 +110,15 @@ function renderValue(value: unknown): string {
 
 interface ProfileCardProps {
   title: string;
-  data: ProfileSection | undefined;
+  data: ProfileSection | unknown[] | undefined;
 }
 
 function ProfileCard({ title, data }: ProfileCardProps): JSX.Element | null {
   if (!data || typeof data !== 'object') return null;
-  const entries = Object.entries(data).filter(([, v]) => {
+  const asEntries: [string, unknown][] = Array.isArray(data)
+    ? data.map((item, i) => [String(i + 1), item])
+    : Object.entries(data);
+  const entries = asEntries.filter(([, v]) => {
     const rendered = renderValue(v);
     return rendered !== '' && rendered !== '{}' && rendered !== '[]';
   });
@@ -182,8 +188,8 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: Profile = await res.json();
-      setProfile(data);
+      const body = await res.json() as { profile: Profile };
+      setProfile(body.profile ?? null);
     } catch (e) {
       setProfileError(String(e));
       setProfile(null);
@@ -340,11 +346,14 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
             )}
             {!profileLoading && profile && (
               <div className="memory-profile">
-                <ProfileCard title="Identidade" data={profile.identity as ProfileSection | undefined} />
-                <ProfileCard title="Preferencias" data={profile.preferences as ProfileSection | undefined} />
-                <ProfileCard title="Atividade Recente" data={profile.recent_activity as ProfileSection | undefined} />
-                <ProfileCard title="Contatos" data={profile.contacts as ProfileSection | undefined} />
-                <ProfileCard title="Financas" data={profile.finances as ProfileSection | undefined} />
+                <ProfileCard title="Identidade" data={profile.identity} />
+                <ProfileCard title="Preferencias" data={profile.preferences} />
+                <ProfileCard title="Trabalho" data={profile.work} />
+                <ProfileCard title="Contatos" data={profile.contacts} />
+                <ProfileCard title="Financas" data={profile.finances} />
+                <ProfileCard title="Saude" data={profile.health} />
+                <ProfileCard title="Objetivos" data={profile.goals} />
+                <ProfileCard title="Atividade Recente" data={profile.activity} />
               </div>
             )}
           </>

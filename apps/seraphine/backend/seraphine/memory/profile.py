@@ -1,113 +1,207 @@
-"""Evolving user profile built from facts + timeline events.
+"""Evolving user profile — LLM-classified from stored facts.
 
-This is a lightweight v1: it aggregates structured signals that Seraphine
-has already collected (semantic facts in SQLite and the event timeline)
-into a dict shaped for the system prompt and the frontend memory panel.
+An LLM (Haiku) groups the stored facts into semantic categories and the
+result is cached in the `user_profile` table. The `/memory/profile`
+endpoint reads from cache only; the rebuild runs in background every N
+turns, triggered by the conversation engine (same pattern as reflection).
 
-No LLM calls — purely string heuristics over the user's own data, so it
-is safe to call on every turn.
+Categories returned:
+
+  identity       — name, age, location, profession, relationship, family
+  preferences    — language, communication style, interests, dislikes
+  work           — role, stack, projects, company
+  contacts       — named people and their relationship to the user
+  finances       — accounts, income notes, recurring expenses
+  health         — notable conditions, routines
+  goals          — stated aspirations
+  activity       — timeline stats (computed from events, not the LLM)
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 from typing import Any
+
+from llm_adapters.types import ChatMessage
 
 from seraphine.memory.store import MemoryStore
 
-_IDENTITY_NAME_KW = ("nome", "name", "chama", "sou o", "sou a", "me chamo")
-_IDENTITY_LOCATION_KW = ("mora", "moro", "cidade", "local", "vive em", "live in")
-_IDENTITY_JOB_KW = (
-    "trabalha", "trabalho", "dev", "developer", "engineer",
-    "engenheiro", "engenheira", "profiss", "job", "empresa",
-)
-_PREFERENCE_LANG_KW = ("pt-br", "portugu", "english", "ingl", "idioma", "language")
-_PREFERENCE_STYLE_KW = ("prefer", "estilo", "style", "gosta de", "likes", "curto", "conciso")
-_CONTACT_KW = ("jefferson", "pedro", "contato", "amigo", "irmão", "irma", "esposa", "namorada")
-_FINANCIAL_KW = (
-    "gasta", "gasto", "receita", "salário", "salario",
-    "pix", "banco", "c6", "nubank", "fatura", "cartão", "cartao",
-    "investe", "renda",
-)
+logger = logging.getLogger("seraphine.profile")
+
+_MAX_FACTS = 150
+
+_CLASSIFIER_PROMPT = """You classify a user's stored memories into a structured profile.
+
+Input: a JSON list of fact strings about the user.
+Output: a SINGLE JSON object with these exact top-level keys:
+
+{
+  "identity": {
+    "name": "...", "age": "...", "location": "...",
+    "profession": "...", "relationship": "...", "family": "..."
+  },
+  "preferences": {
+    "language": "...", "style": "...",
+    "interests": ["..."], "dislikes": ["..."]
+  },
+  "work": {
+    "role": "...", "stack": ["..."], "projects": ["..."], "company": "..."
+  },
+  "contacts": [
+    {"name": "...", "relation": "..."}
+  ],
+  "finances": {
+    "accounts": ["..."], "income": "...", "recurring": ["..."]
+  },
+  "health": {"notes": ["..."]},
+  "goals": ["..."]
+}
+
+Rules:
+- Omit any sub-key whose value you don't know (don't write "unknown" or empty strings).
+- Omit any top-level section that ends up fully empty.
+- Prefer the most recent or most specific fact when multiple conflict.
+- Synthesize short, clean values — "Jonathan" not "Nome: Jonathan".
+- Never invent information that isn't in the facts.
+- Output ONLY the JSON object. No prose, no code fences.
+"""
 
 
-def _matches(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(kw in text for kw in keywords)
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _parse_profile_json(raw: str) -> dict[str, Any] | None:
+    match = _JSON_OBJ_RE.search(raw)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _prune_empty(data)
+
+
+def _prune_empty(obj: Any) -> Any:
+    """Drop empty strings, lists, dicts, and None values recursively."""
+    if isinstance(obj, dict):
+        cleaned: dict[str, Any] = {}
+        for k, v in obj.items():
+            pv = _prune_empty(v)
+            if pv not in (None, "", [], {}):
+                cleaned[k] = pv
+        return cleaned
+    if isinstance(obj, list):
+        return [p for p in (_prune_empty(i) for i in obj) if p not in (None, "", [], {})]
+    if isinstance(obj, str):
+        s = obj.strip()
+        return s if s.lower() not in ("unknown", "n/a", "none", "null") else ""
+    return obj
+
+
+def _activity_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    if not events:
+        return {}
+    type_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    for e in events:
+        t = e.get("event_type", "?")
+        type_counts[t] = type_counts.get(t, 0) + 1
+        s = e.get("source", "?")
+        source_counts[s] = source_counts.get(s, 0) + 1
+    return {
+        "total_events": len(events),
+        "last_active": events[0].get("created_at"),
+        "by_type": type_counts,
+        "by_source": source_counts,
+    }
 
 
 class UserProfile:
-    """Build a snapshot of what Seraphine knows about the user."""
+    """Build and cache a structured profile of the user from stored facts."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(self, store: MemoryStore, llm: Any = None) -> None:
         self._store = store
+        self._llm = llm
 
-    async def build_profile(self) -> dict[str, Any]:
-        """Aggregate facts + recent events into a structured profile dict."""
-        facts = await self._store.list_facts(limit=100)
+    async def get_cached(self) -> dict[str, Any]:
+        """Return the cached profile (empty dict if none). No LLM call."""
+        cached = await self._store.get_user_profile()
+        data: dict[str, Any] = dict(cached["data"]) if cached else {}
+
+        # Activity section is always computed fresh from the timeline —
+        # it's cheap and the LLM doesn't need to see per-event counts.
         events = await self._store.get_recent_events(limit=50)
+        activity = _activity_from_events(events)
+        if activity:
+            data["activity"] = activity
+        return data
 
-        profile: dict[str, dict[str, Any]] = {
-            "identity": {},
-            "preferences": {},
-            "habits": {},
-            "contacts": {},
-            "financial": {},
-            "activity": {},
-        }
+    async def rebuild(self) -> dict[str, Any] | None:
+        """Run the classifier LLM over current facts and cache the result.
 
-        for fact in facts:
-            text = (fact.text or "").lower()
-            if not text:
-                continue
+        Returns the rebuilt profile dict, or None on failure / no LLM.
+        """
+        if self._llm is None:
+            return None
 
-            if _matches(text, _IDENTITY_NAME_KW) and "name_context" not in profile["identity"]:
-                profile["identity"]["name_context"] = fact.text
-            if _matches(text, _IDENTITY_LOCATION_KW) and "location" not in profile["identity"]:
-                profile["identity"]["location"] = fact.text
-            if _matches(text, _IDENTITY_JOB_KW) and "job" not in profile["identity"]:
-                profile["identity"]["job"] = fact.text
+        facts = await self._store.list_facts(limit=_MAX_FACTS)
+        if not facts:
+            await self._store.set_user_profile({}, 0)
+            return {}
 
-            if _matches(text, _PREFERENCE_LANG_KW) and "language" not in profile["preferences"]:
-                profile["preferences"]["language"] = fact.text
-            if _matches(text, _PREFERENCE_STYLE_KW) and "style" not in profile["preferences"]:
-                profile["preferences"]["style"] = fact.text
+        payload = json.dumps([f.text for f in facts], ensure_ascii=False)
+        messages = [
+            ChatMessage(role="system", content=_CLASSIFIER_PROMPT),
+            ChatMessage(role="user", content=payload),
+        ]
+        acc: list[str] = []
+        try:
+            async for tok in self._llm.chat(messages, temperature=0.1):
+                if tok.text:
+                    acc.append(tok.text)
+        except Exception as e:
+            logger.warning("profile rebuild: llm failed: %s", e)
+            return None
 
-            if _matches(text, _CONTACT_KW):
-                # Multiple contact facts can coexist — keep them as a list.
-                profile["contacts"].setdefault("mentions", []).append(fact.text)
+        parsed = _parse_profile_json("".join(acc))
+        if parsed is None:
+            logger.warning("profile rebuild: could not parse JSON")
+            return None
 
-            if _matches(text, _FINANCIAL_KW):
-                profile["financial"].setdefault("signals", []).append(fact.text)
+        await self._store.set_user_profile(parsed, len(facts))
+        logger.info("profile rebuilt: %d facts → %d sections", len(facts), len(parsed))
+        return parsed
 
-        if events:
-            profile["activity"]["total_events"] = len(events)
-            profile["activity"]["last_active"] = events[0].get("created_at")
-            type_counts: dict[str, int] = {}
-            source_counts: dict[str, int] = {}
-            for e in events:
-                t = e.get("event_type", "?")
-                type_counts[t] = type_counts.get(t, 0) + 1
-                s = e.get("source", "?")
-                source_counts[s] = source_counts.get(s, 0) + 1
-            profile["activity"]["by_type"] = type_counts
-            profile["activity"]["by_source"] = source_counts
+    async def rebuild_if_stale(self) -> bool:
+        """Rebuild only when fact count has changed since last build.
 
-        # Drop empty sections for a cleaner output.
-        return {k: v for k, v in profile.items() if v}
+        Returns True if a rebuild actually ran.
+        """
+        if self._llm is None:
+            return False
+        facts = await self._store.list_facts(limit=_MAX_FACTS)
+        cached = await self._store.get_user_profile()
+        if cached and cached["fact_count"] == len(facts):
+            return False
+        result = await self.rebuild()
+        return result is not None
 
     async def get_profile_summary(self) -> str:
-        """Human-readable profile summary for injection into system prompt."""
-        profile = await self.build_profile()
-        if not profile:
+        """Human-readable summary for system-prompt injection."""
+        data = await self.get_cached()
+        if not data:
             return "No profile data yet."
         lines: list[str] = []
-        if "identity" in profile:
-            lines.append(f"Identity: {profile['identity']}")
-        if "preferences" in profile:
-            lines.append(f"Preferences: {profile['preferences']}")
-        if "contacts" in profile:
-            lines.append(f"Contacts: {profile['contacts']}")
-        if "financial" in profile:
-            lines.append(f"Financial: {profile['financial']}")
-        if "activity" in profile:
-            lines.append(f"Recent activity: {profile['activity']}")
+        for key in ("identity", "preferences", "work", "contacts", "finances", "health", "goals"):
+            if key in data:
+                lines.append(f"{key.capitalize()}: {data[key]}")
         return "\n".join(lines) if lines else "No profile data yet."
+
+    # Kept for backward compatibility — callers that expect the old
+    # heuristic-based builder now get the cached semantic profile.
+    async def build_profile(self) -> dict[str, Any]:
+        return await self.get_cached()

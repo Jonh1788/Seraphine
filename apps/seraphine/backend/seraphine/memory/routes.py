@@ -147,10 +147,25 @@ async def get_timeline(
 
 @router.get("/profile")
 async def get_profile(request: Request) -> dict[str, Any]:
-    """Return the dynamic user profile built from facts + events."""
+    """Return the cached semantic profile. The rebuild runs in background
+    (see ConversationEngine._auto_rebuild_profile)."""
     store = request.app.state.store
-    profile = await UserProfile(store).build_profile()
+    profile = await UserProfile(store).get_cached()
     return {"profile": profile}
+
+
+@router.post("/profile/rebuild")
+async def rebuild_profile(request: Request) -> dict[str, Any]:
+    """Force an LLM-powered rebuild of the profile. Synchronous —
+    the frontend can poll /profile after this returns."""
+    store = request.app.state.store
+    llm = getattr(request.app.state, "llm", None)
+    if llm is None:
+        raise HTTPException(status_code=503, detail="llm not configured")
+    result = await UserProfile(store, llm).rebuild()
+    if result is None:
+        raise HTTPException(status_code=502, detail="rebuild failed")
+    return {"profile": result}
 
 
 @router.get("/notifications")
