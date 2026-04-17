@@ -99,6 +99,24 @@ class ProactiveScheduler:
             "cron", hour=9, minute=0,
             name="curiosity",
         )
+        # 030-B: finance anomaly scan.
+        self._sched.add_job(
+            self._tick_finance_ambient,
+            "cron", hour=10, minute=0,
+            name="finance_ambient",
+        )
+        # 028-B: detect anticipation patterns weekly.
+        self._sched.add_job(
+            self._tick_anticipation,
+            "cron", day_of_week="mon", hour=6, minute=0,
+            name="anticipation",
+        )
+        # 028-C: aggregate meta-learning style prefs weekly.
+        self._sched.add_job(
+            self._tick_metalearning,
+            "cron", day_of_week="mon", hour=6, minute=30,
+            name="metalearning",
+        )
         self._sched.start()
         logger.info("proactive scheduler started")
 
@@ -170,6 +188,43 @@ class ProactiveScheduler:
                 logger.info("curiosity tick: %d new", n)
         except Exception as e:
             logger.warning("tick_curiosity: %s", e)
+
+    async def _tick_metalearning(self) -> None:
+        try:
+            store = getattr(self.app_state, "store", None)
+            if store is None:
+                return
+            from seraphine.metalearning import aggregate_style_prefs
+            data = await aggregate_style_prefs(store)
+            if data:
+                logger.info("metalearning tick: prefs updated")
+        except Exception as e:
+            logger.warning("tick_metalearning: %s", e)
+
+    async def _tick_anticipation(self) -> None:
+        try:
+            store = getattr(self.app_state, "store", None)
+            if store is None:
+                return
+            from seraphine.anticipation import AnticipationService
+            n = await AnticipationService(store).detect_patterns()
+            if n:
+                logger.info("anticipation tick: %d rules", n)
+        except Exception as e:
+            logger.warning("tick_anticipation: %s", e)
+
+    async def _tick_finance_ambient(self) -> None:
+        try:
+            finance = getattr(self.app_state, "finance_service", None)
+            store = getattr(self.app_state, "store", None)
+            if finance is None or store is None:
+                return
+            from seraphine.finance.ambient import FinanceAmbientService
+            n = await FinanceAmbientService(finance, store).detect_and_store()
+            if n:
+                logger.info("finance ambient tick: %d new", n)
+        except Exception as e:
+            logger.warning("tick_finance_ambient: %s", e)
 
     async def _tick_weekly_reflection(self) -> None:
         try:

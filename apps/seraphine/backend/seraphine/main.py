@@ -520,6 +520,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         mcp_event_listener.start()
 
     app.state.store = store
+    app.state.stt = stt
     app.state.llm = llm
     app.state.embeddings = embeddings
     app.state.memory = memory

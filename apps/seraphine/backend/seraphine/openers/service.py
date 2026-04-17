@@ -151,6 +151,17 @@ class OpenerService:
             lines.append(f"    · {loop['text']}")
         return "\n" + "\n".join(lines)
 
+    async def _context_finance_section(self) -> tuple[str, str | None]:
+        """030-B — top finance anomaly, if any. One-shot per nudge."""
+        try:
+            rows = await self.store.list_pending_finance_nudges(limit=1)
+        except Exception:
+            return "", None
+        if not rows:
+            return "", None
+        n = rows[0]
+        return f"\n- anomalia financeira: {n['headline']}", n["id"]
+
     async def _context_email_section(self, app_state: Any) -> str:
         """027-A — if there are recent important emails, mention count.
         Only surfaces during morning openers to avoid nagging."""
@@ -202,6 +213,7 @@ class OpenerService:
         tasks_section = await self._context_tasks_section()
         loops_section = await self._context_open_loops_section()
         discovery_section, discovery_id = await self._context_discovery_section()
+        finance_section, finance_nudge_id = await self._context_finance_section()
         email_section = await self._context_email_section(app_state)
 
         prompt = _OPENER_PROMPT_TEMPLATE.format(
@@ -211,7 +223,9 @@ class OpenerService:
             mm=f"{now.minute:02d}",
             weekday=_weekday_pt(now),
             tasks_section=tasks_section,
-            opener_extras=loops_section + discovery_section + email_section,
+            opener_extras=(
+                loops_section + discovery_section + finance_section + email_section
+            ),
         )
 
         acc: list[str] = []
@@ -244,6 +258,11 @@ class OpenerService:
         if discovery_id:
             try:
                 await self.store.mark_discovery_mentioned(discovery_id)
+            except Exception:
+                pass
+        if finance_nudge_id:
+            try:
+                await self.store.mark_finance_nudge_mentioned(finance_nudge_id)
             except Exception:
                 pass
         return text

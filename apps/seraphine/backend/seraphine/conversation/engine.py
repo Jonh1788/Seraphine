@@ -545,6 +545,17 @@ class ConversationEngine:
         except Exception as e:
             logger.debug("people.process_user_turn failed: %s", e)
 
+        # 028-C: classify reaction to the PREVIOUS assistant turn.
+        prev_turn_id = getattr(self, "_last_assistant_turn_id", None)
+        if prev_turn_id:
+            try:
+                from seraphine.metalearning import infer_reaction
+                reaction = infer_reaction(content)
+                await self.store.update_turn_reaction(prev_turn_id, reaction)
+            except Exception as e:
+                logger.debug("metalearning reaction failed: %s", e)
+            self._last_assistant_turn_id = None
+
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
         messages.append(ChatMessage(role="system", content=_build_date_context()))
 
@@ -557,11 +568,43 @@ class ConversationEngine:
         if music_line:
             messages.append(ChatMessage(role="system", content=music_line))
 
+        # 032-A: trainer mode — only fires when user touches fitness
+        # and a habit streak is at risk.
+        if self._app_state is not None:
+            try:
+                from seraphine.conversation.trainer_mode import TrainerModeService
+                hs = getattr(self._app_state, "habit_service", None)
+                trainer_hint = await TrainerModeService(hs).maybe_hint(content)
+                if trainer_hint:
+                    messages.append(ChatMessage(role="system", content=trainer_hint))
+            except Exception as e:
+                logger.debug("trainer_mode failed: %s", e)
+
         # 028-A: attention hint. Either deep_focus or stressed overrides
         # several injection behaviors below.
         attention_line = self._attention.as_prompt_line()
         if attention_line:
             messages.append(ChatMessage(role="system", content=attention_line))
+
+        # 028-B: anticipation — if we have a time-of-day rule firing now.
+        if not self._attention.should_suppress_nudges():
+            try:
+                from seraphine.anticipation import AnticipationService
+                hint = await AnticipationService(self.store).current_hint()
+                if hint:
+                    messages.append(ChatMessage(role="system", content=hint))
+            except Exception as e:
+                logger.debug("anticipation hint failed: %s", e)
+
+        # 028-C: inject aggregated style prefs if we've learned any.
+        try:
+            from seraphine.metalearning.aggregator import as_prompt_block
+            prefs = await self.store.get_style_prefs()
+            block = as_prompt_block(prefs)
+            if block:
+                messages.append(ChatMessage(role="system", content=block))
+        except Exception as e:
+            logger.debug("style_prefs block failed: %s", e)
 
         # 023-A: ambient context block (next event, health, tasks).
         if self._app_state is not None:
@@ -918,6 +961,20 @@ class ConversationEngine:
 
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)
+
+        # 028-C: stamp a turn_feedback row so the NEXT user turn can
+        # classify the reaction.
+        try:
+            from seraphine.metalearning import infer_tone, length_bucket
+            await self.store.add_turn_feedback(
+                turn_id=assistant_turn.id,
+                tone=infer_tone(final_text),
+                length_bucket=length_bucket(final_text),
+            )
+            self._last_assistant_turn_id = assistant_turn.id
+        except Exception as e:
+            logger.debug("turn_feedback stamp failed: %s", e)
+
         yield MoodEvent(mood="neutral", intensity=0, duration_ms=0)
         yield TurnEndEvent(conversation_id=conversation_id, turn_id=turn_id)
 

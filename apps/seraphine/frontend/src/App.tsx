@@ -45,6 +45,7 @@ import {
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
+import { VoiceMemoModal } from './voice-memo/VoiceMemoModal';
 import { SettingsDrawer } from './settings';
 import { OnboardingFlow } from './onboarding';
 import { BottomNav } from './nav';
@@ -101,6 +102,8 @@ export function App(): JSX.Element {
   const [quickTaskTitle, setQuickTaskTitle] = useState<string>('');
   const quickTaskInputRef = useRef<HTMLInputElement>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState<boolean>(false);
+  // 031 — voice memo modal triggered by Cmd+Shift+M.
+  const [voiceMemoOpen, setVoiceMemoOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   // SDD 017-B — on-demand clipboard assist (Cmd+Shift+V).
   const [clipboardAssist, setClipboardAssist] = useState<{ open: boolean; content: string }>({
@@ -303,6 +306,19 @@ export function App(): JSX.Element {
     return () => {
       unlisten?.();
     };
+  }, []);
+
+  // 031 — Cmd+Shift+M opens voice memo modal (in-window shortcut, not global).
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent): void => {
+      const mod = ev.metaKey || ev.ctrlKey;
+      if (mod && ev.shiftKey && ev.code === 'KeyM') {
+        ev.preventDefault();
+        setVoiceMemoOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // PWA: Badging API — show unread count on app icon
@@ -1383,6 +1399,8 @@ export function App(): JSX.Element {
           </ViewTransition>
         )}
       </AnimatePresence>
+
+      <VoiceMemoModal open={voiceMemoOpen} onClose={() => setVoiceMemoOpen(false)} />
 
       <SettingsDrawer
         open={settingsOpen}

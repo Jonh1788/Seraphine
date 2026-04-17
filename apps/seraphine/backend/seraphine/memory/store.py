@@ -230,6 +230,44 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_voice_memos_created
           ON voice_memos(created_at DESC);
+        CREATE TABLE IF NOT EXISTS finance_nudges (
+          id           TEXT PRIMARY KEY,
+          category     TEXT NOT NULL,
+          ratio        REAL NOT NULL,       -- week_total / avg30d_baseline
+          week_total   REAL NOT NULL,
+          baseline     REAL NOT NULL,
+          headline     TEXT NOT NULL,
+          mentioned    INTEGER NOT NULL DEFAULT 0,
+          mentioned_at TEXT,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_finance_nudges_status
+          ON finance_nudges(mentioned, created_at DESC);
+        CREATE TABLE IF NOT EXISTS anticipation_rules (
+          id           TEXT PRIMARY KEY,
+          trigger_kind TEXT NOT NULL,       -- 'tool_use_pattern'
+          payload      TEXT NOT NULL,       -- JSON: tool + weekday + hour
+          confidence   REAL NOT NULL,
+          last_fired_at TEXT,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_anticipation_kind
+          ON anticipation_rules(trigger_kind, confidence DESC);
+        CREATE TABLE IF NOT EXISTS turn_feedback (
+          turn_id       TEXT PRIMARY KEY,
+          tone          TEXT,               -- inferred from next user turn
+          length_bucket TEXT,               -- short|medium|long
+          tool_used     TEXT,
+          reaction      TEXT,               -- positive|negative|neutral
+          created_at    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_turn_feedback_reaction
+          ON turn_feedback(reaction, created_at DESC);
+        CREATE TABLE IF NOT EXISTS style_prefs (
+          id         INTEGER PRIMARY KEY CHECK (id = 1),
+          data_json  TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_open_loops_status
           ON open_loops(resolved_at, created_at DESC);
         """
@@ -1118,6 +1156,201 @@ class MemoryStore(Store):
                     (url,),
                 ).fetchone()
             return row is not None
+
+        return await asyncio.to_thread(_work)
+
+    async def add_finance_nudge(
+        self, *, category: str, ratio: float, week_total: float,
+        baseline: float, headline: str,
+    ) -> str:
+        nid = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO finance_nudges"
+                    " (id, category, ratio, week_total, baseline, headline, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (nid, category, ratio, week_total, baseline, headline, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return nid
+
+    async def list_pending_finance_nudges(self, limit: int = 3) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, category, ratio, week_total, baseline,"
+                    " headline, created_at FROM finance_nudges"
+                    " WHERE mentioned = 0 ORDER BY ratio DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {"id": r[0], "category": r[1], "ratio": r[2],
+                 "week_total": r[3], "baseline": r[4], "headline": r[5],
+                 "created_at": r[6]}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def mark_finance_nudge_mentioned(self, nudge_id: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE finance_nudges SET mentioned = 1, mentioned_at = ?"
+                    " WHERE id = ?",
+                    (_now(), nudge_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def finance_nudge_exists_this_week(self, category: str) -> bool:
+        def _work() -> bool:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM finance_nudges"
+                    " WHERE category = ? AND created_at > ? LIMIT 1",
+                    (category, cutoff),
+                ).fetchone()
+            return row is not None
+
+        return await asyncio.to_thread(_work)
+
+    async def add_anticipation_rule(
+        self, *, trigger_kind: str, payload: dict[str, Any], confidence: float,
+    ) -> str:
+        rid = str(uuid.uuid4())
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO anticipation_rules"
+                    " (id, trigger_kind, payload, confidence, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (rid, trigger_kind, json.dumps(payload, ensure_ascii=False),
+                     confidence, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+        return rid
+
+    async def list_anticipation_rules(self) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, trigger_kind, payload, confidence, last_fired_at"
+                    " FROM anticipation_rules ORDER BY confidence DESC"
+                ).fetchall()
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                try:
+                    pl = json.loads(r[2])
+                except json.JSONDecodeError:
+                    pl = {}
+                out.append({
+                    "id": r[0], "trigger_kind": r[1], "payload": pl,
+                    "confidence": r[3], "last_fired_at": r[4],
+                })
+            return out
+
+        return await asyncio.to_thread(_work)
+
+    async def anticipation_rule_exists(
+        self, trigger_kind: str, payload_match: dict[str, Any],
+    ) -> bool:
+        existing = await self.list_anticipation_rules()
+        for rule in existing:
+            if rule["trigger_kind"] != trigger_kind:
+                continue
+            if all(rule["payload"].get(k) == v for k, v in payload_match.items()):
+                return True
+        return False
+
+    async def touch_anticipation_rule(self, rule_id: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE anticipation_rules SET last_fired_at = ? WHERE id = ?",
+                    (_now(), rule_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def add_turn_feedback(
+        self, *, turn_id: str, tone: str | None, length_bucket: str,
+        tool_used: str | None = None,
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO turn_feedback"
+                    " (turn_id, tone, length_bucket, tool_used, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (turn_id, tone, length_bucket, tool_used, _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def update_turn_reaction(
+        self, turn_id: str, reaction: str,
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE turn_feedback SET reaction = ? WHERE turn_id = ?",
+                    (reaction, turn_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def get_turn_feedback_stats(self, days: int = 30) -> list[dict[str, Any]]:
+        """Aggregate reactions grouped by tone + length_bucket."""
+        def _work() -> list[dict[str, Any]]:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT tone, length_bucket, reaction, COUNT(*) as cnt"
+                    " FROM turn_feedback WHERE created_at > ?"
+                    " AND reaction IS NOT NULL"
+                    " GROUP BY tone, length_bucket, reaction",
+                    (cutoff,),
+                ).fetchall()
+            return [
+                {"tone": r[0], "length_bucket": r[1], "reaction": r[2], "count": r[3]}
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def set_style_prefs(self, data: dict[str, Any]) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO style_prefs (id, data_json, updated_at)"
+                    " VALUES (1, ?, ?)"
+                    " ON CONFLICT(id) DO UPDATE SET"
+                    "   data_json = excluded.data_json,"
+                    "   updated_at = excluded.updated_at",
+                    (json.dumps(data, ensure_ascii=False), _now()),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def get_style_prefs(self) -> dict[str, Any] | None:
+        def _work() -> dict[str, Any] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT data_json FROM style_prefs WHERE id = 1"
+                ).fetchone()
+            if not row:
+                return None
+            try:
+                return json.loads(row[0])
+            except (json.JSONDecodeError, TypeError):
+                return None
 
         return await asyncio.to_thread(_work)
 
