@@ -84,6 +84,46 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     setFlipped(false);
   }, [current, queue]);
 
+  const forget = useCallback(async () => {
+    if (!current) return;
+    if (!window.confirm(`Apagar esse card?\n\n"${current.front.slice(0, 100)}"`)) return;
+    try {
+      await fetch(`${API_BASE}/flashcards/${current.id}`, { method: 'DELETE' });
+    } catch { /* */ }
+    const next = queue.slice(1);
+    setQueue(next);
+    setCurrent(next[0] || null);
+    setFlipped(false);
+  }, [current, queue]);
+
+  const forgetTopic = useCallback(async () => {
+    if (!current) return;
+    const topic = current.topic;
+    if (!window.confirm(`Apagar TODOS os cards do deck "${topic}"?`)) return;
+    const toDelete = queue.filter((c) => c.topic === topic);
+    try {
+      await Promise.all(
+        toDelete.map((c) =>
+          fetch(`${API_BASE}/flashcards/${c.id}`, { method: 'DELETE' }),
+        ),
+      );
+    } catch { /* */ }
+    const remaining = queue.filter((c) => c.topic !== topic);
+    setQueue(remaining);
+    setCurrent(remaining[0] || null);
+    setFlipped(false);
+  }, [current, queue]);
+
+  const skip = useCallback(() => {
+    if (!current) return;
+    // Move to the back of the queue without rating.
+    const [first, ...rest] = queue;
+    const next = [...rest, first];
+    setQueue(next);
+    setCurrent(next[0] || null);
+    setFlipped(false);
+  }, [current, queue]);
+
   const createDeck = useCallback(async () => {
     const topic = deckTopic.trim();
     if (!topic || creating) return;
@@ -106,9 +146,17 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   useEffect(() => {
     const onKey = (ev: KeyboardEvent): void => {
       if (!current) return;
+      const target = ev.target as HTMLElement;
+      if (target && target.tagName === 'INPUT') return;  // let deck input type
       if (ev.code === 'Space') {
         ev.preventDefault();
         setFlipped((p) => !p);
+      } else if (ev.key === 'Delete' || (ev.key === 'Backspace' && ev.shiftKey)) {
+        ev.preventDefault();
+        void forget();
+      } else if (ev.key === 'ArrowRight' || ev.key === 's' || ev.key === 'S') {
+        ev.preventDefault();
+        skip();
       } else if (flipped) {
         if (ev.key === '1') void rate(0);
         else if (ev.key === '2') void rate(3);
@@ -118,7 +166,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, flipped, rate]);
+  }, [current, flipped, rate, forget, skip]);
 
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto' }}>
@@ -182,8 +230,31 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
         }}
         onClick={() => !flipped && setFlipped(true)}
         >
-          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>
-            {current.topic}
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            fontSize: 11, opacity: 0.5, marginBottom: 8, textTransform: 'uppercase',
+          }}>
+            <span>{current.topic}</span>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, textTransform: 'none' }}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); skip(); }}
+                style={cardBtnStyle}
+                title="pular (→ ou S)"
+              >pular</button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); void forget(); }}
+                style={cardBtnStyle}
+                title="apagar esse card (Delete)"
+              >apagar</button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); void forgetTopic(); }}
+                style={cardBtnStyle}
+                title="apagar todo o deck deste tópico"
+              >apagar deck</button>
+            </div>
           </div>
           <div style={{ fontSize: 20, lineHeight: 1.4, fontWeight: 500 }}>
             {current.front}
@@ -262,4 +333,15 @@ const btnPrimary = {
   cursor: 'pointer',
   fontSize: 13,
   fontWeight: 600,
+};
+
+const cardBtnStyle = {
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  color: 'inherit',
+  padding: '3px 9px',
+  borderRadius: 6,
+  cursor: 'pointer',
+  fontSize: 11,
+  opacity: 0.75,
 };
