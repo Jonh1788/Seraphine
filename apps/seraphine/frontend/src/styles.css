@@ -8926,7 +8926,11 @@ body.qc-window .quick-capture {
   letter-spacing: 0.5px;
 }
 
-/* Popover */
+/* Popover. Background sólido (não backdrop-filter) porque WebKit quebra
+   backdrop-filter quando há transform em algum ancestor — o blur vaza
+   pro conteúdo do próprio popover, deixando o timer e os botões
+   ilegíveis. Animação só com opacity, sem transform, pelo mesmo
+   motivo. */
 .focus-popover {
   position: absolute;
   top: calc(100% + 8px);
@@ -8934,11 +8938,9 @@ body.qc-window .quick-capture {
   z-index: 100;
   min-width: 220px;
   padding: var(--space-4);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--bg-2);
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
@@ -8948,8 +8950,8 @@ body.qc-window .quick-capture {
 }
 
 @keyframes focus-pop-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .focus-popover__phase {
