@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from seraphine.config import settings
 from google_integration.client import GoogleAPIError, GoogleAuthError, GoogleClient
-from google_integration.oauth import OAuthFlow
+from google_integration.oauth import OAuthFlow, WebOAuthFlow
 
 router = APIRouter(prefix="/google", tags=["google"])
 logger = logging.getLogger(__name__)
@@ -96,9 +96,35 @@ class OAuthStartResponse(BaseModel):
     consent_url: str
 
 
+# Helper: pick the OAuth flow based on whether a public redirect URL is
+# configured. When set, the backend is assumed to be reachable publicly
+# and the web-redirect flow is used (frontend opens consent in a system
+# browser → Google hits our /callback). When empty, falls back to the
+# Mac-local loopback flow that binds google_oauth_port.
+def _web_flow_if_configured() -> Optional[WebOAuthFlow]:
+    redirect = settings.google_oauth_redirect_url.strip()
+    if not redirect:
+        return None
+    return WebOAuthFlow(
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        scopes=settings.google_scopes,
+        redirect_uri=redirect,
+    )
+
+
 @router.post("/oauth/start", response_model=OAuthStartResponse)
 async def oauth_start(request: Request) -> OAuthStartResponse:
     client = _client_or_503(request)
+    web = _web_flow_if_configured()
+    if web is not None:
+        # State token is unused today — we have a single user; the
+        # callback persists tokens globally. Kept as a placeholder if we
+        # ever go multi-tenant.
+        consent_url = web.build_consent_url(state="seraphine")
+        return OAuthStartResponse(consent_url=consent_url)
+
+    # Legacy Mac-local loopback path.
     flow = OAuthFlow(
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
@@ -116,8 +142,6 @@ async def oauth_start(request: Request) -> OAuthStartResponse:
         except Exception as e:
             logger.warning("google oauth flow failed: %s", e)
 
-    # Fire-and-forget: the HTTP response returns immediately with the
-    # consent URL, and the background task waits for the callback.
     asyncio.create_task(_complete())
     return OAuthStartResponse(consent_url=consent_url)
 
@@ -128,6 +152,12 @@ async def oauth_start_redirect(request: Request):
     to Google's consent screen. Useful when surfacing a re-auth link in
     error messages or docs (POST requires a form/fetch)."""
     from fastapi.responses import RedirectResponse
+
+    _ = _client_or_503(request)
+    web = _web_flow_if_configured()
+    if web is not None:
+        consent_url = web.build_consent_url(state="seraphine")
+        return RedirectResponse(consent_url, status_code=302)
 
     client = _client_or_503(request)
     flow = OAuthFlow(
@@ -149,6 +179,58 @@ async def oauth_start_redirect(request: Request):
 
     asyncio.create_task(_complete())
     return RedirectResponse(consent_url, status_code=302)
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(request: Request, code: str = "", error: str = ""):
+    """Google redirects here after the user grants consent in their
+    browser (web-redirect flow). Exchange the code for tokens, persist,
+    and show a "you can close this tab" page. This route is a no-op when
+    the loopback flow is active (google_oauth_redirect_url unset)."""
+    from fastapi.responses import HTMLResponse
+
+    if error:
+        return HTMLResponse(
+            f"<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;background:#111;color:#eee;padding:40px;'>"
+            f"<h1>Erro no login do Google</h1><p>{error}</p></body>",
+            status_code=400,
+        )
+
+    client = _client_or_503(request)
+    web = _web_flow_if_configured()
+    if web is None:
+        # Nothing to do — the loopback flow handles its own callback.
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;background:#111;color:#eee;padding:40px;'>"
+            "<h1>Callback não aplicável</h1><p>Configure SERAPHINE_GOOGLE_OAUTH_REDIRECT_URL pra ativar o fluxo web.</p></body>",
+            status_code=400,
+        )
+
+    if not code:
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;background:#111;color:#eee;padding:40px;'>"
+            "<h1>Erro no login do Google</h1><p>Código ausente.</p></body>",
+            status_code=400,
+        )
+
+    try:
+        bundle = await web.exchange_code(code)
+        await client.save_bundle(bundle)
+        logger.info("google oauth (web) completed; tokens persisted")
+    except Exception as e:
+        logger.warning("google oauth (web) failed: %s", e)
+        return HTMLResponse(
+            f"<!doctype html><meta charset='utf-8'><body style='font-family:system-ui;background:#111;color:#eee;padding:40px;'>"
+            f"<h1>Erro ao trocar o código</h1><p>{e}</p></body>",
+            status_code=500,
+        )
+
+    return HTMLResponse(
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><title>Seraphine</title>"
+        "<style>body{font-family:-apple-system,system-ui,sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+        ".card{background:#1b1b1b;padding:32px 48px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);text-align:center}h1{margin:0 0 8px;font-size:22px}p{margin:0;color:#aaa}</style></head>"
+        "<body><div class='card'><h1>OK! Pode fechar essa aba.</h1><p>Seraphine já tem acesso ao seu Google.</p></div></body></html>",
+    )
 
 
 class OAuthStatus(BaseModel):

@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_oauth_port: int = 8765
+    # When set, the backend uses the web-redirect OAuth flow
+    # (``/google/oauth/callback`` on this server) instead of binding a
+    # local loopback server on ``google_oauth_port``. Required when the
+    # backend runs remotely (VPS) — the loopback flow only works when
+    # backend + browser share a localhost. Leave empty for the legacy
+    # Mac-local flow.
+    google_oauth_redirect_url: str = ""
     google_scopes: Annotated[list[str], NoDecode] = [
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",

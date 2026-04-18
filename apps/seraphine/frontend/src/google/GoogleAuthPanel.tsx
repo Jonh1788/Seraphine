@@ -69,7 +69,28 @@ export function GoogleAuthPanel(): JSX.Element {
     setError(null);
     try {
       const { consent_url } = await startOAuth();
-      window.open(consent_url, '_blank', 'noopener,noreferrer');
+      // WKWebView (iPad/iPhone) silently blocks window.open on a
+      // non-user-gesture URL; the Tauri shell plugin opens the URL in
+      // the system browser (Safari / SFSafariViewController) instead.
+      // Falls back to window.open on plain-browser dev.
+      const tauriWindow = window as unknown as {
+        __TAURI_INTERNALS__?: unknown;
+        __TAURI__?: unknown;
+      };
+      const isTauri = Boolean(
+        tauriWindow.__TAURI_INTERNALS__ || tauriWindow.__TAURI__,
+      );
+      if (isTauri) {
+        try {
+          const { open } = await import('@tauri-apps/plugin-shell');
+          await open(consent_url);
+        } catch (err) {
+          console.warn('[google-auth] shell.open failed, falling back:', err);
+          window.open(consent_url, '_blank', 'noopener,noreferrer');
+        }
+      } else {
+        window.open(consent_url, '_blank', 'noopener,noreferrer');
+      }
       setPolling(true);
       pollDeadlineRef.current = Date.now() + POLL_TIMEOUT_MS;
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
