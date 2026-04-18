@@ -227,40 +227,118 @@ class MemoryManager:
             ],
         )
 
-    async def recall(self, query: str, *, k: int = 5) -> list[Memory]:
+    async def recall(
+        self, query: str, *, k: int = 5, decay_days: float = 30.0,
+    ) -> list[Memory]:
         if self._collection is None:
             return []
+
+        # --- vector retrieval (overshoot for RRF fusion) ---
         try:
             qvec = (await self.embeddings.embed([query]))[0]
         except Exception as e:
             logger.warning("recall embed failed: %s", e)
             await self._log_warning("recall.embed", e)
             return []
-        result = self._collection.query(query_embeddings=[qvec], n_results=k)
-        ids = (result.get("ids") or [[]])[0]
-        docs = (result.get("documents") or [[]])[0]
-        metas = (result.get("metadatas") or [[]])[0]
-        dists = (result.get("distances") or [[None] * len(ids)])[0]
+        n_vector = max(k, 20)
+        result = self._collection.query(query_embeddings=[qvec], n_results=n_vector)
+        vec_ids = (result.get("ids") or [[]])[0]
+        vec_docs = (result.get("documents") or [[]])[0]
+        vec_metas = (result.get("metadatas") or [[]])[0]
+        vec_dists = (result.get("distances") or [[None] * len(vec_ids)])[0]
+
+        # Build per-id info map from vector results.
+        info: dict[str, dict[str, Any]] = {}
+        for i, vid in enumerate(vec_ids):
+            meta = vec_metas[i] if i < len(vec_metas) and vec_metas[i] else {}
+            info[vid] = {
+                "text": vec_docs[i] if i < len(vec_docs) else "",
+                "metadata": meta,
+                "dist": vec_dists[i] if i < len(vec_dists) else None,
+            }
+
+        # --- FTS retrieval ---
+        try:
+            fts_results = await self.store.fts_search_turns(query, k=max(k, 20))
+        except Exception:
+            fts_results = []
+
+        # --- RRF fusion ---
+        rrf_scores: dict[str, float] = {}
+        rrf_k = 60  # standard RRF constant
+        for rank, vid in enumerate(vec_ids):
+            rrf_scores[vid] = rrf_scores.get(vid, 0.0) + 1.0 / (rrf_k + rank)
+        for rank, (tid, _bm25) in enumerate(fts_results):
+            rrf_scores[tid] = rrf_scores.get(tid, 0.0) + 1.0 / (rrf_k + rank)
+            if tid not in info:
+                # FTS-only hit — fetch the turn to populate info.
+                try:
+                    turn = await self.store.get_turn(tid)
+                    if turn:
+                        info[tid] = {
+                            "text": turn.content,
+                            "metadata": {
+                                "role": turn.role,
+                                "conversation_id": turn.conversation_id,
+                                "created_at": turn.created_at,
+                            },
+                            "dist": None,
+                        }
+                except Exception:
+                    pass
+
+        if not rrf_scores:
+            return []
+
+        # If FTS returned nothing, fall through to vector-only (rrf_scores
+        # already populated from vector path).
+
+        # Sort by RRF score descending, take top-k.
+        sorted_ids = sorted(rrf_scores, key=lambda x: -rrf_scores[x])
+
+        # --- time-weight reranking ---
+        now = datetime.now(timezone.utc)
+        ranked: list[tuple[str, float]] = []
+        for sid in sorted_ids:
+            base = rrf_scores[sid]
+            meta = info.get(sid, {}).get("metadata", {})
+            ca_raw = meta.get("created_at")
+            if decay_days > 0 and ca_raw:
+                try:
+                    ca = datetime.fromisoformat(ca_raw)
+                    if ca.tzinfo is None:
+                        ca = ca.replace(tzinfo=timezone.utc)
+                    age = (now - ca).total_seconds() / 86400
+                    base = base * math.exp(-age / decay_days)
+                except (ValueError, TypeError):
+                    pass
+            ranked.append((sid, base))
+        ranked.sort(key=lambda x: -x[1])
+        top = ranked[:k]
+
         out: list[Memory] = []
-        for i, doc in enumerate(docs):
-            meta = metas[i] if i < len(metas) and metas[i] else {}
-            created_at_raw = meta.get("created_at") if meta else None
+        for sid, score in top:
+            entry = info.get(sid)
+            if not entry:
+                continue
+            meta = entry.get("metadata") or {}
+            ca_raw = meta.get("created_at")
             try:
                 created_at = (
-                    datetime.fromisoformat(created_at_raw)
-                    if isinstance(created_at_raw, str)
+                    datetime.fromisoformat(ca_raw)
+                    if isinstance(ca_raw, str)
                     else datetime.now()
                 )
             except ValueError:
                 created_at = datetime.now()
             out.append(
                 Memory(
-                    id=ids[i] if i < len(ids) else f"unknown-{i}",
+                    id=sid,
                     kind="episode",
-                    text=doc,
-                    score=dists[i] if i < len(dists) else None,
+                    text=entry["text"],
+                    score=score,
                     created_at=created_at,
-                    metadata=meta or {},
+                    metadata=meta,
                 )
             )
         return out

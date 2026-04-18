@@ -355,6 +355,55 @@ def _seraphine_facts_decay_migrator(conn: sqlite3.Connection) -> None:
         pass  # column already exists
 
 
+def _seraphine_fts5_migrator(conn: sqlite3.Connection) -> None:
+    """Create FTS5 virtual table over turns.content + sync triggers."""
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+          content, content='turns', content_rowid='rowid'
+        );
+        CREATE TRIGGER IF NOT EXISTS turns_ai AFTER INSERT ON turns BEGIN
+          INSERT INTO turns_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS turns_ad AFTER DELETE ON turns BEGIN
+          INSERT INTO turns_fts(turns_fts, rowid, content)
+            VALUES('delete', old.rowid, old.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS turns_au AFTER UPDATE ON turns BEGIN
+          INSERT INTO turns_fts(turns_fts, rowid, content)
+            VALUES('delete', old.rowid, old.content);
+          INSERT INTO turns_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+        """
+    )
+    # Back-fill: if turns exist but FTS is empty, rebuild once.
+    turns_count = conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
+    fts_count = conn.execute("SELECT COUNT(*) FROM turns_fts").fetchone()[0]
+    if turns_count > 0 and fts_count == 0:
+        conn.execute("INSERT INTO turns_fts(turns_fts) VALUES ('rebuild')")
+
+
+def _seraphine_episode_windows_migrator(conn: sqlite3.Connection) -> None:
+    """Create episode_windows table for windowed episode indexing."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS episode_windows (
+          id              TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          first_turn_id   TEXT NOT NULL,
+          last_turn_id    TEXT NOT NULL,
+          turn_count      INTEGER NOT NULL,
+          text            TEXT NOT NULL,
+          started_at      TEXT NOT NULL,
+          ended_at        TEXT NOT NULL,
+          created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_episode_windows_conv
+          ON episode_windows(conversation_id, ended_at DESC);
+        """
+    )
+
+
 class MemoryStore(Store):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
@@ -363,6 +412,8 @@ class MemoryStore(Store):
         # TABLE block from `_seraphine_core_migrator`.
         self.register_migrator("seraphine_core", _seraphine_core_migrator)
         self.register_migrator("seraphine_facts_decay", _seraphine_facts_decay_migrator)
+        self.register_migrator("seraphine_fts5", _seraphine_fts5_migrator)
+        self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
 
     async def create_conversation(self) -> str:
         conv_id = str(uuid.uuid4())
@@ -469,6 +520,53 @@ class MemoryStore(Store):
                 )
                 for r in rows
             ]
+
+        return await asyncio.to_thread(_work)
+
+    async def get_turn(self, turn_id: str) -> Turn | None:
+        """Fetch a single turn by id."""
+
+        def _work() -> Turn | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id, conversation_id, role, content, created_at, token_count"
+                    " FROM turns WHERE id = ?",
+                    (turn_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            return Turn(
+                id=row[0], conversation_id=row[1], role=row[2],
+                content=row[3], created_at=row[4], token_count=row[5],
+            )
+
+        return await asyncio.to_thread(_work)
+
+    async def fts_search_turns(
+        self, query: str, k: int = 10,
+    ) -> list[tuple[str, float]]:
+        """Full-text search over turns via FTS5.
+
+        Returns [(turn_id, bm25_score), ...] ordered by relevance.
+        The query is wrapped in double quotes for safe phrase matching.
+        """
+        sanitized = '"' + query.replace('"', '""') + '"'
+
+        def _work() -> list[tuple[str, float]]:
+            with self._connect() as conn:
+                try:
+                    rows = conn.execute(
+                        "SELECT t.id, bm25(turns_fts) AS score"
+                        " FROM turns_fts"
+                        " JOIN turns t ON t.rowid = turns_fts.rowid"
+                        " WHERE turns_fts MATCH ?"
+                        " ORDER BY score"
+                        " LIMIT ?",
+                        (sanitized, k),
+                    ).fetchall()
+                except Exception:
+                    return []
+            return [(r[0], float(r[1])) for r in rows]
 
         return await asyncio.to_thread(_work)
 
