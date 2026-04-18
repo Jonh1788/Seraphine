@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     mcp_url: str = ""
     mcp_api_key: str = ""
 
-    cors_origins: list[str] = ["*"]
+    cors_origins: Annotated[list[str], NoDecode] = ["*"]
 
     # 024 — proactive scheduler kill switch. Silences day-review,
     # weekly reflection, and stalled-task jobs when False.
@@ -185,6 +185,22 @@ class Settings(BaseSettings):
             for chunk in s.split(","):
                 parts.extend(p for p in chunk.split() if p)
             return parts
+        return v
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, v):  # type: ignore[no-untyped-def]
+        """Accept comma-separated origins from .env.
+
+        `SERAPHINE_CORS_ORIGINS=https://a,tauri://localhost` is more
+        natural than the JSON-array shape pydantic-settings defaults to.
+        A bare `*` remains the library-default when unset.
+        """
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return ["*"]
+            return [p.strip() for p in s.split(",") if p.strip()]
         return v
 
 
