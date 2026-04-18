@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Protocol
@@ -23,6 +24,9 @@ REFLECTION_TURN_WINDOW = 100
 REFLECTION_CONFIDENCE_THRESHOLD = 0.7
 # Minimum character length for a turn to be considered signal-bearing.
 _MIN_TURN_CHARS = 12
+# Episode windowing: group consecutive turns into chunks for richer context.
+WINDOW_SIZE = 8
+WINDOW_GAP_SECONDS = 600
 
 # Greetings / acks that the LLM should never try to extract facts from.
 # Matched as full-message substrings after lowercasing + stripping punctuation.
@@ -133,7 +137,7 @@ def _is_signal_assistant_turn(role: str, content: str) -> bool:
 
 class Memory(BaseModel):
     id: str
-    kind: Literal["episode", "fact"]
+    kind: Literal["episode", "fact", "window"]
     text: str
     score: float | None = None
     created_at: datetime
@@ -160,6 +164,7 @@ class MemoryManager:
         self.embedding_model = embedding_model
         self._collection: Any = None
         self._fact_embedding_cache: dict[str, list[float]] = {}
+        self._window_buffer: dict[str, list[Turn]] = {}
 
     async def start(self) -> None:
         # Hydrate the fact embedding cache from SQLite so the first
@@ -223,6 +228,74 @@ class MemoryManager:
                     "role": turn.role,
                     "conversation_id": turn.conversation_id,
                     "created_at": turn.created_at,
+                }
+            ],
+        )
+        # --- windowing ---
+        conv = turn.conversation_id
+        buf = self._window_buffer.setdefault(conv, [])
+        # Check gap: if the last turn in the buffer and this turn have
+        # a time gap >= WINDOW_GAP_SECONDS, flush before appending.
+        if buf:
+            try:
+                last_dt = datetime.fromisoformat(buf[-1].created_at)
+                cur_dt = datetime.fromisoformat(turn.created_at)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if cur_dt.tzinfo is None:
+                    cur_dt = cur_dt.replace(tzinfo=timezone.utc)
+                gap = (cur_dt - last_dt).total_seconds()
+                if gap >= WINDOW_GAP_SECONDS:
+                    await self._flush_window(conv)
+            except (ValueError, TypeError):
+                pass
+        buf = self._window_buffer.setdefault(conv, [])
+        buf.append(turn)
+        if len(buf) >= WINDOW_SIZE:
+            await self._flush_window(conv)
+
+    async def _flush_window(self, conversation_id: str) -> None:
+        """Concatenate buffered turns into an episode window, persist, and embed."""
+        buf = self._window_buffer.pop(conversation_id, [])
+        if len(buf) < 2:
+            # Single-turn windows add no context beyond the individual turn
+            # already indexed in chroma. Skip creating a window.
+            return
+        text = "\n".join(f"[{t.role}] {t.content}" for t in buf)
+        win_id = str(uuid.uuid4())
+        first = buf[0]
+        last = buf[-1]
+        now = datetime.now(timezone.utc).isoformat()
+        await self.store.add_episode_window(
+            id=win_id,
+            conversation_id=conversation_id,
+            first_turn_id=first.id,
+            last_turn_id=last.id,
+            turn_count=len(buf),
+            text=text,
+            started_at=first.created_at,
+            ended_at=last.created_at,
+            created_at=now,
+        )
+        if self._collection is None:
+            return
+        try:
+            vec = (await self.embeddings.embed([text]))[0]
+        except Exception as e:
+            logger.warning("flush_window embed failed: %s", e)
+            await self._log_warning("flush_window.embed", e)
+            return
+        self._collection.add(
+            ids=[win_id],
+            embeddings=[vec],
+            documents=[text],
+            metadatas=[
+                {
+                    "kind": "window",
+                    "conversation_id": conversation_id,
+                    "first_turn_id": first.id,
+                    "last_turn_id": last.id,
+                    "created_at": last.created_at,
                 }
             ],
         )
@@ -314,14 +387,42 @@ class MemoryManager:
                     pass
             ranked.append((sid, base))
         ranked.sort(key=lambda x: -x[1])
-        top = ranked[:k]
 
-        out: list[Memory] = []
-        for sid, score in top:
+        # --- window / turn dedup ---
+        # If a window and one of its constituent turns both appear,
+        # prefer the window (richer context) and drop the turn.
+        window_turn_ids: dict[str, set[str]] = {}  # window_id -> {turn_ids covered}
+        for sid in [r[0] for r in ranked]:
             entry = info.get(sid)
             if not entry:
                 continue
             meta = entry.get("metadata") or {}
+            if meta.get("kind") == "window":
+                first = meta.get("first_turn_id")
+                last = meta.get("last_turn_id")
+                if first and last:
+                    # Collect all turn IDs in the collection that belong to
+                    # this window's range. Since we don't have all turn IDs
+                    # in the window, approximate by marking the known ones.
+                    window_turn_ids[sid] = {first, last}
+
+        # Build the set of turn IDs that are covered by any window in results.
+        covered_by_windows: set[str] = set()
+        for wid, tids in window_turn_ids.items():
+            covered_by_windows.update(tids)
+
+        out: list[Memory] = []
+        for sid, score in ranked:
+            if len(out) >= k:
+                break
+            entry = info.get(sid)
+            if not entry:
+                continue
+            meta = entry.get("metadata") or {}
+            kind_str = meta.get("kind", "episode")
+            # Skip turn-level results whose ID is covered by a window.
+            if kind_str != "window" and sid in covered_by_windows:
+                continue
             ca_raw = meta.get("created_at")
             try:
                 created_at = (
@@ -331,10 +432,13 @@ class MemoryManager:
                 )
             except ValueError:
                 created_at = datetime.now()
+            mem_kind: Literal["episode", "fact", "window"] = (
+                "window" if kind_str == "window" else "episode"
+            )
             out.append(
                 Memory(
                     id=sid,
-                    kind="episode",
+                    kind=mem_kind,
                     text=entry["text"],
                     score=score,
                     created_at=created_at,

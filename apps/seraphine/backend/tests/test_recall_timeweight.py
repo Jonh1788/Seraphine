@@ -57,14 +57,19 @@ async def _seed_pair(
         content="preciso revisar meu planejamento financeiro mensal",
         created_at=new_ts,
     )
-    # Insert in DB for FTS sync.
-    for t in (old_turn, new_turn):
+    # Insert in DB for FTS sync, then index in chroma.
+    import asyncio as _aio
+
+    def _insert(t: Turn) -> None:
         with store._connect() as conn:
             conn.execute(
                 "INSERT INTO turns(id, conversation_id, role, content,"
                 " created_at, token_count) VALUES (?, ?, ?, ?, ?, NULL)",
                 (t.id, t.conversation_id, t.role, t.content, t.created_at),
             )
+
+    for t in (old_turn, new_turn):
+        await _aio.to_thread(_insert, t)
         await manager.remember_episode(t)
 
     return old_turn.id, new_turn.id

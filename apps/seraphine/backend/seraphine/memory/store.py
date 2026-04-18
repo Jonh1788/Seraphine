@@ -1767,3 +1767,168 @@ class MemoryStore(Store):
             ]
 
         return await asyncio.to_thread(_work)
+
+    # ---------- episode windows ----------
+
+    async def add_episode_window(
+        self,
+        *,
+        id: str,
+        conversation_id: str,
+        first_turn_id: str,
+        last_turn_id: str,
+        turn_count: int,
+        text: str,
+        started_at: str,
+        ended_at: str,
+        created_at: str,
+    ) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO episode_windows"
+                    " (id, conversation_id, first_turn_id, last_turn_id,"
+                    "  turn_count, text, started_at, ended_at, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (id, conversation_id, first_turn_id, last_turn_id,
+                     turn_count, text, started_at, ended_at, created_at),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def list_windows(self, limit: int = 100) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, conversation_id, first_turn_id, last_turn_id,"
+                    " turn_count, text, started_at, ended_at, created_at"
+                    " FROM episode_windows ORDER BY ended_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {
+                    "id": r[0], "conversation_id": r[1],
+                    "first_turn_id": r[2], "last_turn_id": r[3],
+                    "turn_count": r[4], "text": r[5],
+                    "started_at": r[6], "ended_at": r[7],
+                    "created_at": r[8],
+                }
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    # ---------- bulk / import helpers ----------
+
+    async def list_all_decisions(self, limit: int = 10000) -> list[dict[str, Any]]:
+        def _work() -> list[dict[str, Any]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, subject, choice, alternatives, created_at,"
+                    " followed_up_at, outcome"
+                    " FROM decisions ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [
+                {
+                    "id": r[0], "subject": r[1], "choice": r[2],
+                    "alternatives": r[3], "created_at": r[4],
+                    "followed_up_at": r[5], "outcome": r[6],
+                }
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def insert_narrative_raw(
+        self, *, id: str, conversation_id: str, text: str,
+        turn_count: int, started_at: str, ended_at: str, created_at: str,
+    ) -> bool:
+        """Idempotent insert (OR IGNORE). Returns True if inserted."""
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO conversation_narratives"
+                    " (id, conversation_id, text, turn_count, started_at,"
+                    "  ended_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (id, conversation_id, text, turn_count,
+                     started_at, ended_at, created_at),
+                )
+                return (cur.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_work)
+
+    async def insert_person_raw(
+        self, *, id: str, name: str, relation: str | None,
+        first_seen_at: str, last_mentioned_at: str,
+        mention_count: int, tags: str | None,
+    ) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO people"
+                    " (id, name, relation, first_seen_at, last_mentioned_at,"
+                    "  mention_count, tags) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (id, name, relation, first_seen_at,
+                     last_mentioned_at, mention_count, tags),
+                )
+                return (cur.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_work)
+
+    async def insert_decision_raw(
+        self, *, id: str, subject: str, choice: str,
+        alternatives: str | None, created_at: str,
+        followed_up_at: str | None, outcome: str | None,
+    ) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO decisions"
+                    " (id, subject, choice, alternatives, created_at,"
+                    "  followed_up_at, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (id, subject, choice, alternatives,
+                     created_at, followed_up_at, outcome),
+                )
+                return (cur.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_work)
+
+    async def insert_open_loop_raw(
+        self, *, id: str, text: str, owner: str, created_at: str,
+        resolved_at: str | None, resolution: str | None,
+        injection_count: int,
+    ) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO open_loops"
+                    " (id, text, owner, created_at, resolved_at,"
+                    "  resolution, injection_count)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (id, text, owner, created_at, resolved_at,
+                     resolution, injection_count),
+                )
+                return (cur.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_work)
+
+    async def insert_window_raw(
+        self, *, id: str, conversation_id: str,
+        first_turn_id: str, last_turn_id: str,
+        turn_count: int, text: str,
+        started_at: str, ended_at: str, created_at: str,
+    ) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO episode_windows"
+                    " (id, conversation_id, first_turn_id, last_turn_id,"
+                    "  turn_count, text, started_at, ended_at, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (id, conversation_id, first_turn_id, last_turn_id,
+                     turn_count, text, started_at, ended_at, created_at),
+                )
+                return (cur.rowcount or 0) > 0
+
+        return await asyncio.to_thread(_work)
