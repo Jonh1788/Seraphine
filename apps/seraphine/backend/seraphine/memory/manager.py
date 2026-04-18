@@ -336,6 +336,17 @@ class MemoryManager:
         except Exception:
             fts_results = []
 
+        # --- fact semantic retrieval (third modality) ---
+        # Scan the in-memory fact embedding cache and rank by cosine to the
+        # query vector. Facts are curated signal — surfacing them alongside
+        # turns and windows gives recall much richer context.
+        fact_ranked: list[tuple[str, float]] = []
+        for fid, fvec in self._fact_embedding_cache.items():
+            cos = _cosine(qvec, fvec)
+            fact_ranked.append((fid, cos))
+        fact_ranked.sort(key=lambda x: -x[1])
+        fact_top = fact_ranked[:10]
+
         # --- RRF fusion ---
         rrf_scores: dict[str, float] = {}
         rrf_k = 60  # standard RRF constant
@@ -359,9 +370,35 @@ class MemoryManager:
                         }
                 except Exception:
                     pass
+        # Facts as third RRF list.
+        for rank, (fid, _cos) in enumerate(fact_top):
+            rrf_scores[fid] = rrf_scores.get(fid, 0.0) + 1.0 / (rrf_k + rank)
 
         if not rrf_scores:
             return []
+
+        # Populate info entries for fact hits so we can build Memory objects.
+        fact_ids_in_rrf = {fid for fid, _ in fact_top if fid in rrf_scores}
+        for fid in fact_ids_in_rrf:
+            if fid not in info:
+                try:
+                    fact = await self.store.get_fact(fid)
+                    if fact and fact.superseded_by is None:
+                        info[fid] = {
+                            "text": fact.text,
+                            "metadata": {
+                                "kind": "fact",
+                                "source": fact.source,
+                                "confidence": fact.confidence,
+                                "created_at": fact.created_at,
+                            },
+                            "dist": None,
+                        }
+                    else:
+                        # Superseded or deleted fact — remove from RRF.
+                        rrf_scores.pop(fid, None)
+                except Exception:
+                    rrf_scores.pop(fid, None)
 
         # If FTS returned nothing, fall through to vector-only (rrf_scores
         # already populated from vector path).
@@ -411,6 +448,32 @@ class MemoryManager:
         for wid, tids in window_turn_ids.items():
             covered_by_windows.update(tids)
 
+        # --- fact dedup: if two facts have cosine > 0.98, keep higher confidence ---
+        fact_entries = [
+            (sid, score) for sid, score in ranked
+            if (info.get(sid, {}).get("metadata") or {}).get("kind") == "fact"
+        ]
+        suppressed_facts: set[str] = set()
+        for i, (fid_a, _) in enumerate(fact_entries):
+            if fid_a in suppressed_facts:
+                continue
+            vec_a = self._fact_embedding_cache.get(fid_a)
+            if vec_a is None:
+                continue
+            meta_a = info.get(fid_a, {}).get("metadata", {})
+            conf_a = meta_a.get("confidence", 0.0)
+            for j in range(i + 1, len(fact_entries)):
+                fid_b = fact_entries[j][0]
+                if fid_b in suppressed_facts:
+                    continue
+                vec_b = self._fact_embedding_cache.get(fid_b)
+                if vec_b is None:
+                    continue
+                if _cosine(vec_a, vec_b) > 0.98:
+                    meta_b = info.get(fid_b, {}).get("metadata", {})
+                    conf_b = meta_b.get("confidence", 0.0)
+                    suppressed_facts.add(fid_b if conf_a >= conf_b else fid_a)
+
         out: list[Memory] = []
         for sid, score in ranked:
             if len(out) >= k:
@@ -421,7 +484,10 @@ class MemoryManager:
             meta = entry.get("metadata") or {}
             kind_str = meta.get("kind", "episode")
             # Skip turn-level results whose ID is covered by a window.
-            if kind_str != "window" and sid in covered_by_windows:
+            if kind_str != "window" and kind_str != "fact" and sid in covered_by_windows:
+                continue
+            # Skip duplicate facts.
+            if kind_str == "fact" and sid in suppressed_facts:
                 continue
             ca_raw = meta.get("created_at")
             try:
@@ -432,9 +498,12 @@ class MemoryManager:
                 )
             except ValueError:
                 created_at = datetime.now()
-            mem_kind: Literal["episode", "fact", "window"] = (
-                "window" if kind_str == "window" else "episode"
-            )
+            if kind_str == "fact":
+                mem_kind: Literal["episode", "fact", "window"] = "fact"
+            elif kind_str == "window":
+                mem_kind = "window"
+            else:
+                mem_kind = "episode"
             out.append(
                 Memory(
                     id=sid,
@@ -445,6 +514,13 @@ class MemoryManager:
                     metadata=meta,
                 )
             )
+            # Bump last_used_at for recalled facts — reinforces relevance
+            # and delays decay.
+            if kind_str == "fact":
+                try:
+                    await self.store.bump_fact_used(sid)
+                except Exception:  # pragma: no cover
+                    pass
         return out
 
     async def learn_fact(
