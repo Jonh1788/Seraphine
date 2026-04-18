@@ -1183,11 +1183,14 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
         ...prev,
         [gestureName]: { name: def.name, duration: def.duration, keyframes: def.keyframes },
       }));
+      // Register with the live controller so `playGesture(name)` can reach
+      // it immediately — no reload needed.
+      controller?.registerGesture?.(gestureName, def);
       flash('Salvo');
     } catch (err) {
       flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [gestureName, duration, keyframes, flash]);
+  }, [gestureName, duration, keyframes, flash, controller]);
 
   const handleCopyTs = useCallback(async () => {
     const code = generateTsCode(gestureName, duration, keyframes);

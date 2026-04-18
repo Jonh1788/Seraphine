@@ -80,6 +80,13 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     if (saved && controller) controller.setNodIntensity(v);
     return v;
   });
+  const [idleGesture, setIdleGesture] = useState<string>(() => {
+    const saved = localStorage.getItem('seraphine.lab.idleGesture');
+    const v = saved ?? controller?.getIdleGesture() ?? '';
+    if (saved && controller) controller.setIdleGesture(saved || null);
+    return v;
+  });
+  const availableIdleGestures = controller?.getAvailableGestureNames?.() ?? [];
 
   // Resolve available RAW blendshapes from the VRM model (not emotion presets)
   const blendshapes = getBlendshapes(controller);
@@ -426,6 +433,31 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
                 <div className="avatar-lab__slider-hints">
                   <span>Sutil</span>
                   <span>Expressivo</span>
+                </div>
+              </div>
+              <div className="avatar-lab__slider-row">
+                <label className="avatar-lab__slider-label">
+                  Idle (loop quando parada)
+                </label>
+                <select
+                  value={idleGesture}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIdleGesture(v);
+                    controller?.setIdleGesture(v || null);
+                    if (v) localStorage.setItem('seraphine.lab.idleGesture', v);
+                    else localStorage.removeItem('seraphine.lab.idleGesture');
+                  }}
+                  className="gesture-editor__select"
+                  style={{ width: '100%' }}
+                >
+                  <option value="">— nenhuma —</option>
+                  {availableIdleGestures.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <div className="avatar-lab__slider-hints">
+                  <span>Roda em loop enquanto não fala nem gesticula</span>
                 </div>
               </div>
             </section>

@@ -455,9 +455,19 @@ button:disabled {
     justify-content: center;
   }
 
-  /* Mobile: hide sidebar completely on non-chat views */
+  /* Mobile: hide sidebar on non-chat views but keep it mounted off-screen
+     so the VRM avatar's WebGL canvas doesn't get disposed and rebuilt
+     every time the user revisits the chat view. `position: absolute` +
+     offset pops it out of the flex flow so the layout looks identical
+     to `display: none`. */
   .sidebar--hidden {
-    display: none !important;
+    position: absolute !important;
+    left: -99999px !important;
+    top: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 320px !important;
+    height: 240px !important;
   }
 }
 
@@ -648,6 +658,44 @@ button:disabled {
   flex-direction: column;
 }
 .chat > .view-transition > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ChatView is the persistent base of the .chat section — always mounted
+   so WS subscriptions, streaming turns, and composer draft survive when
+   the user hops to another view. Other views render as `.view-overlay`
+   absolutely positioned above, hiding the chat without unmounting it. */
+.chat-layer {
+  grid-row: 1 / -1;
+  grid-column: 1 / -1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-layer > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.chat-layer--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ViewTransition gets both classes `view-transition` and `view-overlay`,
+   so scope overlay rules under `.chat >` to match the specificity of the
+   existing `.chat > .view-transition` block. No background — the parent
+   `.chat` already paints the blurred tint, and the chat layer below is
+   visibility:hidden so nothing bleeds through. */
+.chat > .view-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.chat > .view-overlay > * {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -11260,8 +11308,18 @@ body.qc-window .quick-capture {
     grid-template-columns: 60px 1fr;
   }
 
+  /* Keep the sidebar mounted off-screen so the VRM WebGL context, the
+     playback analyser, and the RAF lipsync loop survive the window
+     being laptop-width. Previously `display: none` tore down the canvas
+     on every layout change. */
   .sidebar {
-    display: none;
+    position: absolute;
+    left: -99999px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    width: 320px;
+    height: 240px;
   }
 }
 

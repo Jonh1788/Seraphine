@@ -190,6 +190,22 @@ export class VrmAvatarController implements AvatarAdapter {
 
   // --- Gesture system ---
   private readonly gesturePlayer = new GesturePlayer();
+  /**
+   * User-saved gestures (from AnimationLab → `POST /lab/gestures`).
+   * Looked up BEFORE `GESTURE_LIBRARY` in `playGesture` so a user can
+   * override a built-in (e.g., customise "wave") and so freshly saved
+   * names become reachable everywhere (chat reactions, activeAppReactor,
+   * etc.) without plumbing them through every call site.
+   */
+  private readonly userGestures = new Map<string, GestureDefinition>();
+
+  // --- Idle loop system ---
+  /** Name of the gesture currently looping as idle (null = none). */
+  private idleGestureName: string | null = null;
+  /** Promise of the current idle iteration; null while paused. */
+  private idleLoopActive = false;
+  /** True while a one-shot gesture or TTS is happening — idle is paused. */
+  private idleSuppressed = false;
 
   // --- Idle look-around system ---
   // Periodically picks a random head direction and smoothly interpolates
@@ -897,10 +913,14 @@ export class VrmAvatarController implements AvatarAdapter {
    *  false on tts_end/turn_end so she "looks at you" while speaking. */
   setSpeaking(speaking: boolean): void {
     console.log(`[avatar] setSpeaking(${speaking})`);
+    const wasSpeaking = this._isSpeaking;
     this._isSpeaking = speaking;
     if (speaking) {
       // Smoothly return gaze to forward
       this.idleLookTarget = { x: 0, y: 0, z: 0 };
+    } else if (wasSpeaking) {
+      // Resume idle loop once TTS is done (no-op if none is set).
+      this.kickIdleLoop();
     }
   }
 
@@ -941,20 +961,103 @@ export class VrmAvatarController implements AvatarAdapter {
   // -------------------------------------------------------------------------
 
   /**
-   * Play a named gesture (wave, nod, shakeHead, tiltHead, bow).
-   * Returns a Promise that resolves when the animation finishes.
+   * Play a named gesture. Checks user-saved gestures first (from the
+   * AnimationLab) then falls back to `GESTURE_LIBRARY`. Returns a
+   * Promise that resolves when the animation finishes.
    */
   playGesture(name: string): Promise<void> {
-    const def = GESTURE_LIBRARY[name];
+    const def = this.userGestures.get(name) ?? GESTURE_LIBRARY[name];
     if (!def) {
       return Promise.reject(new Error(`Unknown gesture: ${name}`));
     }
-    return this.gesturePlayer.play(def);
+    // One-shot gestures pause the idle loop so they don't fight for the
+    // same bones. Idle resumes on finish.
+    this.idleSuppressed = true;
+    const p = this.gesturePlayer.play(def);
+    void p.finally(() => {
+      this.idleSuppressed = false;
+      this.kickIdleLoop();
+    });
+    return p;
   }
 
   /** Play an arbitrary gesture definition (used by the Gesture Editor). */
   playGestureDef(def: GestureDefinition): Promise<void> {
     return this.gesturePlayer.play(def);
+  }
+
+  /**
+   * Register (or overwrite) a user-saved gesture so it becomes playable
+   * by name everywhere. Called at app boot after fetching `/lab/gestures`
+   * and again after each successful save in AnimationLab.
+   */
+  registerGesture(name: string, def: GestureDefinition): void {
+    this.userGestures.set(name, def);
+  }
+
+  /** Bulk registration — used on app boot. */
+  registerGestures(defs: Record<string, GestureDefinition>): void {
+    for (const [name, def] of Object.entries(defs)) {
+      this.userGestures.set(name, def);
+    }
+  }
+
+  /** Return the merged list (user-saved + library), deduped. */
+  getAvailableGestureNames(): string[] {
+    const set = new Set<string>(Object.keys(GESTURE_LIBRARY));
+    for (const name of this.userGestures.keys()) set.add(name);
+    return [...set].sort();
+  }
+
+  // -------------------------------------------------------------------------
+  // Idle loop — runs a chosen gesture continuously while the avatar is
+  // otherwise idle (no TTS, no one-shot gesture). Resumes automatically
+  // when `setSpeaking(false)` or a one-shot finishes.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Set (or clear with null) the idle gesture. If the name is not
+   * registered the call is silently ignored — that way the lab can set
+   * it optimistically before the controller has fetched the library.
+   */
+  setIdleGesture(name: string | null): void {
+    if (this.idleGestureName === name) return;
+    this.idleGestureName = name;
+    if (!name) {
+      // Loop exits naturally on its next iteration check.
+      return;
+    }
+    this.kickIdleLoop();
+  }
+
+  getIdleGesture(): string | null {
+    return this.idleGestureName;
+  }
+
+  private async kickIdleLoop(): Promise<void> {
+    if (this.idleLoopActive) return;
+    this.idleLoopActive = true;
+    try {
+      while (
+        !this.disposed &&
+        this.idleGestureName !== null &&
+        !this.idleSuppressed &&
+        !this._isSpeaking
+      ) {
+        const def =
+          this.userGestures.get(this.idleGestureName) ??
+          GESTURE_LIBRARY[this.idleGestureName];
+        if (!def) break;
+        try {
+          await this.gesturePlayer.play(def);
+        } catch {
+          // Defensive — don't let a single failure kill the loop.
+          break;
+        }
+      }
+    } finally {
+      this.idleLoopActive = false;
+    }
   }
 
   // -------------------------------------------------------------------------

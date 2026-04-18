@@ -5,6 +5,7 @@ import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
 import { VrmAvatar } from './avatar/VrmAvatar';
 import type { VrmAvatarController } from './avatar/VrmAvatarController';
+import type { GestureDefinition } from './avatar/gestures';
 import { MicCapture, PCMPlayback } from './audio';
 import { warmSharedAudioContext } from './audio/sharedContext';
 import { ApprovalPanel } from './tools';
@@ -754,9 +755,25 @@ export function App(): JSX.Element {
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
     avatarCtrlRef.current = controller;
     const pb = playbackRef.current;
-    if (!pb) return;
-    const analyser = pb.getAnalyser((a) => controller.attachAudioAnalyser(a));
-    if (analyser) controller.attachAudioAnalyser(analyser);
+    if (pb) {
+      const analyser = pb.getAnalyser((a) => controller.attachAudioAnalyser(a));
+      if (analyser) controller.attachAudioAnalyser(analyser);
+    }
+    // Pull user-saved gestures from the backend so `playGesture(name)` can
+    // reach them (chat reactions, keyboard triggers, activeAppReactor).
+    void fetch(`${API_BASE}/lab/gestures`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: Record<string, GestureDefinition> | null | undefined) => {
+        if (data && typeof data === 'object') {
+          controller.registerGestures?.(data);
+        }
+        // Restore persisted idle choice if any.
+        try {
+          const idle = localStorage.getItem('seraphine.lab.idleGesture');
+          if (idle) controller.setIdleGesture?.(idle);
+        } catch { /* */ }
+      })
+      .catch(() => { /* backend offline — library gestures still work */ });
   }, []);
 
   /** When running inside the Tauri desktop shell we prefer the embedded
@@ -1267,98 +1284,114 @@ export function App(): JSX.Element {
         </aside>
 
         <section className="chat">
+          {/*
+            Chat is the persistent base layer: always mounted so the WS
+            subscription, in-flight streaming turns, composer draft, and
+            scrollback survive switching to other views. Hidden with CSS
+            (visibility + pointer-events) when another view is active so
+            we don't lose unmount animations on other views.
+          */}
+          <div
+            className={`chat-layer${activeView === 'chat' ? '' : ' chat-layer--hidden'}`}
+            aria-hidden={activeView !== 'chat'}
+          >
+            {wsRef.current && (
+              <ChatView
+                ws={wsRef.current}
+                status={status}
+                speak={speak}
+                think={think}
+                talking={talking}
+                onTalkStart={handleTalkStart}
+                onTalkEnd={handleTalkEnd}
+                onTalkCancel={handleTalkCancel}
+                avatarController={avatarCtrlRef}
+                initialText={pendingComposerText}
+                initialAutoSend={pendingComposerAutoSend}
+                onInitialTextConsumed={() => {
+                  setPendingComposerText(null);
+                  setPendingComposerAutoSend(false);
+                }}
+                realtimeActive={realtimeActive}
+                onRealtimeToggle={() => {
+                  setRealtimeActive((prev) => {
+                    const next = !prev;
+                    if (!next) {
+                      // Leaving realtime: ensure any in-flight TTS is stopped
+                      // and the backend drops the outstanding turn.
+                      playbackRef.current?.stop();
+                      wsRef.current?.send({ type: 'interrupt' });
+                    } else {
+                      // Entering realtime: ensure AudioContext is primed
+                      // from the click gesture.
+                      warmSharedAudioContext();
+                      playbackRef.current?.ensureCtx();
+                    }
+                    return next;
+                  });
+                }}
+                playback={playbackRef.current}
+                manualMute={manualMute}
+                onManualMuteToggle={() => setManualMute((v) => !v)}
+              />
+            )}
+          </div>
+
+          {/* Other views overlay on top of the chat layer. */}
           <AnimatePresence mode="wait" initial={false}>
-            <ViewTransition key={activeView} transitionKey={activeView}>
-              {activeView === 'dashboard' && (
-                <DashboardView
-                  onNavigate={(view) => setActiveView(view as ActiveView)}
-                  connected={connected}
-                />
-              )}
-              {activeView === 'finance' && (
-                <FinanceDashboard onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'calendar' && (
-                <CalendarView
-                  onBack={() => setActiveView('chat')}
-                  onNavigateToTask={handleNavigateToTask}
-                />
-              )}
-              {activeView === 'whatsapp' && (
-                <WhatsAppPanel
-                  messages={whatsappMessages}
-                  onBack={() => setActiveView('chat')}
-                  onNavigate={(view) => setActiveView(view)}
-                />
-              )}
-              {activeView === 'memory' && (
-                <MemoryView onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'tasks' && (
-                <TasksView
-                  onBack={() => setActiveView('chat')}
-                  focusId={focusedTaskId}
-                />
-              )}
-              {activeView === 'habits' && (
-                <HabitsView onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'insights' && (
-                <InsightsView onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'notes' && (
-                <NotesView
-                  onBack={() => setActiveView('chat')}
-                  initialNoteId={initialNoteId}
-                />
-              )}
-              {activeView === 'images' && (
-                <ImagesView onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'flashcards' && (
-                <FlashcardsView onBack={() => setActiveView('chat')} />
-              )}
-              {activeView === 'chat' && wsRef.current && (
-                <ChatView
-                  ws={wsRef.current}
-                  status={status}
-                  speak={speak}
-                  think={think}
-                  talking={talking}
-                  onTalkStart={handleTalkStart}
-                  onTalkEnd={handleTalkEnd}
-                  onTalkCancel={handleTalkCancel}
-                  avatarController={avatarCtrlRef}
-                  initialText={pendingComposerText}
-                  initialAutoSend={pendingComposerAutoSend}
-                  onInitialTextConsumed={() => {
-                    setPendingComposerText(null);
-                    setPendingComposerAutoSend(false);
-                  }}
-                  realtimeActive={realtimeActive}
-                  onRealtimeToggle={() => {
-                    setRealtimeActive((prev) => {
-                      const next = !prev;
-                      if (!next) {
-                        // Leaving realtime: ensure any in-flight TTS is stopped
-                        // and the backend drops the outstanding turn.
-                        playbackRef.current?.stop();
-                        wsRef.current?.send({ type: 'interrupt' });
-                      } else {
-                        // Entering realtime: ensure AudioContext is primed
-                        // from the click gesture.
-                        warmSharedAudioContext();
-                        playbackRef.current?.ensureCtx();
-                      }
-                      return next;
-                    });
-                  }}
-                  playback={playbackRef.current}
-                  manualMute={manualMute}
-                  onManualMuteToggle={() => setManualMute((v) => !v)}
-                />
-              )}
-            </ViewTransition>
+            {activeView !== 'chat' && (
+              <ViewTransition key={activeView} transitionKey={activeView} className="view-overlay">
+                {activeView === 'dashboard' && (
+                  <DashboardView
+                    onNavigate={(view) => setActiveView(view as ActiveView)}
+                    connected={connected}
+                  />
+                )}
+                {activeView === 'finance' && (
+                  <FinanceDashboard onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'calendar' && (
+                  <CalendarView
+                    onBack={() => setActiveView('chat')}
+                    onNavigateToTask={handleNavigateToTask}
+                  />
+                )}
+                {activeView === 'whatsapp' && (
+                  <WhatsAppPanel
+                    messages={whatsappMessages}
+                    onBack={() => setActiveView('chat')}
+                    onNavigate={(view) => setActiveView(view)}
+                  />
+                )}
+                {activeView === 'memory' && (
+                  <MemoryView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'tasks' && (
+                  <TasksView
+                    onBack={() => setActiveView('chat')}
+                    focusId={focusedTaskId}
+                  />
+                )}
+                {activeView === 'habits' && (
+                  <HabitsView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'insights' && (
+                  <InsightsView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'notes' && (
+                  <NotesView
+                    onBack={() => setActiveView('chat')}
+                    initialNoteId={initialNoteId}
+                  />
+                )}
+                {activeView === 'images' && (
+                  <ImagesView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'flashcards' && (
+                  <FlashcardsView onBack={() => setActiveView('chat')} />
+                )}
+              </ViewTransition>
+            )}
           </AnimatePresence>
         </section>
       </div>

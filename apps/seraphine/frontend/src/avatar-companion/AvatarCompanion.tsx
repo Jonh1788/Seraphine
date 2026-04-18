@@ -7,6 +7,7 @@ import { PCMPlayback } from '../audio/playback';
 import { MicCapture } from '../audio/micCapture';
 import { RealtimeController } from '../realtime';
 import { BubbleLayer, bubbles } from './BubbleLayer';
+import { API_BASE } from '../api';
 
 const DEFAULT_AVATAR =
   localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm';
@@ -145,6 +146,19 @@ export function AvatarCompanion(): JSX.Element {
     pb.getAnalyser((analyser) => ctrl.attachAudioAnalyser(analyser));
     setPlayback(pb);
 
+    // Pull user-saved gestures + persisted idle choice so the companion
+    // window can also play them by name and loop the chosen idle.
+    void fetch(`${API_BASE}/lab/gestures`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: Record<string, any> | null | undefined) => {
+        if (data && typeof data === 'object') ctrl.registerGestures?.(data);
+        try {
+          const idle = localStorage.getItem('seraphine.lab.idleGesture');
+          if (idle) ctrl.setIdleGesture?.(idle);
+        } catch { /* */ }
+      })
+      .catch(() => { /* backend offline */ });
+
     // Open WS — reuse same URL convention
     const wsClient = new SeraphineWS();
     wsRef.current = wsClient;
@@ -156,6 +170,20 @@ export function AvatarCompanion(): JSX.Element {
         return;
       }
       const typed = msg as unknown as { type?: string; [k: string]: unknown };
+      if (typed.type === 'tts_start') {
+        const rate = (typed as { playback_rate?: number }).playback_rate;
+        pb.setPlaybackRate?.(rate && rate !== 1.0 ? rate : 1.0);
+        // Avatar: forward-facing conversational nods while speaking.
+        try { ctrl.setSpeaking?.(true); } catch { /* */ }
+      } else if (typed.type === 'tts_end') {
+        // Flush sub-threshold tail — without this, short utterances
+        // (< 1s of PCM) stay stuck in the accumulator and never play.
+        pb.flushPending?.();
+      } else if (typed.type === 'turn_end') {
+        void pb.flush().catch(() => { /* */ });
+        // Back to free look-around when the turn fully drains.
+        try { ctrl.setSpeaking?.(false); } catch { /* */ }
+      }
       if (typed.type === 'mood') {
         const m = msg as { mood: string; intensity: number; duration_ms: number };
         const amb = (ctrl as any).__ambient;
