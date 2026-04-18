@@ -126,6 +126,15 @@ async def import_facts(request: Request, body: ImportPayload) -> dict[str, Any]:
     return {"imported": imported, "skipped": skipped}
 
 
+@router.post("/decay")
+async def decay_facts(request: Request) -> dict[str, int]:
+    """Run the decay sweep: self-supersede facts whose adjusted confidence
+    dropped below 0.3 due to age without revalidation."""
+    memory = request.app.state.memory
+    n = await memory.decay_facts()
+    return {"superseded": n}
+
+
 @router.post("/recall")
 async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory

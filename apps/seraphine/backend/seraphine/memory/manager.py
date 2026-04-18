@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Protocol
 
@@ -347,9 +347,15 @@ class MemoryManager:
         inserted = 0
         for (text, confidence), vec in zip(candidates, cand_vecs):
             duplicate = False
-            for ev in existing_vecs:
+            for idx, ev in enumerate(existing_vecs):
                 if _cosine(vec, ev) >= REFLECTION_SIM_THRESHOLD:
                     duplicate = True
+                    # Revalidated — bump last_used_at on the matching fact.
+                    if idx < len(existing):
+                        try:
+                            await self.store.bump_fact_used(existing[idx].id)
+                        except Exception:  # pragma: no cover
+                            pass
                     break
             if duplicate:
                 continue
@@ -375,6 +381,47 @@ class MemoryManager:
         except Exception:  # pragma: no cover
             pass
         return inserted
+
+    async def decay_facts(self) -> int:
+        """Exponentially decay facts by age since last use/creation.
+
+        Facts whose adjusted confidence drops below 0.3 are self-superseded
+        (soft-deleted) so they stop appearing in active lists but remain
+        auditable.  Returns count of superseded facts.
+        """
+        facts = await self.store.list_facts_for_decay()
+        now = datetime.now(timezone.utc)
+        superseded = 0
+        for f in facts:
+            # Use last_used_at if available, else fall back to created_at.
+            ref = f.last_used_at or f.created_at
+            try:
+                ref_dt = datetime.fromisoformat(ref)
+            except (ValueError, TypeError):
+                continue
+            # Make timezone-aware if naive.
+            if ref_dt.tzinfo is None:
+                ref_dt = ref_dt.replace(tzinfo=timezone.utc)
+            age_days = (now - ref_dt).total_seconds() / 86400
+            adjusted = f.confidence * math.exp(-age_days / 90)
+            if adjusted < 0.3:
+                await self.store.supersede_fact(f.id, f.id)
+                self._fact_embedding_cache.pop(f.id, None)
+                try:
+                    await self.store.add_event(
+                        event_type="decay_superseded",
+                        summary=f"decay: fact {f.id[:8]}… (adj={adjusted:.3f})",
+                        source="memory",
+                        metadata={
+                            "fact_id": f.id,
+                            "age_days": round(age_days, 1),
+                            "adjusted_confidence": round(adjusted, 4),
+                        },
+                    )
+                except Exception:  # pragma: no cover
+                    pass
+                superseded += 1
+        return superseded
 
 
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)

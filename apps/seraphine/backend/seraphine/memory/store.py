@@ -38,10 +38,11 @@ class ToolAudit(BaseModel):
 class Fact(BaseModel):
     id: str
     text: str
-    source: Literal["explicit", "reflection", "user_taught"]
+    source: Literal["explicit", "reflection", "user_taught", "observation"]
     confidence: float
     created_at: str
     superseded_by: str | None = None
+    last_used_at: str | None = None
 
 
 def _now() -> str:
@@ -346,6 +347,14 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
     # gives push its own module.
 
 
+def _seraphine_facts_decay_migrator(conn: sqlite3.Connection) -> None:
+    """Add last_used_at column to facts (idempotent ALTER)."""
+    try:
+        conn.execute("ALTER TABLE facts ADD COLUMN last_used_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+
 class MemoryStore(Store):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
@@ -353,6 +362,7 @@ class MemoryStore(Store):
         # extractions will register their own and remove their CREATE
         # TABLE block from `_seraphine_core_migrator`.
         self.register_migrator("seraphine_core", _seraphine_core_migrator)
+        self.register_migrator("seraphine_facts_decay", _seraphine_facts_decay_migrator)
 
     async def create_conversation(self) -> str:
         conv_id = str(uuid.uuid4())
@@ -591,6 +601,41 @@ class MemoryStore(Store):
         await asyncio.to_thread(_work)
         return fact
 
+    async def bump_fact_used(self, fact_id: str) -> None:
+        """Touch last_used_at to signal the fact was revalidated."""
+        now = _now()
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE facts SET last_used_at = ? WHERE id = ?",
+                    (now, fact_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def list_facts_for_decay(self) -> list[Fact]:
+        """Return all active (non-superseded) facts for the decay job."""
+
+        def _work() -> list[Fact]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at"
+                    " FROM facts WHERE superseded_by IS NULL"
+                    " ORDER BY created_at ASC",
+                ).fetchall()
+            return [
+                Fact(
+                    id=r[0], text=r[1], source=r[2],
+                    confidence=r[3], created_at=r[4],
+                    superseded_by=r[5], last_used_at=r[6],
+                )
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
     async def list_facts(
         self, *, limit: int = 50, include_superseded: bool = False
     ) -> list[Fact]:
@@ -598,13 +643,15 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 if include_superseded:
                     rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at, superseded_by"
+                        "SELECT id, text, source, confidence, created_at,"
+                        " superseded_by, last_used_at"
                         " FROM facts ORDER BY created_at DESC LIMIT ?",
                         (limit,),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at, superseded_by"
+                        "SELECT id, text, source, confidence, created_at,"
+                        " superseded_by, last_used_at"
                         " FROM facts WHERE superseded_by IS NULL"
                         " ORDER BY created_at DESC LIMIT ?",
                         (limit,),
@@ -617,6 +664,7 @@ class MemoryStore(Store):
                     confidence=r[3],
                     created_at=r[4],
                     superseded_by=r[5],
+                    last_used_at=r[6],
                 )
                 for r in rows
             ]
@@ -652,7 +700,8 @@ class MemoryStore(Store):
                     vals,
                 )
                 row = conn.execute(
-                    "SELECT id, text, source, confidence, created_at, superseded_by"
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -661,6 +710,7 @@ class MemoryStore(Store):
             return Fact(
                 id=row[0], text=row[1], source=row[2],
                 confidence=row[3], created_at=row[4], superseded_by=row[5],
+                last_used_at=row[6],
             )
 
         return await asyncio.to_thread(_work)
@@ -929,7 +979,8 @@ class MemoryStore(Store):
         def _work() -> Fact | None:
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT id, text, source, confidence, created_at, superseded_by"
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -942,6 +993,7 @@ class MemoryStore(Store):
                 confidence=row[3],
                 created_at=row[4],
                 superseded_by=row[5],
+                last_used_at=row[6],
             )
 
         return await asyncio.to_thread(_work)
