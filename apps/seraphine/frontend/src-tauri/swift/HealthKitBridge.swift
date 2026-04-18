@@ -196,26 +196,52 @@ private func querySleepMinutes(start: Date, end: Date) -> Double? {
     guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
     let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
     let sem = DispatchSemaphore(value: 0)
-    var total: TimeInterval = 0
-    var hadAny = false
+    var intervals: [(Date, Date)] = []
     let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
     let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, _ in
         defer { sem.signal() }
         guard let arr = samples as? [HKCategorySample], !arr.isEmpty else { return }
-        hadAny = true
         for s in arr {
-            // Count any "asleep" value (iOS 16+ split REM/core/deep, older
-            // systems just have .asleep). HKCategoryValueSleepAnalysis
-            // raw values: 0=inBed, 1=asleep, 3=awake, 4=core, 5=deep, 6=rem.
+            // HKCategoryValueSleepAnalysis raw values (iOS 16+):
+            //   0 = .inBed             ← not sleeping, skip
+            //   1 = .asleepUnspecified ← legacy / iPhone-only tracking
+            //   2 = .awake             ← not sleeping, skip
+            //   3 = .asleepCore        ← ~40-60% of a typical night
+            //   4 = .asleepDeep
+            //   5 = .asleepREM
+            //
+            // The previous implementation dropped value 3 (core) and
+            // counted a nonexistent value 6, so total came out to ~30-40%
+            // of the real sleep duration (Apple Health shows 8h → bridge
+            // reported 3h).
             let v = s.value
-            if v == 1 || v == 4 || v == 5 || v == 6 {
-                total += s.endDate.timeIntervalSince(s.startDate)
+            if v == 1 || v == 3 || v == 4 || v == 5 {
+                intervals.append((s.startDate, s.endDate))
             }
         }
     }
     healthStore.execute(query)
     sem.wait()
-    return hadAny ? total / 60.0 : nil
+    if intervals.isEmpty { return nil }
+
+    // Merge overlapping intervals before summing so an older unified
+    // `.asleepUnspecified` sample plus the newer `.asleepCore/Deep/REM`
+    // stages covering the same night don't double-count.
+    intervals.sort { $0.0 < $1.0 }
+    var merged: [(Date, Date)] = [intervals[0]]
+    for (s, e) in intervals.dropFirst() {
+        let (ls, le) = merged[merged.count - 1]
+        if s <= le {
+            merged[merged.count - 1] = (ls, max(le, e))
+        } else {
+            merged.append((s, e))
+        }
+    }
+    var total: TimeInterval = 0
+    for (s, e) in merged {
+        total += e.timeIntervalSince(s)
+    }
+    return total / 60.0
 }
 
 private struct WorkoutDTO: Encodable {
