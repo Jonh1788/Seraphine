@@ -93,6 +93,13 @@ _ASSISTANT_INSIGHTS_PROMPT = (
     "If nothing qualifies, return {\"facts\": []}."
 )
 
+_CONTRADICTION_PROMPT = (
+    "Given pairs of (existing_fact, new_fact), decide for each pair whether"
+    " new_fact CONTRADICTS existing_fact (updates its value). Return STRICT"
+    ' JSON: {"contradictions": [{"existing_id": "...", "new_index": N,'
+    ' "reason": "..."}]}. If none contradict, return {"contradictions": []}.'
+)
+
 # Greeting/ack prefixes that disqualify assistant turns from observation mining.
 _ASSISTANT_SKIP_PREFIXES = (
     "ok", "okay", "certo", "entend", "claro", "sure", "got it",
@@ -566,13 +573,13 @@ class MemoryManager:
         existing_vecs: list[list[float]],
         *,
         confidence_cap: float | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, list[tuple[Fact, list[float]]]]:
         """Run one LLM extraction pass and dedup+persist the results.
 
         Mutates ``existing_vecs`` in-place (appends new vectors) so the
         next pass sees facts from this one for dedup.
 
-        Returns (inserted, candidate_count).
+        Returns (inserted, candidate_count, [(fact, vec), ...] of inserted).
         """
         assert self.llm is not None
         excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in turns)
@@ -587,27 +594,28 @@ class MemoryManager:
                     accumulated.append(tok.text)
         except Exception as e:
             logger.warning("reflect(%s): llm chat failed: %s", source, e)
-            return 0, 0
+            return 0, 0, []
 
         raw = "".join(accumulated).strip()
         candidates = _parse_facts_json(raw)
         if not candidates:
-            return 0, 0
+            return 0, 0, []
 
         candidates = [
             c for c in candidates if c[1] >= REFLECTION_CONFIDENCE_THRESHOLD
         ]
         if not candidates:
-            return 0, len(candidates)
+            return 0, len(candidates), []
 
         try:
             cand_vecs = await self.embeddings.embed([c[0] for c in candidates])
         except Exception as e:
             logger.warning("reflect(%s): embed candidates failed: %s", source, e)
             await self._log_warning(f"reflect.embed_candidates.{source}", e)
-            return 0, len(candidates)
+            return 0, len(candidates), []
 
         inserted = 0
+        inserted_facts: list[tuple[Fact, list[float]]] = []
         for (text, confidence), vec in zip(candidates, cand_vecs):
             if confidence_cap is not None:
                 confidence = min(confidence, confidence_cap)
@@ -634,8 +642,91 @@ class MemoryManager:
             except Exception:  # pragma: no cover
                 pass
             existing_vecs.append(vec)
+            inserted_facts.append((fact, vec))
             inserted += 1
-        return inserted, len(candidates)
+        return inserted, len(candidates), inserted_facts
+
+    async def _detect_contradictions(
+        self,
+        new_facts: list[tuple[Fact, list[float]]],
+        existing: list[Fact],
+    ) -> None:
+        """Check whether any newly inserted fact contradicts an existing one.
+
+        Uses cosine similarity to find candidate pairs (in the "related
+        but not paraphrase" band) then asks the LLM to confirm. Confirmed
+        contradictions result in the old fact being superseded by the new.
+
+        Protected by try/except — a failure here must not break reflect().
+        """
+        if self.llm is None:
+            return
+        try:
+            # Build candidate pairs: new_fact vs existing_fact where
+            # cosine is in [0.5, REFLECTION_SIM_THRESHOLD).
+            pairs: list[tuple[int, str, str, str]] = []  # (new_idx, exist_id, new_text, exist_text)
+            for new_idx, (nf, nvec) in enumerate(new_facts):
+                for ef in existing:
+                    evec = self._fact_embedding_cache.get(ef.id)
+                    if evec is None:
+                        continue
+                    cos = _cosine(nvec, evec)
+                    if 0.5 <= cos < REFLECTION_SIM_THRESHOLD:
+                        pairs.append((new_idx, ef.id, nf.text, ef.text))
+
+            if not pairs:
+                return
+
+            # Build prompt for the LLM.
+            pair_lines: list[str] = []
+            for i, (new_idx, exist_id, new_text, exist_text) in enumerate(pairs):
+                pair_lines.append(
+                    f"{i}. existing_id={exist_id}: \"{exist_text}\" vs "
+                    f"new_index={new_idx}: \"{new_text}\""
+                )
+            user_content = "\n".join(pair_lines)
+            messages = [
+                ChatMessage(role="system", content=_CONTRADICTION_PROMPT),
+                ChatMessage(role="user", content=user_content),
+            ]
+            accumulated: list[str] = []
+            async for tok in self.llm.chat(messages, temperature=0.1):
+                if tok.text:
+                    accumulated.append(tok.text)
+
+            raw = "".join(accumulated).strip()
+            parsed = _parse_contradictions_json(raw)
+            if not parsed:
+                return
+
+            # Map new_index -> inserted Fact for supersede.
+            new_by_idx = {i: f for i, (f, _) in enumerate(new_facts)}
+            superseded_count = 0
+            for item in parsed:
+                exist_id = item.get("existing_id")
+                new_idx = item.get("new_index")
+                if exist_id is None or new_idx is None:
+                    continue
+                new_fact = new_by_idx.get(new_idx)
+                if new_fact is None:
+                    continue
+                await self.store.supersede_fact(exist_id, new_fact.id)
+                # Remove superseded fact from embedding cache.
+                self._fact_embedding_cache.pop(exist_id, None)
+                superseded_count += 1
+
+            if superseded_count > 0:
+                await self.store.add_event(
+                    event_type="contradiction_supersede",
+                    summary=f"contradiction: {superseded_count} superseded",
+                    source="memory",
+                    metadata={
+                        "pairs": len(pairs),
+                        "superseded": superseded_count,
+                    },
+                )
+        except Exception as e:
+            logger.warning("contradiction detection failed: %s", e)
 
     async def reflect(self) -> int:
         """Pull recent turns, ask the LLM to extract durable facts, dedup
@@ -706,25 +797,37 @@ class MemoryManager:
         inserted_reflection = 0
         inserted_observation = 0
         candidates_total = 0
+        all_inserted: list[tuple[Fact, list[float]]] = []
 
         # Pass 1: user turns
         if len(user_turns) >= 2:
-            n, c = await self._reflect_pass(
+            n, c, facts_vecs = await self._reflect_pass(
                 user_turns, _FACTS_PROMPT, "reflection",
                 existing, existing_vecs,
             )
             inserted_reflection = n
             candidates_total += c
+            all_inserted.extend(facts_vecs)
 
         # Pass 2: assistant turns
         if assistant_turns:
-            n, c = await self._reflect_pass(
+            n, c, facts_vecs = await self._reflect_pass(
                 assistant_turns, _ASSISTANT_INSIGHTS_PROMPT, "observation",
                 existing, existing_vecs,
                 confidence_cap=0.7,
             )
             inserted_observation = n
             candidates_total += c
+            all_inserted.extend(facts_vecs)
+
+        # --- contradiction detection ---
+        # Compare newly inserted facts against pre-existing ones. Pairs
+        # with cosine in [0.5, REFLECTION_SIM_THRESHOLD) are candidates
+        # for semantic contradictions (not paraphrases, not unrelated).
+        if all_inserted and existing:
+            await self._detect_contradictions(
+                all_inserted, existing,
+            )
 
         inserted_total = inserted_reflection + inserted_observation
 
@@ -841,3 +944,25 @@ def _parse_facts_json(raw: str) -> list[tuple[str, float]]:
             conf = max(0.0, min(1.0, conf))
             out.append((s, conf))
     return out
+
+
+def _parse_contradictions_json(raw: str) -> list[dict[str, Any]]:
+    """Extract the ``contradictions`` list from an LLM JSON response."""
+    if not raw:
+        return []
+    match = _JSON_OBJ_RE.search(raw)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return []
+    items = data.get("contradictions") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [
+        item for item in items
+        if isinstance(item, dict)
+        and "existing_id" in item
+        and "new_index" in item
+    ]
