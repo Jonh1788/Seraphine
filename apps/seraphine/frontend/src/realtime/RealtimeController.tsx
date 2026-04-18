@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 import type { PCMPlayback } from '../audio/playback';
+import { TauriVpioSession, isTauriVpioAvailable } from '../audio/tauriVpio';
 import { warmSharedAudioContext } from '../audio/sharedContext';
 import { createRealtimeVAD, type RealtimeVAD } from './vad';
 import {
@@ -150,6 +151,7 @@ export function RealtimeController({
   thinkRef.current = think;
 
   const vadRef = useRef<RealtimeVAD | null>(null);
+  const vpioRef = useRef<TauriVpioSession | null>(null);
   const audioStartedRef = useRef<boolean>(false);
   /**
    * Accumulated Float32 frames for the current user utterance. We buffer
@@ -274,6 +276,14 @@ export function RealtimeController({
           endUserSegment();
         }
       }
+      // Detach VPIO sink so subsequent non-realtime playback goes back
+      // through Web Audio, then stop the session.
+      playbackRef.current?.setVpioSink?.(null);
+      if (vpioRef.current) {
+        const session = vpioRef.current;
+        vpioRef.current = null;
+        void session.stop().catch(() => { /* ignore */ });
+      }
       setMicAnalyser(null);
       setState('idle');
       return;
@@ -287,6 +297,31 @@ export function RealtimeController({
 
     (async () => {
       try {
+        // On macOS Tauri, start VPIO first so Apple's AEC owns the mic
+        // AND the speaker output path. Then hand VAD its mic subscription
+        // and point playback at the VPIO sink.
+        let externalMic: TauriVpioSession | undefined;
+        if (isTauriVpioAvailable()) {
+          const session = new TauriVpioSession();
+          try {
+            await session.start();
+            if (cancelled) {
+              // User toggled realtime off while VPIO was starting —
+              // tear down without publishing the session anywhere.
+              void session.stop();
+              return;
+            }
+            vpioRef.current = session;
+            externalMic = session;
+            playbackRef.current?.setVpioSink?.(session);
+          } catch (err) {
+            // VPIO is macOS-only; on Linux/Windows Tauri the command
+            // returns an error. Fall through to cpal-backed mic +
+            // Web Audio playback.
+            console.warn('[realtime] VPIO unavailable, using cpal+WebAudio:', err);
+          }
+        }
+
         const vad = await createRealtimeVAD({
           onSpeechStart: () => {
             const cur = stateRef.current;
@@ -351,7 +386,7 @@ export function RealtimeController({
               setState('listening');
             }
           },
-        });
+        }, externalMic);
         if (cancelled) {
           void vad.stop();
           return;
@@ -368,6 +403,14 @@ export function RealtimeController({
         }
       } catch (err) {
         console.error('[realtime] VAD init failed:', err);
+        // Roll back the VPIO session / sink on VAD failure so we don't
+        // leave the mic engaged with nothing consuming it.
+        playbackRef.current?.setVpioSink?.(null);
+        if (vpioRef.current) {
+          const session = vpioRef.current;
+          vpioRef.current = null;
+          void session.stop().catch(() => { /* ignore */ });
+        }
         if (!cancelled) {
           setError('Nao foi possivel iniciar o modo realtime. Verifique o microfone.');
           setState('idle');

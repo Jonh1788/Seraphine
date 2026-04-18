@@ -1,0 +1,125 @@
+/**
+ * Frontend wrapper around the Rust VoiceProcessingIO audio unit
+ * (`vpio_*` tauri commands). One instance = one mic + speaker session
+ * with Apple's AEC + noise suppression + AGC.
+ *
+ * Used by the realtime voice path only. PTT keeps using cpal because
+ * there's no concurrent playback to cancel, and cpal's code path is
+ * proven. VPIO and cpal can't run simultaneously (they both want the
+ * default input device), so callers must stop one before starting the
+ * other.
+ */
+
+import type { UnlistenFn } from '@tauri-apps/api/event';
+
+type ChunkListener = (pcm: Int16Array) => void;
+type PlaybackListener = (pcm: Int16Array) => void;
+
+/** True if running inside the Tauri desktop shell (`__TAURI_INTERNALS__`). */
+export function isTauriVpioAvailable(): boolean {
+  return typeof (window as unknown as { __TAURI_INTERNALS__?: unknown })
+    .__TAURI_INTERNALS__ !== 'undefined';
+}
+
+export class TauriVpioSession {
+  private listeners = new Set<ChunkListener>();
+  private playbackListeners = new Set<PlaybackListener>();
+  private unlistenMic: UnlistenFn | null = null;
+  private unlistenPlayback: UnlistenFn | null = null;
+  private running = false;
+
+  async start(): Promise<void> {
+    if (this.running) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { listen } = await import('@tauri-apps/api/event');
+    // Subscribe BEFORE invoking start so we don't miss the first chunk.
+    this.unlistenMic = await listen<number[]>('mic-pcm-chunk', (event) => {
+      const arr = event.payload;
+      const pcm = new Int16Array(arr);
+      this.listeners.forEach((cb) => cb(pcm));
+    });
+    // Playback-chunk events fire from the Rust render callback every
+    // ~42 ms with the samples just handed to the speaker. Used by the
+    // PCMPlayback JS analyser to drive lipsync in step with the actual
+    // audio instead of WS arrival time.
+    this.unlistenPlayback = await listen<number[]>('vpio-playback-chunk', (event) => {
+      if (this.playbackListeners.size === 0) return;
+      const arr = event.payload;
+      const pcm = new Int16Array(arr);
+      this.playbackListeners.forEach((cb) => cb(pcm));
+    });
+    try {
+      await invoke('vpio_start');
+    } catch (err) {
+      this.unlistenMic?.();
+      this.unlistenMic = null;
+      this.unlistenPlayback?.();
+      this.unlistenPlayback = null;
+      throw err;
+    }
+    this.running = true;
+    console.log('[vpio] session started — AEC + NS + AGC active');
+  }
+
+  async stop(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('vpio_stop');
+    } catch (err) {
+      console.warn('[vpio] stop failed:', err);
+    }
+    this.unlistenMic?.();
+    this.unlistenMic = null;
+    this.unlistenPlayback?.();
+    this.unlistenPlayback = null;
+    this.listeners.clear();
+    this.playbackListeners.clear();
+    console.log('[vpio] session stopped');
+  }
+
+  onChunk(cb: ChunkListener): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+
+  /** Subscribe to samples at the moment they leave the audio unit for
+   *  the speaker. Payload is i16 @ 24 kHz mono. */
+  onPlaybackChunk(cb: PlaybackListener): () => void {
+    this.playbackListeners.add(cb);
+    return () => {
+      this.playbackListeners.delete(cb);
+    };
+  }
+
+  /** Queue s16le 24 kHz mono PCM for playback through the VPIO output. */
+  async playChunk(pcm: Uint8Array): Promise<void> {
+    if (!this.running) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    try {
+      // Array.from(pcm) converts the Uint8Array to a plain number[] that
+      // Tauri's JSON IPC can serialise as Vec<u8>.
+      await invoke('vpio_play_chunk', { pcm: Array.from(pcm) });
+    } catch (err) {
+      console.warn('[vpio] play_chunk failed:', err);
+    }
+  }
+
+  /** Drop every queued sample (barge-in). */
+  async flushOutput(): Promise<void> {
+    if (!this.running) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('vpio_flush_output');
+    } catch (err) {
+      console.warn('[vpio] flush_output failed:', err);
+    }
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+}

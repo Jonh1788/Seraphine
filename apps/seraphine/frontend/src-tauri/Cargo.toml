@@ -33,14 +33,23 @@ whisper-rs = { version = "0.14", features = ["metal"] }
 dirs = "5"
 base64 = "0.22"
 
-# Desktop-only dependencies — mic capture (cpal), clipboard (arboard),
-# global shortcuts, tray. iOS has its own equivalents via UIKit and
-# requires none of these crates.
+# Desktop-only dependencies — mic capture (cpal for the legacy PTT path;
+# VoiceProcessingIO for realtime with AEC), clipboard, shortcuts, tray.
+# iOS has its own equivalents via UIKit and requires none of these crates.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 cpal = "0.15"
 arboard = "3"
+
+# macOS-only: raw CoreAudio FFI for the VoiceProcessingIO audio unit
+# (Apple AEC + noise suppression + AGC). Used by the realtime voice
+# path so Seraphine's TTS played through VPIO output is cancelled from
+# the mic input before Whisper sees it. cpal is kept for the PTT path
+# (push-to-talk doesn't need AEC since the user isn't hearing TTS
+# simultaneously).
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"
 
 [lib]
 name = "seraphine_desktop_lib"

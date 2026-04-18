@@ -3,8 +3,8 @@
 //! Shipped inside the Seraphine Tauri app so STT works on a signed
 //! release build without any backend process — same idea MacWhisper
 //! uses. Apple Silicon runs the ggml model through Metal and hits
-//! near-MLX speeds (~150-250 ms for a 5 s utterance on an M4 Max with
-//! the q5_1 small model).
+//! near-MLX speeds (~300-600 ms for a 5 s utterance on an M4 Max with
+//! the `large-v3-turbo` FP16 model).
 //!
 //! First use on a machine downloads the model file to the user's
 //! Caches directory (~/Library/Caches/seraphine/models/…) so the app
@@ -26,13 +26,14 @@ use whisper_rs::{
 // Model registry
 // ---------------------------------------------------------------------------
 
-/// Small full-precision multilingual model. 488 MB FP16, good PT-BR.
-/// Versao quantizada (q5_1, 181MB) trocada para FP16 a pedido — perde
-/// alguma velocidade no M4 Max (negligivel em frases curtas) mas
-/// melhora precisao especialmente em sotaques e palavras tecnicas.
-const DEFAULT_MODEL_ID: &str = "ggml-small";
+/// Large-v3 turbo — 1.62 GB FP16. Near-`large-v3` accuracy (WER ~5-7%
+/// em PT-BR, vs ~13% do `small`) com ~6-8x realtime no M4 Max via Metal,
+/// porque tem menos camadas de decoder. Sweet spot pra uso em voz
+/// realtime num laptop Apple Silicon com RAM de sobra. Cache key muda
+/// pro novo filename, entao a primeira execucao re-baixa.
+const DEFAULT_MODEL_ID: &str = "ggml-large-v3-turbo";
 const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 
 // ---------------------------------------------------------------------------
 // Lazy-initialised singleton — load the context once per process.

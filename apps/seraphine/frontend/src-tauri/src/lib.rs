@@ -22,6 +22,8 @@ mod health;
 mod mac_tools;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod voice_io;
 mod whisper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -79,9 +81,14 @@ fn run_desktop() {
 
     tauri::Builder::default()
         .manage(mic::MicState::new())
+        .manage(voice_io::VoiceIoState::new())
         .invoke_handler(tauri::generate_handler![
             mic::start_mic_capture,
             mic::stop_mic_capture,
+            voice_io::vpio_start,
+            voice_io::vpio_stop,
+            voice_io::vpio_play_chunk,
+            voice_io::vpio_flush_output,
             clipboard::read_clipboard,
             health::health_request_authorization,
             health::health_get_today_summary,

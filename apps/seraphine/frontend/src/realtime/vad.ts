@@ -36,6 +36,17 @@ export interface RealtimeVADOptions {
   onMisfire?: () => void;
 }
 
+/**
+ * Pre-started mic source. When provided, the VAD skips its own mic boot
+ * and only subscribes to `onChunk`. Used so the VPIO session (which
+ * already owns the mic for AEC purposes) is the single mic source in
+ * realtime mode — preventing cpal/VPIO from both grabbing the default
+ * input device.
+ */
+export interface ExternalMicSource {
+  onChunk(cb: (pcm: Int16Array) => void): () => void;
+}
+
 export interface RealtimeVAD {
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -65,12 +76,13 @@ export interface RealtimeVAD {
 
 export async function createRealtimeVAD(
   opts: RealtimeVADOptions,
+  externalMic?: ExternalMicSource,
 ): Promise<RealtimeVAD> {
   // Desktop (Tauri): WKWebView doesn't expose getUserMedia, so use our
   // native-capture-based VAD with energy detection instead of Silero.
   if (isTauriMicAvailable()) {
     const { createTauriRealtimeVAD } = await import('./tauriVad');
-    return createTauriRealtimeVAD(opts);
+    return createTauriRealtimeVAD(opts, externalMic);
   }
 
   // Share the AudioContext with mic capture + playback so macOS CoreAudio

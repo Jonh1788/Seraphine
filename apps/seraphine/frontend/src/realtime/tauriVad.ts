@@ -5,8 +5,9 @@
  */
 
 import * as ort from 'onnxruntime-web';
+import { FFTAnalyser } from '../audio/fftAnalyser';
 import { MicCapture } from '../audio/micCapture';
-import type { RealtimeVAD, RealtimeVADOptions } from './vad';
+import type { ExternalMicSource, RealtimeVAD, RealtimeVADOptions } from './vad';
 
 const SAMPLE_RATE = 16000;
 const FRAME_SIZE = 512;                   // Silero legacy uses 512 samples at 16kHz
@@ -37,9 +38,13 @@ function getModel(): Promise<ort.InferenceSession> {
 
 export async function createTauriRealtimeVAD(
   opts: RealtimeVADOptions,
+  externalMic?: ExternalMicSource,
 ): Promise<RealtimeVAD> {
   const session = await getModel();
-  const mic = new MicCapture();
+  // When an external mic is provided (VPIO session), we don't own the
+  // mic lifecycle — just subscribe to its chunks. Otherwise fall back to
+  // our own cpal-backed MicCapture.
+  const mic = externalMic ? null : new MicCapture();
   let listening = false;
   let suspended = false;
   let offChunk: (() => void) | null = null;
@@ -185,9 +190,34 @@ export async function createTauriRealtimeVAD(
     processing = false;
   };
 
+  // JS-side analyser for the realtime waveform. Kept off Web Audio on
+  // purpose — routing the mic PCM through an AudioBufferSource tail caused
+  // static during TTS (audio-thread contention) and echo leakage through
+  // the silent-gain output. Waveform only needs frequencyBinCount +
+  // getByteFrequencyData, both of which this provides.
+  const micAnalyser = new FFTAnalyser(1024);
+
   let accumulator: Float32Array = new Float32Array(0);
+  let chunksLogged = 0;
   const pushChunk = (pcm: Int16Array): void => {
+    if (chunksLogged < 3) {
+      let maxAbs = 0;
+      for (let i = 0; i < pcm.length; i += 1) {
+        const v = pcm[i];
+        const a = v < 0 ? -v : v;
+        if (a > maxAbs) maxAbs = a;
+      }
+      console.log(
+        '[tauri-vad] pcm chunk: len=%d byteLength=%d maxAbs=%d preview=%o',
+        pcm.length,
+        pcm.byteLength,
+        maxAbs,
+        Array.from(pcm.slice(0, 8)),
+      );
+      chunksLogged += 1;
+    }
     const floats = i16ToFloat32(pcm);
+    if (!suspended) micAnalyser.push(floats);
     const merged = new Float32Array(accumulator.length + floats.length);
     merged.set(accumulator, 0);
     merged.set(floats, accumulator.length);
@@ -206,15 +236,22 @@ export async function createTauriRealtimeVAD(
       // Reset LSTM state
       h = new Float32Array(2 * 1 * 64);
       c = new Float32Array(2 * 1 * 64);
-      await mic.start();
-      offChunk = mic.onChunk(pushChunk);
+      micAnalyser.reset();
+      if (mic) {
+        await mic.start();
+        offChunk = mic.onChunk(pushChunk);
+      } else if (externalMic) {
+        offChunk = externalMic.onChunk(pushChunk);
+      }
       listening = true;
     },
     stop: async () => {
       listening = false;
       offChunk?.();
       offChunk = null;
-      mic.stop();
+      // Only stop the mic we own; the external mic's lifecycle is the
+      // caller's responsibility.
+      mic?.stop();
       preBuffer.length = 0;
       utterance = [];
       pending.length = 0;
@@ -222,8 +259,9 @@ export async function createTauriRealtimeVAD(
       inSpeech = false;
       speechFrames = 0;
       silenceFrames = 0;
+      micAnalyser.reset();
     },
-    getAnalyser: () => null,
+    getAnalyser: () => micAnalyser as unknown as AnalyserNode,
     isListening: () => listening,
     suspendForPlayback: () => {
       suspended = true;
