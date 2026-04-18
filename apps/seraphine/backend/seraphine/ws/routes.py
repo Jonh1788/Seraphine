@@ -39,6 +39,12 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB safety cap per utterance
 TTS_FIRST_CHUNK_MIN_CHARS = 40
 TTS_CHUNK_MIN_CHARS = 200
 
+# Maximum time to wait for the speech worker to finish streaming TTS
+# before sending turn_end anyway.  Prevents indefinite hangs when TTS
+# is stuck, while still ensuring correct event ordering under normal
+# conditions (tts_start → chunks → tts_end → turn_end).
+SPEAK_DONE_TIMEOUT_S = 60.0
+
 
 class PongMessage(BaseModel):
     type: str = "pong"
@@ -193,12 +199,18 @@ async def _speech_worker(
             done.set()
             return
         except Exception as e:
+            # tts_end delivery failure is swallowed by design (best-effort
+            # on a failing WS); done.set() below still fires to unblock
+            # _drive_turn / audio_end callers awaiting speak_done.
             logger.warning("speech worker TTS failed: %s", e)
-        finally:
-            done.set()
 
         # Check if the queue is empty — if so, close the stream.
         # Use a tiny sleep to let any just-enqueued item land.
+        #
+        # IMPORTANT: done.set() is deferred until AFTER tts_end is sent
+        # so that callers awaiting speak_done.wait() are guaranteed that
+        # tts_end has already been delivered to the client.  This ensures
+        # the correct event order: tts_start → chunks → tts_end → turn_end.
         await asyncio.sleep(0.05)
         if queue.empty():
             if streaming:
@@ -207,6 +219,12 @@ async def _speech_worker(
                 except Exception:
                     pass
                 streaming = False
+            done.set()
+        else:
+            # More items queued — the stream stays open. Signal this
+            # item's done event so intermediate waiters don't block,
+            # but the *last* item's done will fire after tts_end above.
+            done.set()
 
 
 async def _speak_full(
@@ -856,6 +874,27 @@ async def conversation_ws(ws: WebSocket) -> None:
                             # state. Drop any buffered tokens.
                             final_turn_id = getattr(event, "turn_id", final_turn_id)
                             sentence_buf = ""
+
+                        # Ensure correct event ordering for voice turns:
+                        # tts_start → binary chunks → tts_end → turn_end.
+                        # Without this wait, turn_end races ahead of the
+                        # speech worker which is still streaming audio.
+                        if etype == "turn_end" and speak and speak_done is not None:
+                            try:
+                                await asyncio.wait_for(speak_done.wait(), timeout=SPEAK_DONE_TIMEOUT_S)
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "speak_done timed out after %.0fs before turn_end "
+                                    "(turn=%s, conv=%s) — sending turn_end anyway",
+                                    SPEAK_DONE_TIMEOUT_S,
+                                    final_turn_id,
+                                    conv_id,
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as e:
+                                logger.warning("speak_done wait error: %s", e)
+
                         await ws.send_json(event.model_dump())
 
                 turn_task = asyncio.create_task(_drive_turn())
@@ -980,6 +1019,25 @@ async def conversation_ws(ws: WebSocket) -> None:
                                     ws, cleaned, audio_final_turn_id or ""
                                 )
                             audio_sentence_buf = ""
+                        # Ensure correct event ordering for audio turns:
+                        # tts_start → chunks → tts_end → turn_end.
+                        # Without this wait, turn_end races ahead of the
+                        # speech worker which is still streaming audio.
+                        if audio_speak_done is not None:
+                            try:
+                                await asyncio.wait_for(audio_speak_done.wait(), timeout=SPEAK_DONE_TIMEOUT_S)
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "audio speak_done timed out after %.0fs before turn_end "
+                                    "(turn=%s, conv=%s) — sending turn_end anyway",
+                                    SPEAK_DONE_TIMEOUT_S,
+                                    audio_final_turn_id,
+                                    conv_id,
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as e:
+                                logger.warning("audio speak_done wait error: %s", e)
                         await ws.send_json(event.model_dump())
                         continue
                     if isinstance(event, AudioErrorEvent):

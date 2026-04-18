@@ -52,8 +52,11 @@ def test_ws_user_message_streams(tmp_path: Path) -> None:
 
 
 def test_ws_user_message_speak(tmp_path: Path) -> None:
-    """When `speak: true` is sent, the WS layer should follow turn_end with
-    tts_start, one or more binary PCM frames, and tts_end."""
+    """When `speak: true` is sent, the correct event ordering is:
+    tts_start → binary PCM chunks → tts_end → turn_end.
+    turn_end is deferred until after the speech worker finishes."""
+    # NOTE: This test imports llm_adapters which may not be installed in every
+    # local venv.  It runs in CI where the full dependency set is available.
     with TestClient(app) as client:
         store = MemoryStore(tmp_path / "speak.sqlite")
         import asyncio
@@ -65,9 +68,10 @@ def test_ws_user_message_speak(tmp_path: Path) -> None:
         with client.websocket_connect("/ws/conversation") as ws:
             ws.send_json({"type": "user_message", "content": "oi", "speak": True})
 
-            saw_turn_end = False
+            order: list[str] = []
             saw_tts_start = False
             saw_tts_end = False
+            saw_turn_end = False
             binary_frames = 0
             tts_turn_id: str | None = None
 
@@ -78,22 +82,28 @@ def test_ws_user_message_speak(tmp_path: Path) -> None:
 
                     obj = _json.loads(msg["text"])
                     t = obj.get("type")
-                    if t == "turn_end":
-                        saw_turn_end = True
-                        tts_turn_id = obj.get("turn_id")
-                    elif t == "tts_start":
+                    if t == "tts_start":
                         saw_tts_start = True
-                        assert obj.get("turn_id") == tts_turn_id
+                        tts_turn_id = obj.get("turn_id")
+                        order.append("tts_start")
                         assert obj.get("sample_rate") == 24000
                     elif t == "tts_end":
                         saw_tts_end = True
                         assert obj.get("turn_id") == tts_turn_id
+                        order.append("tts_end")
+                    elif t == "turn_end":
+                        saw_turn_end = True
+                        assert obj.get("turn_id") == tts_turn_id
+                        order.append("turn_end")
                         break
                 elif "bytes" in msg and msg["bytes"] is not None:
                     binary_frames += 1
 
-    assert saw_turn_end and saw_tts_start and saw_tts_end
+    assert saw_tts_start and saw_tts_end and saw_turn_end
     assert binary_frames >= 1
+    # Core invariant: tts_start and tts_end must both precede turn_end.
+    assert order.index("tts_start") < order.index("turn_end"), f"bad ordering: {order}"
+    assert order.index("tts_end") < order.index("turn_end"), f"bad ordering: {order}"
 
 
 class MultiSentenceLLM:
