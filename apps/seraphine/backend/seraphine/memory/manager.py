@@ -643,6 +643,10 @@ class MemoryManager:
         the survivors. Returns the number of new facts inserted.
         Returns 0 (no-op) if no llm is wired or there is too little signal.
 
+        Uses an incremental cursor so that successive calls only process
+        turns added since the last successful reflect — avoids re-reading
+        the same 97 turns on every 3-turn tick.
+
         Runs two passes:
           1. User turns  -> source="reflection" (no confidence cap)
           2. Assistant turns -> source="observation" (confidence capped at 0.7)
@@ -657,6 +661,15 @@ class MemoryManager:
             return 0
         if len(recent) < REFLECTION_MIN_TURNS:
             return 0
+
+        # --- incremental cursor: only process turns newer than last reflect ---
+        cursor = await self.store.get_reflect_cursor(None)
+        if cursor is not None:
+            cursor_updated = cursor["updated_at"]
+            # Keep only turns created strictly after the cursor timestamp.
+            recent = [t for t in recent if t.created_at > cursor_updated]
+            if not recent:
+                return 0
 
         # Filter down to signal-bearing turns per role.
         user_turns = [t for t in recent if _is_signal_turn(t.role, t.content)]
@@ -714,6 +727,16 @@ class MemoryManager:
             candidates_total += c
 
         inserted_total = inserted_reflection + inserted_observation
+
+        # Advance the global reflect cursor to the most recent turn processed,
+        # so the next reflect() skips everything up to this point.
+        if recent:
+            last_turn = recent[-1]  # turns are in chronological order
+            try:
+                await self.store.set_reflect_cursor(None, last_turn.id)
+            except Exception:  # pragma: no cover
+                pass
+
         try:
             await self.store.add_event(
                 event_type="reflect_success",

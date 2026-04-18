@@ -383,6 +383,19 @@ def _seraphine_fts5_migrator(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO turns_fts(turns_fts) VALUES ('rebuild')")
 
 
+def _seraphine_reflect_cursor_migrator(conn: sqlite3.Connection) -> None:
+    """Track the last turn processed by reflect() to avoid re-reading."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS reflect_cursor (
+          conversation_id TEXT PRIMARY KEY,
+          last_turn_id    TEXT NOT NULL,
+          updated_at      TEXT NOT NULL
+        );
+        """
+    )
+
+
 def _seraphine_episode_windows_migrator(conn: sqlite3.Connection) -> None:
     """Create episode_windows table for windowed episode indexing."""
     conn.executescript(
@@ -413,6 +426,7 @@ class MemoryStore(Store):
         self.register_migrator("seraphine_core", _seraphine_core_migrator)
         self.register_migrator("seraphine_facts_decay", _seraphine_facts_decay_migrator)
         self.register_migrator("seraphine_fts5", _seraphine_fts5_migrator)
+        self.register_migrator("seraphine_reflect_cursor", _seraphine_reflect_cursor_migrator)
         self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
 
     async def create_conversation(self) -> str:
@@ -1767,6 +1781,49 @@ class MemoryStore(Store):
             ]
 
         return await asyncio.to_thread(_work)
+
+    # ---------- reflect cursor ----------
+
+    async def get_reflect_cursor(
+        self, conversation_id: str | None = None,
+    ) -> dict[str, str] | None:
+        """Return {last_turn_id, updated_at} for the cursor, or None.
+
+        ``conversation_id=None`` maps to the global sentinel ``__global__``.
+        """
+        key = conversation_id or "__global__"
+
+        def _work() -> dict[str, str] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT last_turn_id, updated_at FROM reflect_cursor"
+                    " WHERE conversation_id = ?",
+                    (key,),
+                ).fetchone()
+            if row is None:
+                return None
+            return {"last_turn_id": row[0], "updated_at": row[1]}
+
+        return await asyncio.to_thread(_work)
+
+    async def set_reflect_cursor(
+        self, conversation_id: str | None, last_turn_id: str,
+    ) -> None:
+        key = conversation_id or "__global__"
+        now = _now()
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO reflect_cursor(conversation_id, last_turn_id, updated_at)"
+                    " VALUES (?, ?, ?)"
+                    " ON CONFLICT(conversation_id) DO UPDATE SET"
+                    "   last_turn_id = excluded.last_turn_id,"
+                    "   updated_at = excluded.updated_at",
+                    (key, last_turn_id, now),
+                )
+
+        await asyncio.to_thread(_work)
 
     # ---------- episode windows ----------
 
