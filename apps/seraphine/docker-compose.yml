@@ -49,6 +49,11 @@ services:
       # cliproxy/config.yaml; o backend usa esse valor no header
       # x-api-key/Authorization contra o sidecar).
       SERAPHINE_STT_BACKEND: remote
+      # Embeddings via Ollama sidecar (mesma network). Overrides
+      # qualquer SERAPHINE_OLLAMA_BASE_URL do .env.prod — o default
+      # `host.docker.internal` não resolve em Linux e deixava a
+      # memory semântica silenciosamente morta.
+      SERAPHINE_OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - seraphine-data:/data
       # Mantém credentials montadas (read-only) só pro fallback do
@@ -57,6 +62,8 @@ services:
       - /root/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     depends_on:
       cliproxy:
+        condition: service_started
+      ollama:
         condition: service_started
     ports:
       - "127.0.0.1:8002:8000"
@@ -75,6 +82,40 @@ services:
       - ./cliproxy/logs:/CLIProxyAPI/logs
     expose:
       - "8317"
+    networks:
+      - seraphine-net
+
+  # Ollama sidecar — serve só pra embeddings (nomic-embed-text, ~274MB,
+  # CPU-only, ~50ms/text). No first start, o entrypoint inicia o server
+  # em background, espera ficar up e puxa o modelo uma vez; próximos
+  # boots são instantâneos. Usa um healthcheck que só fica "healthy"
+  # depois que o pull termina, pra não botar backend pra rodar com
+  # modelo faltando (embed retornaria 404).
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        SERVE_PID=$$!
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        if ! ollama list | grep -q nomic-embed-text; then
+          echo "pulling nomic-embed-text..."
+          ollama pull nomic-embed-text
+        fi
+        touch /tmp/ready
+        wait $$SERVE_PID
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    volumes:
+      - ollama-data:/root/.ollama
+    expose:
+      - "11434"
     networks:
       - seraphine-net
 
@@ -111,6 +152,7 @@ services:
 volumes:
   seraphine-data:
   cliproxy-auths:
+  ollama-data:
 
 networks:
   seraphine-net:
