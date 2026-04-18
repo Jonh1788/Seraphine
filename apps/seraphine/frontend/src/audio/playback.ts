@@ -90,6 +90,19 @@ export class PCMPlayback {
   private jsAnalyser = new FFTAnalyser(1024);
   private vpioPlaybackUnsub: (() => void) | null = null;
 
+  /**
+   * Watchdog state — see `startWatchdog()`. Long-running sessions on
+   * macOS/WebKit can drop the AudioContext into `suspended` /
+   * `interrupted` after device switches, sleep/wake, Siri grabbing audio
+   * focus, etc. The statechange listener tries resume, but if the
+   * browser rejects (no user gesture, window unfocused) the context stays
+   * stuck forever — new segments log "segment scheduled" but never play.
+   * The watchdog retries resume on an interval and re-anchors the
+   * gapless-scheduling cursor if it drifted past real time.
+   */
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogResumeFailures = 0;
+
   constructor() {}
 
   /** Route TTS output to the VPIO sink. Pass `null` to restore Web Audio. */
@@ -180,7 +193,59 @@ export class PCMPlayback {
         try { cb(active); } catch { /* */ }
       }
     }
+    this.startWatchdog();
     return this.ctx;
+  }
+
+  private startWatchdog(): void {
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(() => {
+      void this.runWatchdog();
+    }, 3000);
+  }
+
+  private async runWatchdog(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    // 1) Stuck state — attempt to resume, warn if persistently failing.
+    if (ctx.state !== 'running') {
+      try {
+        await ctx.resume();
+      } catch {
+        /* resume can reject in unfocused windows; just retry next tick */
+      }
+      if ((ctx.state as AudioContextState) !== 'running') {
+        this.watchdogResumeFailures += 1;
+        if (
+          this.watchdogResumeFailures === 1 ||
+          this.watchdogResumeFailures % 10 === 0
+        ) {
+          console.warn(
+            `[PCMPlayback] watchdog: ctx state=${ctx.state} — ${this.watchdogResumeFailures} failed resume attempts`,
+          );
+        }
+      } else {
+        if (this.watchdogResumeFailures > 0) {
+          console.log('[PCMPlayback] watchdog: ctx recovered');
+        }
+        this.watchdogResumeFailures = 0;
+      }
+      return;
+    }
+    this.watchdogResumeFailures = 0;
+
+    // 2) Scheduling drift — if `lastScheduledEnd` got far ahead of real
+    // time (can happen after suspend/resume on WebKit where currentTime
+    // semantics diverge), re-anchor so the next segment starts "now"
+    // instead of decades in the future.
+    const drift = this.lastScheduledEnd - ctx.currentTime;
+    if (drift > 10) {
+      console.warn(
+        `[PCMPlayback] watchdog: scheduling drift ${drift.toFixed(2)}s — re-anchoring`,
+      );
+      this.lastScheduledEnd = ctx.currentTime;
+    }
   }
 
   getAnalyser(onReady?: (a: AnalyserNode) => void): AnalyserNode | null {
@@ -444,6 +509,10 @@ export class PCMPlayback {
 
   dispose(): void {
     this.stop();
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
     if (this.analyser) {
       try { this.analyser.disconnect(); } catch { /* */ }
       this.analyser = null;

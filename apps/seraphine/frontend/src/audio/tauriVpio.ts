@@ -28,6 +28,19 @@ export class TauriVpioSession {
   private unlistenPlayback: UnlistenFn | null = null;
   private running = false;
 
+  /**
+   * Watchdog state — the render callback in the Rust VPIO unit fires
+   * continuously (~every 42 ms), even during silence, and each firing
+   * emits `vpio-playback-chunk`. If we stop receiving events while the
+   * session is still "running" (sleep/wake, audio device teardown,
+   * driver bug), the audio unit is dead in the water. Watchdog
+   * reinitializes it so the user doesn't have to toggle realtime off
+   * and back on.
+   */
+  private lastPlaybackChunkAt = 0;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private restartInFlight = false;
+
   async start(): Promise<void> {
     if (this.running) return;
     const { invoke } = await import('@tauri-apps/api/core');
@@ -43,6 +56,7 @@ export class TauriVpioSession {
     // PCMPlayback JS analyser to drive lipsync in step with the actual
     // audio instead of WS arrival time.
     this.unlistenPlayback = await listen<number[]>('vpio-playback-chunk', (event) => {
+      this.lastPlaybackChunkAt = Date.now();
       if (this.playbackListeners.size === 0) return;
       const arr = event.payload;
       const pcm = new Int16Array(arr);
@@ -58,12 +72,20 @@ export class TauriVpioSession {
       throw err;
     }
     this.running = true;
+    this.lastPlaybackChunkAt = Date.now();
+    this.watchdogTimer = setInterval(() => {
+      void this.runWatchdog();
+    }, 3000);
     console.log('[vpio] session started — AEC + NS + AGC active');
   }
 
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('vpio_stop');
@@ -77,6 +99,29 @@ export class TauriVpioSession {
     this.listeners.clear();
     this.playbackListeners.clear();
     console.log('[vpio] session stopped');
+  }
+
+  private async runWatchdog(): Promise<void> {
+    if (!this.running || this.restartInFlight) return;
+    const elapsed = Date.now() - this.lastPlaybackChunkAt;
+    if (elapsed <= 4000) return;
+
+    this.restartInFlight = true;
+    console.warn(
+      `[vpio] watchdog: render callback silent for ${elapsed} ms — restarting audio unit`,
+    );
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('vpio_stop');
+      if (!this.running) return; // external stop raced us
+      await invoke('vpio_start');
+      this.lastPlaybackChunkAt = Date.now();
+      console.log('[vpio] watchdog: audio unit restarted');
+    } catch (err) {
+      console.warn('[vpio] watchdog: restart failed:', err);
+    } finally {
+      this.restartInFlight = false;
+    }
   }
 
   onChunk(cb: ChunkListener): () => void {
