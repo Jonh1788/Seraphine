@@ -260,6 +260,18 @@ async def decay_facts(request: Request) -> dict[str, int]:
     return {"superseded": n}
 
 
+class PrunePayload(BaseModel):
+    days: int = Field(default=90, ge=1)
+
+
+@router.post("/prune")
+async def prune_events(request: Request, body: PrunePayload) -> dict[str, int]:
+    """Delete events older than ``days`` from the event timeline."""
+    store = request.app.state.store
+    deleted = await store.prune_events_older_than(body.days)
+    return {"deleted": deleted}
+
+
 @router.post("/recall")
 async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory

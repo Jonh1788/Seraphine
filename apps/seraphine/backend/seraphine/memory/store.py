@@ -1090,6 +1090,20 @@ class MemoryStore(Store):
 
         return await asyncio.to_thread(_work)
 
+    async def prune_events_older_than(self, days: int = 90) -> int:
+        """Delete events older than ``days`` days. Returns count of deleted rows."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        def _work() -> int:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM event_timeline WHERE created_at < ?",
+                    (cutoff,),
+                )
+                return cur.rowcount or 0
+
+        return await asyncio.to_thread(_work)
+
     async def get_events_since(self, since: str) -> list[dict[str, Any]]:
         """Return events with created_at >= ``since`` (ISO datetime string)."""
 
