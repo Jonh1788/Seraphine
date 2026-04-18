@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Protocol
+import time
+from typing import Any, Protocol
 
 import httpx
 
@@ -45,6 +46,38 @@ class OllamaEmbeddings:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def health(self) -> dict[str, Any]:
+        """Probe /api/tags. Returns reachable, model_loaded, latency_ms.
+
+        Never raises — used by /memory/health and must stay fast.
+        """
+        started = time.perf_counter()
+        try:
+            resp = await self._client.get(f"{self.base_url}/api/tags", timeout=2.0)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            return {
+                "reachable": False,
+                "model_loaded": False,
+                "latency_ms": None,
+                "error": str(e)[:200],
+                "model": self.model,
+            }
+        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        models = data.get("models") or []
+        loaded = any(
+            (m.get("name") or "").split(":")[0] == self.model.split(":")[0]
+            for m in models
+            if isinstance(m, dict)
+        )
+        return {
+            "reachable": True,
+            "model_loaded": loaded,
+            "latency_ms": latency_ms,
+            "model": self.model,
+        }
+
 
 class FakeEmbeddings:
     """Deterministic, hash-based pseudo-embeddings for tests. Same text → same vector."""
@@ -54,6 +87,14 @@ class FakeEmbeddings:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._vec(t) for t in texts]
+
+    async def health(self) -> dict[str, Any]:
+        return {
+            "reachable": True,
+            "model_loaded": True,
+            "latency_ms": 0.0,
+            "model": "fake",
+        }
 
     def _vec(self, text: str) -> list[float]:
         out: list[float] = []

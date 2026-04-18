@@ -786,6 +786,57 @@ class MemoryStore(Store):
 
         return await asyncio.to_thread(_work)
 
+    async def get_latest_event(
+        self, *, source: str, event_type: str,
+    ) -> dict[str, Any] | None:
+        """Return the most recent event matching source+event_type, or None."""
+
+        def _work() -> dict[str, Any] | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id, event_type, summary, source, metadata, created_at"
+                    " FROM event_timeline WHERE source = ? AND event_type = ?"
+                    " ORDER BY created_at DESC, id DESC LIMIT 1",
+                    (source, event_type),
+                ).fetchone()
+            return _row_to_event(row) if row else None
+
+        return await asyncio.to_thread(_work)
+
+    async def count_events_since(
+        self, *, source: str, event_type: str, since: str,
+    ) -> int:
+        """Count events matching source+event_type with created_at >= since."""
+
+        def _work() -> int:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM event_timeline"
+                    " WHERE source = ? AND event_type = ? AND created_at >= ?",
+                    (source, event_type, since),
+                ).fetchone()
+            return int(row[0]) if row else 0
+
+        return await asyncio.to_thread(_work)
+
+    async def count_facts(self) -> dict[str, int]:
+        """Return {active, superseded, total} fact counts."""
+
+        def _work() -> dict[str, int]:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*), COUNT(superseded_by) FROM facts"
+                ).fetchone()
+            total = int(row[0]) if row else 0
+            superseded = int(row[1]) if row else 0
+            return {
+                "active": total - superseded,
+                "superseded": superseded,
+                "total": total,
+            }
+
+        return await asyncio.to_thread(_work)
+
     async def get_events_since(self, since: str) -> list[dict[str, Any]]:
         """Return events with created_at >= ``since`` (ISO datetime string)."""
 

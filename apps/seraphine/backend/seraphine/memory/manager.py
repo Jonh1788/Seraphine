@@ -133,6 +133,22 @@ class MemoryManager:
     def set_collection_for_tests(self, collection: Any) -> None:
         self._collection = collection
 
+    async def _log_warning(self, stage: str, err: Exception) -> None:
+        """Best-effort: record an embed/recall failure on event_timeline.
+
+        Keeps /memory/health honest without flooding logs or retrying
+        inside the hot path. Swallows any error from add_event itself.
+        """
+        try:
+            await self.store.add_event(
+                event_type="warning",
+                summary=f"{stage}: {str(err)[:200]}",
+                source="memory",
+                metadata={"stage": stage},
+            )
+        except Exception:  # pragma: no cover - observability must not break flow
+            pass
+
     async def remember_episode(self, turn: Turn) -> None:
         if self._collection is None:
             return
@@ -140,6 +156,7 @@ class MemoryManager:
             vec = (await self.embeddings.embed([turn.content]))[0]
         except Exception as e:  # pragma: no cover - best-effort
             logger.warning("embed failed for turn %s: %s", turn.id, e)
+            await self._log_warning("remember_episode.embed", e)
             return
         self._collection.add(
             ids=[turn.id],
@@ -161,6 +178,7 @@ class MemoryManager:
             qvec = (await self.embeddings.embed([query]))[0]
         except Exception as e:
             logger.warning("recall embed failed: %s", e)
+            await self._log_warning("recall.embed", e)
             return []
         result = self._collection.query(query_embeddings=[qvec], n_results=k)
         ids = (result.get("ids") or [[]])[0]
@@ -276,6 +294,7 @@ class MemoryManager:
                     self._fact_embedding_cache[fact.id] = vec
             except Exception as e:
                 logger.warning("reflect: embed uncached facts failed: %s", e)
+                await self._log_warning("reflect.embed_uncached", e)
 
         existing_vecs = [
             self._fact_embedding_cache[f.id]
@@ -287,6 +306,7 @@ class MemoryManager:
             cand_vecs = await self.embeddings.embed([c[0] for c in candidates])
         except Exception as e:
             logger.warning("reflect: embed candidates failed: %s", e)
+            await self._log_warning("reflect.embed_candidates", e)
             return 0
 
         inserted = 0
@@ -304,6 +324,15 @@ class MemoryManager:
             self._fact_embedding_cache[fact.id] = vec
             existing_vecs.append(vec)
             inserted += 1
+        try:
+            await self.store.add_event(
+                event_type="reflect_success",
+                summary=f"reflect: +{inserted} fact(s)",
+                source="memory",
+                metadata={"inserted": inserted, "candidates": len(candidates)},
+            )
+        except Exception:  # pragma: no cover
+            pass
         return inserted
 
 

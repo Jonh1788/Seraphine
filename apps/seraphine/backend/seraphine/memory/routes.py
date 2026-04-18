@@ -7,7 +7,7 @@ read-only for now — they're surfaced via the recall endpoint.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -131,6 +131,64 @@ async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory
     memories = await memory.recall(body.query, k=body.k)
     return [m.model_dump() for m in memories]
+
+
+@router.get("/health")
+async def memory_health(request: Request) -> dict[str, Any]:
+    """Return end-to-end semantic-memory health.
+
+    Signals that catch the kind of silent-degradation bug where the
+    backend stayed ``healthy`` while every embed call failed:
+      - ``ollama`` — reachable + model loaded + latency
+      - ``chroma`` — reachable + episode count
+      - ``facts`` — active/superseded/total counts
+      - ``last_reflect_at`` — timestamp of the last successful reflect
+      - ``warnings_24h`` — count of embed/recall failures in the last day
+    """
+    store = request.app.state.store
+    memory = request.app.state.memory
+    embeddings = request.app.state.embeddings
+
+    # Ollama probe — duck-typed so FakeEmbeddings works in tests.
+    if hasattr(embeddings, "health"):
+        ollama = await embeddings.health()
+    else:
+        ollama = {"reachable": None, "model_loaded": None, "latency_ms": None}
+
+    # Chroma: count() is the native API; collection may be None if start failed.
+    collection = getattr(memory, "_collection", None)
+    chroma: dict[str, Any] = {"reachable": False, "count": None}
+    if collection is not None:
+        try:
+            chroma = {"reachable": True, "count": int(collection.count())}
+        except Exception as e:
+            chroma = {"reachable": False, "count": None, "error": str(e)[:200]}
+
+    facts = await store.count_facts()
+
+    last_reflect = await store.get_latest_event(
+        source="memory", event_type="reflect_success",
+    )
+    last_reflect_at = last_reflect["created_at"] if last_reflect else None
+    last_reflect_inserted = (
+        last_reflect.get("metadata", {}).get("inserted") if last_reflect else None
+    )
+
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    warnings_24h = await store.count_events_since(
+        source="memory", event_type="warning", since=since,
+    )
+
+    overall_ok = bool(ollama.get("reachable")) and chroma.get("reachable") is True
+    return {
+        "ok": overall_ok,
+        "ollama": ollama,
+        "chroma": chroma,
+        "facts": facts,
+        "last_reflect_at": last_reflect_at,
+        "last_reflect_inserted": last_reflect_inserted,
+        "warnings_24h": warnings_24h,
+    }
 
 
 @router.get("/timeline")
