@@ -51,6 +51,33 @@ class _LLMLike(Protocol):
     ) -> AsyncIterator[Token]: ...
 
 
+def _build_chroma_where(
+    *,
+    conversation_id: str | None = None,
+    role: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, Any] | None:
+    """Build a Chroma ``where`` filter dict from optional recall kwargs.
+
+    Returns None if no filters are active.
+    """
+    clauses: list[dict[str, Any]] = []
+    if conversation_id:
+        clauses.append({"conversation_id": conversation_id})
+    if role:
+        clauses.append({"role": role})
+    if since:
+        clauses.append({"created_at": {"$gte": since}})
+    if until:
+        clauses.append({"created_at": {"$lte": until}})
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
@@ -308,7 +335,15 @@ class MemoryManager:
         )
 
     async def recall(
-        self, query: str, *, k: int = 5, decay_days: float = 30.0,
+        self,
+        query: str,
+        *,
+        k: int = 5,
+        decay_days: float = 30.0,
+        conversation_id: str | None = None,
+        role: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> list[Memory]:
         if self._collection is None:
             return []
@@ -321,7 +356,28 @@ class MemoryManager:
             await self._log_warning("recall.embed", e)
             return []
         n_vector = max(k, 20)
-        result = self._collection.query(query_embeddings=[qvec], n_results=n_vector)
+
+        # Build Chroma where-filter from optional kwargs.
+        chroma_where = _build_chroma_where(
+            conversation_id=conversation_id,
+            role=role,
+            since=since,
+            until=until,
+        )
+        query_kwargs: dict[str, Any] = {
+            "query_embeddings": [qvec],
+            "n_results": n_vector,
+        }
+        if chroma_where:
+            query_kwargs["where"] = chroma_where
+        try:
+            result = self._collection.query(**query_kwargs)
+        except Exception:
+            # Chroma may fail if metadata fields don't exist on stored docs;
+            # fall back to unfiltered query.
+            result = self._collection.query(
+                query_embeddings=[qvec], n_results=n_vector,
+            )
         vec_ids = (result.get("ids") or [[]])[0]
         vec_docs = (result.get("documents") or [[]])[0]
         vec_metas = (result.get("metadatas") or [[]])[0]
@@ -339,7 +395,13 @@ class MemoryManager:
 
         # --- FTS retrieval ---
         try:
-            fts_results = await self.store.fts_search_turns(query, k=max(k, 20))
+            fts_results = await self.store.fts_search_turns(
+                query, k=max(k, 20),
+                conversation_id=conversation_id,
+                role=role,
+                since=since,
+                until=until,
+            )
         except Exception:
             fts_results = []
 
@@ -347,6 +409,9 @@ class MemoryManager:
         # Scan the in-memory fact embedding cache and rank by cosine to the
         # query vector. Facts are curated signal — surfacing them alongside
         # turns and windows gives recall much richer context.
+        # Note: facts are global — conversation_id and role filters do NOT
+        # apply to them (facts aren't per-conversation). Only since/until
+        # filter on fact.created_at, applied after fetching the fact object.
         fact_ranked: list[tuple[str, float]] = []
         for fid, fvec in self._fact_embedding_cache.items():
             cos = _cosine(qvec, fvec)
@@ -391,6 +456,13 @@ class MemoryManager:
                 try:
                     fact = await self.store.get_fact(fid)
                     if fact and fact.superseded_by is None:
+                        # Apply time filters to facts (since/until on created_at).
+                        if since and fact.created_at < since:
+                            rrf_scores.pop(fid, None)
+                            continue
+                        if until and fact.created_at > until:
+                            rrf_scores.pop(fid, None)
+                            continue
                         info[fid] = {
                             "text": fact.text,
                             "metadata": {

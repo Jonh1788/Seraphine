@@ -34,6 +34,10 @@ class RecallQuery(BaseModel):
     query: str = Field(..., min_length=1)
     k: int = Field(default=5, ge=1, le=50)
     decay_days: float = Field(default=30.0, ge=0.0)
+    conversation_id: str | None = None
+    role: str | None = None
+    since: str | None = None
+    until: str | None = None
 
 
 @router.get("/facts")
@@ -259,7 +263,15 @@ async def decay_facts(request: Request) -> dict[str, int]:
 @router.post("/recall")
 async def recall(request: Request, body: RecallQuery) -> list[dict[str, Any]]:
     memory = request.app.state.memory
-    memories = await memory.recall(body.query, k=body.k, decay_days=body.decay_days)
+    memories = await memory.recall(
+        body.query,
+        k=body.k,
+        decay_days=body.decay_days,
+        conversation_id=body.conversation_id,
+        role=body.role,
+        since=body.since,
+        until=body.until,
+    )
     return [m.model_dump() for m in memories]
 
 

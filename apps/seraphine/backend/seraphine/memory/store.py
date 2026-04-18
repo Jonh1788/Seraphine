@@ -557,27 +557,49 @@ class MemoryStore(Store):
         return await asyncio.to_thread(_work)
 
     async def fts_search_turns(
-        self, query: str, k: int = 10,
+        self,
+        query: str,
+        k: int = 10,
+        *,
+        conversation_id: str | None = None,
+        role: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> list[tuple[str, float]]:
         """Full-text search over turns via FTS5.
 
         Returns [(turn_id, bm25_score), ...] ordered by relevance.
         The query is wrapped in double quotes for safe phrase matching.
+
+        Optional filters narrow results by conversation, role, or time range.
         """
         sanitized = '"' + query.replace('"', '""') + '"'
 
         def _work() -> list[tuple[str, float]]:
             with self._connect() as conn:
                 try:
-                    rows = conn.execute(
+                    sql = (
                         "SELECT t.id, bm25(turns_fts) AS score"
                         " FROM turns_fts"
                         " JOIN turns t ON t.rowid = turns_fts.rowid"
                         " WHERE turns_fts MATCH ?"
-                        " ORDER BY score"
-                        " LIMIT ?",
-                        (sanitized, k),
-                    ).fetchall()
+                    )
+                    params: list[Any] = [sanitized]
+                    if conversation_id:
+                        sql += " AND t.conversation_id = ?"
+                        params.append(conversation_id)
+                    if role:
+                        sql += " AND t.role = ?"
+                        params.append(role)
+                    if since:
+                        sql += " AND t.created_at >= ?"
+                        params.append(since)
+                    if until:
+                        sql += " AND t.created_at <= ?"
+                        params.append(until)
+                    sql += " ORDER BY score LIMIT ?"
+                    params.append(k)
+                    rows = conn.execute(sql, params).fetchall()
                 except Exception:
                     return []
             return [(r[0], float(r[1])) for r in rows]

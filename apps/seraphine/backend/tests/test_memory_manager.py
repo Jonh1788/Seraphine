@@ -20,6 +20,26 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+def _matches_where(meta: dict, where: dict) -> bool:
+    """Minimal Chroma where-filter evaluator for tests."""
+    if "$and" in where:
+        return all(_matches_where(meta, clause) for clause in where["$and"])
+    for key, val in where.items():
+        if key.startswith("$"):
+            continue
+        actual = meta.get(key)
+        if isinstance(val, dict):
+            for op, operand in val.items():
+                if op == "$gte" and (actual is None or actual < operand):
+                    return False
+                if op == "$lte" and (actual is None or actual > operand):
+                    return False
+        else:
+            if actual != val:
+                return False
+    return True
+
+
 class FakeCollection:
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {}
@@ -38,11 +58,22 @@ class FakeCollection:
                 "metadata": metadatas[i],
             }
 
-    def query(self, query_embeddings: list[list[float]], n_results: int) -> dict:
+    def query(
+        self,
+        query_embeddings: list[list[float]],
+        n_results: int,
+        where: dict | None = None,
+    ) -> dict:
         q = query_embeddings[0]
+        candidates = list(self.docs.items())
+        if where:
+            candidates = [
+                (id_, d) for id_, d in candidates
+                if _matches_where(d.get("metadata", {}), where)
+            ]
         scored = [
             (id_, _cosine(q, d["embedding"]), d["document"], d["metadata"])
-            for id_, d in self.docs.items()
+            for id_, d in candidates
         ]
         scored.sort(key=lambda x: -x[1])
         top = scored[:n_results]
