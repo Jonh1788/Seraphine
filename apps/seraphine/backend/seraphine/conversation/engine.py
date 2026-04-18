@@ -550,6 +550,31 @@ class ConversationEngine:
             # Cache it
             await self.store.save_summary(conversation_id, summary_text, last_old_turn_id)
 
+            # Persist as a durable narrative so the summary survives
+            # beyond the transient conversation_summaries table and is
+            # available for long-term recall.
+            if self.memory and summary_text:
+                try:
+                    already = await self.memory.store.narrative_exists_for_conv(
+                        conversation_id,
+                    )
+                    if not already:
+                        # Resolve created_at from the original Turn objects.
+                        turn_by_id = {t.id: t for t in turns}
+                        first_t = turn_by_id.get(old_turns[0][0])
+                        last_t = turn_by_id.get(old_turns[-1][0])
+                        started_at = first_t.created_at if first_t else ""
+                        ended_at = last_t.created_at if last_t else ""
+                        await self.memory.store.add_narrative(
+                            conversation_id=conversation_id,
+                            text=summary_text,
+                            turn_count=len(old_turns),
+                            started_at=started_at,
+                            ended_at=ended_at,
+                        )
+                except Exception as e:
+                    logger.warning("compaction narrative failed: %s", e)
+
         # Build compacted message list
         messages: list[ChatMessage] = [
             ChatMessage(
