@@ -89,40 +89,160 @@ async def delete_fact(request: Request, fact_id: str) -> None:
 class ImportPayload(BaseModel):
     version: int = 1
     exported_at: str = ""
-    facts: list[dict[str, Any]]
+    facts: list[dict[str, Any]] = []
+    narratives: list[dict[str, Any]] = []
+    people: list[dict[str, Any]] = []
+    decisions: list[dict[str, Any]] = []
+    open_loops: list[dict[str, Any]] = []
+    episode_windows: list[dict[str, Any]] = []
 
 
 @router.get("/export")
-async def export_facts(request: Request) -> dict[str, Any]:
-    """Export all active facts as a JSON download."""
+async def export_memory(request: Request) -> dict[str, Any]:
+    """Export full memory backup: facts, narratives, people, decisions,
+    open_loops, and episode_windows."""
     store = request.app.state.store
     facts = await store.list_facts(limit=10_000, include_superseded=False)
+    narratives = await store.list_narratives(limit=10_000)
+    people = await store.list_people(limit=10_000)
+    decisions = await store.list_all_decisions(limit=10_000)
+    loops = await store.list_open_loops(only_open=False, limit=10_000)
+    windows = await store.list_windows(limit=10_000)
     return {
-        "version": 1,
+        "version": 2,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "facts": [f.model_dump() for f in facts],
+        "narratives": narratives,
+        "people": people,
+        "decisions": decisions,
+        "open_loops": loops,
+        "episode_windows": windows,
     }
 
 
 @router.post("/import")
-async def import_facts(request: Request, body: ImportPayload) -> dict[str, Any]:
-    """Import facts from a previously exported JSON payload, skipping duplicates."""
+async def import_memory(request: Request, body: ImportPayload) -> dict[str, Any]:
+    """Import memory from a previously exported JSON payload, skipping duplicates."""
     store = request.app.state.store
-    existing = await store.list_facts(limit=10_000, include_superseded=False)
-    existing_texts: set[str] = {f.text for f in existing}
+    imported: dict[str, int] = {}
+    skipped: dict[str, int] = {}
 
-    imported = 0
-    skipped = 0
+    # --- facts (dedup by text) ---
+    existing_facts = await store.list_facts(limit=10_000, include_superseded=False)
+    existing_texts: set[str] = {f.text for f in existing_facts}
+    imp, skip = 0, 0
     for item in body.facts:
         text = item.get("text", "").strip()
         if not text or text in existing_texts:
-            skipped += 1
+            skip += 1
             continue
         source = item.get("source", "explicit")
         confidence = item.get("confidence", 1.0)
         await store.add_fact(text, source=source, confidence=confidence)
         existing_texts.add(text)
-        imported += 1
+        imp += 1
+    imported["facts"] = imp
+    skipped["facts"] = skip
+
+    # --- narratives ---
+    imp, skip = 0, 0
+    for item in body.narratives:
+        ok = await store.insert_narrative_raw(
+            id=item["id"],
+            conversation_id=item.get("conversation_id", ""),
+            text=item.get("text", ""),
+            turn_count=item.get("turn_count", 0),
+            started_at=item.get("started_at", ""),
+            ended_at=item.get("ended_at", ""),
+            created_at=item.get("created_at", ""),
+        )
+        if ok:
+            imp += 1
+        else:
+            skip += 1
+    imported["narratives"] = imp
+    skipped["narratives"] = skip
+
+    # --- people ---
+    imp, skip = 0, 0
+    for item in body.people:
+        tags = item.get("tags")
+        if isinstance(tags, list):
+            tags = json.dumps(tags, ensure_ascii=False)
+        ok = await store.insert_person_raw(
+            id=item["id"],
+            name=item.get("name", ""),
+            relation=item.get("relation"),
+            first_seen_at=item.get("first_seen_at", ""),
+            last_mentioned_at=item.get("last_mentioned_at", ""),
+            mention_count=item.get("mention_count", 1),
+            tags=tags,
+        )
+        if ok:
+            imp += 1
+        else:
+            skip += 1
+    imported["people"] = imp
+    skipped["people"] = skip
+
+    # --- decisions ---
+    imp, skip = 0, 0
+    for item in body.decisions:
+        ok = await store.insert_decision_raw(
+            id=item["id"],
+            subject=item.get("subject", ""),
+            choice=item.get("choice", ""),
+            alternatives=item.get("alternatives"),
+            created_at=item.get("created_at", ""),
+            followed_up_at=item.get("followed_up_at"),
+            outcome=item.get("outcome"),
+        )
+        if ok:
+            imp += 1
+        else:
+            skip += 1
+    imported["decisions"] = imp
+    skipped["decisions"] = skip
+
+    # --- open_loops ---
+    imp, skip = 0, 0
+    for item in body.open_loops:
+        ok = await store.insert_open_loop_raw(
+            id=item["id"],
+            text=item.get("text", ""),
+            owner=item.get("owner", "user"),
+            created_at=item.get("created_at", ""),
+            resolved_at=item.get("resolved_at"),
+            resolution=item.get("resolution"),
+            injection_count=item.get("injection_count", 0),
+        )
+        if ok:
+            imp += 1
+        else:
+            skip += 1
+    imported["open_loops"] = imp
+    skipped["open_loops"] = skip
+
+    # --- episode_windows ---
+    imp, skip = 0, 0
+    for item in body.episode_windows:
+        ok = await store.insert_window_raw(
+            id=item["id"],
+            conversation_id=item.get("conversation_id", ""),
+            first_turn_id=item.get("first_turn_id", ""),
+            last_turn_id=item.get("last_turn_id", ""),
+            turn_count=item.get("turn_count", 0),
+            text=item.get("text", ""),
+            started_at=item.get("started_at", ""),
+            ended_at=item.get("ended_at", ""),
+            created_at=item.get("created_at", ""),
+        )
+        if ok:
+            imp += 1
+        else:
+            skip += 1
+    imported["episode_windows"] = imp
+    skipped["episode_windows"] = skip
 
     return {"imported": imported, "skipped": skipped}
 
