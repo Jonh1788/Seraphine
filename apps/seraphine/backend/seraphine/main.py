@@ -106,7 +106,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("LLM warmup failed (continuing anyway): %s", e)
     embeddings = OllamaEmbeddings(settings.ollama_base_url, settings.embedding_model)
-    memory = MemoryManager(store, embeddings, settings.chroma_path, llm=llm)
+    memory = MemoryManager(
+        store, embeddings, settings.chroma_path,
+        llm=llm, embedding_model=settings.embedding_model,
+    )
     try:
         await memory.start()
     except Exception as e:

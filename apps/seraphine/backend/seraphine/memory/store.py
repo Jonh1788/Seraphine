@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import struct
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -98,6 +99,15 @@ def _seraphine_core_migrator(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_facts_created
           ON facts(created_at DESC);
+        CREATE TABLE IF NOT EXISTS fact_embeddings (
+          fact_id     TEXT PRIMARY KEY REFERENCES facts(id) ON DELETE CASCADE,
+          vec         BLOB NOT NULL,
+          dim         INTEGER NOT NULL,
+          model       TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_fact_embeddings_model
+          ON fact_embeddings(model);
         CREATE TABLE IF NOT EXISTS conversation_summaries (
           id              TEXT PRIMARY KEY,
           conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -818,6 +828,65 @@ class MemoryStore(Store):
             return int(row[0]) if row else 0
 
         return await asyncio.to_thread(_work)
+
+    async def save_fact_embedding(
+        self, fact_id: str, vec: list[float], *, model: str,
+    ) -> None:
+        """Upsert a fact embedding keyed by fact_id. vec is stored as a
+        little-endian float32 BLOB plus its dim + model for sanity checks.
+        """
+        blob = struct.pack(f"<{len(vec)}f", *vec)
+        dim = len(vec)
+        now = _now()
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO fact_embeddings(fact_id, vec, dim, model, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)"
+                    " ON CONFLICT(fact_id) DO UPDATE SET"
+                    "   vec = excluded.vec,"
+                    "   dim = excluded.dim,"
+                    "   model = excluded.model,"
+                    "   updated_at = excluded.updated_at",
+                    (fact_id, blob, dim, model, now),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def load_fact_embeddings(
+        self, *, model: str,
+    ) -> dict[str, list[float]]:
+        """Load every cached embedding for the given model.
+
+        Filters by ``model`` so swapping embedding models (which changes
+        vector space) doesn't silently mix incompatible vectors — the
+        caller gets an empty dict and re-embeds.
+        """
+        def _work() -> dict[str, list[float]]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT fact_id, vec, dim FROM fact_embeddings WHERE model = ?",
+                    (model,),
+                ).fetchall()
+            out: dict[str, list[float]] = {}
+            for fid, blob, dim in rows:
+                try:
+                    out[fid] = list(struct.unpack(f"<{int(dim)}f", blob))
+                except struct.error:
+                    continue
+            return out
+
+        return await asyncio.to_thread(_work)
+
+    async def delete_fact_embedding(self, fact_id: str) -> None:
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM fact_embeddings WHERE fact_id = ?", (fact_id,),
+                )
+
+        await asyncio.to_thread(_work)
 
     async def count_facts(self) -> dict[str, int]:
         """Return {active, superseded, total} fact counts."""

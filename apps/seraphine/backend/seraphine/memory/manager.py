@@ -112,15 +112,36 @@ class MemoryManager:
         embeddings: EmbeddingsClient,
         chroma_path: Path,
         llm: _LLMLike | None = None,
+        *,
+        embedding_model: str = "unknown",
     ) -> None:
         self.store = store
         self.embeddings = embeddings
         self.chroma_path = Path(chroma_path)
         self.llm = llm
+        # Tag used to namespace cached fact embeddings. If this changes,
+        # load_fact_embeddings returns {} and reflect re-embeds from
+        # scratch — avoids mixing vectors from incompatible models.
+        self.embedding_model = embedding_model
         self._collection: Any = None
         self._fact_embedding_cache: dict[str, list[float]] = {}
 
     async def start(self) -> None:
+        # Hydrate the fact embedding cache from SQLite so the first
+        # reflect() after boot doesn't re-embed up to 200 facts.
+        try:
+            cached = await self.store.load_fact_embeddings(
+                model=self.embedding_model,
+            )
+            self._fact_embedding_cache.update(cached)
+            if cached:
+                logger.info(
+                    "memory: hydrated %d fact embedding(s) from cache (model=%s)",
+                    len(cached), self.embedding_model,
+                )
+        except Exception as e:  # pragma: no cover - best-effort
+            logger.warning("memory: fact embedding hydrate failed: %s", e)
+
         if self._collection is not None:
             return
         # Local import so this module is importable without chromadb installed.
@@ -220,8 +241,12 @@ class MemoryManager:
         try:
             vecs = await self.embeddings.embed([text])
             self._fact_embedding_cache[fact.id] = vecs[0]
+            await self.store.save_fact_embedding(
+                fact.id, vecs[0], model=self.embedding_model,
+            )
         except Exception as e:
             logger.warning("learn_fact: embed for cache failed: %s", e)
+            await self._log_warning("learn_fact.embed", e)
         return fact
 
     async def forget(self, memory_id: str) -> None:
@@ -231,6 +256,10 @@ class MemoryManager:
             # excludes it. A real new fact id can also be passed via store.supersede_fact.
             await self.store.supersede_fact(memory_id, memory_id)
             self._fact_embedding_cache.pop(memory_id, None)
+            try:
+                await self.store.delete_fact_embedding(memory_id)
+            except Exception:  # pragma: no cover
+                pass
             return
         if self._collection is not None:
             self._collection.delete(ids=[memory_id])
@@ -292,6 +321,12 @@ class MemoryManager:
                 new_vecs = await self.embeddings.embed([f.text for f in uncached])
                 for fact, vec in zip(uncached, new_vecs):
                     self._fact_embedding_cache[fact.id] = vec
+                    try:
+                        await self.store.save_fact_embedding(
+                            fact.id, vec, model=self.embedding_model,
+                        )
+                    except Exception:  # pragma: no cover - cache is best-effort
+                        pass
             except Exception as e:
                 logger.warning("reflect: embed uncached facts failed: %s", e)
                 await self._log_warning("reflect.embed_uncached", e)
@@ -322,6 +357,12 @@ class MemoryManager:
                 text=text, source="reflection", confidence=confidence,
             )
             self._fact_embedding_cache[fact.id] = vec
+            try:
+                await self.store.save_fact_embedding(
+                    fact.id, vec, model=self.embedding_model,
+                )
+            except Exception:  # pragma: no cover - cache is best-effort
+                pass
             existing_vecs.append(vec)
             inserted += 1
         try:
