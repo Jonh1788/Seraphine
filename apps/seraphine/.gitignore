@@ -1,0 +1,3 @@
+# WhatsApp bridge session state — seeded on the VPS via rsync, never
+# committed (contains auth tokens for the connected WhatsApp account).
+whatsapp-data/

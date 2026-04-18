@@ -78,6 +78,36 @@ services:
     networks:
       - seraphine-net
 
+  # WhatsApp bridge — Express API wrapping whatsapp-web.js. Auth session
+  # lives in `./whatsapp-data/` (bind mount, gitignored) so it survives
+  # rebuilds and can be seeded from the local machine without re-scanning
+  # the QR code. Reached by the backend at http://whatsapp-bridge:3001
+  # (set via SERAPHINE_WHATSAPP_BRIDGE_URL in .env.prod).
+  whatsapp-bridge:
+    build:
+      context: ../../services/whatsapp-bridge
+      dockerfile: Dockerfile
+    image: seraphine-whatsapp-bridge:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      # Backend reachable by service name on the private network.
+      WEBHOOK_URL: http://backend:8000/webhook/whatsapp
+      TZ: America/Sao_Paulo
+      LOG_LEVEL: info
+    volumes:
+      # Seeded from the dev machine with the already-authenticated
+      # whatsapp-web.js session so no QR re-scan is needed on first boot.
+      - ./whatsapp-data/auth:/app/.wwebjs_auth
+      - ./whatsapp-data/cache:/app/.wwebjs_cache
+    # /dev/shm default of 64 MB is too small for Chromium and causes
+    # random "Target closed" errors under load.
+    shm_size: "512m"
+    expose:
+      - "3001"
+    networks:
+      - seraphine-net
+
 volumes:
   seraphine-data:
   cliproxy-auths:
