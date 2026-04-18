@@ -74,6 +74,27 @@ _FACTS_PROMPT = (
     "If nothing qualifies, return {\"facts\": []}."
 )
 
+_ASSISTANT_INSIGHTS_PROMPT = (
+    "Analyze the assistant turns below and extract DURABLE OBSERVATIONS"
+    " about the user that the assistant identified or inferred.\n\n"
+    "DO extract:\n"
+    "- User emotional state patterns the assistant noticed\n"
+    "- Behavioral patterns (tone, recurring topics, habits)\n"
+    "- Preferences the assistant learned from context\n"
+    "- Relationship dynamics the assistant inferred\n\n"
+    "DO NOT extract: greetings, tool call summaries, instructions to the user,"
+    " transient status, or anything the user said directly.\n\n"
+    "For each observation, estimate a confidence score in [0,1]. Return STRICT JSON:\n"
+    '{"facts": [{"text": "<observation>", "confidence": 0.85}, ...]}\n'
+    "If nothing qualifies, return {\"facts\": []}."
+)
+
+# Greeting/ack prefixes that disqualify assistant turns from observation mining.
+_ASSISTANT_SKIP_PREFIXES = (
+    "ok", "okay", "certo", "entend", "claro", "sure", "got it",
+    "understood", "all right", "alright",
+)
+
 
 def _is_signal_turn(role: str, content: str) -> bool:
     """Filter heuristics: decide whether a turn is worth sending to the LLM.
@@ -93,6 +114,20 @@ def _is_signal_turn(role: str, content: str) -> bool:
     collapsed = " ".join(normalized.split())
     if collapsed in _SKIP_SHORT_PHRASES:
         return False
+    return True
+
+
+def _is_signal_assistant_turn(role: str, content: str) -> bool:
+    """Heuristic for assistant turns worth mining for user observations."""
+    if role != "assistant":
+        return False
+    text = (content or "").strip()
+    if len(text) < 40:
+        return False
+    lower = text.lower()
+    for prefix in _ASSISTANT_SKIP_PREFIXES:
+        if lower.startswith(prefix):
+            return False
     return True
 
 
@@ -264,11 +299,96 @@ class MemoryManager:
         if self._collection is not None:
             self._collection.delete(ids=[memory_id])
 
+    async def _reflect_pass(
+        self,
+        turns: list[Turn],
+        prompt: str,
+        source: str,
+        existing: list[Fact],
+        existing_vecs: list[list[float]],
+        *,
+        confidence_cap: float | None = None,
+    ) -> tuple[int, int]:
+        """Run one LLM extraction pass and dedup+persist the results.
+
+        Mutates ``existing_vecs`` in-place (appends new vectors) so the
+        next pass sees facts from this one for dedup.
+
+        Returns (inserted, candidate_count).
+        """
+        assert self.llm is not None
+        excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in turns)
+        messages = [
+            ChatMessage(role="system", content=prompt),
+            ChatMessage(role="user", content=excerpts),
+        ]
+        accumulated: list[str] = []
+        try:
+            async for tok in self.llm.chat(messages, temperature=0.2):
+                if tok.text:
+                    accumulated.append(tok.text)
+        except Exception as e:
+            logger.warning("reflect(%s): llm chat failed: %s", source, e)
+            return 0, 0
+
+        raw = "".join(accumulated).strip()
+        candidates = _parse_facts_json(raw)
+        if not candidates:
+            return 0, 0
+
+        candidates = [
+            c for c in candidates if c[1] >= REFLECTION_CONFIDENCE_THRESHOLD
+        ]
+        if not candidates:
+            return 0, len(candidates)
+
+        try:
+            cand_vecs = await self.embeddings.embed([c[0] for c in candidates])
+        except Exception as e:
+            logger.warning("reflect(%s): embed candidates failed: %s", source, e)
+            await self._log_warning(f"reflect.embed_candidates.{source}", e)
+            return 0, len(candidates)
+
+        inserted = 0
+        for (text, confidence), vec in zip(candidates, cand_vecs):
+            if confidence_cap is not None:
+                confidence = min(confidence, confidence_cap)
+            duplicate = False
+            for idx, ev in enumerate(existing_vecs):
+                if _cosine(vec, ev) >= REFLECTION_SIM_THRESHOLD:
+                    duplicate = True
+                    if idx < len(existing):
+                        try:
+                            await self.store.bump_fact_used(existing[idx].id)
+                        except Exception:  # pragma: no cover
+                            pass
+                    break
+            if duplicate:
+                continue
+            fact = await self.store.add_fact(
+                text=text, source=source, confidence=confidence,
+            )
+            self._fact_embedding_cache[fact.id] = vec
+            try:
+                await self.store.save_fact_embedding(
+                    fact.id, vec, model=self.embedding_model,
+                )
+            except Exception:  # pragma: no cover
+                pass
+            existing_vecs.append(vec)
+            inserted += 1
+        return inserted, len(candidates)
+
     async def reflect(self) -> int:
         """Pull recent turns, ask the LLM to extract durable facts, dedup
         against existing facts via embedding cosine similarity, and persist
         the survivors. Returns the number of new facts inserted.
         Returns 0 (no-op) if no llm is wired or there is too little signal.
+
+        Runs two passes:
+          1. User turns  -> source="reflection" (no confidence cap)
+          2. Assistant turns -> source="observation" (confidence capped at 0.7)
+        Dedup is shared: a fact from pass 2 that duplicates pass 1 is dropped.
         """
         if self.llm is None:
             return 0
@@ -280,41 +400,16 @@ class MemoryManager:
         if len(recent) < REFLECTION_MIN_TURNS:
             return 0
 
-        # Filter down to signal-bearing user turns before spending tokens.
-        signal_turns = [t for t in recent if _is_signal_turn(t.role, t.content)]
-        if len(signal_turns) < 2:
-            return 0
-
-        excerpts = "\n".join(f"- [{t.role}] {t.content}" for t in signal_turns)
-        messages = [
-            ChatMessage(role="system", content=_FACTS_PROMPT),
-            ChatMessage(role="user", content=excerpts),
+        # Filter down to signal-bearing turns per role.
+        user_turns = [t for t in recent if _is_signal_turn(t.role, t.content)]
+        assistant_turns = [
+            t for t in recent if _is_signal_assistant_turn(t.role, t.content)
         ]
-        accumulated: list[str] = []
-        try:
-            async for tok in self.llm.chat(messages, temperature=0.2):
-                if tok.text:
-                    accumulated.append(tok.text)
-        except Exception as e:
-            logger.warning("reflect: llm chat failed: %s", e)
+        if len(user_turns) < 2 and not assistant_turns:
             return 0
 
-        raw = "".join(accumulated).strip()
-        candidates = _parse_facts_json(raw)
-        if not candidates:
-            return 0
-
-        # Apply confidence threshold — drop low-signal extractions early.
-        candidates = [
-            c for c in candidates if c[1] >= REFLECTION_CONFIDENCE_THRESHOLD
-        ]
-        if not candidates:
-            return 0
-
-        # Dedup against existing non-superseded facts using cached embeddings.
+        # Build shared dedup baseline from existing facts.
         existing = await self.store.list_facts(limit=200)
-
-        # Only embed facts not already in cache.
         uncached = [f for f in existing if f.id not in self._fact_embedding_cache]
         if uncached:
             try:
@@ -325,62 +420,57 @@ class MemoryManager:
                         await self.store.save_fact_embedding(
                             fact.id, vec, model=self.embedding_model,
                         )
-                    except Exception:  # pragma: no cover - cache is best-effort
+                    except Exception:  # pragma: no cover
                         pass
             except Exception as e:
                 logger.warning("reflect: embed uncached facts failed: %s", e)
                 await self._log_warning("reflect.embed_uncached", e)
 
-        existing_vecs = [
+        existing_vecs: list[list[float]] = [
             self._fact_embedding_cache[f.id]
             for f in existing
             if f.id in self._fact_embedding_cache
         ]
 
-        try:
-            cand_vecs = await self.embeddings.embed([c[0] for c in candidates])
-        except Exception as e:
-            logger.warning("reflect: embed candidates failed: %s", e)
-            await self._log_warning("reflect.embed_candidates", e)
-            return 0
+        inserted_reflection = 0
+        inserted_observation = 0
+        candidates_total = 0
 
-        inserted = 0
-        for (text, confidence), vec in zip(candidates, cand_vecs):
-            duplicate = False
-            for idx, ev in enumerate(existing_vecs):
-                if _cosine(vec, ev) >= REFLECTION_SIM_THRESHOLD:
-                    duplicate = True
-                    # Revalidated — bump last_used_at on the matching fact.
-                    if idx < len(existing):
-                        try:
-                            await self.store.bump_fact_used(existing[idx].id)
-                        except Exception:  # pragma: no cover
-                            pass
-                    break
-            if duplicate:
-                continue
-            fact = await self.store.add_fact(
-                text=text, source="reflection", confidence=confidence,
+        # Pass 1: user turns
+        if len(user_turns) >= 2:
+            n, c = await self._reflect_pass(
+                user_turns, _FACTS_PROMPT, "reflection",
+                existing, existing_vecs,
             )
-            self._fact_embedding_cache[fact.id] = vec
-            try:
-                await self.store.save_fact_embedding(
-                    fact.id, vec, model=self.embedding_model,
-                )
-            except Exception:  # pragma: no cover - cache is best-effort
-                pass
-            existing_vecs.append(vec)
-            inserted += 1
+            inserted_reflection = n
+            candidates_total += c
+
+        # Pass 2: assistant turns
+        if assistant_turns:
+            n, c = await self._reflect_pass(
+                assistant_turns, _ASSISTANT_INSIGHTS_PROMPT, "observation",
+                existing, existing_vecs,
+                confidence_cap=0.7,
+            )
+            inserted_observation = n
+            candidates_total += c
+
+        inserted_total = inserted_reflection + inserted_observation
         try:
             await self.store.add_event(
                 event_type="reflect_success",
-                summary=f"reflect: +{inserted} fact(s)",
+                summary=f"reflect: +{inserted_total} fact(s)",
                 source="memory",
-                metadata={"inserted": inserted, "candidates": len(candidates)},
+                metadata={
+                    "inserted": inserted_total,
+                    "inserted_reflection": inserted_reflection,
+                    "inserted_observation": inserted_observation,
+                    "candidates": candidates_total,
+                },
             )
         except Exception:  # pragma: no cover
             pass
-        return inserted
+        return inserted_total
 
     async def decay_facts(self) -> int:
         """Exponentially decay facts by age since last use/creation.
