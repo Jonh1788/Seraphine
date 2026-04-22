@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Literal, Protocol, Union
@@ -265,6 +266,40 @@ AUDIT_OUTPUT_EXCERPT = 4 * 1024
 COMPACTION_TOKEN_THRESHOLD = 100_000
 COMPACTION_CHAR_THRESHOLD = COMPACTION_TOKEN_THRESHOLD * 4
 COMPACTION_KEEP_RECENT = 20
+# Markup emitted by tool calls that we persist in assistant turn content
+# for frontend rehydration (chat reload needs the HTML card back). Must be
+# stripped before replaying to the LLM — leaving it in the prompt teaches
+# the model to imitate the pattern inline instead of invoking the tool.
+#
+# Shape of what gets stripped:
+#   <!--card--> ... <!--/card-->                (HTML card, any length/newlines)
+#   <!--task-data:{...}-->                      (structured task JSON)
+#   <!--recurring-data:{...}-->
+#   <!--reminder-data:{...}-->
+_TOOL_MARKUP_PATTERNS = [
+    re.compile(r"<!--card-->.*?<!--/card-->", re.DOTALL),
+    re.compile(r"<!--task-data:\{.*?\}-->"),
+    re.compile(r"<!--recurring-data:\{.*?\}-->"),
+    re.compile(r"<!--reminder-data:\{.*?\}-->"),
+]
+
+
+def _strip_tool_markup(content: str) -> str:
+    """Remove tool-output HTML and data comments from an assistant turn.
+
+    Used ONLY when replaying history to the LLM — the persisted `turns.content`
+    in the DB is left untouched so the frontend still has what it needs to
+    re-render cards on chat reload.
+    """
+    if not content:
+        return content
+    for pat in _TOOL_MARKUP_PATTERNS:
+        content = pat.sub("", content)
+    # Collapse 3+ consecutive newlines left by the strip down to 2.
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()
+
+
 # Run reflect() automatically every N assistant turns to let Seraphine
 # learn facts about the user on her own.
 AUTO_REFLECT_EVERY_N_TURNS = 3
@@ -492,12 +527,22 @@ class ConversationEngine:
         If the total character count of all turns exceeds COMPACTION_CHAR_THRESHOLD,
         older turns are summarized into a single "Previously:" system message.
         The summary is cached in the conversation_summaries table.
+
+        Assistant turns are sanitized (strip tool-output markup) before being
+        replayed to the LLM. See `_strip_tool_markup` — persisted `turns.content`
+        has the HTML card + data comments appended so the frontend can re-render
+        on chat reload, but feeding that raw to the model teaches it to imitate
+        the pattern instead of invoking the tool. Strip keeps the DB intact and
+        only cleans what the model sees.
         """
         # Build messages from turns
         chat_turns: list[tuple[str, str, str]] = []  # (turn_id, role, content)
         for t in turns:
             if t.role in ("user", "assistant"):
-                chat_turns.append((t.id, t.role, t.content))
+                content = t.content
+                if t.role == "assistant":
+                    content = _strip_tool_markup(content)
+                chat_turns.append((t.id, t.role, content))
 
         total_chars = sum(len(c) for _, _, c in chat_turns)
         if total_chars <= COMPACTION_CHAR_THRESHOLD or len(chat_turns) <= COMPACTION_KEEP_RECENT:
