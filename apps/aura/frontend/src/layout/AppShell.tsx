@@ -38,7 +38,12 @@ function AppShellInner({
   topbarActions,
   bareTopbar = false,
 }: AppShellProps) {
+  // `drawerOpen` = user intent (true while the drawer should be visible).
+  // `drawerMounted` = render flag (true while in the DOM, including the
+  // closing animation). Letting them diverge for ~280ms keeps the
+  // slide-out + backdrop fade animations playable before unmount.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerMounted, setDrawerMounted] = useState(false);
   const refreshHandler = usePageRefreshHandler();
 
   const pull = usePullToRefresh({
@@ -46,15 +51,27 @@ function AppShellInner({
     enabled: !!refreshHandler && !fullBleed,
   });
 
-  // Lock background scroll while drawer is open
+  // Drive mount based on intent: open immediately, delay unmount until
+  // the close animation finishes.
   useEffect(() => {
-    if (!drawerOpen) return;
+    if (drawerOpen) {
+      setDrawerMounted(true);
+      return;
+    }
+    if (!drawerMounted) return;
+    const id = window.setTimeout(() => setDrawerMounted(false), 300);
+    return () => window.clearTimeout(id);
+  }, [drawerOpen, drawerMounted]);
+
+  // Lock background scroll while drawer is mounted (covers closing anim too).
+  useEffect(() => {
+    if (!drawerMounted) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [drawerOpen]);
+  }, [drawerMounted]);
 
   // Close drawer on Escape
   useEffect(() => {
@@ -73,26 +90,26 @@ function AppShellInner({
         <Sidebar variant="rail" />
       </div>
 
-      {/* Hamburger drawer — animated */}
-      {drawerOpen ? (
+      {/* Hamburger drawer — animated open + close */}
+      {drawerMounted ? (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div
-            className="drawer-backdrop absolute inset-0"
+            className={drawerOpen ? "drawer-backdrop absolute inset-0" : "drawer-backdrop-leave absolute inset-0"}
             style={{ background: "rgba(2,4,12,0.65)", backdropFilter: "blur(6px)" }}
             onClick={() => setDrawerOpen(false)}
             aria-hidden="true"
           />
-          <div className="drawer-panel absolute top-0 left-0 h-full">
+          <div className={`${drawerOpen ? "drawer-panel" : "drawer-panel-leave"} absolute top-0 left-0 h-full`}>
             <Sidebar variant="drawer" onNavigate={() => setDrawerOpen(false)} />
             <button
               type="button"
               onClick={() => setDrawerOpen(false)}
-              className="absolute top-3 right-3 grid place-items-center h-9 w-9 rounded-[11px] transition-colors menu-item-stagger"
+              className={`absolute top-3 right-3 grid place-items-center h-9 w-9 rounded-[11px] transition-colors ${drawerOpen ? "menu-item-stagger" : ""}`}
               style={{
                 background: "rgba(99,130,255,0.06)",
                 border: "1px solid rgba(99,130,255,0.10)",
                 color: "#8B9CC8",
-                animationDelay: "30ms",
+                animationDelay: drawerOpen ? "30ms" : undefined,
               }}
               aria-label="Fechar menu"
             >

@@ -125,9 +125,31 @@ body {
     transform: translateX(0);
   }
 }
+@keyframes drawerSlideOut {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
 @keyframes drawerBackdropIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+@keyframes drawerBackdropOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes menuItemOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
 }
 @keyframes menuItemIn {
   from {
@@ -153,12 +175,25 @@ body {
 .drawer-panel {
   animation: drawerSlideIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
+.drawer-panel-leave {
+  animation: drawerSlideOut 0.28s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
 .drawer-backdrop {
   animation: drawerBackdropIn 0.32s ease-out;
+}
+.drawer-backdrop-leave {
+  animation: drawerBackdropOut 0.28s ease-out forwards;
 }
 .menu-item-stagger {
   opacity: 0;
   animation: menuItemIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+/* When the drawer is closing, suppress the per-item enter animation
+   so the panel slides as a single block instead of items animating
+   in opposing directions. */
+.drawer-panel-leave .menu-item-stagger {
+  animation: none;
+  opacity: 1;
 }
 
 *::-webkit-scrollbar {
