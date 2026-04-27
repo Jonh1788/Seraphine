@@ -44,6 +44,58 @@ body {
   padding-bottom: calc(var(--bottom-nav-h) + var(--safe-bottom));
 }
 
+/* ===== Briefing entrance animations (mockup-faithful) ===== */
+@keyframes briefItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes briefOrbPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    filter: drop-shadow(0 0 14px rgba(79, 126, 255, 0.55));
+  }
+  35% {
+    transform: translate(-50%, -50%) scale(1.22);
+    filter: drop-shadow(0 0 26px rgba(143, 188, 255, 0.95))
+      drop-shadow(0 0 44px rgba(79, 126, 255, 0.45));
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    filter: drop-shadow(0 0 14px rgba(79, 126, 255, 0.55));
+  }
+}
+
+.brief-item {
+  opacity: 0;
+}
+.brief-item.is-in {
+  animation: briefItemIn 0.42s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+.brief-orb-pulse {
+  animation: briefOrbPulse 0.55s cubic-bezier(0.3, 0.9, 0.4, 1.1);
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+.brief-tw-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 16px;
+  background: #7DA4FF;
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: cursorBlink 0.8s ease-in-out infinite;
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;

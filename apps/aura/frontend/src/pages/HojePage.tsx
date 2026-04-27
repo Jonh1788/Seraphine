@@ -21,12 +21,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { AuraSphere } from "../aura/sphere/AuraSphere";
-import { InstallBanner } from "../pwa/InstallBanner";
 import { getTodayBriefing, refreshBriefing, type Briefing } from "../api/briefing";
 import * as tasksApi from "../api/tasks";
 import * as financeApi from "../api/finance";
 import { ApiError } from "../api/client";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
+import { useBriefSequence } from "../hooks/useBriefSequence";
 import type {
   FinanceSummary,
   FinancialEntry,
@@ -53,7 +53,7 @@ const TONE_VAL: Record<"blue" | "red" | "amber" | "green" | "purple", string> = 
 
 interface SnapKpi {
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number | string }>;
   iconClass: string;
   value: string;
   tone: keyof typeof TONE_VAL;
@@ -203,12 +203,44 @@ export function HojePage() {
     },
   ];
 
+  // Build the sequence: orb (0), 4 cards (1-4), prio header (5),
+  // up to 4 prio rows (6-9), fin header (10), 3 fin rows (11-13),
+  // analise (14), narration (15). Trim to actual rendered count.
+  const finRowsCount = summary ? 3 : 0;
+  const sequenceCount =
+    1 /* orb */ +
+    kpis.length +
+    1 + upcomingTasks.length +
+    1 + finRowsCount +
+    1 /* analise */ +
+    1 /* narration */;
+  const seq = useBriefSequence({
+    count: sequenceCount,
+    stepMs: 175,
+    leadMs: 60,
+    resetKey: briefing?.generated_at,
+  });
+
+  // Compute index offsets so each section knows where it starts.
+  let cursor = 0;
+  const orbIdx = cursor++;
+  const cardsStart = cursor; cursor += kpis.length;
+  const prioHeaderIdx = cursor++;
+  const prioStart = cursor; cursor += upcomingTasks.length;
+  const finHeaderIdx = cursor++;
+  const finStart = cursor; cursor += finRowsCount;
+  const analiseIdx = cursor++;
+  const narrationIdx = cursor++;
+
   return (
-    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-bg-base">
+    <div
+      className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-bg-base"
+      onClick={() => seq.completed || seq.finish()}
+    >
       <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-3">
         <button
           type="button"
-          onClick={handleRefresh}
+          onClick={(e) => { e.stopPropagation(); void handleRefresh(); }}
           disabled={briefingLoading}
           aria-label="Atualizar briefing"
           className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-aura-border text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors disabled:opacity-50"
@@ -219,15 +251,19 @@ export function HojePage() {
           to="/"
           aria-label="Fechar"
           title="Voltar pra Aura"
+          onClick={(e) => e.stopPropagation()}
           className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-aura-border text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors"
         >
           <X className="h-3.5 w-3.5" />
         </Link>
       </div>
 
-      <InstallBanner />
-
-      <SnapGridWithOrb kpis={kpis} />
+      <SnapGridWithOrb
+        kpis={kpis}
+        orbClass={seq.classOf(orbIdx)}
+        cardClassFor={(i) => seq.classOf(cardsStart + i)}
+        pulseTick={seq.pulseTick}
+      />
 
       <SectionCard
         title="Prioridades"
@@ -235,8 +271,9 @@ export function HojePage() {
         iconColorClass="text-aura-green"
         count={String(upcomingTasks.length)}
         empty="Nenhuma tarefa pendente."
+        headerClass={seq.classOf(prioHeaderIdx)}
       >
-        {upcomingTasks.map((t) => {
+        {upcomingTasks.map((t, i) => {
           const isOverdue = t.due_date != null && t.due_date < todayIso;
           const dot = isOverdue ? "red" : dotByPriority(t.priority);
           const meta = isOverdue
@@ -250,7 +287,8 @@ export function HojePage() {
             <Link
               key={t.id}
               to="/tarefas"
-              className="brief-prio-row flex items-center gap-3 px-4 py-3 hover:bg-bg-s2/60 transition-colors border-t border-aura-border first:border-t-0"
+              onClick={(e) => e.stopPropagation()}
+              className={`${seq.classOf(prioStart + i)} flex items-center gap-3 px-4 py-3.5 hover:bg-bg-s2/60 transition-colors border-t border-aura-border first:border-t-0`}
             >
               <PrioDot color={dot} />
               <span className="flex-1 text-[13px] text-ink-primary truncate">{t.title}</span>
@@ -260,9 +298,9 @@ export function HojePage() {
                   isOverdue
                     ? "text-aura-red"
                     : t.priority === "high"
-                      ? "text-aura-red font-semibold uppercase"
+                      ? "text-aura-red font-bold uppercase tracking-[0.1em]"
                       : t.priority === "med"
-                        ? "text-aura-amber font-semibold uppercase"
+                        ? "text-aura-amber font-bold uppercase tracking-[0.1em]"
                         : "text-ink-faint",
                 ].join(" ")}
               >
@@ -280,20 +318,24 @@ export function HojePage() {
         iconColorClass="text-aura-green"
         count={summary ? "3" : "—"}
         empty="Nenhuma transação no mês."
+        headerClass={seq.classOf(finHeaderIdx)}
       >
         {summary ? (
           <>
             <FinRow
+              className={seq.classOf(finStart + 0)}
               name="Saldo do mês"
               value={fmtBrl(summary.balance)}
               positive={summary.balance >= 0}
             />
             <FinRow
+              className={seq.classOf(finStart + 1)}
               name="Receitas do mês"
               value={fmtBrl(summary.income)}
               positive
             />
             <FinRow
+              className={seq.classOf(finStart + 2)}
               name="Despesas do mês"
               value={fmtBrl(summary.expenses)}
               positive={false}
@@ -302,61 +344,52 @@ export function HojePage() {
         ) : null}
       </SectionCard>
 
-      {recentEntries.length > 0 ? (
-        <SectionCard
-          title="Últimas transações"
-          icon={Activity}
-          iconColorClass="text-accent-blue-soft"
-          count={String(recentEntries.length)}
-        >
-          {recentEntries.slice(0, 4).map((e) => (
-            <FinRow
-              key={e.id}
-              name={e.description ?? e.category}
-              value={fmtBrl(e.amount)}
-              positive={e.type === "income"}
-              meta={dateAbbr(e.date)}
-            />
-          ))}
-        </SectionCard>
-      ) : null}
-
-      <BriefAnalise />
+      <BriefAnalise className={seq.classOf(analiseIdx)} />
 
       <NarrationBottom
+        className={seq.classOf(narrationIdx)}
+        active={seq.isRevealed(narrationIdx)}
         briefing={briefing}
         loading={briefingLoading}
         error={briefingError}
         greetingName={shortName(user?.email)}
       />
+
+      {recentEntries.length > 0 ? (
+        <div className="opacity-70">
+          {/* "Últimas transações" agora vive no Tab Finanças; mantido oculto aqui pra não competir com o briefing */}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 interface SnapGridWithOrbProps {
   kpis: SnapKpi[];
+  orbClass: string;
+  cardClassFor: (i: number) => string;
+  pulseTick: number;
 }
 
-function SnapGridWithOrb({ kpis }: SnapGridWithOrbProps) {
+function SnapGridWithOrb({ kpis, orbClass, cardClassFor, pulseTick }: SnapGridWithOrbProps) {
   return (
     <div className="relative px-4 pt-3 pb-4">
       <div className="grid grid-cols-2 gap-2.5">
         {kpis.map((k, i) => {
           const Inner = (
             <>
-              <div className="flex items-center gap-1.5 text-[9px] font-bold tracking-[0.14em] uppercase text-ink-faint mb-1.5">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.16em] uppercase text-ink-faint mb-2">
                 <k.icon className={`h-3 w-3 ${k.iconClass}`} />
                 {k.label}
               </div>
-              <div className={`text-2xl leading-none font-bold tracking-tight ${TONE_VAL[k.tone]}`}>
+              <div className={`text-[28px] leading-none font-bold tracking-tight ${TONE_VAL[k.tone]}`}>
                 {k.value}
               </div>
             </>
           );
-          const baseClass =
-            "snap-card relative bg-bg-s1 border border-aura-border rounded-[14px] px-3.5 py-3 transition-all hover:bg-bg-s2 hover:border-aura-border2 hover:-translate-y-px";
+          const baseClass = `${cardClassFor(i)} snap-card relative bg-bg-s1 border border-aura-border rounded-[14px] px-4 py-3.5 transition-colors hover:bg-bg-s2 hover:border-aura-border2`;
           return k.to ? (
-            <Link key={i} to={k.to} className={baseClass}>
+            <Link key={i} to={k.to} onClick={(e) => e.stopPropagation()} className={baseClass}>
               {Inner}
             </Link>
           ) : (
@@ -366,46 +399,80 @@ function SnapGridWithOrb({ kpis }: SnapGridWithOrbProps) {
           );
         })}
       </div>
-      {/* Mini orb sobreposta no centro do grid */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 86,
-          height: 86,
-          filter: "drop-shadow(0 0 14px rgba(79,126,255,0.55))",
-        }}
-        aria-hidden="true"
-      >
-        <AuraSphere variant="mini" state="idle" minimal />
-      </div>
+      {/* Mini orb sobreposta entre os cards (top:25% left:36% como mockup) */}
+      <BriefMiniOrb className={orbClass} pulseTick={pulseTick} />
+    </div>
+  );
+}
+
+interface BriefMiniOrbProps {
+  className?: string;
+  pulseTick: number;
+}
+
+function BriefMiniOrb({ className = "", pulseTick }: BriefMiniOrbProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (pulseTick === 0) return;
+    const el = ref.current;
+    if (!el) return;
+    el.classList.remove("brief-orb-pulse");
+    // Force reflow so the animation restarts
+    void el.offsetWidth;
+    el.classList.add("brief-orb-pulse");
+  }, [pulseTick]);
+
+  return (
+    <div
+      ref={ref}
+      className={`${className} brief-orb-anchor pointer-events-none absolute`}
+      style={{
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: 80,
+        height: 80,
+        zIndex: 5,
+        filter: "drop-shadow(0 0 14px rgba(79,126,255,0.55))",
+      }}
+      aria-hidden="true"
+    >
+      <AuraSphere variant="mini" state="idle" minimal />
     </div>
   );
 }
 
 interface SectionCardProps {
   title: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number | string }>;
   iconColorClass: string;
   count?: string;
   empty?: string;
   children?: React.ReactNode;
+  headerClass?: string;
 }
 
-function SectionCard({ title, icon: Icon, iconColorClass, count, empty, children }: SectionCardProps) {
+function SectionCard({
+  title,
+  icon: Icon,
+  iconColorClass,
+  count,
+  empty,
+  children,
+  headerClass = "",
+}: SectionCardProps) {
   const items = Array.isArray(children) ? children : children ? [children] : [];
   const hasContent = items.some((c) => c);
   return (
-    <section className="mx-4 mb-3.5 bg-bg-s1 border border-aura-border rounded-[18px] overflow-hidden">
-      <header className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-aura-border">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-primary tracking-tight">
-          <Icon className={`h-3.5 w-3.5 ${iconColorClass}`} />
+    <section className={`${headerClass} mx-4 mb-3.5 bg-bg-s1 border border-aura-border rounded-[18px] overflow-hidden`}>
+      <header className="flex items-center justify-between px-4 pt-3.5 pb-3 border-b border-aura-border">
+        <div className="flex items-center gap-2.5 font-display text-[15px] font-bold text-ink-primary tracking-tight">
+          <Icon className={`h-4 w-4 ${iconColorClass}`} strokeWidth={2.2} />
           {title}
         </div>
         {count !== undefined ? (
-          <span className="text-[11px] text-ink-faint">{count}</span>
+          <span className="font-sans text-[12px] text-ink-faint">{count}</span>
         ) : null}
       </header>
       {hasContent ? (
@@ -434,35 +501,36 @@ function PrioDot({ color }: { color: "red" | "amber" | "blue" }) {
         : "rgba(125,164,255,0.55)";
   return (
     <span
-      className={`h-[7px] w-[7px] rounded-full shrink-0 ${cls}`}
+      className={`h-[8px] w-[8px] rounded-full shrink-0 ${cls}`}
       style={{ boxShadow: `0 0 8px ${glow}` }}
     />
   );
 }
 
 interface FinRowProps {
+  className?: string;
   name: string;
   value: string;
   positive: boolean;
   meta?: string;
 }
 
-function FinRow({ name, value, positive, meta }: FinRowProps) {
+function FinRow({ className = "", name, value, positive, meta }: FinRowProps) {
   const color = positive ? "text-aura-green" : "text-aura-red";
   const dotGlow = positive ? "rgba(45,212,191,0.55)" : "rgba(255,91,114,0.55)";
   const Icon = positive ? ArrowUpRight : ArrowDownLeft;
   return (
-    <div className="brief-fin-row flex items-center gap-3 px-4 py-3 border-t border-aura-border first:border-t-0">
+    <div className={`${className} flex items-center gap-3 px-4 py-3.5 border-t border-aura-border first:border-t-0`}>
       <span
         className={[
-          "h-[7px] w-[7px] rounded-full shrink-0",
+          "h-[8px] w-[8px] rounded-full shrink-0",
           positive ? "bg-aura-green" : "bg-aura-red",
         ].join(" ")}
         style={{ boxShadow: `0 0 8px ${dotGlow}` }}
       />
       <span className="flex-1 text-[13px] text-ink-primary truncate">{name}</span>
       {meta ? <span className="text-[10px] text-ink-faint">{meta}</span> : null}
-      <span className={`inline-flex items-center gap-1 font-mono text-[12px] font-medium shrink-0 ${color}`}>
+      <span className={`inline-flex items-center gap-1 font-mono text-[13px] font-medium shrink-0 ${color}`}>
         <Icon className="h-3 w-3" />
         {value}
       </span>
@@ -470,9 +538,9 @@ function FinRow({ name, value, positive, meta }: FinRowProps) {
   );
 }
 
-function BriefAnalise() {
+function BriefAnalise({ className = "" }: { className?: string }) {
   return (
-    <div className="relative mx-4 my-3 py-3 flex items-center justify-center gap-2">
+    <div className={`${className} relative mx-4 my-3 py-3 flex items-center justify-center gap-2`}>
       <span
         aria-hidden="true"
         className="absolute top-1/2 left-0 right-[calc(50%+70px)] h-px bg-aura-border"
@@ -490,13 +558,22 @@ function BriefAnalise() {
 }
 
 interface NarrationBottomProps {
+  className?: string;
+  active: boolean;
   briefing: Briefing | null;
   loading: boolean;
   error: string | null;
   greetingName?: string;
 }
 
-function NarrationBottom({ briefing, loading, error, greetingName }: NarrationBottomProps) {
+function NarrationBottom({
+  className = "",
+  active,
+  briefing,
+  loading,
+  error,
+  greetingName,
+}: NarrationBottomProps) {
   const segments = briefing?.segments ?? [];
   const totalChars = useMemo(
     () => segments.reduce((acc, s) => acc + s.text.length, 0),
@@ -507,9 +584,10 @@ function NarrationBottom({ briefing, loading, error, greetingName }: NarrationBo
 
   useEffect(() => {
     setRevealed(0);
-  }, [briefing?.generated_at]);
+  }, [briefing?.generated_at, active]);
 
   useEffect(() => {
+    if (!active) return;
     if (totalChars === 0 || revealed >= totalChars) {
       if (intervalRef.current !== null) {
         window.clearInterval(intervalRef.current);
@@ -535,7 +613,7 @@ function NarrationBottom({ briefing, loading, error, greetingName }: NarrationBo
         intervalRef.current = null;
       }
     };
-  }, [totalChars, revealed]);
+  }, [active, totalChars, revealed]);
 
   const visibleSegments = useMemo(() => {
     const out: typeof segments = [];
@@ -554,28 +632,18 @@ function NarrationBottom({ briefing, loading, error, greetingName }: NarrationBo
     return out;
   }, [segments, revealed]);
 
-  const isTyping = totalChars > 0 && revealed < totalChars;
-
-  const skipTyping = () => {
-    if (totalChars > 0 && revealed < totalChars) {
-      setRevealed(totalChars);
-    }
-  };
-
+  const isTyping = active && totalChars > 0 && revealed < totalChars;
   const greeting = greetingName ? `Olá, ${greetingName}.` : null;
 
   return (
-    <div className="mx-4 mt-1 mb-7">
-      <div
-        className="font-sans text-[13px] leading-[1.75] text-ink-dim font-light min-h-[180px] cursor-pointer"
-        onClick={skipTyping}
-      >
+    <div className={`${className} mx-4 mt-1 mb-7`}>
+      <div className="font-sans text-[13px] leading-[1.75] text-ink-dim font-light min-h-[180px]">
         {greeting ? (
           <span className="text-accent-blue-soft font-medium">{greeting} </span>
         ) : null}
         {error ? (
           <span className="text-aura-red">{error}</span>
-        ) : visibleSegments.length === 0 && !loading ? (
+        ) : !active ? null : visibleSegments.length === 0 && !loading ? (
           <span className="text-ink-faint">Sem narração pra hoje.</span>
         ) : visibleSegments.length === 0 && loading ? (
           <span className="text-ink-faint">Preparando seu briefing…</span>
@@ -586,11 +654,7 @@ function NarrationBottom({ briefing, loading, error, greetingName }: NarrationBo
                 {seg.text}
               </span>
             ))}
-            {isTyping ? (
-              <span
-                className="inline-block w-[2px] h-[15px] -mb-[2px] ml-[2px] bg-accent-blue-soft align-middle animate-pulse"
-              />
-            ) : null}
+            {isTyping ? <span className="brief-tw-cursor" /> : null}
           </>
         )}
       </div>
