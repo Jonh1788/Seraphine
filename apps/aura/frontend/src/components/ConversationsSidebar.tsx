@@ -73,12 +73,19 @@ export function ConversationsSidebar({ currentId, onSelect, refreshKey = 0 }: Pr
             const isActive = c.id === currentId;
             const title = c.title ?? c.last_snippet ?? "Nova conversa";
             return (
-              <button
+              <div
                 key={c.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(c.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(c.id);
+                  }
+                }}
                 className={[
-                  "group flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
+                  "group flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors cursor-pointer",
                   isActive
                     ? "bg-accent-purple/15 ring-1 ring-accent-purple/30"
                     : "hover:bg-white/5",
@@ -114,7 +121,7 @@ export function ConversationsSidebar({ currentId, onSelect, refreshKey = 0 }: Pr
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
-              </button>
+              </div>
             );
           })
         )}

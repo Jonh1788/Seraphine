@@ -50,10 +50,14 @@ export function FinancePage() {
 
   const events = useMemo<CalendarEvent[]>(
     () =>
-      entries.map((e) => ({
-        date: e.date.slice(0, 10),
-        color: e.type === "income" ? "green" : "red",
-      })),
+      entries
+        .filter((e): e is FinancialEntry & { date: string } =>
+          typeof e.date === "string" && e.date.length >= 10,
+        )
+        .map((e) => ({
+          date: e.date.slice(0, 10),
+          color: e.type === "income" ? "green" : "red",
+        })),
     [entries],
   );
 

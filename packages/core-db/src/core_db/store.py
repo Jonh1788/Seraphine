@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -27,7 +28,15 @@ Migrator = Callable[[sqlite3.Connection], None]
 class Store:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
-        self._conn: sqlite3.Connection | None = None
+        # One sqlite3.Connection per thread. Sharing a single connection
+        # across the asyncio.to_thread executor pool corrupted result
+        # sets — two simultaneous .execute().fetchone() calls would race
+        # on the implicit cursor and one would return None. Per-thread
+        # connections sidestep the issue entirely; SQLite WAL handles
+        # multiple writer threads fine for our scale.
+        self._tls = threading.local()
+        self._conns: list[sqlite3.Connection] = []
+        self._conns_lock = threading.Lock()
         # Insertion-ordered list of (name, migrator) so we can show what
         # ran in logs / debug output.
         self._migrators: list[tuple[str, Migrator]] = []
@@ -37,17 +46,33 @@ class Store:
     # ------------------------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
-        if self._conn is not None:
-            return self._conn
+        existing = getattr(self._tls, "conn", None)
+        if existing is not None:
+            return existing
         conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
-        self._conn = conn
+        # WAL lets read threads proceed while a writer holds the file —
+        # important now that we open one connection per thread.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        self._tls.conn = conn
+        with self._conns_lock:
+            self._conns.append(conn)
         return conn
 
     async def aclose(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._conns_lock:
+            conns = list(self._conns)
+            self._conns.clear()
+        for c in conns:
+            try:
+                c.close()
+            except Exception:
+                pass
+        # Drop the thread-local on the current thread; other threads'
+        # locals will be GC'd with their threads.
+        if hasattr(self._tls, "conn"):
+            del self._tls.conn
 
     # ------------------------------------------------------------------
     # Migration registry
