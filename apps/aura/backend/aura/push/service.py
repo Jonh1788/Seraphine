@@ -73,9 +73,13 @@ class PushService:
         self._tasks = tasks
         self._subject = vapid_subject
         if vapid_private_pem and vapid_public_b64:
+            # .env files store the PEM as a single line with literal "\n";
+            # pywebpush needs real newlines. Idempotent: if already multi-
+            # line, the replace is a no-op.
+            normalized = vapid_private_pem.replace("\\n", "\n")
             self._keys = VapidKeys(
-                private_pem=vapid_private_pem,
-                public_uncompressed_b64=vapid_public_b64,
+                private_pem=normalized,
+                public_uncompressed_b64=vapid_public_b64.strip(),
             )
         else:
             self._keys = self._generate_keys()
