@@ -36,6 +36,10 @@ from mod_tasks.routes import get_current_user_id
 from mod_tasks.service import TaskService
 
 from aura.chat.service import ConversationService
+from aura.goals.service import GoalsService
+from aura.habits.service import HabitsService
+from aura.knowledge.service import KnowledgeService
+from aura.projects.service import ProjectsService
 from aura.recurring.service import RecurringService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -108,7 +112,21 @@ _SYSTEM_PROMPT = (
     "interprete o conteúdo extraído e registre o TOTAL como uma transação "
     "única via register_transaction, com description = nome do "
     "estabelecimento (ou do banco/emissor), categoria adequada, "
-    "source='chat'. Não pergunte confirmação; registre direto."
+    "source='chat'. Não pergunte confirmação; registre direto. "
+    "Quando o usuário pedir um lembrete (ex: 'me lembra de tomar remédio "
+    "às 8', 'lembrete pra ligar pro médico amanhã 14h'), use create_reminder. "
+    "Quando ele descrever uma iniciativa, projeto ou meta de longo prazo "
+    "com escopo (ex: 'quero criar um projeto chamado X', 'iniciativa de Y'), "
+    "use create_project. Quando descrever um hábito a manter (ex: 'quero "
+    "começar a caminhar 5x por semana', 'meta de beber água diariamente'), "
+    "use create_habit (target_per_week 1..7). Quando o usuário pedir pra "
+    "anotar/salvar uma ideia, reflexão ou texto livre (ex: 'anota essa "
+    "ideia: ...', 'salva isso no caderno X'), use create_note. Se o "
+    "caderno_name não existir, será criado. Quando o usuário definir um "
+    "objetivo mensurável com prazo (ex: 'meta: economizar R$ 5000 até "
+    "dezembro', 'quero ler 12 livros este ano'), use create_goal — kind "
+    "deve ser 'financial', 'habit', 'project' ou 'general'. Após qualquer "
+    "criação, confirme com mensagem curta — o card aparece visualmente."
 )
 
 _EXTRACT_PROMPT = (
@@ -285,6 +303,136 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "create_reminder",
+        "description": (
+            "Cria um lembrete (push notification) com data e hora. "
+            "Use quando o usuário pedir 'me lembra de X às H', 'lembrete pra "
+            "Y amanhã'. Diferente de create_task: lembretes aparecem na tela "
+            "Lembretes e disparam push no horário certo."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "due_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD; padrão = hoje",
+                },
+                "due_time": {
+                    "type": "string",
+                    "description": "HH:MM 24h; padrão = 09:00 se omitido",
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Categoria curta opcional (ex.: Saúde, Pix)",
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "create_project",
+        "description": (
+            "Cria um projeto (iniciativa de longo prazo com escopo). Use "
+            "quando o usuário descrever um projeto / iniciativa nomeada."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "color": {
+                    "type": "string",
+                    "enum": ["blue", "violet", "emerald", "amber", "rose"],
+                    "description": "Cor da stripe; padrão blue",
+                },
+                "target_date": {
+                    "type": "string",
+                    "description": "Prazo opcional YYYY-MM-DD",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "create_habit",
+        "description": (
+            "Cria um hábito recorrente (toggle diário). Use quando o usuário "
+            "descrever uma rotina pessoal a manter."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "color": {
+                    "type": "string",
+                    "enum": ["emerald", "blue", "violet", "amber", "rose", "teal"],
+                },
+                "target_per_week": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 7,
+                    "description": "Meta de repetições por semana, 1..7",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "create_note",
+        "description": (
+            "Salva uma nota markdown em um caderno. Use quando o usuário "
+            "pedir 'anota isso', 'salva no caderno X'. Se o caderno não "
+            "existir, cria automaticamente."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "notebook_name": {
+                    "type": "string",
+                    "description": "Nome do caderno; cria se não existir",
+                },
+                "title": {"type": "string"},
+                "content_md": {
+                    "type": "string",
+                    "description": "Conteúdo em markdown",
+                },
+            },
+            "required": ["notebook_name", "content_md"],
+        },
+    },
+    {
+        "name": "create_goal",
+        "description": (
+            "Cria uma meta de longo prazo, com kind (general/financial/"
+            "habit/project), opcionalmente com target_value e deadline."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "enum": ["general", "financial", "habit", "project"],
+                },
+                "target_value": {
+                    "type": "number",
+                    "description": "Quantidade alvo (R$, livros, km, ...)",
+                },
+                "unit": {
+                    "type": "string",
+                    "description": "Unidade do target (R$, livros, km, ...)",
+                },
+                "deadline": {
+                    "type": "string",
+                    "description": "Prazo YYYY-MM-DD opcional",
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 _TITLE_PROMPT = (
@@ -341,6 +489,22 @@ def _recurring_or_503(request: Request) -> RecurringService:
     if svc is None:
         raise HTTPException(status_code=503, detail="recurring service não configurado")
     return svc
+
+
+def _projects_or_none(request: Request) -> Optional[ProjectsService]:
+    return getattr(request.app.state, "projects_service", None)
+
+
+def _habits_or_none(request: Request) -> Optional[HabitsService]:
+    return getattr(request.app.state, "habits_service", None)
+
+
+def _knowledge_or_none(request: Request) -> Optional[KnowledgeService]:
+    return getattr(request.app.state, "knowledge_service", None)
+
+
+def _goals_or_none(request: Request) -> Optional[GoalsService]:
+    return getattr(request.app.state, "goals_service", None)
 
 
 def _require_user(user_id: str | None) -> str:
@@ -649,11 +813,185 @@ async def _exec_list_tasks(
     }
 
 
+async def _exec_create_reminder(
+    tasks: TaskService,
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    title = (args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "título obrigatório"}
+    due_date = (args.get("due_date") or _today_iso()).strip()
+    due_time = (args.get("due_time") or "09:00").strip()
+    tag = (args.get("tag") or "").strip()
+    try:
+        task_id = await tasks.create_task(
+            type="reminder",
+            title=title,
+            source="chat",
+            payload={},
+            due_date=due_date,
+            due_time=due_time,
+            tags=[tag] if tag else None,
+            user_id=user_id,
+        )
+        persisted = await tasks.get_task(task_id, user_id=user_id)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if persisted is None:
+        return {"ok": False, "error": "falha ao carregar lembrete"}
+    return {"ok": True, "reminder": _task_to_inline(persisted)}
+
+
+async def _exec_create_project(
+    projects: Optional[ProjectsService],
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    if projects is None:
+        return {"ok": False, "error": "projetos não configurado"}
+    name = (args.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name obrigatório"}
+    try:
+        proj = await projects.create(
+            user_id=user_id,
+            name=name,
+            description=args.get("description"),
+            color=(args.get("color") or "blue"),
+            target_date=args.get("target_date"),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "project": {
+            "id": proj.id,
+            "name": proj.name,
+            "color": proj.color,
+            "status": proj.status,
+            "target_date": proj.target_date,
+        },
+    }
+
+
+async def _exec_create_habit(
+    habits: Optional[HabitsService],
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    if habits is None:
+        return {"ok": False, "error": "habits não configurado"}
+    name = (args.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name obrigatório"}
+    try:
+        h = await habits.create(
+            user_id=user_id,
+            name=name,
+            color=(args.get("color") or "emerald"),
+            target_per_week=int(args.get("target_per_week") or 7),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "habit": {
+            "id": h.id,
+            "name": h.name,
+            "color": h.color,
+            "target_per_week": h.target_per_week,
+        },
+    }
+
+
+async def _exec_create_note(
+    knowledge: Optional[KnowledgeService],
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    if knowledge is None:
+        return {"ok": False, "error": "knowledge não configurado"}
+    notebook_name = (args.get("notebook_name") or "").strip()
+    content_md = (args.get("content_md") or "").strip()
+    if not notebook_name or not content_md:
+        return {"ok": False, "error": "notebook_name e content_md obrigatórios"}
+    title = (args.get("title") or "").strip() or None
+    try:
+        # Find or create notebook by name (case-insensitive match)
+        existing = await knowledge.list_notebooks(user_id)
+        nb = next(
+            (n for n in existing if n.name.lower() == notebook_name.lower()),
+            None,
+        )
+        if nb is None:
+            nb = await knowledge.create_notebook(user_id=user_id, name=notebook_name)
+        note = await knowledge.create_note(
+            notebook_id=nb.id,
+            user_id=user_id,
+            title=title,
+            content_md=content_md,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if note is None:
+        return {"ok": False, "error": "falha ao criar nota"}
+    return {
+        "ok": True,
+        "note": {
+            "id": note.id,
+            "notebook_id": note.notebook_id,
+            "notebook_name": notebook_name,
+            "title": note.title,
+            "content_md": note.content_md,
+        },
+    }
+
+
+async def _exec_create_goal(
+    goals: Optional[GoalsService],
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    if goals is None:
+        return {"ok": False, "error": "goals não configurado"}
+    title = (args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title obrigatório"}
+    try:
+        g = await goals.create(
+            user_id=user_id,
+            title=title,
+            description=args.get("description"),
+            kind=(args.get("kind") or "general"),
+            target_value=args.get("target_value"),
+            unit=args.get("unit"),
+            deadline=args.get("deadline"),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "goal": {
+            "id": g.id,
+            "title": g.title,
+            "kind": g.kind,
+            "target_value": g.target_value,
+            "unit": g.unit,
+            "deadline": g.deadline,
+        },
+    }
+
+
 def _run_agentic_stream(
     llm: AnthropicClient,
     finance: FinanceService,
     tasks_svc: TaskService,
     recurring_svc: RecurringService,
+    projects_svc: Optional[ProjectsService],
+    habits_svc: Optional[HabitsService],
+    knowledge_svc: Optional[KnowledgeService],
+    goals_svc: Optional[GoalsService],
     svc: ConversationService,
     uid: str,
     conversation_id: str,
@@ -707,6 +1045,16 @@ def _run_agentic_stream(
                         result = await _exec_create_recurring_task(
                             recurring_svc, tasks_svc, uid, args,
                         )
+                    elif name == "create_reminder":
+                        result = await _exec_create_reminder(tasks_svc, uid, args)
+                    elif name == "create_project":
+                        result = await _exec_create_project(projects_svc, uid, args)
+                    elif name == "create_habit":
+                        result = await _exec_create_habit(habits_svc, uid, args)
+                    elif name == "create_note":
+                        result = await _exec_create_note(knowledge_svc, uid, args)
+                    elif name == "create_goal":
+                        result = await _exec_create_goal(goals_svc, uid, args)
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -742,6 +1090,15 @@ def _run_agentic_stream(
                             turn_tasks.append(mat)
                             yield (
                                 f"data: {json.dumps({'task': mat})}\n\n"
+                            ).encode()
+                    # New tool families emit a generic "chip" event so the
+                    # frontend can render a small confirmation card without
+                    # needing a dedicated channel per kind.
+                    for chip_kind in ("reminder", "project", "habit", "note", "goal"):
+                        if result.get("ok") and result.get(chip_kind):
+                            payload = {"kind": chip_kind, "item": result[chip_kind]}
+                            yield (
+                                f"data: {json.dumps({'chip': payload})}\n\n"
                             ).encode()
 
                     # Feed the tool result back to the LLM so it can
@@ -825,6 +1182,10 @@ async def stream_message(
     finance = _finance_or_503(request)
     tasks_svc = _tasks_or_503(request)
     recurring_svc = _recurring_or_503(request)
+    projects_svc = _projects_or_none(request)
+    habits_svc = _habits_or_none(request)
+    knowledge_svc = _knowledge_or_none(request)
+    goals_svc = _goals_or_none(request)
 
     user_text = body.content.strip()
     if not user_text:
@@ -846,7 +1207,9 @@ async def stream_message(
 
     return _sse_response(
         _run_agentic_stream(
-            llm, finance, tasks_svc, recurring_svc, svc, uid,
+            llm, finance, tasks_svc, recurring_svc,
+            projects_svc, habits_svc, knowledge_svc, goals_svc,
+            svc, uid,
             conversation_id, user_text, msgs, is_first_exchange,
         )
     )
@@ -955,6 +1318,10 @@ async def stream_message_with_attachment(
     finance = _finance_or_503(request)
     tasks_svc = _tasks_or_503(request)
     recurring_svc = _recurring_or_503(request)
+    projects_svc = _projects_or_none(request)
+    habits_svc = _habits_or_none(request)
+    knowledge_svc = _knowledge_or_none(request)
+    goals_svc = _goals_or_none(request)
 
     ctype = request.headers.get("content-type", "")
     if "multipart/form-data" not in ctype.lower():
@@ -1102,7 +1469,9 @@ async def stream_message_with_attachment(
 
     return _sse_response(
         _run_agentic_stream(
-            llm, finance, tasks_svc, recurring_svc, svc, uid,
+            llm, finance, tasks_svc, recurring_svc,
+            projects_svc, habits_svc, knowledge_svc, goals_svc,
+            svc, uid,
             conversation_id, title_seed, msgs, is_first_exchange,
         )
     )

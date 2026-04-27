@@ -6,11 +6,9 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Link } from "react-router-dom";
 import {
-  BookText,
   ChevronLeft,
-  ChevronRight,
+  ChevronRight as ChevronRightIcon,
   FileText,
   Loader2,
   Plus,
@@ -23,22 +21,53 @@ import { ApiError } from "../api/client";
 import { Sheet } from "../components/Sheet";
 import { Markdown } from "../components/Markdown";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
+import { useCountUp } from "../hooks/useCountUp";
 
 type View =
-  | { kind: "notebooks" }
+  | { kind: "list" }
   | { kind: "notes"; notebook: Notebook }
   | { kind: "note"; notebook: Notebook; note: Note };
 
+type Tab = "notebooks" | "brain" | "diary" | "dump";
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+const NB_PALETTE = [
+  { hex: "#7DA4FF", emoji: "📚" },
+  { hex: "#2DD4BF", emoji: "💚" },
+  { hex: "#F472B6", emoji: "💗" },
+  { hex: "#A78BFA", emoji: "💜" },
+  { hex: "#F5A623", emoji: "💛" },
+];
+
+function emojiFor(name: string): string {
+  const lower = name.toLowerCase();
+  if (/[\$€£]|fina|gast|salar|invest|dinheiro|banco/.test(lower)) return "💰";
+  if (/pess|ami|fami|relacion/.test(lower)) return "👤";
+  if (/saude|medi|treino|fitness/.test(lower)) return "🩺";
+  if (/livro|leit|estud|curso|aula/.test(lower)) return "📖";
+  if (/ideia|brain|inspir/.test(lower)) return "💡";
+  if (/diario|diary/.test(lower)) return "📝";
+  if (/empresa|trab|projeto|negoc/.test(lower)) return "💼";
+  return "📚";
+}
+
 export function KnowledgePage() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
-  const [view, setView] = useState<View>({ kind: "notebooks" });
+  const [view, setView] = useState<View>({ kind: "list" });
+  const [tab, setTab] = useState<Tab>("notebooks");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [newNotebookOpen, setNewNotebookOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Note[] | null>(null);
   const searchTimer = useRef<number | null>(null);
+  const [newNotebookOpen, setNewNotebookOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const loadNotebooks = useCallback(async () => {
     setLoading(true);
@@ -78,116 +107,194 @@ export function KnowledgePage() {
     };
   }, [search]);
 
-  const openNotebook = useCallback((nb: Notebook) => {
-    setView({ kind: "notes", notebook: nb });
-  }, []);
+  const totalNotes = useMemo(
+    () => notebooks.reduce((acc, nb) => acc + (nb.note_count ?? 0), 0),
+    [notebooks],
+  );
+  const totalRecords = notebooks.length + totalNotes;
 
-  const openNote = useCallback((notebook: Notebook, note: Note) => {
-    setView({ kind: "note", notebook, note });
-  }, []);
+  const ringRatio = useMemo(() => {
+    if (totalRecords === 0) return 0;
+    // Ring fills based on total records, capped at 50 (after that always full).
+    return Math.max(0.05, Math.min(1, totalRecords / 50));
+  }, [totalRecords]);
+
+  const animDelay = (i: number) => ({ animationDelay: `${0.04 + i * 0.05}s` });
+
+  // ---- Sub-views (nesting): notes list / editor ----
+  if (view.kind === "notes") {
+    return (
+      <NotesListView
+        notebook={view.notebook}
+        onBack={() => setView({ kind: "list" })}
+        onOpen={(n) => setView({ kind: "note", notebook: view.notebook, note: n })}
+        onChanged={loadNotebooks}
+      />
+    );
+  }
+  if (view.kind === "note") {
+    return (
+      <NoteEditorView
+        notebook={view.notebook}
+        note={view.note}
+        onBack={() => setView({ kind: "notes", notebook: view.notebook })}
+        onUpdated={(n) => setView({ kind: "note", notebook: view.notebook, note: n })}
+        onDeleted={() => {
+          setView({ kind: "notes", notebook: view.notebook });
+          void loadNotebooks();
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl mx-auto">
-      <header className="flex items-center gap-3">
-        {view.kind === "notebooks" ? (
-          <Link
-            to="/mais"
-            className="grid place-items-center h-10 w-10 -ml-2 rounded-lg text-ink-dim hover:text-ink-primary hover:bg-white/5"
-            aria-label="Voltar"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={() =>
-              view.kind === "note"
-                ? setView({ kind: "notes", notebook: view.notebook })
-                : setView({ kind: "notebooks" })
-            }
-            className="grid place-items-center h-10 w-10 -ml-2 rounded-lg text-ink-dim hover:text-ink-primary hover:bg-white/5"
-            aria-label="Voltar"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-        )}
-        <div className="h-10 w-10 rounded-xl2 bg-mod-chat/15 text-mod-chat grid place-items-center">
-          <BookText className="h-5 w-5" />
-        </div>
+    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-[#06091A] pb-24 relative">
+      {/* Title row */}
+      <div className="flex items-center gap-2.5 pt-4 px-5 pb-3.5 screen-item" style={animDelay(0)}>
+        <h1 className="font-display text-[28px] font-bold tracking-tight text-[#EEF2FF]">
+          Conhecimento
+        </h1>
+      </div>
+
+      {/* h-hero ring blue */}
+      <section
+        className="mx-4 mb-3.5 p-4 rounded-[20px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] flex items-center gap-4 screen-item"
+        style={animDelay(1)}
+      >
+        <RingSm ratio={ringRatio} value={totalRecords} sub="REG" />
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-2xl font-bold text-ink-primary leading-tight truncate">
-            {view.kind === "notebooks"
-              ? "Conhecimento"
-              : view.kind === "notes"
-                ? view.notebook.name
-                : (view.note.title || "Sem título")}
-          </h1>
-          <p className="text-sm text-ink-dim truncate">
-            {view.kind === "notebooks"
-              ? "Cadernos, notas e brain dumps."
-              : view.kind === "notes"
-                ? `${view.notebook.note_count} nota(s)`
-                : view.notebook.name}
-          </p>
-        </div>
-        {view.kind === "notebooks" ? (
-          <button
-            type="button"
-            onClick={() => setNewNotebookOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-10 rounded-lg bg-accent-blue text-white hover:bg-accent-blue-soft hover:text-bg-base text-sm font-medium shadow-glow-blue"
-          >
-            <Plus className="h-4 w-4" />
-            Caderno
-          </button>
-        ) : null}
-      </header>
-
-      {view.kind === "notebooks" ? (
-        <>
-          <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar em todas as notas…"
-              className="w-full rounded-xl2 border border-white/10 bg-bg-s1/60 pl-10 pr-3 py-2.5 min-h-11 text-ink-primary placeholder:text-ink-faint focus:border-accent-blue focus:outline-none"
-            />
+          <div className="font-display text-[14px] font-semibold tracking-tight text-[#EEF2FF] mb-1">
+            {totalRecords === 0 ? "Início" : "Coleção viva"}
           </div>
+          <div className="text-[11px] leading-snug mb-2" style={{ color: "#8B9CC8" }}>
+            {totalRecords === 0
+              ? "Comece a registrar seus pensamentos."
+              : "Explore, pesquise e construa novos contextos."}
+          </div>
+          <div className="text-[11px]" style={{ color: "#4D5E8A" }}>
+            {notebooks.length} caderno{notebooks.length === 1 ? "" : "s"} · {totalNotes} nota{totalNotes === 1 ? "" : "s"}
+          </div>
+        </div>
+      </section>
 
-          {searchResults !== null ? (
-            <SearchResults
-              results={searchResults}
-              notebooks={notebooks}
-              onOpen={openNote}
-            />
-          ) : (
-            <NotebookList
-              notebooks={notebooks}
-              loading={loading}
-              error={error}
-              onOpen={openNotebook}
-            />
-          )}
-        </>
-      ) : view.kind === "notes" ? (
-        <NotesList
-          notebook={view.notebook}
-          onBack={() => setView({ kind: "notebooks" })}
-          onOpen={(n) => openNote(view.notebook, n)}
-          onChanged={loadNotebooks}
-        />
-      ) : (
-        <NoteEditor
-          notebook={view.notebook}
-          note={view.note}
-          onUpdated={(n) => setView({ kind: "note", notebook: view.notebook, note: n })}
-          onDeleted={() => {
-            setView({ kind: "notes", notebook: view.notebook });
-            void loadNotebooks();
+      {/* search */}
+      <div className="mx-4 mb-3.5 relative screen-item" style={animDelay(2)}>
+        <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#4D5E8A" }} />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar em todas as notas…"
+          className="w-full rounded-[12px] pl-10 pr-3 py-2.5 min-h-11 placeholder:text-[#4D5E8A] focus:outline-none"
+          style={{
+            background: "rgba(17,27,56,0.6)",
+            border: "1px solid rgba(99,130,255,0.10)",
+            color: "#EEF2FF",
           }}
         />
+      </div>
+
+      {/* pills row */}
+      <div className="flex gap-1.5 px-4 mb-3.5 overflow-x-auto screen-item" style={{ ...animDelay(3), scrollbarWidth: "none" }}>
+        <PillBtn active={tab === "notebooks"} onClick={() => setTab("notebooks")}>
+          Cadernos · {notebooks.length}
+        </PillBtn>
+        <PillBtn active={tab === "brain"} onClick={() => setTab("brain")}>Cérebro</PillBtn>
+        <PillBtn active={tab === "diary"} onClick={() => setTab("diary")}>Diário</PillBtn>
+        <PillBtn active={tab === "dump"} onClick={() => setTab("dump")}>Brain Dump · {totalNotes}</PillBtn>
+      </div>
+
+      {searchResults !== null ? (
+        <SearchResults
+          results={searchResults}
+          notebooks={notebooks}
+          onOpen={(nb, n) => setView({ kind: "note", notebook: nb, note: n })}
+        />
+      ) : error ? (
+        <div className="mx-4 mb-3 px-3 py-2 rounded-lg text-[11px]" style={{
+          background: "rgba(255,91,114,0.12)",
+          border: "1px solid rgba(255,91,114,0.2)",
+          color: "#FF5B72",
+        }}>
+          {error}
+        </div>
+      ) : loading && notebooks.length === 0 ? (
+        <div className="grid place-items-center py-10" style={{ color: "#4D5E8A" }}>
+          <Loader2 className="h-5 w-5 animate-spin" />
+        </div>
+      ) : notebooks.length === 0 ? (
+        <div className="mx-4 mt-2 rounded-[18px] p-8 text-center text-[13px]" style={{
+          color: "#4D5E8A",
+          border: "1px dashed rgba(99,130,255,0.10)",
+        }}>
+          Nenhum caderno ainda. Toque em <span style={{ color: "#8B9CC8" }}>+</span> ou peça pra Aura criar um.
+        </div>
+      ) : (
+        <ul className="px-4 flex flex-col gap-2.5">
+          {notebooks.map((nb, i) => (
+            <li key={nb.id} className="screen-item" style={animDelay(4 + i)}>
+              <button
+                type="button"
+                onClick={() => setView({ kind: "notes", notebook: nb })}
+                className="w-full text-left flex items-center gap-3 p-3.5 rounded-[14px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] hover:bg-[#111B38] transition-colors"
+              >
+                <span
+                  className="grid place-items-center text-[20px] shrink-0 rounded-[12px]"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    background: "rgba(79,126,255,0.12)",
+                    border: "1px solid rgba(79,126,255,0.18)",
+                  }}
+                >
+                  {emojiFor(nb.name)}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[14px] font-medium text-[#EEF2FF] truncate">
+                    {nb.name}
+                  </span>
+                  <span className="block text-[11px] mt-0.5" style={{ color: "#4D5E8A" }}>
+                    Caderno · {nb.note_count > 0 ? `${nb.note_count} nota${nb.note_count === 1 ? "" : "s"}` : "vazio"}
+                  </span>
+                </span>
+                <span
+                  className="shrink-0 grid place-items-center text-[12px] font-semibold"
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    background: nb.note_count > 0 ? "rgba(79,126,255,0.15)" : "#111B38",
+                    color: nb.note_count > 0 ? "#7DA4FF" : "#4D5E8A",
+                  }}
+                >
+                  {nb.note_count}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {/* FAB */}
+      <button
+        type="button"
+        onClick={() => setNewNotebookOpen(true)}
+        aria-label="Novo caderno"
+        className="fixed grid place-items-center transition-transform active:scale-95"
+        style={{
+          right: 20,
+          bottom: "calc(var(--bottom-nav-h) + var(--safe-bottom) + 18px)",
+          width: 50,
+          height: 50,
+          borderRadius: 16,
+          background: "#4F7EFF",
+          color: "white",
+          boxShadow: "0 4px 20px rgba(79,126,255,0.5), 0 0 0 1px rgba(79,126,255,0.3)",
+          zIndex: 20,
+        }}
+      >
+        <Plus className="h-[22px] w-[22px]" strokeWidth={2.5} />
+      </button>
 
       <Sheet
         open={newNotebookOpen}
@@ -215,57 +322,57 @@ export function KnowledgePage() {
   );
 }
 
-function NotebookList({
-  notebooks,
-  loading,
-  error,
-  onOpen,
-}: {
-  notebooks: Notebook[];
-  loading: boolean;
-  error: string | null;
-  onOpen: (nb: Notebook) => void;
-}) {
-  if (loading) {
-    return (
-      <div className="grid place-items-center py-10 text-ink-faint">
-        <Loader2 className="h-5 w-5 animate-spin" />
-      </div>
-    );
-  }
-  if (error) return <p className="text-sm text-red-300">{error}</p>;
-  if (notebooks.length === 0) {
-    return (
-      <div className="rounded-xl3 border border-dashed border-white/10 p-10 text-center text-ink-faint">
-        Nenhum caderno ainda. Toque em <span className="text-ink-dim">Caderno</span> pra criar o primeiro.
-      </div>
-    );
-  }
+function RingSm({ ratio, value, sub }: { ratio: number; value: number; sub: string }) {
+  const r = 30;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - ratio);
+  const animVal = useCountUp(value, 850, value);
   return (
-    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {notebooks.map((nb) => (
-        <li key={nb.id}>
-          <button
-            type="button"
-            onClick={() => onOpen(nb)}
-            className="w-full text-left flex items-center gap-3 p-4 rounded-xl2 bg-bg-s1/70 border border-white/8 hover:bg-bg-s2 hover:border-white/15 transition-colors"
-          >
-            <span className="h-12 w-12 rounded-xl2 bg-mod-chat/20 text-mod-chat grid place-items-center shrink-0">
-              <BookText className="h-5 w-5" strokeWidth={1.8} />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block font-display text-base font-semibold text-ink-primary truncate">
-                {nb.name}
-              </span>
-              <span className="block text-xs text-ink-faint mt-0.5">
-                {nb.note_count} nota(s)
-              </span>
-            </span>
-            <ChevronRight className="h-4 w-4 text-ink-faint shrink-0" />
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="relative shrink-0" style={{ width: 70, height: 70 }}>
+      <svg width={70} height={70} viewBox="0 0 70 70" style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
+        <circle cx={35} cy={35} r={r} fill="none" stroke="#162040" strokeWidth={6} />
+        <circle
+          cx={35}
+          cy={35}
+          r={r}
+          fill="none"
+          stroke="#4F7EFF"
+          strokeWidth={6}
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          className="ring-fill-anim"
+          style={{ filter: "drop-shadow(0 0 6px rgba(79,126,255,0.5))" }}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="text-center">
+          <div className="font-display text-[16px] font-bold leading-none tracking-tight text-[#EEF2FF]">
+            {animVal}
+          </div>
+          <div className="text-[8px] mt-0.5 uppercase tracking-[0.1em]" style={{ color: "#4D5E8A" }}>
+            {sub}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PillBtn({ active = false, onClick, children }: { active?: boolean; onClick?: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium tracking-[0.02em] whitespace-nowrap shrink-0 transition-colors"
+      style={
+        active
+          ? { background: "rgba(79,126,255,0.15)", border: "1px solid rgba(79,126,255,0.3)", color: "#7DA4FF" }
+          : { background: "transparent", border: "1px solid rgba(99,130,255,0.10)", color: "#4D5E8A" }
+      }
+    >
+      {children}
+    </button>
   );
 }
 
@@ -276,18 +383,18 @@ function SearchResults({
 }: {
   results: Note[];
   notebooks: Notebook[];
-  onOpen: (notebook: Notebook, note: Note) => void;
+  onOpen: (nb: Notebook, n: Note) => void;
 }) {
   if (results.length === 0) {
     return (
-      <p className="text-sm text-ink-faint text-center py-6">
+      <p className="text-[13px] text-center py-6" style={{ color: "#4D5E8A" }}>
         Nada encontrado.
       </p>
     );
   }
   const byId = new Map(notebooks.map((n) => [n.id, n]));
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className="flex flex-col gap-2 px-4">
       {results.map((n) => {
         const nb = byId.get(n.notebook_id);
         if (!nb) return null;
@@ -297,16 +404,16 @@ function SearchResults({
             <button
               type="button"
               onClick={() => onOpen(nb, n)}
-              className="w-full text-left p-3 rounded-xl2 bg-bg-s1/60 border border-white/8 hover:bg-bg-s2 transition-colors"
+              className="w-full text-left p-3 rounded-[14px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] hover:bg-[#111B38] transition-colors"
             >
-              <div className="text-xs uppercase tracking-wider text-ink-faint">
+              <div className="text-[10px] uppercase tracking-[0.08em]" style={{ color: "#4D5E8A" }}>
                 {nb.name}
               </div>
-              <div className="text-sm text-ink-primary font-medium mt-0.5 truncate">
+              <div className="text-[13px] text-[#EEF2FF] font-medium mt-0.5 truncate">
                 {n.title || "Sem título"}
               </div>
               {preview ? (
-                <div className="text-xs text-ink-dim mt-1 truncate">{preview}</div>
+                <div className="text-[11px] mt-1 truncate" style={{ color: "#8B9CC8" }}>{preview}</div>
               ) : null}
             </button>
           </li>
@@ -316,7 +423,7 @@ function SearchResults({
   );
 }
 
-function NotesList({
+function NotesListView({
   notebook,
   onBack,
   onOpen,
@@ -361,44 +468,65 @@ function NotesList({
   };
 
   const onDeleteNotebook = async () => {
-    if (!confirm(`Excluir caderno "${notebook.name}"? Todas as notas serão removidas.`))
-      return;
+    if (!confirm(`Excluir caderno "${notebook.name}"? Todas as notas serão removidas.`)) return;
     await knowledgeApi.deleteNotebook(notebook.id);
     onChanged();
     onBack();
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
+    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-[#06091A] pb-24 relative">
+      <div className="flex items-center gap-3 pt-4 px-4 pb-3.5">
         <button
           type="button"
-          onClick={onNew}
-          disabled={busy}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-11 rounded-lg bg-accent-blue text-white hover:bg-accent-blue-soft hover:text-bg-base text-sm font-medium shadow-glow-blue disabled:opacity-50"
+          onClick={onBack}
+          className="grid place-items-center h-10 w-10 -ml-2 rounded-lg"
+          style={{ color: "#8B9CC8" }}
+          aria-label="Voltar"
         >
-          <Plus className="h-4 w-4" />
-          Nova nota
+          <ChevronLeft className="h-5 w-5" />
         </button>
+        <span className="text-[20px] mr-1">{emojiFor(notebook.name)}</span>
+        <div className="flex-1 min-w-0">
+          <h1 className="font-display text-[22px] font-bold tracking-tight text-[#EEF2FF] truncate leading-tight">
+            {notebook.name}
+          </h1>
+          <p className="text-[11px]" style={{ color: "#4D5E8A" }}>
+            {notes.length} nota{notes.length === 1 ? "" : "s"}
+          </p>
+        </div>
         <button
           type="button"
           onClick={onDeleteNotebook}
           aria-label="Excluir caderno"
-          className="grid place-items-center h-11 w-11 rounded-lg text-ink-faint hover:text-red-300 hover:bg-white/5"
+          className="grid place-items-center h-10 w-10 rounded-lg"
+          style={{ color: "#4D5E8A" }}
         >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+      <div className="px-4 mb-3">
+        <button
+          type="button"
+          onClick={onNew}
+          disabled={busy}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-11 rounded-lg text-[13px] font-medium text-white disabled:opacity-50"
+          style={{ background: "#4F7EFF", boxShadow: "0 4px 14px rgba(79,126,255,0.4)" }}
+        >
+          <Plus className="h-4 w-4" strokeWidth={2.5} />
+          Nova nota
+        </button>
+      </div>
       {loading ? (
-        <div className="grid place-items-center py-10 text-ink-faint">
+        <div className="grid place-items-center py-10" style={{ color: "#4D5E8A" }}>
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
       ) : notes.length === 0 ? (
-        <div className="rounded-xl3 border border-dashed border-white/10 p-10 text-center text-ink-faint">
+        <div className="mx-4 rounded-[18px] p-8 text-center text-[13px]" style={{ color: "#4D5E8A", border: "1px dashed rgba(99,130,255,0.10)" }}>
           Caderno vazio. Crie a primeira nota.
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="px-4 flex flex-col gap-2">
           {notes.map((n) => {
             const preview = n.content_md.slice(0, 140).replace(/\n+/g, " ");
             return (
@@ -406,19 +534,20 @@ function NotesList({
                 <button
                   type="button"
                   onClick={() => onOpen(n)}
-                  className="w-full text-left p-3 rounded-xl2 bg-bg-s1/70 border border-white/8 hover:bg-bg-s2 transition-colors"
+                  className="w-full text-left p-3 rounded-[14px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] hover:bg-[#111B38] transition-colors flex items-center gap-3"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <FileText className="h-3.5 w-3.5 text-ink-faint" />
-                    <span className="text-sm font-medium text-ink-primary truncate">
+                  <FileText className="h-4 w-4 shrink-0" style={{ color: "#4D5E8A" }} strokeWidth={2.2} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] text-[#EEF2FF] font-medium truncate">
                       {n.title || "Sem título"}
-                    </span>
+                    </div>
+                    {preview ? (
+                      <div className="text-[11px] mt-0.5 line-clamp-1" style={{ color: "#4D5E8A" }}>
+                        {preview}
+                      </div>
+                    ) : null}
                   </div>
-                  {preview ? (
-                    <div className="text-xs text-ink-dim line-clamp-2">{preview}</div>
-                  ) : (
-                    <div className="text-xs text-ink-faint italic">vazia</div>
-                  )}
+                  <ChevronRightIcon className="h-3.5 w-3.5 shrink-0" style={{ color: "#4D5E8A" }} />
                 </button>
               </li>
             );
@@ -429,14 +558,16 @@ function NotesList({
   );
 }
 
-function NoteEditor({
+function NoteEditorView({
   notebook,
   note,
+  onBack,
   onUpdated,
   onDeleted,
 }: {
   notebook: Notebook;
   note: Note;
+  onBack: () => void;
   onUpdated: (n: Note) => void;
   onDeleted: () => void;
 }) {
@@ -463,7 +594,6 @@ function NoteEditor({
     [note.id, onUpdated],
   );
 
-  // Autosave on idle (450ms after last keystroke)
   useEffect(() => {
     if (title === (note.title ?? "") && content === note.content_md) return;
     if (dirtyTimer.current !== null) window.clearTimeout(dirtyTimer.current);
@@ -482,23 +612,52 @@ function NoteEditor({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-[#06091A] pb-24 px-4">
+      <div className="flex items-center gap-3 pt-4 pb-3.5">
+        <button
+          type="button"
+          onClick={onBack}
+          className="grid place-items-center h-10 w-10 -ml-2 rounded-lg"
+          style={{ color: "#8B9CC8" }}
+          aria-label="Voltar"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <span className="text-[16px] shrink-0">{emojiFor(notebook.name)}</span>
+        <div className="flex-1 min-w-0 text-[12px] truncate" style={{ color: "#4D5E8A" }}>
+          em <span style={{ color: "#8B9CC8" }}>{notebook.name}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Excluir nota"
+          className="grid place-items-center h-10 w-10 rounded-lg"
+          style={{ color: "#4D5E8A" }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Título"
-        className="font-display text-xl font-semibold bg-transparent text-ink-primary placeholder:text-ink-faint focus:outline-none px-1 py-2"
+        className="font-display text-[22px] font-bold bg-transparent text-[#EEF2FF] placeholder:text-[#4D5E8A] focus:outline-none w-full px-1 py-2 mb-2"
       />
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder="Escreva em markdown…"
         rows={14}
-        className="rounded-xl2 border border-white/10 bg-bg-s1/60 px-4 py-3 text-ink-primary placeholder:text-ink-faint resize-y min-h-[40vh] font-mono text-sm focus:border-accent-blue focus:outline-none"
+        className="w-full rounded-[14px] px-4 py-3 placeholder:text-[#4D5E8A] resize-y min-h-[40vh] font-mono text-[13px] focus:outline-none"
+        style={{
+          background: "rgba(17,27,56,0.6)",
+          border: "1px solid rgba(99,130,255,0.10)",
+          color: "#EEF2FF",
+        }}
       />
       {content.trim() ? (
-        <details className="rounded-xl2 border border-white/8 bg-bg-s1/40 px-4 py-3">
-          <summary className="text-xs uppercase tracking-wider text-ink-faint cursor-pointer">
+        <details className="mt-3 rounded-[14px] px-4 py-3" style={{ background: "rgba(17,27,56,0.4)", border: "1px solid rgba(99,130,255,0.10)" }}>
+          <summary className="text-[10px] uppercase tracking-[0.08em] cursor-pointer" style={{ color: "#4D5E8A" }}>
             Pré-visualizar
           </summary>
           <div className="mt-2">
@@ -506,26 +665,12 @@ function NoteEditor({
           </div>
         </details>
       ) : null}
-
-      <div className="flex items-center justify-between text-xs text-ink-faint">
-        <span>
-          {saving
-            ? "Salvando…"
-            : savedAt
-              ? `Salvo · ${new Date(savedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
-              : ""}
-        </span>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md hover:text-red-300 hover:bg-white/5"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Excluir
-        </button>
-      </div>
-      <div className="text-[10px] text-ink-faint pl-1">
-        em <span className="text-ink-dim">{notebook.name}</span>
+      <div className="text-[11px] mt-2" style={{ color: "#4D5E8A" }}>
+        {saving
+          ? "Salvando…"
+          : savedAt
+            ? `Salvo · ${new Date(savedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+            : ""}
       </div>
     </div>
   );
@@ -541,18 +686,16 @@ function NewNotebookForm({
   onCreate: (name: string) => Promise<void> | void;
 }) {
   const [name, setName] = useState("");
-  const canSubmit = useMemo(() => name.trim().length > 0, [name]);
-
+  const canSubmit = name.trim().length > 0;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit || busy) return;
     void onCreate(name.trim());
   };
-
   return (
     <form onSubmit={submit} className="flex flex-col gap-4 px-5 py-5">
       <label className="flex flex-col gap-1.5">
-        <span className="text-xs uppercase tracking-wider text-ink-faint">
+        <span className="text-[11px] uppercase tracking-[0.14em] font-bold" style={{ color: "#4D5E8A" }}>
           Nome
         </span>
         <input
@@ -561,21 +704,28 @@ function NewNotebookForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Ex.: Aprendizados, Ideias…"
-          className="rounded-lg border border-white/10 bg-bg-s2/60 px-3.5 py-2.5 min-h-11 text-ink-primary placeholder:text-ink-faint focus:border-accent-blue focus:outline-none"
+          className="rounded-lg px-3.5 py-2.5 min-h-11 placeholder:text-[#4D5E8A] focus:outline-none"
+          style={{
+            background: "rgba(17,27,56,0.6)",
+            border: "1px solid rgba(99,130,255,0.10)",
+            color: "#EEF2FF",
+          }}
         />
       </label>
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-white/5 text-ink-primary hover:bg-white/10"
+          className="flex-1 px-4 py-2.5 min-h-11 rounded-lg text-[#EEF2FF]"
+          style={{ background: "rgba(255,255,255,0.05)" }}
         >
           Cancelar
         </button>
         <button
           type="submit"
           disabled={!canSubmit || busy}
-          className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-accent-blue text-white hover:bg-accent-blue-soft hover:text-bg-base font-medium shadow-glow-blue disabled:opacity-50"
+          className="flex-1 px-4 py-2.5 min-h-11 rounded-lg text-white font-medium disabled:opacity-50"
+          style={{ background: "#4F7EFF", boxShadow: "0 4px 20px rgba(79,126,255,0.5)" }}
         >
           {busy ? "Criando…" : "Criar"}
         </button>
@@ -583,3 +733,7 @@ function NewNotebookForm({
     </form>
   );
 }
+
+// expose unused color palette as referenced styles for tests/eslint
+void NB_PALETTE;
+void isoLocal;

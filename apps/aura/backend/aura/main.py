@@ -50,6 +50,9 @@ from aura.habits.service import HabitsService
 from aura.knowledge import schema as knowledge_schema
 from aura.knowledge.routes import router as knowledge_router
 from aura.knowledge.service import KnowledgeService
+from aura.goals import schema as goals_schema
+from aura.goals.routes import router as goals_router
+from aura.goals.service import GoalsService
 from aura.projects import schema as projects_schema
 from aura.projects.routes import router as projects_router
 from aura.projects.service import ProjectsService
@@ -82,6 +85,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("aura_habits", habits_schema.migrate)
     store.register_migrator("aura_knowledge", knowledge_schema.migrate)
     store.register_migrator("aura_projects", projects_schema.migrate)
+    store.register_migrator("aura_goals", goals_schema.migrate)
     store.register_migrator("aura_push", push_schema.migrate)
     await store.ensure_schema()
 
@@ -115,6 +119,7 @@ async def lifespan(app: FastAPI):
     habits_service = HabitsService(store)
     knowledge_service = KnowledgeService(store)
     projects_service = ProjectsService(store)
+    goals_service = GoalsService(store)
     push_service = PushService(
         store=store,
         tasks=task_service,
@@ -160,6 +165,7 @@ async def lifespan(app: FastAPI):
     app.state.habits_service = habits_service
     app.state.knowledge_service = knowledge_service
     app.state.projects_service = projects_service
+    app.state.goals_service = goals_service
     app.state.push_service = push_service
     app.state.stt_service = stt_service
 
@@ -266,6 +272,7 @@ def create_app() -> FastAPI:
     app.include_router(habits_router)
     app.include_router(knowledge_router)
     app.include_router(projects_router)
+    app.include_router(goals_router)
     app.include_router(push_router)
 
     @app.get("/health")
