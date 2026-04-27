@@ -42,7 +42,7 @@ const ITEMS: HubItem[] = [
     description: "Heatmap, anel diário e séries",
     icon: HeartPulse,
     accent: "from-mod-habits/30 to-mod-habits/10 text-mod-habits",
-    available: false,
+    available: true,
   },
   {
     to: "/mais/conhecimento",
@@ -50,7 +50,7 @@ const ITEMS: HubItem[] = [
     description: "Cadernos, notas e brain dumps",
     icon: BookText,
     accent: "from-mod-chat/30 to-mod-chat/10 text-mod-chat",
-    available: false,
+    available: true,
   },
 ];
 

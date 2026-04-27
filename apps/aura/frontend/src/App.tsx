@@ -11,6 +11,8 @@ import { FinancePage } from "./pages/FinancePage";
 import { CalendarPage } from "./pages/CalendarPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { MaisPage } from "./pages/MaisPage";
+import { HabitsPage } from "./pages/HabitsPage";
+import { KnowledgePage } from "./pages/KnowledgePage";
 
 export default function App() {
   return (
@@ -85,6 +87,26 @@ export default function App() {
             <ProtectedRoute>
               <AppShell title="Mais">
                 <MaisPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mais/habitos"
+          element={
+            <ProtectedRoute>
+              <AppShell title="Hábitos">
+                <HabitsPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mais/conhecimento"
+          element={
+            <ProtectedRoute>
+              <AppShell title="Conhecimento">
+                <KnowledgePage />
               </AppShell>
             </ProtectedRoute>
           }

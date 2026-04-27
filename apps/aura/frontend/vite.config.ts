@@ -47,6 +47,9 @@ export default defineConfig({
           /^\/tasks\//,
           /^\/finance\//,
           /^\/briefing\//,
+          /^\/habits\//,
+          /^\/habits$/,
+          /^\/knowledge\//,
           /^\/health$/,
         ],
         runtimeCaching: [
@@ -88,6 +91,8 @@ export default defineConfig({
       "/tasks": "http://127.0.0.1:8002",
       "/finance": "http://127.0.0.1:8002",
       "/briefing": "http://127.0.0.1:8002",
+      "/habits": "http://127.0.0.1:8002",
+      "/knowledge": "http://127.0.0.1:8002",
       "/health": "http://127.0.0.1:8002",
     },
   },

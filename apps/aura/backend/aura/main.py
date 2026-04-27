@@ -44,6 +44,12 @@ from aura.config import settings
 from aura.google import schema as google_schema
 from aura.google.routes import router as google_router
 from aura.google.service import GoogleAuthService
+from aura.habits import schema as habits_schema
+from aura.habits.routes import router as habits_router
+from aura.habits.service import HabitsService
+from aura.knowledge import schema as knowledge_schema
+from aura.knowledge.routes import router as knowledge_router
+from aura.knowledge.service import KnowledgeService
 from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
@@ -67,6 +73,8 @@ async def lifespan(app: FastAPI):
     store.register_migrator("mod_finance", finance_schema.migrate)
     store.register_migrator("aura_recurring", recurring_schema.migrate)
     store.register_migrator("aura_google", google_schema.migrate)
+    store.register_migrator("aura_habits", habits_schema.migrate)
+    store.register_migrator("aura_knowledge", knowledge_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -96,6 +104,8 @@ async def lifespan(app: FastAPI):
     briefing_service = BriefingService(
         llm=llm, tasks=task_service, finance=finance_service,
     )
+    habits_service = HabitsService(store)
+    knowledge_service = KnowledgeService(store)
 
     # ---- STT (lazy model load on first /chat/transcribe call).
     # mkdir is best-effort: in dev the default /data isn't writable;
@@ -131,6 +141,8 @@ async def lifespan(app: FastAPI):
     app.state.recurring_service = recurring_service
     app.state.google_auth_service = google_auth_service
     app.state.briefing_service = briefing_service
+    app.state.habits_service = habits_service
+    app.state.knowledge_service = knowledge_service
     app.state.stt_service = stt_service
 
     # Background materialize loop — every 10 minutes, create today's
@@ -208,6 +220,8 @@ def create_app() -> FastAPI:
     app.include_router(recurring_router)
     app.include_router(google_router)
     app.include_router(briefing_router)
+    app.include_router(habits_router)
+    app.include_router(knowledge_router)
 
     @app.get("/health")
     async def health() -> dict:
