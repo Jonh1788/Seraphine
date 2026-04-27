@@ -6,5 +6,10 @@
   "workspaces": [
     "apps/seraphine/frontend",
     "apps/aura/frontend"
-  ]
+  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp"
+    ]
+  }
 }

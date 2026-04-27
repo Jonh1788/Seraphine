@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="62%">
+      <stop offset="0%" stop-color="#1d274a"/>
+      <stop offset="55%" stop-color="#0a1228"/>
+      <stop offset="100%" stop-color="#02040c"/>
+    </radialGradient>
+    <linearGradient id="spark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7da0ff"/>
+      <stop offset="100%" stop-color="#4F7EFF"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4F7EFF" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#4F7EFF" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#4F7EFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="180" fill="url(#halo)"/>
+
+  <g transform="translate(256 256)">
+    <path
+      d="M 0,-128
+         C 18,-66 66,-18 128,0
+         C 66,18 18,66 0,128
+         C -18,66 -66,18 -128,0
+         C -66,-18 -18,-66 0,-128 Z"
+      fill="url(#spark)"
+    />
+    <circle r="14" fill="#ffffff" fill-opacity="0.95"/>
+    <circle r="6" fill="#7da0ff"/>
+  </g>
+
+  <g fill="#7da0ff" fill-opacity="0.65">
+    <circle cx="92" cy="118" r="4"/>
+    <circle cx="416" cy="146" r="3"/>
+    <circle cx="438" cy="368" r="5"/>
+    <circle cx="78" cy="394" r="3"/>
+    <circle cx="190" cy="84" r="2.5"/>
+    <circle cx="338" cy="76" r="2.5"/>
+  </g>
+</svg>

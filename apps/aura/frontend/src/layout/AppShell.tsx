@@ -3,6 +3,12 @@ import { X } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { MobileTopbar } from "./MobileTopbar";
 import { BottomNav } from "./BottomNav";
+import {
+  PageRefreshProvider,
+  usePageRefreshHandler,
+} from "./PageRefreshContext";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
+import { PullIndicator } from "../hooks/PullIndicator";
 
 interface AppShellProps {
   children: ReactNode;
@@ -18,7 +24,15 @@ interface AppShellProps {
   hideBottomNav?: boolean;
 }
 
-export function AppShell({
+export function AppShell(props: AppShellProps) {
+  return (
+    <PageRefreshProvider>
+      <AppShellInner {...props} />
+    </PageRefreshProvider>
+  );
+}
+
+function AppShellInner({
   children,
   fullBleed = false,
   title,
@@ -26,6 +40,20 @@ export function AppShell({
   hideBottomNav = false,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const refreshHandler = usePageRefreshHandler();
+
+  const pull = usePullToRefresh({
+    onRefresh: refreshHandler ?? (() => undefined),
+    enabled: !!refreshHandler && !fullBleed,
+  });
+
+  const mainStyle = hideBottomNav
+    ? undefined
+    : {
+        paddingBottom: fullBleed
+          ? "calc(var(--bottom-nav-h) + var(--safe-bottom))"
+          : "calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px)",
+      };
 
   return (
     <div className="h-[100dvh] flex bg-bg-base text-ink-primary">
@@ -61,25 +89,16 @@ export function AppShell({
           onOpenDrawer={() => setDrawerOpen(true)}
         />
         {fullBleed ? (
-          <main
-            className="flex-1 min-h-0 overflow-hidden"
-            style={
-              hideBottomNav
-                ? undefined
-                : { paddingBottom: "calc(var(--bottom-nav-h) + var(--safe-bottom))" }
-            }
-          >
+          <main className="flex-1 min-h-0 overflow-hidden" style={mainStyle}>
             {children}
           </main>
         ) : (
           <main
+            ref={pull.bind}
             className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10"
-            style={
-              hideBottomNav
-                ? undefined
-                : { paddingBottom: "calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px)" }
-            }
+            style={mainStyle}
           >
+            <PullIndicator progress={pull.progress} refreshing={pull.refreshing} />
             <div className="mx-auto max-w-7xl">{children}</div>
           </main>
         )}

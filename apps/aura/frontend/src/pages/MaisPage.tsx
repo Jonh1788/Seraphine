@@ -8,6 +8,7 @@ import {
   HeartPulse,
   BookText,
 } from "lucide-react";
+import { InstallBanner } from "../pwa/InstallBanner";
 
 interface HubItem {
   to: string;
@@ -65,6 +66,8 @@ export function MaisPage() {
           <p className="text-sm text-ink-dim">Tudo que não cabe na barra inferior.</p>
         </div>
       </header>
+
+      <InstallBanner />
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {ITEMS.map((item) => {
