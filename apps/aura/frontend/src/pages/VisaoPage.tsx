@@ -15,6 +15,12 @@ import {
 } from "lucide-react";
 import * as tasksApi from "../api/tasks";
 import * as financeApi from "../api/finance";
+import * as habitsApi from "../api/habits";
+import * as projectsApi from "../api/projects";
+import * as goalsApi from "../api/goals";
+import type { HabitsToday } from "../api/habits";
+import type { Project } from "../api/projects";
+import type { Goal, GoalsOverview } from "../api/goals";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import type { FinanceSummary, Task, TaskPriority } from "../types/api";
 
@@ -79,7 +85,12 @@ function useNow(updateMs = 1000): Date {
 export function VisaoPage() {
   const now = useNow(1000);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [habitsToday, setHabitsToday] = useState<HabitsToday | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalsOverview, setGoalsOverview] = useState<GoalsOverview | null>(null);
   const [_, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -87,12 +98,23 @@ export function VisaoPage() {
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
     try {
-      const [openTasks, sum] = await Promise.all([
-        tasksApi.listTasks({ status: "pending", limit: 200 }),
-        financeApi.getSummary({ month, year }),
-      ]);
+      const [openTasks, allTasksRes, sum, habits, projList, goalsList, goalsOv] =
+        await Promise.all([
+          tasksApi.listTasks({ status: "pending", limit: 200 }),
+          tasksApi.listTasks({ limit: 300 }),
+          financeApi.getSummary({ month, year }),
+          habitsApi.getToday().catch(() => null),
+          projectsApi.listProjects(false).then((r) => r.projects).catch(() => []),
+          goalsApi.listGoals(null, false).then((r) => r.goals).catch(() => []),
+          goalsApi.getOverview().catch(() => null),
+        ]);
       setTasks(openTasks);
+      setAllTasks(allTasksRes);
       setSummary(sum);
+      setHabitsToday(habits);
+      setProjects(projList);
+      setGoals(goalsList);
+      setGoalsOverview(goalsOv);
     } catch {
       /* tolerate */
     } finally {
@@ -210,7 +232,18 @@ export function VisaoPage() {
         />
       </SectionCard>
 
-      <RadarCard tasksCount={tasks.length} balance={summary?.balance ?? 0} />
+      <RadarCard
+        scores={computeRadarScores({
+          tasks,
+          allTasks,
+          todayIso,
+          summary,
+          habitsToday,
+          projects,
+          goals,
+          goalsOverview,
+        })}
+      />
 
       <SectionCard
         title="Briefing do Dia"
@@ -596,22 +629,11 @@ function EmptyRow({ message }: { message: string }) {
 }
 
 interface RadarCardProps {
-  tasksCount: number;
-  balance: number;
+  scores: [number, number, number, number, number];
 }
 
-function RadarCard({ tasksCount, balance }: RadarCardProps) {
-  // Compute simple "life radar" scores from real data: 5 axes 0..1.
-  // We treat tasksCount and balance as proxies until we have a richer
-  // life-tracking model. Numbers are intentionally generous so the
-  // pentagon doesn't collapse to a point on first launch.
-  const productivity = Math.min(1, 0.2 + tasksCount * 0.04);
-  const financial = Math.min(1, 0.3 + Math.max(0, balance) / 5000);
-  const habits = 0.05;
-  const planning = 0.18;
-  const balanceLife = 0.38;
-
-  const scores = [productivity, financial, habits, planning, balanceLife];
+function RadarCard({ scores: scoreTuple }: RadarCardProps) {
+  const scores = scoreTuple;
   const colors = ["#4F7EFF", "#2DD4BF", "#F472B6", "#A78BFA", "#F5A623"];
   const labels = ["Produtividade", "Financeiro", "Hábitos", "Planejamento", "Equilíbrio"];
 
@@ -730,4 +752,75 @@ function RadarCard({ tasksCount, balance }: RadarCardProps) {
       </div>
     </div>
   );
+}
+
+// ----------------------------------------------------------------------
+// Radar score derivation — turns real domain state into 5 axes in [0,1].
+// Each axis is intentionally a single-line composition of the relevant
+// signal so the math is auditable and easy to tune later.
+// ----------------------------------------------------------------------
+
+interface RadarInputs {
+  tasks: Task[];           // pending only (status='pending')
+  allTasks: Task[];        // all statuses, for completion rate
+  todayIso: string;
+  summary: FinanceSummary | null;
+  habitsToday: HabitsToday | null;
+  projects: Project[];
+  goals: Goal[];
+  goalsOverview: GoalsOverview | null;
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function computeRadarScores(inputs: RadarInputs): [number, number, number, number, number] {
+  // 1. PRODUTIVIDADE — completion rate do mês corrente penalizada por
+  //    atrasadas. Sem dados → 0.
+  const totalTasks = inputs.allTasks.length;
+  const completed = inputs.allTasks.filter((t) => t.status === "completed").length;
+  const overdue = inputs.tasks.filter(
+    (t) => t.due_date != null && t.due_date < inputs.todayIso,
+  ).length;
+  const completionRate = totalTasks > 0 ? completed / totalTasks : 0;
+  const overduePenalty = inputs.tasks.length > 0 ? overdue / inputs.tasks.length : 0;
+  const productivity = totalTasks === 0 ? 0 : clamp01(completionRate * (1 - 0.6 * overduePenalty));
+
+  // 2. FINANCEIRO — savings rate (saldo / income) com piso 0 quando
+  //    saldo negativo. Sem income → 0.
+  const income = inputs.summary?.income ?? 0;
+  const balance = inputs.summary?.balance ?? 0;
+  const financial = income > 0 ? clamp01(balance / income) : 0;
+
+  // 3. HÁBITOS — vem direto do ring weekly do habits/today; 0 se sem
+  //    target.
+  const habits = inputs.habitsToday?.ring?.ratio ?? 0;
+
+  // 4. PLANEJAMENTO — projetos ativos sem risco + metas ativas com
+  //    deadline.  cada lado contribui com até 0.5.
+  const activeProjects = inputs.projects.filter((p) => p.status === "active").length;
+  const atRiskProjects = inputs.projects.filter((p) => p.status === "at_risk").length;
+  const totalProjects = inputs.projects.length;
+  const projectScore = totalProjects > 0
+    ? clamp01((activeProjects - 0.5 * atRiskProjects) / Math.max(1, totalProjects))
+    : 0;
+  const goalsWithDeadline = inputs.goals.filter(
+    (g) => g.status === "active" && g.deadline,
+  ).length;
+  const totalActiveGoals =
+    inputs.goalsOverview?.active ?? inputs.goals.filter((g) => g.status === "active").length;
+  const goalsScore = totalActiveGoals > 0 ? clamp01(goalsWithDeadline / totalActiveGoals) : 0;
+  const planning = clamp01(projectScore * 0.5 + goalsScore * 0.5);
+
+  // 5. EQUILÍBRIO — média dos outros 4 menos penalidade pelo desvio
+  //    padrão. Quanto mais uniformes os pilares, maior o equilíbrio.
+  const others = [productivity, financial, habits, planning];
+  const avg = others.reduce((a, b) => a + b, 0) / others.length;
+  const variance = others.reduce((acc, v) => acc + (v - avg) ** 2, 0) / others.length;
+  const stddev = Math.sqrt(variance);
+  // stddev em [0, 0.5]; transforma em penalidade [0, 1].
+  const balanceLife = clamp01(avg * (1 - stddev));
+
+  return [productivity, financial, habits, planning, balanceLife];
 }
