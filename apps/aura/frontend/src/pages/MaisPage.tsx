@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import {
   CalendarDays,
+  Eye,
   Settings,
   Sparkles,
   type LucideIcon,
@@ -20,6 +21,14 @@ interface HubItem {
 }
 
 const ITEMS: HubItem[] = [
+  {
+    to: "/visao",
+    label: "Visão",
+    description: "Saudação, KPIs, prioridades, finanças e radar de vida",
+    icon: Eye,
+    accent: "from-accent-blue/30 to-accent-blue/10 text-accent-blue-soft",
+    available: true,
+  },
   {
     to: "/calendario",
     label: "Calendário",
