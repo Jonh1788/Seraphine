@@ -37,18 +37,18 @@ import type {
 const TYPE_INTERVAL_MS = 18;
 
 const SEGMENT_CLASS: Record<string, string> = {
-  text: "text-ink-dim",
-  urgent: "text-aura-red font-medium",
-  good: "text-aura-green font-medium",
-  blue: "text-accent-blue-soft font-medium",
+  text: "text-[#8B9CC8]",
+  urgent: "text-[#FF5B72] font-medium",
+  good: "text-[#2DD4BF] font-medium",
+  blue: "text-[#7DA4FF] font-medium",
 };
 
 const TONE_VAL: Record<"blue" | "red" | "amber" | "green" | "purple", string> = {
-  blue: "text-accent-blue-soft",
-  red: "text-aura-red",
-  amber: "text-aura-amber",
-  green: "text-aura-green font-mono",
-  purple: "text-aura-purple",
+  blue: "text-[#7DA4FF]",
+  red: "text-[#FF5B72]",
+  amber: "text-[#F5A623]",
+  green: "text-[#2DD4BF] font-mono",
+  purple: "text-[#A78BFA]",
 };
 
 interface SnapKpi {
@@ -173,7 +173,7 @@ export function HojePage() {
     {
       label: "Tarefas",
       icon: CheckCircle2,
-      iconClass: "text-accent-blue-soft",
+      iconClass: "text-[#7DA4FF]",
       value: String(dueToday.length || tasks.length),
       tone: "blue",
       to: "/tarefas",
@@ -181,7 +181,7 @@ export function HojePage() {
     {
       label: "Atrasadas",
       icon: AlertTriangle,
-      iconClass: "text-aura-red",
+      iconClass: "text-[#FF5B72]",
       value: String(overdue.length),
       tone: "red",
       to: "/tarefas",
@@ -189,14 +189,14 @@ export function HojePage() {
     {
       label: "Projetos",
       icon: Folder,
-      iconClass: "text-aura-purple",
+      iconClass: "text-[#A78BFA]",
       value: "0",
       tone: "purple",
     },
     {
       label: "Saldo",
       icon: CreditCard,
-      iconClass: "text-aura-green",
+      iconClass: "text-[#2DD4BF]",
       value: summary ? fmtBrl(summary.balance) : "—",
       tone: "green",
       to: "/financas",
@@ -268,7 +268,7 @@ export function HojePage() {
       <SectionCard
         title="Prioridades"
         icon={CheckCircle2}
-        iconColorClass="text-aura-green"
+        iconColorClass="text-[#2DD4BF]"
         count={String(upcomingTasks.length)}
         empty="Nenhuma tarefa pendente."
         headerClass={seq.classOf(prioHeaderIdx)}
@@ -296,15 +296,15 @@ export function HojePage() {
                 className={[
                   "flex items-center gap-1 text-[10px] tracking-wider shrink-0",
                   isOverdue
-                    ? "text-aura-red"
+                    ? "text-[#FF5B72]"
                     : t.priority === "high"
-                      ? "text-aura-red font-bold uppercase tracking-[0.1em]"
+                      ? "text-[#FF5B72] font-bold uppercase tracking-[0.1em]"
                       : t.priority === "med"
-                        ? "text-aura-amber font-bold uppercase tracking-[0.1em]"
+                        ? "text-[#F5A623] font-bold uppercase tracking-[0.1em]"
                         : "text-ink-faint",
                 ].join(" ")}
               >
-                {isOverdue ? <Clock className="h-2.5 w-2.5" /> : null}
+                {isOverdue ? <Clock className="h-3 w-3" strokeWidth={2.2} /> : null}
                 {meta}
               </span>
             </Link>
@@ -315,7 +315,7 @@ export function HojePage() {
       <SectionCard
         title="Finanças"
         icon={Wallet}
-        iconColorClass="text-aura-green"
+        iconColorClass="text-[#2DD4BF]"
         count={summary ? "3" : "—"}
         empty="Nenhuma transação no mês."
         headerClass={seq.classOf(finHeaderIdx)}
@@ -379,7 +379,7 @@ function SnapGridWithOrb({ kpis, orbClass, cardClassFor, pulseTick }: SnapGridWi
           const Inner = (
             <>
               <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.16em] uppercase text-ink-faint mb-2">
-                <k.icon className={`h-3 w-3 ${k.iconClass}`} />
+                <k.icon className={`h-[13px] w-[13px] ${k.iconClass}`} strokeWidth={2.2} />
                 {k.label}
               </div>
               <div className={`text-[28px] leading-none font-bold tracking-tight ${TONE_VAL[k.tone]}`}>
@@ -468,7 +468,7 @@ function SectionCard({
     <section className={`${headerClass} mx-4 mb-3.5 bg-bg-s1 border border-[rgba(99,130,255,0.10)] rounded-[18px] overflow-hidden`}>
       <header className="flex items-center justify-between px-4 pt-3.5 pb-3 border-b border-[rgba(99,130,255,0.10)]">
         <div className="flex items-center gap-2.5 font-display text-[15px] font-bold text-ink-primary tracking-tight">
-          <Icon className={`h-4 w-4 ${iconColorClass}`} strokeWidth={2.2} />
+          <Icon className={`h-[18px] w-[18px] ${iconColorClass}`} strokeWidth={2.2} />
           {title}
         </div>
         {count !== undefined ? (
@@ -487,12 +487,12 @@ function SectionCard({
 }
 
 function PrioDot({ color }: { color: "red" | "amber" | "blue" }) {
-  const cls =
+  const bg =
     color === "red"
-      ? "bg-aura-red"
+      ? "#FF5B72"
       : color === "amber"
-        ? "bg-aura-amber"
-        : "bg-accent-blue-soft";
+        ? "#F5A623"
+        : "#7DA4FF";
   const glow =
     color === "red"
       ? "rgba(255,91,114,0.55)"
@@ -501,8 +501,8 @@ function PrioDot({ color }: { color: "red" | "amber" | "blue" }) {
         : "rgba(125,164,255,0.55)";
   return (
     <span
-      className={`h-[8px] w-[8px] rounded-full shrink-0 ${cls}`}
-      style={{ boxShadow: `0 0 8px ${glow}` }}
+      className="h-[8px] w-[8px] rounded-full shrink-0"
+      style={{ backgroundColor: bg, boxShadow: `0 0 8px ${glow}` }}
     />
   );
 }
@@ -516,22 +516,22 @@ interface FinRowProps {
 }
 
 function FinRow({ className = "", name, value, positive, meta }: FinRowProps) {
-  const color = positive ? "text-aura-green" : "text-aura-red";
+  const color = positive ? "#2DD4BF" : "#FF5B72";
   const dotGlow = positive ? "rgba(45,212,191,0.55)" : "rgba(255,91,114,0.55)";
   const Icon = positive ? ArrowUpRight : ArrowDownLeft;
   return (
     <div className={`${className} flex items-center gap-3 px-4 py-3.5 border-t border-[rgba(99,130,255,0.10)] first:border-t-0`}>
       <span
-        className={[
-          "h-[8px] w-[8px] rounded-full shrink-0",
-          positive ? "bg-aura-green" : "bg-aura-red",
-        ].join(" ")}
-        style={{ boxShadow: `0 0 8px ${dotGlow}` }}
+        className="h-[8px] w-[8px] rounded-full shrink-0"
+        style={{ backgroundColor: color, boxShadow: `0 0 8px ${dotGlow}` }}
       />
       <span className="flex-1 text-[13px] text-ink-primary truncate">{name}</span>
       {meta ? <span className="text-[10px] text-ink-faint">{meta}</span> : null}
-      <span className={`inline-flex items-center gap-1 font-mono text-[13px] font-medium shrink-0 ${color}`}>
-        <Icon className="h-3 w-3" />
+      <span
+        className="inline-flex items-center gap-1 font-mono text-[13px] font-medium shrink-0"
+        style={{ color }}
+      >
+        <Icon className="h-3 w-3" strokeWidth={2.4} />
         {value}
       </span>
     </div>
@@ -549,7 +549,7 @@ function BriefAnalise({ className = "" }: { className?: string }) {
         aria-hidden="true"
         className="absolute top-1/2 left-[calc(50%+70px)] right-0 h-px bg-[rgba(99,130,255,0.10)]"
       />
-      <Activity className="h-3.5 w-3.5 text-accent-blue-soft" />
+      <Activity className="h-3.5 w-3.5 text-[#7DA4FF]" strokeWidth={2.2} />
       <span className="text-[11px] font-bold tracking-[0.22em] uppercase text-ink-faint">
         Análise
       </span>
@@ -637,12 +637,12 @@ function NarrationBottom({
 
   return (
     <div className={`${className} mx-4 mt-1 mb-7`}>
-      <div className="font-sans text-[13px] leading-[1.75] text-ink-dim font-light min-h-[180px]">
+      <div className="font-sans text-[13px] leading-[1.75] font-light min-h-[180px]" style={{ color: "#8B9CC8" }}>
         {greeting ? (
-          <span className="text-accent-blue-soft font-medium">{greeting} </span>
+          <span className="font-medium" style={{ color: "#7DA4FF" }}>{greeting} </span>
         ) : null}
         {error ? (
-          <span className="text-aura-red">{error}</span>
+          <span style={{ color: "#FF5B72" }}>{error}</span>
         ) : !active ? null : visibleSegments.length === 0 && !loading ? (
           <span className="text-ink-faint">Sem narração pra hoje.</span>
         ) : visibleSegments.length === 0 && loading ? (
@@ -650,7 +650,7 @@ function NarrationBottom({
         ) : (
           <>
             {visibleSegments.map((seg, i) => (
-              <span key={i} className={SEGMENT_CLASS[seg.kind] ?? "text-ink-dim"}>
+              <span key={i} className={SEGMENT_CLASS[seg.kind] ?? "text-[#8B9CC8]"}>
                 {seg.text}
               </span>
             ))}
