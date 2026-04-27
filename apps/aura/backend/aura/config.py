@@ -72,6 +72,16 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/calendar.events"
     )
 
+    # --- Push notifications (VAPID)
+    # When private/public are empty, an ephemeral pair is generated on
+    # boot — fine for dev, NOT for prod (browser subscriptions break on
+    # restart because the public key changes). Generate a stable pair
+    # once with `uv run python -m aura.push.gen_keys` and persist the
+    # output in the prod env.
+    vapid_subject: str = "mailto:contact@minha-aura.com"
+    vapid_private_pem: str = ""
+    vapid_public_b64: str = ""
+
     # --- STT (speech-to-text) — faster-whisper
     # The model is lazy-loaded on the first /chat/transcribe call so
     # startup isn't blocked by a ~500MB download. Swap `whisper_model`

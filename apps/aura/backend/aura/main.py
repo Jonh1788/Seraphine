@@ -50,6 +50,9 @@ from aura.habits.service import HabitsService
 from aura.knowledge import schema as knowledge_schema
 from aura.knowledge.routes import router as knowledge_router
 from aura.knowledge.service import KnowledgeService
+from aura.push import schema as push_schema
+from aura.push.routes import router as push_router
+from aura.push.service import PushService
 from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
@@ -75,6 +78,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("aura_google", google_schema.migrate)
     store.register_migrator("aura_habits", habits_schema.migrate)
     store.register_migrator("aura_knowledge", knowledge_schema.migrate)
+    store.register_migrator("aura_push", push_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -106,6 +110,13 @@ async def lifespan(app: FastAPI):
     )
     habits_service = HabitsService(store)
     knowledge_service = KnowledgeService(store)
+    push_service = PushService(
+        store=store,
+        tasks=task_service,
+        vapid_subject=settings.vapid_subject,
+        vapid_private_pem=settings.vapid_private_pem or None,
+        vapid_public_b64=settings.vapid_public_b64 or None,
+    )
 
     # ---- STT (lazy model load on first /chat/transcribe call).
     # mkdir is best-effort: in dev the default /data isn't writable;
@@ -143,6 +154,7 @@ async def lifespan(app: FastAPI):
     app.state.briefing_service = briefing_service
     app.state.habits_service = habits_service
     app.state.knowledge_service = knowledge_service
+    app.state.push_service = push_service
     app.state.stt_service = stt_service
 
     # Background materialize loop — every 10 minutes, create today's
@@ -177,16 +189,41 @@ async def lifespan(app: FastAPI):
 
     materialize_task = asyncio.create_task(_materialize_loop())
 
+    # Push dispatch loop — every 60s, scan reminders due in the last
+    # minute and send a push to subscribed browsers. Idempotent via the
+    # push_dispatches table.
+    push_task: asyncio.Task[None] | None = None
+
+    async def _push_loop() -> None:
+        interval = 60
+        # Small initial delay so the first tick lines up off-clock with
+        # materialize and we don't burst-write at boot.
+        await asyncio.sleep(15)
+        while True:
+            try:
+                sent = await push_service.dispatch_due_reminders()
+                if sent:
+                    logger.info("push: dispatched %d reminder(s)", sent)
+            except Exception:
+                logger.exception("push dispatch loop failed")
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+
+    push_task = asyncio.create_task(_push_loop())
+
     logger.info("Aura ready — DB=%s", settings.sqlite_path)
     try:
         yield
     finally:
-        if materialize_task is not None:
-            materialize_task.cancel()
-            try:
-                await materialize_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        for t in (materialize_task, push_task):
+            if t is not None:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
         await store.aclose()
 
 
@@ -222,6 +259,7 @@ def create_app() -> FastAPI:
     app.include_router(briefing_router)
     app.include_router(habits_router)
     app.include_router(knowledge_router)
+    app.include_router(push_router)
 
     @app.get("/health")
     async def health() -> dict:

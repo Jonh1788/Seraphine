@@ -17,6 +17,8 @@ dependencies = [
     "google-integration",
     "mod-vision",
     "faster-whisper>=1.0",
+    "pywebpush>=2.0",
+    "cryptography>=43",
 ]
 
 [tool.uv.sources]

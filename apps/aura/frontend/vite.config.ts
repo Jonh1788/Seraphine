@@ -8,11 +8,17 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       includeAssets: [
         "favicon.ico",
         "apple-touch-icon-180x180.png",
         "aura-source.svg",
       ],
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+      },
       manifest: {
         name: "Aura",
         short_name: "Aura",
@@ -38,48 +44,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [
-          /^\/auth\//,
-          /^\/chat\//,
-          /^\/tasks\//,
-          /^\/finance\//,
-          /^\/briefing\//,
-          /^\/habits\//,
-          /^\/habits$/,
-          /^\/knowledge\//,
-          /^\/health$/,
-        ],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/,
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "google-fonts-stylesheets" },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-webfonts",
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith("/briefing/"),
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "aura-briefing",
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 12 },
-            },
-          },
-        ],
-      },
       devOptions: {
         enabled: false,
+        type: "module",
       },
     }),
   ],
@@ -93,6 +60,7 @@ export default defineConfig({
       "/briefing": "http://127.0.0.1:8002",
       "/habits": "http://127.0.0.1:8002",
       "/knowledge": "http://127.0.0.1:8002",
+      "/push": "http://127.0.0.1:8002",
       "/health": "http://127.0.0.1:8002",
     },
   },

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import {
+  Bell,
   CalendarDays,
   Eye,
   Settings,
@@ -27,6 +28,14 @@ const ITEMS: HubItem[] = [
     description: "Saudação, KPIs, prioridades, finanças e radar de vida",
     icon: Eye,
     accent: "from-accent-blue/30 to-accent-blue/10 text-accent-blue-soft",
+    available: true,
+  },
+  {
+    to: "/mais/lembretes",
+    label: "Lembretes",
+    description: "Avisos pontuais e recorrentes com push",
+    icon: Bell,
+    accent: "from-mod-reminders/30 to-mod-reminders/10 text-mod-reminders",
     available: true,
   },
   {

@@ -14,6 +14,7 @@ import { MaisPage } from "./pages/MaisPage";
 import { HabitsPage } from "./pages/HabitsPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { VisaoPage } from "./pages/VisaoPage";
+import { LembretesPage } from "./pages/LembretesPage";
 
 export default function App() {
   return (
@@ -118,6 +119,16 @@ export default function App() {
             <ProtectedRoute>
               <AppShell title="Visão">
                 <VisaoPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mais/lembretes"
+          element={
+            <ProtectedRoute>
+              <AppShell title="Lembretes">
+                <LembretesPage />
               </AppShell>
             </ProtectedRoute>
           }

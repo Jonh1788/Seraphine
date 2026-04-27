@@ -109,7 +109,7 @@ export function Sheet({
           role="dialog"
           aria-modal="true"
           className={[
-            "pointer-events-auto bg-bg-s2 text-ink-primary border border-white/8 shadow-glass",
+            "pointer-events-auto bg-bg-s2 text-ink-primary shadow-glass",
             isFullMobile
               ? "h-[100dvh] w-full rounded-none lg:h-auto lg:rounded-xl3"
               : "max-h-[88dvh] w-full rounded-t-xl3 lg:rounded-xl3",
