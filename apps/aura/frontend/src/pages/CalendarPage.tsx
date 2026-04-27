@@ -263,9 +263,12 @@ export function CalendarPage() {
         <SnapCell label="Próx 7d" value={upcoming7} color="#2DD4BF" />
       </section>
 
+      {/* Month + Day side-by-side on lg+ (calendar narrower, day wider) */}
+      <div className="lg:grid lg:grid-cols-12 lg:gap-3.5 lg:mx-4 lg:items-start">
+
       {/* Month nav + grid */}
       <section
-        className="mx-4 mb-3.5 rounded-[18px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] overflow-hidden screen-item"
+        className="mx-4 mb-3.5 lg:mx-0 lg:col-span-5 lg:max-w-[420px] rounded-[18px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] overflow-hidden screen-item"
         style={animDelay(oauth?.connected ? 2 : 3)}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(99,130,255,0.10)]">
@@ -387,7 +390,7 @@ export function CalendarPage() {
 
       {/* Day detail */}
       <section
-        className="mx-4 mb-3.5 rounded-[18px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] overflow-hidden screen-item"
+        className="mx-4 mb-3.5 lg:mx-0 lg:col-span-7 lg:sticky lg:top-4 rounded-[18px] bg-[#0C1228] border border-[rgba(99,130,255,0.10)] overflow-hidden screen-item"
         style={animDelay(oauth?.connected ? 3 : 4)}
       >
         <header className="px-4 pt-3.5 pb-2.5 border-b border-[rgba(99,130,255,0.10)] flex items-center gap-2">
@@ -424,6 +427,8 @@ export function CalendarPage() {
           </ul>
         )}
       </section>
+
+      </div>
     </div>
   );
 }
