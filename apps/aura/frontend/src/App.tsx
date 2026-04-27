@@ -5,7 +5,7 @@ import { LoginPage } from "./auth/LoginPage";
 import { RegisterPage } from "./auth/RegisterPage";
 import { AppShell } from "./layout/AppShell";
 import { ChatPage } from "./pages/ChatPage";
-import { DashboardPage } from "./pages/DashboardPage";
+import { HojePage } from "./pages/HojePage";
 import { TasksPage } from "./pages/TasksPage";
 import { FinancePage } from "./pages/FinancePage";
 import { CalendarPage } from "./pages/CalendarPage";
@@ -33,7 +33,7 @@ export default function App() {
           element={
             <ProtectedRoute>
               <AppShell title="Hoje">
-                <DashboardPage />
+                <HojePage />
               </AppShell>
             </ProtectedRoute>
           }

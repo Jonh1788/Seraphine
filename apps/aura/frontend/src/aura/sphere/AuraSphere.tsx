@@ -40,6 +40,8 @@ export interface AuraSphereProps {
   style?: CSSProperties;
   /** Disable dust + sparkle even on hero (cheap fallback) */
   minimal?: boolean;
+  /** CSS opacity 0..1 applied to the entire canvas (sphere + dust + sparkle) */
+  opacity?: number;
 }
 
 interface LODProfile {
@@ -416,6 +418,7 @@ export function AuraSphere({
   className = "",
   style,
   minimal = false,
+  opacity = 1,
 }: AuraSphereProps) {
   const lod = useMemo(() => detectLOD(variant, minimal), [variant, minimal]);
 
@@ -439,12 +442,12 @@ export function AuraSphere({
   );
 
   const interactive = variant === "hero";
-  const distance = variant === "hero" ? 5.3 : variant === "compact" ? 5.0 : 4.6;
+  const distance = variant === "hero" ? 9.24 : variant === "compact" ? 5.0 : 4.6;
 
   return (
     <div
       className={["relative w-full h-full pointer-events-none", className].join(" ")}
-      style={style}
+      style={{ opacity, ...style }}
     >
       <Canvas
         dpr={[1, 2]}

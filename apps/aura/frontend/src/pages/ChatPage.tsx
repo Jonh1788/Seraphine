@@ -846,7 +846,7 @@ function EmptyChat({ state }: { state: AuraState }) {
   return (
     <div className="h-full relative flex flex-col items-center justify-center text-center px-4">
       <div className="absolute inset-0 pointer-events-none">
-        <AuraSphere variant="hero" state={state} />
+        <AuraSphere variant="hero" state={state} opacity={0.6} />
       </div>
       <div className="relative z-10 max-w-md flex flex-col items-center gap-3 mt-auto mb-6 sm:mb-12">
         <h2 className="font-display text-2xl sm:text-3xl font-semibold text-ink-primary tracking-tight">

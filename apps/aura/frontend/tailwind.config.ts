@@ -6,12 +6,12 @@ const config: Config = {
     extend: {
       colors: {
         bg: {
-          base: "#06091A",
-          surface: "#0d132a",
-          elevated: "#141c38",
-          s1: "#0d132a",
-          s2: "#141c38",
-          s3: "#1d274a",
+          base: "#02040c",
+          surface: "#0a1228",
+          elevated: "#121a36",
+          s1: "#0a1228",
+          s2: "#121a36",
+          s3: "#1b2547",
         },
         ink: {
           primary: "#e5e7eb",

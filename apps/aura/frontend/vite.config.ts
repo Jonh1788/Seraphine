@@ -10,6 +10,7 @@ export default defineConfig({
       "/chat": "http://127.0.0.1:8002",
       "/tasks": "http://127.0.0.1:8002",
       "/finance": "http://127.0.0.1:8002",
+      "/briefing": "http://127.0.0.1:8002",
       "/health": "http://127.0.0.1:8002",
     },
   },

@@ -35,6 +35,8 @@ from mod_tasks.service import TaskService
 from aura.auth.routes import router as auth_router
 from aura.auth import schema as auth_schema
 from aura.auth.service import UsersService
+from aura.briefing.routes import router as briefing_router
+from aura.briefing.service import BriefingService
 from aura.chat.routes import router as chat_router
 from aura.chat import schema as chat_schema
 from aura.chat.service import ConversationService
@@ -91,6 +93,9 @@ async def lifespan(app: FastAPI):
     conversations_service = ConversationService(store)
     recurring_service = RecurringService(store, task_service)
     google_auth_service = GoogleAuthService(store, settings)
+    briefing_service = BriefingService(
+        llm=llm, tasks=task_service, finance=finance_service,
+    )
 
     # ---- STT (lazy model load on first /chat/transcribe call).
     # mkdir is best-effort: in dev the default /data isn't writable;
@@ -125,6 +130,7 @@ async def lifespan(app: FastAPI):
     app.state.conversations_service = conversations_service
     app.state.recurring_service = recurring_service
     app.state.google_auth_service = google_auth_service
+    app.state.briefing_service = briefing_service
     app.state.stt_service = stt_service
 
     # Background materialize loop — every 10 minutes, create today's
@@ -201,6 +207,7 @@ def create_app() -> FastAPI:
     app.include_router(finance_router)
     app.include_router(recurring_router)
     app.include_router(google_router)
+    app.include_router(briefing_router)
 
     @app.get("/health")
     async def health() -> dict:
