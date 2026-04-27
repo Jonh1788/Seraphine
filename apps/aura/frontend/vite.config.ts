@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      "/auth": "http://localhost:8001",
-      "/chat": "http://localhost:8001",
-      "/tasks": "http://localhost:8001",
-      "/finance": "http://localhost:8001",
-      "/health": "http://localhost:8001",
+      "/auth": "http://127.0.0.1:8002",
+      "/chat": "http://127.0.0.1:8002",
+      "/tasks": "http://127.0.0.1:8002",
+      "/finance": "http://127.0.0.1:8002",
+      "/health": "http://127.0.0.1:8002",
     },
   },
 });

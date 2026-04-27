@@ -20,6 +20,8 @@ import { TasksBlock } from "../components/TaskCard";
 import { TaskEditorModal } from "../components/TaskEditorModal";
 import { RecurringBlock } from "../components/RecurringCard";
 import * as tasksApi from "../api/tasks";
+import { AuraSphere } from "../aura/sphere/AuraSphere";
+import type { AuraState } from "../aura/sphere/states";
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -548,6 +550,14 @@ export function ChatPage() {
     streamingTasks.length === 0 &&
     streamingRecurring.length === 0;
 
+  const auraState: AuraState = recording
+    ? "listening"
+    : streaming !== null
+      ? "speaking"
+      : transcribing || busy
+        ? "thinking"
+        : "idle";
+
   return (
     <div className="h-full flex">
       <ConversationsSidebar
@@ -566,7 +576,7 @@ export function ChatPage() {
               Carregando conversa…
             </div>
           ) : showEmpty ? (
-            <EmptyChat />
+            <EmptyChat state={auraState} />
           ) : (
             <div className="max-w-3xl mx-auto flex flex-col gap-5">
               {messages.map((m, i) => (
@@ -832,15 +842,17 @@ function Dot({ delay }: { delay: string }) {
   );
 }
 
-function EmptyChat() {
+function EmptyChat({ state }: { state: AuraState }) {
   return (
-    <div className="h-full grid place-items-center text-center text-ink-faint">
-      <div className="max-w-md flex flex-col items-center gap-3">
-        <div className="h-14 w-14 rounded-full bg-gradient-to-br from-cyan-500/30 to-cyan-400/10 grid place-items-center">
-          <Mic className="h-6 w-6 text-cyan-300" />
-        </div>
-        <h2 className="text-xl font-semibold text-ink-primary">Conversar com Aura</h2>
-        <p className="text-sm text-ink-dim">
+    <div className="h-full relative flex flex-col items-center justify-center text-center px-4">
+      <div className="absolute inset-0 pointer-events-none">
+        <AuraSphere variant="hero" state={state} />
+      </div>
+      <div className="relative z-10 max-w-md flex flex-col items-center gap-3 mt-auto mb-6 sm:mb-12">
+        <h2 className="font-display text-2xl sm:text-3xl font-semibold text-ink-primary tracking-tight">
+          Conversar com Aura
+        </h2>
+        <p className="text-sm text-ink-dim max-w-sm">
           Pergunte sobre suas tarefas, finanças, ou peça pra organizar sua semana.
         </p>
       </div>
