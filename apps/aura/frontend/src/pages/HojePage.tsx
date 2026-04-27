@@ -243,7 +243,7 @@ export function HojePage() {
           onClick={(e) => { e.stopPropagation(); void handleRefresh(); }}
           disabled={briefingLoading}
           aria-label="Atualizar briefing"
-          className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-aura-border text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors disabled:opacity-50"
+          className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-[rgba(99,130,255,0.10)] text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${briefingLoading ? "animate-spin" : ""}`} />
         </button>
@@ -252,7 +252,7 @@ export function HojePage() {
           aria-label="Fechar"
           title="Voltar pra Aura"
           onClick={(e) => e.stopPropagation()}
-          className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-aura-border text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors"
+          className="grid place-items-center h-9 w-9 rounded-xl bg-accent-blue-dim/40 border border-[rgba(99,130,255,0.10)] text-ink-dim hover:text-accent-blue-soft hover:border-accent-blue/30 transition-colors"
         >
           <X className="h-3.5 w-3.5" />
         </Link>
@@ -288,7 +288,7 @@ export function HojePage() {
               key={t.id}
               to="/tarefas"
               onClick={(e) => e.stopPropagation()}
-              className={`${seq.classOf(prioStart + i)} flex items-center gap-3 px-4 py-3.5 hover:bg-bg-s2/60 transition-colors border-t border-aura-border first:border-t-0`}
+              className={`${seq.classOf(prioStart + i)} flex items-center gap-3 px-4 py-3.5 hover:bg-bg-s2/60 transition-colors border-t border-[rgba(99,130,255,0.10)] first:border-t-0`}
             >
               <PrioDot color={dot} />
               <span className="flex-1 text-[13px] text-ink-primary truncate">{t.title}</span>
@@ -387,7 +387,7 @@ function SnapGridWithOrb({ kpis, orbClass, cardClassFor, pulseTick }: SnapGridWi
               </div>
             </>
           );
-          const baseClass = `${cardClassFor(i)} snap-card relative bg-bg-s1 border border-aura-border rounded-[14px] px-4 py-3.5 transition-colors hover:bg-bg-s2 hover:border-aura-border2`;
+          const baseClass = `${cardClassFor(i)} snap-card relative bg-bg-s1 border border-[rgba(99,130,255,0.10)] rounded-[14px] px-4 py-3.5 transition-colors hover:bg-bg-s2 hover:border-[rgba(99,130,255,0.18)]`;
           return k.to ? (
             <Link key={i} to={k.to} onClick={(e) => e.stopPropagation()} className={baseClass}>
               {Inner}
@@ -465,8 +465,8 @@ function SectionCard({
   const items = Array.isArray(children) ? children : children ? [children] : [];
   const hasContent = items.some((c) => c);
   return (
-    <section className={`${headerClass} mx-4 mb-3.5 bg-bg-s1 border border-aura-border rounded-[18px] overflow-hidden`}>
-      <header className="flex items-center justify-between px-4 pt-3.5 pb-3 border-b border-aura-border">
+    <section className={`${headerClass} mx-4 mb-3.5 bg-bg-s1 border border-[rgba(99,130,255,0.10)] rounded-[18px] overflow-hidden`}>
+      <header className="flex items-center justify-between px-4 pt-3.5 pb-3 border-b border-[rgba(99,130,255,0.10)]">
         <div className="flex items-center gap-2.5 font-display text-[15px] font-bold text-ink-primary tracking-tight">
           <Icon className={`h-4 w-4 ${iconColorClass}`} strokeWidth={2.2} />
           {title}
@@ -520,7 +520,7 @@ function FinRow({ className = "", name, value, positive, meta }: FinRowProps) {
   const dotGlow = positive ? "rgba(45,212,191,0.55)" : "rgba(255,91,114,0.55)";
   const Icon = positive ? ArrowUpRight : ArrowDownLeft;
   return (
-    <div className={`${className} flex items-center gap-3 px-4 py-3.5 border-t border-aura-border first:border-t-0`}>
+    <div className={`${className} flex items-center gap-3 px-4 py-3.5 border-t border-[rgba(99,130,255,0.10)] first:border-t-0`}>
       <span
         className={[
           "h-[8px] w-[8px] rounded-full shrink-0",
@@ -543,11 +543,11 @@ function BriefAnalise({ className = "" }: { className?: string }) {
     <div className={`${className} relative mx-4 my-3 py-3 flex items-center justify-center gap-2`}>
       <span
         aria-hidden="true"
-        className="absolute top-1/2 left-0 right-[calc(50%+70px)] h-px bg-aura-border"
+        className="absolute top-1/2 left-0 right-[calc(50%+70px)] h-px bg-[rgba(99,130,255,0.10)]"
       />
       <span
         aria-hidden="true"
-        className="absolute top-1/2 left-[calc(50%+70px)] right-0 h-px bg-aura-border"
+        className="absolute top-1/2 left-[calc(50%+70px)] right-0 h-px bg-[rgba(99,130,255,0.10)]"
       />
       <Activity className="h-3.5 w-3.5 text-accent-blue-soft" />
       <span className="text-[11px] font-bold tracking-[0.22em] uppercase text-ink-faint">
