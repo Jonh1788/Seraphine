@@ -29,7 +29,7 @@ export default function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <AppShell fullBleed>
+              <AppShell fullBleed bareTopbar>
                 <ChatPage />
               </AppShell>
             </ProtectedRoute>

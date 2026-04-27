@@ -19,6 +19,8 @@ interface AppShellProps {
   title?: ReactNode;
   /** Right-aligned action(s) on mobile top bar */
   topbarActions?: ReactNode;
+  /** Strip topbar wordmark/border for full-screen feel (e.g. chat). */
+  bareTopbar?: boolean;
 }
 
 export function AppShell(props: AppShellProps) {
@@ -34,6 +36,7 @@ function AppShellInner({
   fullBleed = false,
   title,
   topbarActions,
+  bareTopbar = false,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const refreshHandler = usePageRefreshHandler();
@@ -99,11 +102,12 @@ function AppShellInner({
         </div>
       ) : null}
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col relative">
         <MobileTopbar
           title={title}
           actions={topbarActions}
           onOpenDrawer={() => setDrawerOpen(true)}
+          bare={bareTopbar}
         />
         {fullBleed ? (
           <main className="flex-1 min-h-0 overflow-hidden">{children}</main>

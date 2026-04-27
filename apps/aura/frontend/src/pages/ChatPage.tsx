@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Paperclip, Headphones, Mic, Volume2, Send, X, FileText, Image as ImageIcon, Square, Loader2 } from "lucide-react";
+import { Paperclip, Headphones, Mic, Send, X, FileText, Image as ImageIcon, Square, Loader2, MessageSquare, Plus, Trash2 } from "lucide-react";
 import {
   createConversation,
+  deleteConversation,
   getConversation,
+  listConversations,
   streamMessage,
   streamMessageWithAttachment,
   transcribeAudio,
   type AttachmentMetadata,
   type ChatMessage,
+  type ConversationSummary,
   type InlineRecurring,
   type InlineTask,
   type InlineTransaction,
 } from "../api/chat";
-import { ConversationsSidebar } from "../components/ConversationsSidebar";
+import { Sheet } from "../components/Sheet";
 import { Markdown } from "../components/Markdown";
 import { TransactionsBlock } from "../components/TransactionCard";
 import { TasksBlock } from "../components/TaskCard";
@@ -43,9 +46,11 @@ export function ChatPage() {
   const streamingTasksRef = useRef<InlineTask[]>([]);
   const streamingRecurringRef = useRef<InlineRecurring[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -157,10 +162,62 @@ export function ChatPage() {
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, streaming, busy]);
 
-  const onSelectConversation = (id: string | null) => {
-    if (id) {
-      setSearchParams({ c: id });
-    } else {
+  // ----- Auto-resume last conversation on first mount -----------------
+  // Pedido: ao abrir o chat, anexar mensagens à última conversa em vez
+  // de criar uma nova toda vez. Carrega a mais recente uma única vez se
+  // não vier ?c= na URL.
+  const autoResumeRanRef = useRef(false);
+  useEffect(() => {
+    if (autoResumeRanRef.current) return;
+    if (conversationId) {
+      autoResumeRanRef.current = true;
+      return;
+    }
+    autoResumeRanRef.current = true;
+    void (async () => {
+      try {
+        const rows = await listConversations(1);
+        if (rows.length > 0) {
+          setSearchParams({ c: rows[0].id }, { replace: true });
+        }
+      } catch {
+        /* tolerate — fall back to fresh chat */
+      }
+    })();
+  }, [conversationId, setSearchParams]);
+
+  // ----- History sheet --------------------------------------------------
+  const openHistory = async () => {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const rows = await listConversations(50);
+      setHistoryList(rows);
+    } catch {
+      setHistoryList([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+  const onPickConversation = (id: string) => {
+    setHistoryOpen(false);
+    setSearchParams({ c: id });
+  };
+  const onNewConversation = () => {
+    setHistoryOpen(false);
+    navigate("/", { replace: true });
+    // useEffect on conversationId=null will not auto-resume because
+    // autoResumeRanRef.current is true; user starts fresh by typing.
+  };
+  const onDeleteFromHistory = async (id: string) => {
+    if (!confirm("Excluir essa conversa?")) return;
+    try {
+      await deleteConversation(id);
+    } catch {
+      /* tolerate */
+    }
+    setHistoryList((prev) => prev.filter((c) => c.id !== id));
+    if (id === conversationId) {
       navigate("/", { replace: true });
     }
   };
@@ -436,7 +493,6 @@ export function ChatPage() {
           streamingTransactionsRef.current = [];
           streamingTasksRef.current = [];
           streamingRecurringRef.current = [];
-          setSidebarRefreshKey((k) => k + 1);
         };
       },
       onError: (msg: string) => {
@@ -560,12 +616,6 @@ export function ChatPage() {
 
   return (
     <div className="h-full flex">
-      <ConversationsSidebar
-        currentId={conversationId}
-        onSelect={onSelectConversation}
-        refreshKey={sidebarRefreshKey}
-      />
-
       <div className="flex-1 min-w-0 flex flex-col">
         <div
           ref={scrollerRef}
@@ -620,10 +670,13 @@ export function ChatPage() {
           )}
         </div>
 
-        <div className="px-4 sm:px-6 lg:px-12 pb-6">
+        <div
+          className="px-4 sm:px-6 lg:px-12"
+          style={{ paddingBottom: "calc(var(--safe-bottom) + 18px)" }}
+        >
           <form
             onSubmit={onSubmit}
-            className="max-w-3xl mx-auto flex flex-col gap-2 rounded-2xl bg-bg-surface border border-white/10 px-3 py-2 shadow-lg shadow-black/30"
+            className="max-w-2xl mx-auto flex flex-col"
           >
             <input
               ref={fileInputRef}
@@ -642,123 +695,237 @@ export function ChatPage() {
                 setAttachment(f);
               }}
             />
-            {attachment && (
-              <div className="flex items-center gap-2 self-start rounded-lg bg-white/5 border border-white/10 px-2.5 py-1.5 text-xs text-ink-dim">
-                {attachment.type === "application/pdf" ? (
-                  <FileText className="h-3.5 w-3.5 text-cyan-300" />
+
+            <div
+              className="flex flex-col gap-3 px-5 pt-4 pb-3"
+              style={{
+                background: "rgba(12,18,40,0.6)",
+                border: "1px solid rgba(99,130,255,0.10)",
+                borderRadius: 28,
+                boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              {attachment && (
+                <div className="flex items-center gap-2 self-start rounded-lg px-2.5 py-1.5 text-xs" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(99,130,255,0.10)", color: "#8B9CC8" }}>
+                  {attachment.type === "application/pdf" ? (
+                    <FileText className="h-3.5 w-3.5" style={{ color: "#7DA4FF" }} />
+                  ) : (
+                    <ImageIcon className="h-3.5 w-3.5" style={{ color: "#7DA4FF" }} />
+                  )}
+                  <span className="max-w-[12rem] truncate">{attachment.name}</span>
+                  <span style={{ color: "#4D5E8A" }}>
+                    {(attachment.size / 1024).toFixed(0)} KB
+                  </span>
+                  <button
+                    type="button"
+                    className="hover:text-white"
+                    onClick={() => {
+                      setAttachment(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    title="Remover anexo"
+                    aria-label="Remover anexo"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <textarea
+                ref={taRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Como posso te ajudar?"
+                rows={1}
+                disabled={busy}
+                className="bg-transparent text-[15px] resize-none focus:outline-none disabled:opacity-50 leading-relaxed max-h-40"
+                style={{ color: "#EEF2FF" }}
+              />
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
+                  className="grid place-items-center h-9 w-9 rounded-lg transition-colors disabled:opacity-50"
+                  style={{ color: "#8B9CC8" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#EEF2FF")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#8B9CC8")}
+                  title="Anexar"
+                  aria-label="Anexar"
+                >
+                  <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="grid place-items-center h-9 w-9 rounded-lg transition-colors"
+                  style={{ color: "#8B9CC8" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#EEF2FF")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#8B9CC8")}
+                  title="Áudio (em breve)"
+                  aria-label="Áudio"
+                >
+                  <Headphones className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                </button>
+
+                <div className="flex-1" />
+
+                {draft.trim() || attachment ? (
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    aria-label="Enviar"
+                    title="Enviar"
+                    className="grid place-items-center h-9 w-9 rounded-full text-white disabled:opacity-50 transition-opacity"
+                    style={{ background: "#4F7EFF", boxShadow: "0 0 14px rgba(79,126,255,0.55)" }}
+                  >
+                    <Send className="h-4 w-4" strokeWidth={2.2} />
+                  </button>
+                ) : transcribing ? (
+                  <span
+                    className="grid place-items-center h-9 w-9 rounded-full"
+                    style={{ background: "rgba(79,126,255,0.15)", color: "#7DA4FF" }}
+                    title="Transcrevendo…"
+                    aria-label="Transcrevendo"
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </span>
+                ) : recording ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-[11px] tabular-nums" style={{ color: "#FF5B72" }}>
+                      <span className="h-2 w-2 rounded-full animate-pulse" style={{ background: "#FF5B72" }} />
+                      {String(Math.floor(recordSeconds / 60)).padStart(1, "0")}:
+                      {String(recordSeconds % 60).padStart(2, "0")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={toggleRecording}
+                      aria-label="Parar gravação"
+                      title="Parar gravação"
+                      className="grid place-items-center h-9 w-9 rounded-full text-white animate-pulse"
+                      style={{ background: "#FF5B72" }}
+                    >
+                      <Square className="h-3.5 w-3.5 fill-current" />
+                    </button>
+                  </div>
                 ) : (
-                  <ImageIcon className="h-3.5 w-3.5 text-cyan-300" />
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    disabled={busy}
+                    aria-label="Gravar áudio"
+                    title="Gravar áudio"
+                    className="grid place-items-center h-9 w-9 rounded-full transition-colors"
+                    style={{
+                      background: "rgba(79,126,255,0.12)",
+                      color: "#7DA4FF",
+                    }}
+                  >
+                    <Mic className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                  </button>
                 )}
-                <span className="max-w-[12rem] truncate">{attachment.name}</span>
-                <span className="text-ink-faint">
-                  {(attachment.size / 1024).toFixed(0)} KB
-                </span>
-                <button
-                  type="button"
-                  className="text-ink-faint hover:text-ink-primary"
-                  onClick={() => {
-                    setAttachment(null);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
-                  title="Remover anexo"
-                  aria-label="Remover anexo"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
               </div>
-            )}
-          <div className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-ink-faint hover:text-ink-primary p-2 disabled:opacity-50"
-              disabled={busy}
-              title="Anexar"
-              aria-label="Anexar"
-            >
-              <Paperclip className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="text-ink-faint hover:text-ink-primary p-2"
-              title="Áudio (em breve)"
-              aria-label="Áudio"
-            >
-              <Headphones className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="text-ink-faint hover:text-ink-primary p-2"
-              title="Áudio (em breve)"
-              aria-label="Volume"
-            >
-              <Volume2 className="h-4 w-4" />
-            </button>
+            </div>
 
-            <textarea
-              ref={taRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Digite sua mensagem..."
-              rows={1}
-              disabled={busy}
-              className="flex-1 bg-transparent text-ink-primary placeholder:text-ink-faint resize-none px-2 py-2 max-h-40 focus:outline-none disabled:opacity-50"
-            />
-
-            {draft.trim() || attachment ? (
-              <button
-                type="submit"
-                disabled={busy}
-                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-gradient-to-br from-accent-purple-strong to-accent-purple text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                title="Enviar"
-                aria-label="Enviar"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            ) : transcribing ? (
-              <button
-                type="button"
-                disabled
-                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-cyan-500/15 text-cyan-300 cursor-wait"
-                title="Transcrevendo…"
-                aria-label="Transcrevendo"
-              >
-                <Loader2 className="h-4 w-4 animate-spin" />
-              </button>
-            ) : recording ? (
-              <div className="ml-1 flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-xs text-red-300 tabular-nums">
-                  <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                  {String(Math.floor(recordSeconds / 60)).padStart(1, "0")}:
-                  {String(recordSeconds % 60).padStart(2, "0")}
-                </span>
-                <button
-                  type="button"
-                  onClick={toggleRecording}
-                  className="grid place-items-center h-9 w-9 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors animate-pulse"
-                  title="Parar gravação"
-                  aria-label="Parar gravação"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleRecording}
-                disabled={busy}
-                className="ml-1 grid place-items-center h-9 w-9 rounded-full bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-50 transition-colors"
-                title="Gravar áudio"
-                aria-label="Gravar áudio"
-              >
-                <Mic className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+            <button
+              type="button"
+              onClick={openHistory}
+              className="mt-3 mx-auto inline-flex items-center gap-1.5 text-[13px] font-medium transition-colors"
+              style={{ color: "#8B9CC8" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#EEF2FF")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#8B9CC8")}
+            >
+              <MessageSquare className="h-3.5 w-3.5" strokeWidth={2} />
+              retomar chat
+            </button>
           </form>
         </div>
       </div>
+
+      <Sheet
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        title="Histórico"
+        maxWidth="max-w-md"
+      >
+        <div className="px-5 py-4 flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={onNewConversation}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-11 rounded-lg text-[13px] font-medium text-white"
+            style={{ background: "#4F7EFF", boxShadow: "0 4px 14px rgba(79,126,255,0.4)" }}
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.5} />
+            Nova conversa
+          </button>
+
+          {historyLoading ? (
+            <div className="grid place-items-center py-8" style={{ color: "#4D5E8A" }}>
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : historyList.length === 0 ? (
+            <div className="text-center py-8 text-[13px]" style={{ color: "#4D5E8A" }}>
+              Nenhuma conversa ainda.
+            </div>
+          ) : (
+            <ul className="flex flex-col">
+              {historyList.map((c) => {
+                const isActive = c.id === conversationId;
+                const title = c.title ?? c.last_snippet ?? "Nova conversa";
+                return (
+                  <li
+                    key={c.id}
+                    className="flex items-center gap-2 px-2 py-2 rounded-[10px] cursor-pointer transition-colors group"
+                    style={{
+                      background: isActive ? "rgba(79,126,255,0.12)" : "transparent",
+                    }}
+                    onClick={() => onPickConversation(c.id)}
+                  >
+                    <MessageSquare
+                      className="h-4 w-4 shrink-0"
+                      style={{ color: isActive ? "#7DA4FF" : "#4D5E8A" }}
+                      strokeWidth={2}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className="text-[13px] truncate"
+                        style={{
+                          color: isActive ? "#EEF2FF" : "#EEF2FF",
+                          fontWeight: isActive ? 500 : 400,
+                        }}
+                      >
+                        {title}
+                      </div>
+                      {c.last_snippet ? (
+                        <div className="text-[11px] truncate mt-0.5" style={{ color: "#4D5E8A" }}>
+                          {c.last_snippet}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onDeleteFromHistory(c.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md"
+                      style={{ color: "#4D5E8A" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "#FF5B72")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "#4D5E8A")}
+                      aria-label="Excluir conversa"
+                      title="Excluir"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Sheet>
 
       {editingTaskId ? (
         <TaskEditorModal

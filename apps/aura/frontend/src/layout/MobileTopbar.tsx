@@ -5,9 +5,44 @@ interface MobileTopbarProps {
   title?: ReactNode;
   actions?: ReactNode;
   onOpenDrawer?: () => void;
+  /** Strip wordmark + border + background — only the hamburger remains.
+   *  Used by full-screen pages like the chat where the surrounding chrome
+   *  competes with the content. */
+  bare?: boolean;
 }
 
-export function MobileTopbar({ title, actions, onOpenDrawer }: MobileTopbarProps) {
+export function MobileTopbar({ title, actions, onOpenDrawer, bare = false }: MobileTopbarProps) {
+  if (bare) {
+    return (
+      <header
+        className="lg:hidden absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-3 px-4 pointer-events-none"
+        style={{ paddingTop: "calc(var(--safe-top) + 8px)", paddingBottom: 8 }}
+      >
+        {onOpenDrawer ? (
+          <button
+            type="button"
+            onClick={onOpenDrawer}
+            aria-label="Abrir menu"
+            className="pointer-events-auto grid place-items-center h-10 w-10 -ml-1 rounded-[12px] transition-colors"
+            style={{
+              background: "rgba(12,18,40,0.6)",
+              border: "1px solid rgba(99,130,255,0.10)",
+              color: "#EEF2FF",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <Menu className="h-5 w-5" strokeWidth={2.2} />
+          </button>
+        ) : (
+          <span />
+        )}
+        {actions ? (
+          <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">{actions}</div>
+        ) : null}
+      </header>
+    );
+  }
+
   return (
     <header
       className="lg:hidden flex items-center justify-between gap-3 h-14 px-4 border-b border-white/5 bg-bg-base/80 backdrop-blur-xl sticky top-0 z-20"
