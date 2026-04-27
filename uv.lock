@@ -248,6 +248,7 @@ source = { editable = "apps/aura/backend" }
 dependencies = [
     { name = "core-auth" },
     { name = "core-db" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "faster-whisper" },
     { name = "google-integration" },
@@ -258,6 +259,7 @@ dependencies = [
     { name = "mod-vision" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
+    { name = "pywebpush" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -272,6 +274,7 @@ dev = [
 requires-dist = [
     { name = "core-auth", editable = "packages/core-auth" },
     { name = "core-db", editable = "packages/core-db" },
+    { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "faster-whisper", specifier = ">=1.0" },
     { name = "google-integration", editable = "packages/google-integration" },
@@ -282,6 +285,7 @@ requires-dist = [
     { name = "mod-vision", editable = "packages/mod-vision" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.8" },
     { name = "pydantic-settings", specifier = ">=2.4" },
+    { name = "pywebpush", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
