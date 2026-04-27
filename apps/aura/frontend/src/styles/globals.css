@@ -16,6 +16,10 @@ body,
   height: 100%;
   background-color: #06091A;
   color: #EEF2FF;
+  /* Bloqueia double-tap zoom em iOS Safari sem matar pinch-zoom de
+     acessibilidade. Aplica também em filhos por inheritance. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
