@@ -31,10 +31,26 @@ export function Sheet({
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
+  // Two-phase mount: `mounted` controls DOM presence (covers both open
+  // anim and close anim). `visible` controls the translate target —
+  // it's set to false on first mount so the panel starts off-screen,
+  // then flipped to true on the next frame so CSS transitions a real
+  // delta (translate-y-full → 0). Without this gap the open render
+  // happens already at translate-y-0 and the open animation is skipped.
   const [mounted, setMounted] = useState(open);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (open) setMounted(true);
+    if (open) {
+      setMounted(true);
+      // Force a reflow + commit before flipping `visible` so the
+      // browser sees the off-screen frame as the transition origin.
+      const id = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setVisible(true));
+      });
+      return () => cancelAnimationFrame(id);
+    }
+    setVisible(false);
   }, [open]);
 
   useEffect(() => {
@@ -87,10 +103,10 @@ export function Sheet({
     <div
       className={[
         "fixed inset-0 z-50 transition-opacity duration-200",
-        open ? "opacity-100" : "opacity-0 pointer-events-none",
+        visible ? "opacity-100" : "opacity-0 pointer-events-none",
       ].join(" ")}
       onTransitionEnd={() => {
-        if (!open) setMounted(false);
+        if (!visible) setMounted(false);
       }}
     >
       <div
@@ -116,12 +132,12 @@ export function Sheet({
             "lg:max-h-[85vh] lg:w-full",
             maxWidth,
             "flex flex-col transition-transform duration-300 ease-out",
-            open ? "translate-y-0" : "translate-y-full lg:translate-y-4",
+            visible ? "translate-y-0" : "translate-y-full lg:translate-y-4",
             className,
           ].join(" ")}
           style={{
             transform:
-              dragOffset > 0 && open
+              dragOffset > 0 && visible
                 ? `translateY(${dragOffset}px)`
                 : undefined,
             transition: dragOffset > 0 ? "none" : undefined,
