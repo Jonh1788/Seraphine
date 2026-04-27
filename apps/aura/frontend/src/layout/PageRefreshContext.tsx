@@ -3,7 +3,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -11,57 +10,57 @@ import {
 
 type Handler = () => Promise<void> | void;
 
-interface ContextValue {
-  setHandler: (h: Handler | null) => void;
-  current: Handler | null;
-}
-
-const PageRefreshContext = createContext<ContextValue | null>(null);
+// Two contexts on purpose: pages register handlers without subscribing
+// to value changes (no re-render loop), while the AppShell that *reads*
+// the active handler subscribes only to value changes.
+const SetHandlerContext = createContext<((h: Handler | null) => void) | null>(null);
+const HandlerContext = createContext<Handler | null>(null);
 
 export function PageRefreshProvider({ children }: { children: ReactNode }) {
   const [handler, setHandler] = useState<Handler | null>(null);
-  const value = useMemo<ContextValue>(
-    () => ({ setHandler, current: handler }),
-    [handler],
-  );
+  // setHandler from useState is already stable; wrapping it in a ref
+  // keeps the SetHandlerContext value strictly === across renders.
+  const setHandlerRef = useRef(setHandler);
+  setHandlerRef.current = setHandler;
+  const stableSet = useRef<(h: Handler | null) => void>((h) => setHandlerRef.current(h));
+
   return (
-    <PageRefreshContext.Provider value={value}>
-      {children}
-    </PageRefreshContext.Provider>
+    <SetHandlerContext.Provider value={stableSet.current}>
+      <HandlerContext.Provider value={handler}>{children}</HandlerContext.Provider>
+    </SetHandlerContext.Provider>
   );
 }
 
 /** Read the active refresh handler (used by the AppShell to wire pull-to-refresh). */
 export function usePageRefreshHandler(): Handler | null {
-  const ctx = useContext(PageRefreshContext);
-  return ctx?.current ?? null;
+  return useContext(HandlerContext);
 }
 
 /**
  * Register a refresh handler for the current page. The latest stable
  * function is exposed; AppShell calls it when the user pulls down.
- *
- * Pass `null` (or the hook unmounting) clears the handler — pull becomes
- * a no-op until another page registers.
  */
 export function useRegisterPageRefresh(handler: Handler | null): void {
-  const ctx = useContext(PageRefreshContext);
+  const setHandler = useContext(SetHandlerContext);
   const ref = useRef<Handler | null>(handler);
   ref.current = handler;
 
-  // Stable wrapper: closure over `ref.current` so the latest handler is
-  // always invoked, even though we register only once per ctx.
+  // Stable wrapper invoked from AppShell — always calls the latest handler.
   const stable = useCallback<Handler>(() => {
     return ref.current ? ref.current() : undefined;
   }, []);
 
   useEffect(() => {
-    if (!ctx) return;
+    if (!setHandler) return;
     if (handler === null) {
-      ctx.setHandler(null);
-      return () => ctx.setHandler(null);
+      setHandler(null);
+      return () => setHandler(null);
     }
-    ctx.setHandler(stable);
-    return () => ctx.setHandler(null);
-  }, [ctx, handler, stable]);
+    setHandler(stable);
+    return () => setHandler(null);
+    // setHandler is referentially stable (Provider holds it in a ref),
+    // so this effect runs only on mount/unmount and when the page swaps
+    // its handler from null ↔ non-null.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setHandler, handler === null, stable]);
 }
