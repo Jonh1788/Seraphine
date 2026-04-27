@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { MobileTopbar } from "./MobileTopbar";
+import { BottomNav } from "./BottomNav";
 
 interface AppShellProps {
   children: ReactNode;
@@ -9,24 +10,28 @@ interface AppShellProps {
    *  default padding + max-width wrapper and become the only scrollable
    *  area inside <main>. */
   fullBleed?: boolean;
+  /** Title shown on mobile top bar (defaults to none) */
+  title?: ReactNode;
+  /** Right-aligned action(s) on mobile top bar */
+  topbarActions?: ReactNode;
+  /** Hide the bottom nav (e.g. inside fullscreen sheets or chat focus) */
+  hideBottomNav?: boolean;
 }
 
-export function AppShell({ children, fullBleed = false }: AppShellProps) {
+export function AppShell({
+  children,
+  fullBleed = false,
+  title,
+  topbarActions,
+  hideBottomNav = false,
+}: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="h-screen flex bg-bg-base text-ink-primary">
+    <div className="h-[100dvh] flex bg-bg-base text-ink-primary">
       <div className="hidden lg:flex">
         <Sidebar variant="rail" />
       </div>
-      <div className="flex lg:hidden">
-        <div className="hidden">
-          <Sidebar variant="rail" />
-        </div>
-      </div>
-
-      {/* Rail for small screens (icon only) */}
-      <div className="lg:hidden">{/* placeholder, actual mobile nav via drawer */}</div>
 
       {drawerOpen ? (
         <div className="fixed inset-0 z-40 lg:hidden">
@@ -50,14 +55,35 @@ export function AppShell({ children, fullBleed = false }: AppShellProps) {
       ) : null}
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <MobileTopbar onOpenMenu={() => setDrawerOpen(true)} />
+        <MobileTopbar
+          title={title}
+          actions={topbarActions}
+          onOpenDrawer={() => setDrawerOpen(true)}
+        />
         {fullBleed ? (
-          <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+          <main
+            className="flex-1 min-h-0 overflow-hidden"
+            style={
+              hideBottomNav
+                ? undefined
+                : { paddingBottom: "calc(var(--bottom-nav-h) + var(--safe-bottom))" }
+            }
+          >
+            {children}
+          </main>
         ) : (
-          <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10">
+          <main
+            className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10"
+            style={
+              hideBottomNav
+                ? undefined
+                : { paddingBottom: "calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px)" }
+            }
+          >
             <div className="mx-auto max-w-7xl">{children}</div>
           </main>
         )}
+        {!hideBottomNav && <BottomNav />}
       </div>
     </div>
   );

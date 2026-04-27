@@ -10,6 +10,7 @@ import { TasksPage } from "./pages/TasksPage";
 import { FinancePage } from "./pages/FinancePage";
 import { CalendarPage } from "./pages/CalendarPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { MaisPage } from "./pages/MaisPage";
 
 export default function App() {
   return (
@@ -28,20 +29,21 @@ export default function App() {
           }
         />
         <Route
-          path="/visao-geral"
+          path="/hoje"
           element={
             <ProtectedRoute>
-              <AppShell>
+              <AppShell title="Hoje">
                 <DashboardPage />
               </AppShell>
             </ProtectedRoute>
           }
         />
+        <Route path="/visao-geral" element={<Navigate to="/hoje" replace />} />
         <Route
           path="/tarefas"
           element={
             <ProtectedRoute>
-              <AppShell>
+              <AppShell title="Tarefas">
                 <TasksPage />
               </AppShell>
             </ProtectedRoute>
@@ -51,7 +53,7 @@ export default function App() {
           path="/financas"
           element={
             <ProtectedRoute>
-              <AppShell>
+              <AppShell title="Finanças">
                 <FinancePage />
               </AppShell>
             </ProtectedRoute>
@@ -61,7 +63,7 @@ export default function App() {
           path="/calendario"
           element={
             <ProtectedRoute>
-              <AppShell>
+              <AppShell title="Calendário">
                 <CalendarPage />
               </AppShell>
             </ProtectedRoute>
@@ -71,8 +73,18 @@ export default function App() {
           path="/configuracoes"
           element={
             <ProtectedRoute>
-              <AppShell>
+              <AppShell title="Configurações">
                 <SettingsPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mais"
+          element={
+            <ProtectedRoute>
+              <AppShell title="Mais">
+                <MaisPage />
               </AppShell>
             </ProtectedRoute>
           }

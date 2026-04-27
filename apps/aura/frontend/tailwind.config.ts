@@ -6,9 +6,12 @@ const config: Config = {
     extend: {
       colors: {
         bg: {
-          base: "#0a0e1a",
-          surface: "#0f1525",
-          elevated: "#141a2c",
+          base: "#06091A",
+          surface: "#0d132a",
+          elevated: "#141c38",
+          s1: "#0d132a",
+          s2: "#141c38",
+          s3: "#1d274a",
         },
         ink: {
           primary: "#e5e7eb",
@@ -16,8 +19,11 @@ const config: Config = {
           faint: "#64748b",
         },
         accent: {
-          purple: "#a78bfa",
-          "purple-strong": "#8b5cf6",
+          blue: "#4F7EFF",
+          "blue-soft": "#7da0ff",
+          glow: "rgba(79,126,255,0.45)",
+          purple: "#4F7EFF",
+          "purple-strong": "#3a66ea",
         },
         mod: {
           tasks: "#3b82f6",
@@ -28,7 +34,16 @@ const config: Config = {
         },
       },
       fontFamily: {
+        display: [
+          "Sora",
+          "Inter",
+          "system-ui",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "sans-serif",
+        ],
         sans: [
+          "DM Sans",
           "Inter",
           "system-ui",
           "-apple-system",
@@ -36,9 +51,23 @@ const config: Config = {
           "Segoe UI",
           "sans-serif",
         ],
+        mono: [
+          "JetBrains Mono",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "monospace",
+        ],
+      },
+      borderRadius: {
+        xl2: "22px",
+        xl3: "32px",
+        xl4: "46px",
       },
       boxShadow: {
         glass: "0 1px 0 0 rgba(255,255,255,0.04) inset, 0 8px 24px -12px rgba(0,0,0,0.5)",
+        "glow-blue": "0 0 32px -8px rgba(79,126,255,0.45)",
+        "inset-edge": "inset 0 1px 0 0 rgba(255,255,255,0.06)",
       },
     },
   },

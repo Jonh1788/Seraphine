@@ -13,8 +13,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         {...rest}
         ref={ref}
         className={[
-          "rounded-md border border-white/10 bg-bg-elevated/60 px-3 py-2 text-ink-primary placeholder:text-ink-faint",
-          "focus:border-accent-purple focus:outline-none",
+          "rounded-lg border border-white/10 bg-bg-s2/60 px-3.5 py-2.5 min-h-11 text-ink-primary placeholder:text-ink-faint",
+          "focus:border-accent-blue focus:outline-none focus:shadow-glow-blue/30",
           className,
         ].join(" ")}
       />
@@ -35,8 +35,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         {...rest}
         ref={ref}
         className={[
-          "rounded-md border border-white/10 bg-bg-elevated/60 px-3 py-2 text-ink-primary placeholder:text-ink-faint resize-none",
-          "focus:border-accent-purple focus:outline-none",
+          "rounded-lg border border-white/10 bg-bg-s2/60 px-3.5 py-2.5 text-ink-primary placeholder:text-ink-faint resize-none",
+          "focus:border-accent-blue focus:outline-none",
           className,
         ].join(" ")}
       />

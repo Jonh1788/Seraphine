@@ -1,6 +1,5 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
   ListChecks,
   Wallet,
   CalendarDays,
@@ -8,19 +7,20 @@ import {
   LogOut,
   Sparkles,
   MessageSquareText,
+  Sun,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
 export interface NavItem {
   to: string;
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: typeof Sun;
   disabled?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { to: "/", label: "Chat IA", icon: MessageSquareText },
-  { to: "/visao-geral", label: "Visão Geral", icon: LayoutDashboard },
+  { to: "/", label: "Aura", icon: MessageSquareText },
+  { to: "/hoje", label: "Hoje", icon: Sun },
   { to: "/tarefas", label: "Tarefas", icon: ListChecks },
   { to: "/financas", label: "Finanças", icon: Wallet },
   { to: "/calendario", label: "Calendário", icon: CalendarDays },
@@ -49,12 +49,12 @@ export function Sidebar({ onNavigate, variant = "rail" }: SidebarProps) {
           isDrawer ? "" : "justify-center lg:justify-start",
         ].join(" ")}
       >
-        <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-accent-purple-strong to-accent-purple grid place-items-center shrink-0">
+        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-accent-blue to-accent-blue-soft grid place-items-center shrink-0 shadow-glow-blue">
           <Sparkles className="h-5 w-5 text-white" />
         </div>
         <span
           className={[
-            "text-lg font-bold text-ink-primary",
+            "font-display text-lg font-bold text-ink-primary",
             isDrawer ? "inline" : "hidden lg:inline",
           ].join(" ")}
         >

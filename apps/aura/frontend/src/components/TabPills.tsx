@@ -14,7 +14,7 @@ interface TabPillsProps {
 }
 
 const ACTIVE_BG: Record<StatColor, string> = {
-  purple: "bg-accent-purple-strong text-white",
+  purple: "bg-accent-blue text-white",
   blue: "bg-mod-tasks text-white",
   green: "bg-mod-finance text-white",
   orange: "bg-mod-reminders text-white",
@@ -25,7 +25,7 @@ const ACTIVE_BG: Record<StatColor, string> = {
 
 export function TabPills({ items, active, onChange, color = "purple" }: TabPillsProps) {
   return (
-    <div className="inline-flex flex-wrap gap-1 rounded-lg bg-bg-surface/60 border border-white/5 p-1">
+    <div className="inline-flex flex-wrap gap-1 rounded-xl bg-bg-s1/60 border border-white/5 p-1">
       {items.map((it) => {
         const isActive = it.id === active;
         return (
@@ -34,7 +34,7 @@ export function TabPills({ items, active, onChange, color = "purple" }: TabPills
             type="button"
             onClick={() => onChange(it.id)}
             className={[
-              "inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              "inline-flex items-center gap-2 px-3.5 py-2 min-h-10 rounded-lg text-sm font-medium transition-colors",
               isActive ? ACTIVE_BG[color] : "text-ink-dim hover:text-ink-primary hover:bg-white/5",
             ].join(" ")}
           >
