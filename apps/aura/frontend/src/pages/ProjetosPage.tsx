@@ -151,7 +151,7 @@ export function ProjetosPage() {
   const animDelay = (i: number) => ({ animationDelay: `${0.04 + i * 0.05}s` });
 
   return (
-    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-[#06091A] pb-24 relative">
+    <div className="-mx-4 -my-6 sm:-mx-6 lg:-mx-10 min-h-full bg-[#06091A] pb-12 relative">
       {/* Title row */}
       <div className="flex items-center gap-2.5 pt-4 px-5 pb-3.5 screen-item" style={animDelay(0)}>
         <h1 className="font-display text-[28px] font-bold tracking-tight text-[#EEF2FF]">
@@ -252,7 +252,7 @@ export function ProjetosPage() {
         className="fixed grid place-items-center transition-transform active:scale-95"
         style={{
           right: 20,
-          bottom: "calc(var(--bottom-nav-h) + var(--safe-bottom) + 18px)",
+          bottom: "calc(var(--safe-bottom) + 24px)",
           width: 50,
           height: 50,
           borderRadius: 16,
