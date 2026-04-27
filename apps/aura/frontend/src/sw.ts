@@ -29,6 +29,8 @@ registerRoute(
       /^\/habits\//,
       /^\/habits$/,
       /^\/knowledge\//,
+      /^\/projects\//,
+      /^\/projects$/,
       /^\/push\//,
       /^\/health$/,
     ],

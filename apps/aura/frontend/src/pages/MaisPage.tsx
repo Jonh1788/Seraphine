@@ -3,6 +3,7 @@ import {
   Bell,
   CalendarDays,
   Eye,
+  Folder,
   Settings,
   Sparkles,
   type LucideIcon,
@@ -36,6 +37,14 @@ const ITEMS: HubItem[] = [
     description: "Avisos pontuais e recorrentes com push",
     icon: Bell,
     accent: "from-mod-reminders/30 to-mod-reminders/10 text-mod-reminders",
+    available: true,
+  },
+  {
+    to: "/mais/projetos",
+    label: "Projetos",
+    description: "Iniciativas com prazo, status e progresso",
+    icon: Folder,
+    accent: "from-accent-purple/30 to-accent-purple/10 text-aura-purple",
     available: true,
   },
   {

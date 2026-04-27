@@ -15,6 +15,7 @@ import { HabitsPage } from "./pages/HabitsPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { VisaoPage } from "./pages/VisaoPage";
 import { LembretesPage } from "./pages/LembretesPage";
+import { ProjetosPage } from "./pages/ProjetosPage";
 
 export default function App() {
   return (
@@ -129,6 +130,16 @@ export default function App() {
             <ProtectedRoute>
               <AppShell title="Lembretes">
                 <LembretesPage />
+              </AppShell>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mais/projetos"
+          element={
+            <ProtectedRoute>
+              <AppShell title="Projetos">
+                <ProjetosPage />
               </AppShell>
             </ProtectedRoute>
           }

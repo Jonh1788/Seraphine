@@ -60,6 +60,7 @@ export default defineConfig({
       "/briefing": "http://127.0.0.1:8002",
       "/habits": "http://127.0.0.1:8002",
       "/knowledge": "http://127.0.0.1:8002",
+      "/projects": "http://127.0.0.1:8002",
       "/push": "http://127.0.0.1:8002",
       "/health": "http://127.0.0.1:8002",
     },
