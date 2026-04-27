@@ -51,6 +51,11 @@ export function ChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Welcome mode: re-shows the empty/sphere screen when the conversation
+  // has been idle for >15 min, even though there are persisted messages.
+  // First keystroke (or send) dismisses it with a cross-fade.
+  const [welcomeMode, setWelcomeMode] = useState(false);
+  const [welcomeFading, setWelcomeFading] = useState(false);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -125,8 +130,10 @@ export function ChatPage() {
   useEffect(() => {
     setError(null);
     setStreaming(null);
+    setWelcomeFading(false);
     if (!conversationId) {
       setMessages([]);
+      setWelcomeMode(false);
       return;
     }
     let cancelled = false;
@@ -141,11 +148,23 @@ export function ChatPage() {
             metadata: m.metadata,
           })),
         );
+        // Re-show the welcome screen when the user comes back after a
+        // long break — even though there is a conversation, it feels
+        // calmer to land on the sphere first and let the user choose to
+        // resume by typing.
+        const lastTs =
+          detail.messages.length > 0
+            ? detail.messages[detail.messages.length - 1].created_at
+            : null;
+        const ageMs = lastTs ? Date.now() - new Date(lastTs).getTime() : Infinity;
+        const IDLE_THRESHOLD_MS = 15 * 60 * 1000;
+        setWelcomeMode(detail.messages.length > 0 && ageMs > IDLE_THRESHOLD_MS);
       })
       .catch((err) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Falha ao carregar conversa");
         setMessages([]);
+        setWelcomeMode(false);
       })
       .finally(() => {
         if (!cancelled) setLoadingHistory(false);
@@ -154,6 +173,17 @@ export function ChatPage() {
       cancelled = true;
     };
   }, [conversationId]);
+
+  // Dismiss welcome mode the moment the user starts interacting:
+  // first keystroke, focus, or any submit. Triggers a cross-fade.
+  const dismissWelcome = () => {
+    if (!welcomeMode || welcomeFading) return;
+    setWelcomeFading(true);
+    window.setTimeout(() => {
+      setWelcomeMode(false);
+      setWelcomeFading(false);
+    }, 320);
+  };
 
   // Auto-scroll on every content change (incl. each streamed token).
   useEffect(() => {
@@ -598,13 +628,19 @@ export function ChatPage() {
     }
   };
 
-  const showEmpty =
-    !loadingHistory &&
+  const noContentYet =
     messages.length === 0 &&
     streaming === null &&
     streamingTransactions.length === 0 &&
     streamingTasks.length === 0 &&
     streamingRecurring.length === 0;
+  // Show the welcome screen when (a) there's truly nothing yet, or
+  // (b) the conversation has been idle past the threshold and the user
+  // hasn't started typing again. While the cross-fade runs, both layers
+  // stay mounted so opacity transitions can interpolate.
+  const showEmpty =
+    !loadingHistory && (noContentYet || welcomeMode || welcomeFading);
+  const showMessages = !loadingHistory && !noContentYet;
 
   const auraState: AuraState = recording
     ? "listening"
@@ -625,47 +661,65 @@ export function ChatPage() {
             <div className="h-full grid place-items-center text-ink-faint text-sm">
               Carregando conversa…
             </div>
-          ) : showEmpty ? (
-            <EmptyChat state={auraState} />
           ) : (
-            <div className="max-w-3xl mx-auto flex flex-col gap-5">
-              {messages.map((m, i) => (
-                <Bubble
-                  key={i}
-                  message={m}
-                  onOpenTask={setEditingTaskId}
-                  onToggleTask={handleToggleTaskStatus}
-                />
-              ))}
-              {streaming !== null && (
-                <div className="self-start max-w-[85%] flex flex-col gap-1">
-                  {streamingTransactions.length > 0 && (
-                    <TransactionsBlock transactions={streamingTransactions} />
-                  )}
-                  {streamingRecurring.length > 0 && (
-                    <RecurringBlock rules={streamingRecurring} />
-                  )}
-                  {streamingTasks.length > 0 && (
-                    <TasksBlock
-                      tasks={streamingTasks}
-                      onOpen={setEditingTaskId}
-                      onToggleStatus={handleToggleTaskStatus}
+            <div className="relative h-full">
+              {/* Empty / welcome layer — fades out when leaving */}
+              {showEmpty ? (
+                <div
+                  className="absolute inset-0 transition-opacity duration-300 ease-out"
+                  style={{ opacity: welcomeFading ? 0 : 1, pointerEvents: welcomeFading ? "none" : "auto" }}
+                >
+                  <EmptyChat state={auraState} />
+                </div>
+              ) : null}
+              {/* Messages layer — fades in when welcome is dismissed */}
+              {showMessages ? (
+                <div
+                  className="max-w-3xl mx-auto flex flex-col gap-5 transition-opacity duration-300 ease-out"
+                  style={{
+                    opacity: welcomeMode && !welcomeFading ? 0 : 1,
+                    pointerEvents: welcomeMode && !welcomeFading ? "none" : "auto",
+                  }}
+                >
+                  {messages.map((m, i) => (
+                    <Bubble
+                      key={i}
+                      message={m}
+                      onOpenTask={setEditingTaskId}
+                      onToggleTask={handleToggleTaskStatus}
                     />
+                  ))}
+                  {streaming !== null && (
+                    <div className="self-start max-w-[85%] flex flex-col gap-1">
+                      {streamingTransactions.length > 0 && (
+                        <TransactionsBlock transactions={streamingTransactions} />
+                      )}
+                      {streamingRecurring.length > 0 && (
+                        <RecurringBlock rules={streamingRecurring} />
+                      )}
+                      {streamingTasks.length > 0 && (
+                        <TasksBlock
+                          tasks={streamingTasks}
+                          onOpen={setEditingTaskId}
+                          onToggleStatus={handleToggleTaskStatus}
+                        />
+                      )}
+                      {streaming.length > 0 ? (
+                        <Markdown text={streaming} streaming />
+                      ) : streamingTransactions.length === 0 &&
+                        streamingTasks.length === 0 &&
+                        streamingRecurring.length === 0 ? (
+                        <TypingBubble />
+                      ) : null}
+                    </div>
                   )}
-                  {streaming.length > 0 ? (
-                    <Markdown text={streaming} streaming />
-                  ) : streamingTransactions.length === 0 &&
-                    streamingTasks.length === 0 &&
-                    streamingRecurring.length === 0 ? (
-                    <TypingBubble />
-                  ) : null}
+                  {error && (
+                    <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 self-start">
+                      {error}
+                    </div>
+                  )}
                 </div>
-              )}
-              {error && (
-                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 self-start">
-                  {error}
-                </div>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -735,7 +789,11 @@ export function ChatPage() {
               <textarea
                 ref={taRef}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (e.target.value.length > 0) dismissWelcome();
+                }}
+                onFocus={() => dismissWelcome()}
                 onKeyDown={onKeyDown}
                 placeholder="Como posso te ajudar?"
                 rows={1}
