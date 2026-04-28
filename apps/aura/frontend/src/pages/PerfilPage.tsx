@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { usePushSubscription } from "../pwa/usePushSubscription";
+import * as googleApi from "../api/google";
+import type { GoogleOAuthStatus } from "../api/google";
+import { request as apiRequest } from "../api/client";
 
 function pickInitial(email: string | undefined): string {
   if (!email) return "A";
@@ -35,6 +38,42 @@ export function PerfilPage() {
   const [time, setTime] = useState("--:--");
   const [highContrast, setHighContrast] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [google, setGoogle] = useState<GoogleOAuthStatus | null>(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  const refreshGoogle = async () => {
+    try {
+      const s = await googleApi.getOAuthStatus();
+      setGoogle(s);
+    } catch {
+      setGoogle({ connected: false });
+    }
+  };
+
+  useEffect(() => {
+    void refreshGoogle();
+  }, []);
+
+  const onGoogleConnect = async () => {
+    setGoogleBusy(true);
+    try {
+      const r = await googleApi.startOAuth();
+      window.location.href = r.url;
+    } catch {
+      setGoogleBusy(false);
+    }
+  };
+
+  const onGoogleDisconnect = async () => {
+    if (!confirm("Desconectar Google Calendar? Os eventos pararão de sincronizar.")) return;
+    setGoogleBusy(true);
+    try {
+      await apiRequest("/google/oauth/logout", { method: "POST" });
+      await refreshGoogle();
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -143,11 +182,48 @@ export function PerfilPage() {
           icon={<GcalIcon />}
           label="Google Calendar"
           valueNode={
-            <span className="text-[12px]" style={{ color: "#2DD4BF" }}>
-              ● Conectado
-            </span>
+            google === null ? (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>Verificando…</span>
+            ) : google.connected ? (
+              <span className="text-[12px] truncate block" style={{ color: "#2DD4BF" }}>
+                ● {google.email ?? "Conectado"}
+              </span>
+            ) : (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>Não conectado</span>
+            )
           }
-          right={<Link to="/calendario" className="text-[11px]" style={{ color: "#7DA4FF" }}>Abrir</Link>}
+          right={
+            google === null ? null : google.connected ? (
+              <div className="flex items-center gap-1.5">
+                <Link
+                  to="/calendario"
+                  className="text-[11px] px-2.5 py-1 rounded-md"
+                  style={{ background: "rgba(79,126,255,0.10)", color: "#7DA4FF" }}
+                >
+                  Abrir
+                </Link>
+                <button
+                  type="button"
+                  onClick={onGoogleDisconnect}
+                  disabled={googleBusy}
+                  className="text-[11px] px-2.5 py-1 rounded-md disabled:opacity-50"
+                  style={{ background: "rgba(255,255,255,0.05)", color: "#8B9CC8" }}
+                >
+                  Sair
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onGoogleConnect}
+                disabled={googleBusy}
+                className="text-[11px] px-2.5 py-1 rounded-md text-white font-medium disabled:opacity-50"
+                style={{ background: "#4F7EFF" }}
+              >
+                {googleBusy ? "…" : "Conectar"}
+              </button>
+            )
+          }
         />
         <Row
           iconBg="#7DA4FF"
