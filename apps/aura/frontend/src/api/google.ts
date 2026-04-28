@@ -35,11 +35,18 @@ export interface CalendarEventsQuery {
 }
 
 export function getOAuthStatus(): Promise<GoogleOAuthStatus> {
-  return request<GoogleOAuthStatus>("/google/oauth/status");
+  return request<GoogleOAuthStatus>("/google/status");
 }
 
+/** Returns the URL the browser must navigate (or open in popup) to
+ *  start the consent flow. Aura backend gives `consent_url`. */
 export function startOAuth(): Promise<{ url: string }> {
-  return request<{ url: string }>("/google/oauth/start", { method: "POST" });
+  return request<{ consent_url: string }>("/google/connect", { method: "POST" })
+    .then((r) => ({ url: r.consent_url }));
+}
+
+export function disconnectOAuth(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/google/disconnect", { method: "POST" });
 }
 
 export function listCalendarEvents(query: CalendarEventsQuery = {}): Promise<GoogleEvent[]> {

@@ -16,7 +16,6 @@ import { useAuth } from "../auth/AuthContext";
 import { usePushSubscription } from "../pwa/usePushSubscription";
 import * as googleApi from "../api/google";
 import type { GoogleOAuthStatus } from "../api/google";
-import { request as apiRequest } from "../api/client";
 
 function pickInitial(email: string | undefined): string {
   if (!email) return "A";
@@ -68,7 +67,7 @@ export function PerfilPage() {
     if (!confirm("Desconectar Google Calendar? Os eventos pararão de sincronizar.")) return;
     setGoogleBusy(true);
     try {
-      await apiRequest("/google/oauth/logout", { method: "POST" });
+      await googleApi.disconnectOAuth();
       await refreshGoogle();
     } finally {
       setGoogleBusy(false);

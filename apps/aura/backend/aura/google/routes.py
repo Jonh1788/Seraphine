@@ -17,11 +17,13 @@ from __future__ import annotations
 import html
 import json
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
+from google_integration.client import GoogleAPIError, GoogleAuthError
 from mod_tasks.routes import get_current_user_id
 
 from aura.google.service import GoogleAuthService, GoogleOAuthError
@@ -96,6 +98,53 @@ async def google_disconnect(
     svc = _service(request)
     await svc.disconnect(uid)
     return {"ok": True}
+
+
+# ----------------------------------------------------------------------
+# Calendar — proxy to Google API via the user's stored token
+# ----------------------------------------------------------------------
+
+
+def _parse_iso(value: str) -> datetime:
+    # Google's API wants RFC3339 with timezone. Browsers send full ISO
+    # already (toISOString); just normalize trailing Z.
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+@router.get("/calendar/events")
+async def google_calendar_events(
+    request: Request,
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=250),
+    user_id: Optional[str] = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    """List Google Calendar events for the authed user. Returns [] when
+    the user hasn't connected Google (so the UI can degrade gracefully)."""
+    uid = _require_user(user_id)
+    svc = _service(request)
+    client = await svc.client_for(uid)
+    if client is None:
+        return []
+    try:
+        time_min = _parse_iso(from_) if from_ else datetime.now(timezone.utc)
+        time_max = _parse_iso(to) if to else None
+        return await client.list_events(
+            time_min=time_min, time_max=time_max, q=q, max_results=limit,
+        )
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.exception("calendar events failed")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # ----------------------------------------------------------------------
