@@ -707,9 +707,22 @@ export function ChatPage() {
   return (
     <div className="h-full flex">
       <div className="flex-1 min-w-0 flex flex-col">
+        {/* Wrapper around the scroller so the EmptyChat overlay can pin
+            to the scroller viewport (not the scrollable content) — that
+            keeps the Aura avatar visible regardless of where the
+            messages stack is scrolled. */}
+        <div className="flex-1 min-h-0 relative">
+          {showEmpty && !loadingHistory ? (
+            <div
+              className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300 ease-out"
+              style={{ opacity: welcomeFading ? 0 : 1 }}
+            >
+              <EmptyChat state={auraState} />
+            </div>
+          ) : null}
         <div
           ref={scrollerRef}
-          className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-12 pt-6 pb-4"
+          className="h-full overflow-y-auto px-4 sm:px-6 lg:px-12 pt-6 pb-4"
         >
           {loadingHistory ? (
             <div className="h-full grid place-items-center text-ink-faint text-sm">
@@ -717,15 +730,6 @@ export function ChatPage() {
             </div>
           ) : (
             <div className="relative h-full">
-              {/* Empty / welcome layer — fades out when leaving */}
-              {showEmpty ? (
-                <div
-                  className="absolute inset-0 transition-opacity duration-300 ease-out"
-                  style={{ opacity: welcomeFading ? 0 : 1, pointerEvents: welcomeFading ? "none" : "auto" }}
-                >
-                  <EmptyChat state={auraState} />
-                </div>
-              ) : null}
               {/* Messages layer — fades in when welcome is dismissed */}
               {showMessages ? (
                 <div
@@ -776,6 +780,7 @@ export function ChatPage() {
               ) : null}
             </div>
           )}
+        </div>
         </div>
 
         <div
