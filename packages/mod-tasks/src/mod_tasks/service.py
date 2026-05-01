@@ -34,6 +34,12 @@ from mod_tasks.models import SeraphineTask
 # the create_task call path.
 TaskCreatedHook = Callable[[int, str | None], Awaitable[None]]
 
+# Optional callback fired right after a task row is deleted. Receives
+# (task_id, user_id, payload) — payload is the parsed JSON dict captured
+# *before* the row was removed, so consumers can still read sidecar info
+# like ``google_event_id``. Errors are swallowed.
+TaskDeletedHook = Callable[[int, str | None, dict[str, Any]], Awaitable[None]]
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,6 +103,7 @@ class TaskService:
         self._llm = llm_client
         self._app_state = app_state
         self._on_created: list[TaskCreatedHook] = []
+        self._on_deleted: list[TaskDeletedHook] = []
 
     async def aclose(self) -> None:  # pragma: no cover - trivial
         return None
@@ -108,6 +115,15 @@ class TaskService:
         swallowed (logged) so a failing hook never breaks task creation.
         """
         self._on_created.append(hook)
+
+    def add_on_deleted_hook(self, hook: TaskDeletedHook) -> None:
+        """Register a coroutine to run after each successful delete.
+
+        The payload dict is captured *before* the row is removed so the
+        callback can still see sidecar fields (e.g. google_event_id).
+        Exceptions are swallowed.
+        """
+        self._on_deleted.append(hook)
 
     # ------------------------------------------------------------------
     # CRUD
@@ -338,8 +354,30 @@ class TaskService:
     async def delete_task(
         self, task_id: int, *, user_id: str | None = None,
     ) -> int:
-        def _work() -> int:
+        def _work() -> tuple[int, dict[str, Any]]:
             with self._store._connect() as conn:
+                # Capture payload before delete so hooks can read sidecar
+                # data (e.g. google_event_id) for cascade deletion.
+                if user_id is None:
+                    row = conn.execute(
+                        "SELECT payload FROM seraphine_tasks WHERE id = ?",
+                        (task_id,),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT payload FROM seraphine_tasks"
+                        " WHERE id = ? AND user_id = ?",
+                        (task_id, user_id),
+                    ).fetchone()
+                payload: dict[str, Any] = {}
+                if row and row[0]:
+                    try:
+                        parsed = json.loads(row[0])
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                    except (json.JSONDecodeError, TypeError):
+                        payload = {}
+
                 if user_id is None:
                     cur = conn.execute(
                         "DELETE FROM seraphine_tasks WHERE id = ?",
@@ -351,9 +389,19 @@ class TaskService:
                         " AND user_id = ?",
                         (task_id, user_id),
                     )
-                return cur.rowcount or 0
+                return cur.rowcount or 0, payload
 
-        return await asyncio.to_thread(_work)
+        affected, payload = await asyncio.to_thread(_work)
+        if affected:
+            for hook in self._on_deleted:
+                try:
+                    await hook(task_id, user_id, payload)
+                except Exception:
+                    logger.exception(
+                        "task_deleted hook raised for task=%s user=%s",
+                        task_id, user_id,
+                    )
+        return affected
 
     # ------------------------------------------------------------------
     # Execution

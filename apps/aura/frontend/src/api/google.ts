@@ -53,6 +53,13 @@ export function listCalendarEvents(query: CalendarEventsQuery = {}): Promise<Goo
   return request<GoogleEvent[]>("/google/calendar/events", { query: { ...query } });
 }
 
+export function deleteCalendarEvent(eventId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/google/calendar/events/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" },
+  );
+}
+
 /** Convenience: returns the start as a Date if the event has one,
  *  whether dateTime or all-day date. */
 export function eventStartDate(e: GoogleEvent): Date | null {

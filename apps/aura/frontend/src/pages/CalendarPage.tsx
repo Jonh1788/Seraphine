@@ -13,6 +13,7 @@ import {
   Loader2,
   MapPin,
   Sparkles,
+  Trash2,
   Users,
 } from "lucide-react";
 import * as googleApi from "../api/google";
@@ -422,7 +423,22 @@ export function CalendarPage() {
         ) : (
           <ul className="divide-y" style={{ borderColor: "rgba(99,130,255,0.10)" }}>
             {selectedEvents.map((e) => (
-              <EventRow key={e.id} event={e} />
+              <EventRow
+                key={e.id}
+                event={e}
+                onDelete={async () => {
+                  // Optimistic removal — refetch on failure to resync.
+                  setEvents((prev) => prev.filter((x) => x.id !== e.id));
+                  try {
+                    await googleApi.deleteCalendarEvent(e.id);
+                  } catch (err) {
+                    setError(
+                      err instanceof Error ? err.message : "Falha ao remover evento",
+                    );
+                    void load();
+                  }
+                }}
+              />
             ))}
           </ul>
         )}
@@ -456,9 +472,30 @@ function SnapCell({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function EventRow({ event }: { event: GoogleEvent }) {
+function EventRow({
+  event,
+  onDelete,
+}: {
+  event: GoogleEvent;
+  onDelete: () => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
   const time = fmtTimeRange(event);
   const allDay = isAllDay(event);
+
+  const handleDelete = async () => {
+    if (deleting) return;
+    const confirmed = window.confirm(
+      `Remover "${event.summary || "este evento"}" do Google Calendar?`,
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  };
   const colorMap: Record<string, string> = {
     "1": "#A4BDFC",
     "2": "#7AE7BF",
@@ -505,20 +542,41 @@ function EventRow({ event }: { event: GoogleEvent }) {
           ) : null}
         </div>
       </div>
-      {event.htmlLink ? (
-        <a
-          href={event.htmlLink}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="grid place-items-center h-8 w-8 rounded-md shrink-0 transition-colors"
+      <div className="flex items-center gap-0.5 shrink-0">
+        {event.htmlLink ? (
+          <a
+            href={event.htmlLink}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="grid place-items-center h-8 w-8 rounded-md transition-colors"
+            style={{ color: "#4D5E8A" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#7DA4FF")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#4D5E8A")}
+            aria-label="Abrir no Google"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="grid place-items-center h-8 w-8 rounded-md transition-colors disabled:opacity-50"
           style={{ color: "#4D5E8A" }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "#7DA4FF")}
+          onMouseEnter={(e) => {
+            if (!deleting) e.currentTarget.style.color = "#FF5B72";
+          }}
           onMouseLeave={(e) => (e.currentTarget.style.color = "#4D5E8A")}
-          aria-label="Abrir no Google"
+          aria-label="Remover evento"
+          title="Remover evento"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-      ) : null}
+          {deleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
     </li>
   );
 }

@@ -147,6 +147,33 @@ async def google_calendar_events(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.delete("/calendar/events/{event_id}")
+async def google_calendar_delete_event(
+    request: Request,
+    event_id: str,
+    user_id: Optional[str] = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    """Delete an event from the user's primary Google Calendar."""
+    uid = _require_user(user_id)
+    svc = _service(request)
+    client = await svc.client_for(uid)
+    if client is None:
+        raise HTTPException(status_code=400, detail="Google não conectado")
+    try:
+        await client.delete_event(event_id)
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except GoogleAPIError as e:
+        # Treat "already gone" as success — idempotent for the UI.
+        if e.status_code in (404, 410):
+            return {"ok": True}
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.exception("calendar event delete failed")
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"ok": True}
+
+
 # ----------------------------------------------------------------------
 # OAuth callback (public — Google hits this from the user's browser)
 # ----------------------------------------------------------------------

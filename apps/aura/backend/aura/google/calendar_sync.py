@@ -131,6 +131,32 @@ async def _persist_event_id(
         )
 
 
+def _build_delete_hook(
+    google: GoogleAuthService,
+) -> Callable[[int, str | None, dict], Awaitable[None]]:
+    async def _on_task_deleted(
+        task_id: int, user_id: str | None, payload: dict,
+    ) -> None:
+        if user_id is None:
+            return
+        event_id = payload.get("google_event_id") if isinstance(payload, dict) else None
+        if not event_id:
+            return
+        client = await google.client_for(user_id)
+        if client is None:
+            return
+        try:
+            await client.delete_event(str(event_id))
+        except Exception:
+            logger.exception(
+                "calendar mirror delete failed task=%s user=%s event=%s",
+                task_id, user_id, event_id,
+            )
+
+    return _on_task_deleted
+
+
 def register(tasks: TaskService, google: GoogleAuthService) -> None:
-    """Wire the hook into the TaskService instance."""
+    """Wire the create + delete hooks into the TaskService instance."""
     tasks.add_on_created_hook(_build_hook(tasks, google))
+    tasks.add_on_deleted_hook(_build_delete_hook(google))
