@@ -185,12 +185,62 @@ export function ChatPage() {
     }, 320);
   };
 
-  // Auto-scroll on every content change (incl. each streamed token).
+  // ----- Auto-scroll: stick-to-bottom with user override --------------
+  // While streaming we follow the bottom; if the user manually scrolls
+  // up we stop following (so they can read past content). When the
+  // stream ends and the user is idle (not currently scrolling), we snap
+  // back to the bottom so the latest reply is fully visible.
+  const stickToBottomRef = useRef<boolean>(true);
+  const programmaticScrollRef = useRef<boolean>(false);
+  const lastUserScrollAtRef = useRef<number>(0);
+  const wasStreamingRef = useRef<boolean>(false);
+
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
+    const onScroll = () => {
+      if (programmaticScrollRef.current) {
+        programmaticScrollRef.current = false;
+        return;
+      }
+      lastUserScrollAtRef.current = Date.now();
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distanceFromBottom < 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Follow content updates only while sticking to the bottom.
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    programmaticScrollRef.current = true;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, streaming, busy]);
+
+  // When streaming ends, snap to the bottom once the user has stopped
+  // scrolling (so we don't fight an active gesture).
+  useEffect(() => {
+    const isStreaming = streaming !== null;
+    if (wasStreamingRef.current && !isStreaming) {
+      const trySnap = () => {
+        const idleFor = Date.now() - lastUserScrollAtRef.current;
+        if (idleFor < 220) {
+          window.setTimeout(trySnap, 220 - idleFor);
+          return;
+        }
+        const el = scrollerRef.current;
+        if (!el) return;
+        programmaticScrollRef.current = true;
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        stickToBottomRef.current = true;
+      };
+      trySnap();
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [streaming]);
 
   // ----- Auto-resume last conversation on first mount -----------------
   // Pedido: ao abrir o chat, anexar mensagens à última conversa em vez
@@ -419,6 +469,10 @@ export function ChatPage() {
       metadata: optimisticAttachment ? { attachment: optimisticAttachment } : undefined,
     };
     setMessages((prev) => [...prev, userMsg]);
+    // Sending a new message always snaps the view to the bottom, even
+    // if the user had scrolled up while reading the previous reply.
+    stickToBottomRef.current = true;
+    lastUserScrollAtRef.current = 0;
     setDraft("");
     setAttachment(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -725,7 +779,7 @@ export function ChatPage() {
         </div>
 
         <div
-          className="px-4 sm:px-6 lg:px-12"
+          className="px-4 sm:px-6 lg:px-12 pt-5"
           style={{ paddingBottom: "calc(var(--safe-bottom) + 18px)" }}
         >
           <form
