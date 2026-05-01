@@ -21,11 +21,18 @@ import sqlite3
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from core_db import Store
 
 from mod_tasks.models import SeraphineTask
+
+# Optional callback fired right after a task row is inserted. Receives
+# (task_id, user_id) — implementations can fetch the row themselves and
+# trigger side effects (e.g. mirror to a third-party calendar). Errors
+# raised inside the callback are caught and logged so they never break
+# the create_task call path.
+TaskCreatedHook = Callable[[int, str | None], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +96,18 @@ class TaskService:
         self._google = google_client
         self._llm = llm_client
         self._app_state = app_state
+        self._on_created: list[TaskCreatedHook] = []
 
     async def aclose(self) -> None:  # pragma: no cover - trivial
         return None
+
+    def add_on_created_hook(self, hook: TaskCreatedHook) -> None:
+        """Register a coroutine to run after each successful task insert.
+
+        Hooks fire sequentially in registration order. Exceptions are
+        swallowed (logged) so a failing hook never breaks task creation.
+        """
+        self._on_created.append(hook)
 
     # ------------------------------------------------------------------
     # CRUD
@@ -131,7 +147,16 @@ class TaskService:
                 )
                 return int(cur.lastrowid or 0)
 
-        return await asyncio.to_thread(_work)
+        task_id = await asyncio.to_thread(_work)
+        for hook in self._on_created:
+            try:
+                await hook(task_id, user_id)
+            except Exception:
+                logger.exception(
+                    "task_created hook raised for task=%s user=%s",
+                    task_id, user_id,
+                )
+        return task_id
 
     async def list_tasks(
         self,

@@ -42,6 +42,7 @@ from aura.chat import schema as chat_schema
 from aura.chat.service import ConversationService
 from aura.config import settings
 from aura.google import schema as google_schema
+from aura.google import calendar_sync as google_calendar_sync
 from aura.google.routes import router as google_router
 from aura.google.service import GoogleAuthService
 from aura.habits import schema as habits_schema
@@ -127,6 +128,10 @@ async def lifespan(app: FastAPI):
         vapid_private_pem=settings.vapid_private_pem or None,
         vapid_public_b64=settings.vapid_public_b64 or None,
     )
+
+    # Best-effort: mirror every newly created task/reminder to the user's
+    # Google Calendar (no-op when the user hasn't connected Google).
+    google_calendar_sync.register(task_service, google_auth_service)
 
     # ---- STT (lazy model load on first /chat/transcribe call).
     # mkdir is best-effort: in dev the default /data isn't writable;

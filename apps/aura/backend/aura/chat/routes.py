@@ -660,7 +660,9 @@ async def _exec_create_task(
     args: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute the create_task tool — persists a generic task owned by
-    the user. Defaults due_date to today (São Paulo TZ)."""
+    the user. Defaults due_date to today (São Paulo TZ). When Google is
+    connected the task is mirrored to the primary calendar via the
+    TaskService on-created hook (see aura.google.calendar_sync)."""
     title = (args.get("title") or "").strip()
     if not title:
         return {"ok": False, "error": "title vazio"}
