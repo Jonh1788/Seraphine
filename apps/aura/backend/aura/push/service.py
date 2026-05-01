@@ -280,11 +280,13 @@ class PushService:
         window_start = now - timedelta(minutes=lookback_minutes)
 
         def _candidates() -> list[tuple[str, str, str, str | None, str | None]]:
-            # (id, user_id, title, due_date, due_time)
+            # (id, user_id, title, due_date, due_time). The task table
+            # is `seraphine_tasks` — that name is shared by Seraphine and
+            # Aura via the mod-tasks package and predates the Aura split.
             with self._store._connect() as conn:
                 rows = conn.execute(
                     "SELECT t.id, t.user_id, t.title, t.due_date, t.due_time"
-                    " FROM tasks t"
+                    " FROM seraphine_tasks t"
                     " LEFT JOIN push_dispatches d"
                     "   ON d.task_id = t.id AND d.user_id = t.user_id"
                     " WHERE t.type = 'reminder'"
@@ -292,7 +294,7 @@ class PushService:
                     "   AND t.due_date IS NOT NULL"
                     "   AND d.task_id IS NULL",
                 ).fetchall()
-            return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+            return [(str(r[0]), r[1], r[2], r[3], r[4]) for r in rows]
 
         try:
             rows = await asyncio.to_thread(_candidates)
