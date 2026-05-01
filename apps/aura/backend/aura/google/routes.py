@@ -223,15 +223,33 @@ _PAGE_TEMPLATE = """<!doctype html>
     <p>{detail}</p>
   </div>
   <script>
-    try {{
-      if (window.opener) {{
-        window.opener.postMessage(
-          {{ source: "aura.google.oauth", ok: {ok_json}, error: {error_json} }},
-          "*"
-        );
-      }}
-    }} catch (e) {{ /* ignore */ }}
-    setTimeout(function () {{ try {{ window.close(); }} catch (e) {{}} }}, 400);
+    (function () {{
+      var ok = {ok_json};
+      try {{
+        if (window.opener) {{
+          // Popup flow (e.g. GoogleCalendarChip): notify the opener and
+          // close ourselves — the opener refreshes its own state.
+          window.opener.postMessage(
+            {{ source: "aura.google.oauth", ok: ok, error: {error_json} }},
+            "*"
+          );
+          setTimeout(function () {{ try {{ window.close(); }} catch (e) {{}} }}, 400);
+          return;
+        }}
+      }} catch (e) {{ /* ignore */ }}
+      // Full-page redirect flow (PerfilPage): bring the user back to the
+      // page they started from. Falls back to /perfil when nothing was
+      // stashed (e.g. landed here from an external link).
+      var ret = "/perfil";
+      try {{
+        var stashed = sessionStorage.getItem("aura.google.return_to");
+        if (stashed) {{
+          ret = stashed;
+          sessionStorage.removeItem("aura.google.return_to");
+        }}
+      }} catch (e) {{ /* sessionStorage may be unavailable */ }}
+      setTimeout(function () {{ window.location.replace(ret); }}, 800);
+    }})();
   </script>
 </body>
 </html>

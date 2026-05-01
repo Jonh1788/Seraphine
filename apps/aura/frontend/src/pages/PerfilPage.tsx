@@ -57,6 +57,16 @@ export function PerfilPage() {
     setGoogleBusy(true);
     try {
       const r = await googleApi.startOAuth();
+      // Stash the current SPA path so the callback page can bring the
+      // user back here after Google redirects to /google/oauth/callback.
+      try {
+        sessionStorage.setItem(
+          "aura.google.return_to",
+          window.location.pathname + window.location.search,
+        );
+      } catch {
+        /* sessionStorage may be unavailable in private browsing */
+      }
       window.location.href = r.url;
     } catch {
       setGoogleBusy(false);
