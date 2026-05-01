@@ -22,6 +22,12 @@ services:
       dockerfile: apps/aura/backend/Dockerfile
     image: aura-backend:latest
     restart: unless-stopped
+    # Pinned hostname: the OAuth token Fernet key is derived from
+    # socket.gethostname(); without this, every `compose up --build`
+    # gives the container a fresh random hostname and decryption of
+    # previously stored Google tokens fails — disconnecting every
+    # user that had Google linked.
+    hostname: aura-backend
     env_file:
       - path: .env.prod
         required: true
