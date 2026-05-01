@@ -26,6 +26,7 @@ import {
 } from "../api/google";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const MONTHS_PT = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -92,6 +93,9 @@ export function CalendarPage() {
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<Date>(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<string>(() => isoLocal(new Date()));
+  // Event pending confirmation for deletion. Held at page level so the
+  // dialog is a singleton instead of one per row.
+  const [pendingDelete, setPendingDelete] = useState<GoogleEvent | null>(null);
 
   const monthStart = useMemo(() => startOfMonth(cursor), [cursor]);
   const monthEnd = useMemo(() => endOfMonth(cursor), [cursor]);
@@ -426,18 +430,7 @@ export function CalendarPage() {
               <EventRow
                 key={e.id}
                 event={e}
-                onDelete={async () => {
-                  // Optimistic removal — refetch on failure to resync.
-                  setEvents((prev) => prev.filter((x) => x.id !== e.id));
-                  try {
-                    await googleApi.deleteCalendarEvent(e.id);
-                  } catch (err) {
-                    setError(
-                      err instanceof Error ? err.message : "Falha ao remover evento",
-                    );
-                    void load();
-                  }
-                }}
+                onDeleteRequest={() => setPendingDelete(e)}
               />
             ))}
           </ul>
@@ -445,6 +438,41 @@ export function CalendarPage() {
       </section>
 
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        tone="danger"
+        title="Remover evento"
+        description={
+          pendingDelete ? (
+            <>
+              Você quer remover{" "}
+              <span style={{ color: "#EEF2FF", fontWeight: 500 }}>
+                "{pendingDelete.summary || "este evento"}"
+              </span>{" "}
+              do seu Google Calendar? A ação não pode ser desfeita.
+            </>
+          ) : null
+        }
+        confirmLabel="Remover"
+        cancelLabel="Cancelar"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          const target = pendingDelete;
+          if (!target) return;
+          // Optimistic removal — refetch on failure to resync.
+          setEvents((prev) => prev.filter((x) => x.id !== target.id));
+          setPendingDelete(null);
+          try {
+            await googleApi.deleteCalendarEvent(target.id);
+          } catch (err) {
+            setError(
+              err instanceof Error ? err.message : "Falha ao remover evento",
+            );
+            void load();
+          }
+        }}
+      />
     </div>
   );
 }
@@ -474,28 +502,13 @@ function SnapCell({ label, value, color }: { label: string; value: number; color
 
 function EventRow({
   event,
-  onDelete,
+  onDeleteRequest,
 }: {
   event: GoogleEvent;
-  onDelete: () => Promise<void>;
+  onDeleteRequest: () => void;
 }) {
-  const [deleting, setDeleting] = useState(false);
   const time = fmtTimeRange(event);
   const allDay = isAllDay(event);
-
-  const handleDelete = async () => {
-    if (deleting) return;
-    const confirmed = window.confirm(
-      `Remover "${event.summary || "este evento"}" do Google Calendar?`,
-    );
-    if (!confirmed) return;
-    setDeleting(true);
-    try {
-      await onDelete();
-    } finally {
-      setDeleting(false);
-    }
-  };
   const colorMap: Record<string, string> = {
     "1": "#A4BDFC",
     "2": "#7AE7BF",
@@ -559,22 +572,15 @@ function EventRow({
         ) : null}
         <button
           type="button"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="grid place-items-center h-8 w-8 rounded-md transition-colors disabled:opacity-50"
+          onClick={onDeleteRequest}
+          className="grid place-items-center h-8 w-8 rounded-md transition-colors"
           style={{ color: "#4D5E8A" }}
-          onMouseEnter={(e) => {
-            if (!deleting) e.currentTarget.style.color = "#FF5B72";
-          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "#FF5B72")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "#4D5E8A")}
           aria-label="Remover evento"
           title="Remover evento"
         >
-          {deleting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
+          <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
     </li>
