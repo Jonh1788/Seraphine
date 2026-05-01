@@ -73,10 +73,26 @@ class PushService:
         self._tasks = tasks
         self._subject = vapid_subject
         if vapid_private_pem and vapid_public_b64:
-            # .env files store the PEM as a single line with literal "\n";
-            # pywebpush needs real newlines. Idempotent: if already multi-
-            # line, the replace is a no-op.
+            # py_vapid (used by pywebpush) does NOT understand PEM —
+            # `Vapid.from_string` strips newlines and base64-decodes,
+            # then routes 32-byte payloads to `from_raw` and longer to
+            # `from_der`. So we always feed it the raw 32-byte private
+            # scalar as base64url, which works regardless of whether
+            # the env var was PKCS8 or SEC1.
             normalized = vapid_private_pem.replace("\\n", "\n")
+            try:
+                pkey = serialization.load_pem_private_key(
+                    normalized.encode("utf-8"), password=None,
+                )
+                # EC SECP256R1 → 32-byte big-endian private scalar.
+                priv_int = pkey.private_numbers().private_value
+                raw = priv_int.to_bytes(32, "big")
+                normalized = _b64url(raw)
+            except Exception:
+                logger.exception(
+                    "VAPID private key reformat failed; pywebpush will "
+                    "likely reject it. Check AURA_VAPID_PRIVATE_PEM."
+                )
             self._keys = VapidKeys(
                 private_pem=normalized,
                 public_uncompressed_b64=vapid_public_b64.strip(),

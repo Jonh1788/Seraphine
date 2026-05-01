@@ -18,9 +18,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 def main() -> None:
     priv = ec.generate_private_key(ec.SECP256R1())
+    # TraditionalOpenSSL = SEC1 for EC keys (BEGIN EC PRIVATE KEY).
+    # py_vapid requires this format; PKCS8 fails with ASN.1 parse error.
     pem = priv.private_bytes(
         encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode("ascii")
     pub = priv.public_key()
