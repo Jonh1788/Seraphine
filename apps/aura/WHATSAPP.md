@@ -13,18 +13,21 @@ On your local machine:
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Run three times and assign the values to:
+Run four times and assign the values to:
 
 - `AURA_EVOLUTION_API_KEY` — gates the Evolution REST API.
 - `AURA_EVOLUTION_WEBHOOK_TOKEN` — Evolution sends this header on
   every inbound; Aura's webhook 401s if it doesn't match.
 - `AURA_WHATSAPP_ADMIN_TOKEN` — gates `/whatsapp/admin/qr` and
   `/whatsapp/admin/status` (you'll use these via curl below).
+- `AURA_EVOLUTION_DB_PASSWORD` — Postgres password for the
+  `evolution-postgres` sidecar (Evolution v2 dropped the SQLite
+  provider; only the two Evolution containers see this).
 
 ## 2. Wire env vars on the VPS
 
 SSH the VPS and edit `/var/www/Projeto-Seraphine/apps/aura/.env.prod`.
-Set the five new keys (mirror `.env.prod.example`):
+Set the six new keys (mirror `.env.prod.example`):
 
 ```
 AURA_EVOLUTION_BASE_URL=http://evolution:8080
@@ -32,6 +35,7 @@ AURA_EVOLUTION_API_KEY=<32-byte hex from step 1>
 AURA_EVOLUTION_INSTANCE=aura-main
 AURA_EVOLUTION_WEBHOOK_TOKEN=<32-byte hex from step 1>
 AURA_WHATSAPP_ADMIN_TOKEN=<32-byte hex from step 1>
+AURA_EVOLUTION_DB_PASSWORD=<32-byte hex from step 1>
 ```
 
 ### compose-time interpolation gotcha

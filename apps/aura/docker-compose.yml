@@ -62,8 +62,11 @@ services:
       - path: .env.prod
         required: true
     environment:
-      DATABASE_PROVIDER: sqlite
-      DATABASE_CONNECTION_URI: file:/evolution/instances/evolution.db
+      # Evolution v2 dropped the SQLite provider — only postgres / mysql
+      # accepted. Postgres sidecar below carries instance state.
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${AURA_EVOLUTION_DB_PASSWORD}@evolution-postgres:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_exchange
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://evolution-redis:6379/0
       AUTHENTICATION_API_KEY: ${AURA_EVOLUTION_API_KEY}
@@ -79,7 +82,23 @@ services:
       - "8080"
     depends_on:
       - evolution-redis
+      - evolution-postgres
       - backend
+
+  evolution-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    hostname: aura-evolution-postgres
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${AURA_EVOLUTION_DB_PASSWORD}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution-postgres-data:/var/lib/postgresql/data
+    networks:
+      - aura-net
+    expose:
+      - "5432"
 
   evolution-redis:
     image: redis:7-alpine
@@ -95,6 +114,7 @@ services:
 volumes:
   aura-data:
   evolution-data:
+  evolution-postgres-data:
   evolution-redis-data:
 
 networks:
