@@ -55,10 +55,10 @@ services:
       - aura-net
 
   evolution:
-    # Why: v2.1.0 ships an older Baileys that fails the WhatsApp Web
-    # handshake (QR never emits, connection cycles close↔connecting).
-    # Pin a recent stable tag — bumping requires re-pairing the number.
-    image: atendai/evolution-api:v2.2.3
+    # Track latest because Baileys version skew with WhatsApp's web
+    # protocol breaks QR generation on older tags. Re-pairing required
+    # if the digest changes.
+    image: atendai/evolution-api:latest
     restart: unless-stopped
     hostname: aura-evolution
     env_file:
