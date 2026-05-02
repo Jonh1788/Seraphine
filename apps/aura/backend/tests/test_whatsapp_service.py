@@ -194,3 +194,69 @@ async def test_start_verification_cooldown_boundary(svc):
     # 60s elapsed — re-issuance allowed (strict less-than check).
     svc._now = lambda: base + timedelta(seconds=60)
     await svc.start_verification("u1", "+5511987654321")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_find_or_create_conversation_creates_on_miss(svc):
+    from aura.chat import schema as chat_schema
+    chat_schema.migrate(svc._store._connect())
+    cid1 = await svc.find_or_create_conversation("u1")
+    cid2 = await svc.find_or_create_conversation("u1")
+    assert cid1 == cid2
+    row = svc._store._connect().execute(
+        "SELECT json_extract(metadata, '$.channel') FROM conversations"
+        " WHERE id = ?",
+        (cid1,),
+    ).fetchone()
+    assert row == ("whatsapp",)
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_drops_unknown_phone(svc):
+    out = await svc.route_inbound({
+        "phone_e164": "+5511000000000",
+        "text": "oi",
+        "is_group": False,
+    })
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_drops_group_messages(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    out = await svc.route_inbound({
+        "phone_e164": "+5511987654321",
+        "text": "oi",
+        "is_group": True,
+    })
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_drops_empty_text(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    out = await svc.route_inbound({
+        "phone_e164": "+5511987654321",
+        "text": "   ",
+        "is_group": False,
+    })
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_returns_user_and_conversation_for_verified(svc):
+    from aura.chat import schema as chat_schema
+    chat_schema.migrate(svc._store._connect())
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    out = await svc.route_inbound({
+        "phone_e164": "+5511987654321",
+        "text": "lembra de comprar pão",
+        "is_group": False,
+    })
+    assert out is not None
+    assert out["user_id"] == "u1"
+    assert isinstance(out["conversation_id"], str)
+    assert out["text"] == "lembra de comprar pão"

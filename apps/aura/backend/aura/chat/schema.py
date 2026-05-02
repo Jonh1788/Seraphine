@@ -38,3 +38,9 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as exc:
         if "duplicate column name" not in str(exc).lower():
             raise
+    # Idempotent ADD COLUMN for conversations rows that pre-date metadata.
+    try:
+        conn.execute("ALTER TABLE conversations ADD COLUMN metadata TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise

@@ -9,8 +9,10 @@ disconnect, status) on top of the EvolutionClient and the schema migrated by
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
@@ -219,3 +221,79 @@ class WhatsAppService:
             return row is not None
 
         return await asyncio.to_thread(_work)
+
+    async def find_or_create_conversation(self, user_id: str) -> str:
+        """Return the user's permanent WhatsApp conversation id, creating one on miss."""
+        ts_iso = _iso(self._now())
+
+        def _work() -> str:
+            conn = self._store._connect()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT id FROM conversations"
+                    " WHERE user_id = ?"
+                    "   AND json_extract(metadata, '$.channel') = 'whatsapp'"
+                    " LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                if row:
+                    conn.commit()
+                    return str(row[0])
+                cid = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO conversations"
+                    " (id, user_id, title, created_at, updated_at, metadata)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        cid, user_id, "WhatsApp", ts_iso, ts_iso,
+                        json.dumps({"channel": "whatsapp"}, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+                return cid
+            except Exception:
+                conn.rollback()
+                raise
+
+        return await asyncio.to_thread(_work)
+
+    async def _user_id_for_phone(self, phone_e164: str) -> str | None:
+        def _work() -> str | None:
+            conn = self._store._connect()
+            row = conn.execute(
+                "SELECT user_id FROM aura_user_whatsapp WHERE phone_e164 = ?",
+                (phone_e164,),
+            ).fetchone()
+            return str(row[0]) if row else None
+
+        return await asyncio.to_thread(_work)
+
+    async def route_inbound(
+        self, payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Map an Evolution-shaped payload to a routing decision.
+
+        Returns ``{user_id, conversation_id, text}`` for messages that
+        should be processed. Returns ``None`` (silent drop) for any
+        of these: empty/whitespace text, group chat, missing phone,
+        unknown (unverified) phone.
+        """
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return None
+        if payload.get("is_group"):
+            return None
+        phone = payload.get("phone_e164")
+        if not phone:
+            return None
+        user_id = await self._user_id_for_phone(phone)
+        if user_id is None:
+            logger.info("inbound from unknown phone %s — dropped", phone)
+            return None
+        conversation_id = await self.find_or_create_conversation(user_id)
+        return {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "text": text,
+        }
