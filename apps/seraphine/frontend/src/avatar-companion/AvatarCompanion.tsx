@@ -45,6 +45,20 @@ export function AvatarCompanion(): JSX.Element {
   const wsRef = useRef<SeraphineWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const chunkOffRef = useRef<(() => void) | null>(null);
+  // Conversation continuity — main chat persists this id under the same
+  // localStorage key. Reading it here lets the companion's realtime turns
+  // re-use the same conversation context on the backend instead of
+  // forcing a cold-start (no memory, default system prompt, no history)
+  // on every reply, which made companion responses noticeably slower.
+  const conversationIdRef = useRef<string | undefined>(
+    (() => {
+      try {
+        return localStorage.getItem('seraphine_conversation_id') || undefined;
+      } catch {
+        return undefined;
+      }
+    })(),
+  );
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [camera, setCamera] = useState<CameraSettings>(loadCamera);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -268,7 +282,11 @@ export function AvatarCompanion(): JSX.Element {
     localPcmRef.current = [];
 
     if (!useLocal) {
-      ws.send({ type: 'audio_start', sample_rate: 16000 });
+      ws.send({
+        type: 'audio_start',
+        sample_rate: 16000,
+        conversation_id: conversationIdRef.current,
+      } as never);
     }
     try {
       await micRef.current.start();
@@ -303,7 +321,10 @@ export function AvatarCompanion(): JSX.Element {
     if (!ws) return;
 
     if (!usingLocalSttRef.current) {
-      ws.send({ type: 'audio_end' });
+      ws.send({
+        type: 'audio_end',
+        conversation_id: conversationIdRef.current,
+      } as never);
       return;
     }
 
@@ -327,12 +348,24 @@ export function AvatarCompanion(): JSX.Element {
       });
       const text = (res?.text ?? '').trim();
       if (!text) return;
-      ws.send({ type: 'user_message', content: text, speak: true });
+      ws.send({
+        type: 'user_message',
+        conversation_id: conversationIdRef.current,
+        content: text,
+        speak: true,
+      });
     } catch (err) {
       console.warn('[companion] local whisper failed, falling back:', err);
-      ws.send({ type: 'audio_start', sample_rate: 16000 });
+      ws.send({
+        type: 'audio_start',
+        sample_rate: 16000,
+        conversation_id: conversationIdRef.current,
+      } as never);
       ws.sendBinary(pcm.buffer as ArrayBuffer);
-      ws.send({ type: 'audio_end' });
+      ws.send({
+        type: 'audio_end',
+        conversation_id: conversationIdRef.current,
+      } as never);
     }
   }, []);
 
@@ -613,6 +646,8 @@ export function AvatarCompanion(): JSX.Element {
           playback={playback}
           active={realtimeActive}
           onToggle={() => setRealtimeActive((v) => !v)}
+          conversationId={conversationIdRef.current}
+          speak
           manualMute={false}
           onManualMuteToggle={() => { /* no-op in companion */ }}
         />
