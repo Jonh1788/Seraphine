@@ -86,7 +86,9 @@ services:
       # Pin a recent WhatsApp Web protocol version so Baileys doesn't
       # fall back to its baked-in (stale) default. Bump if WhatsApp
       # rotates and the QR stops emitting.
-      CONFIG_SESSION_PHONE_VERSION: 2.3000.1024304906
+      CONFIG_SESSION_PHONE_VERSION: 2.3000.1029432075
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      CONFIG_SESSION_PHONE_CLIENT: Aura
       # INFO during the bring-up; can be downgraded to WARN once the
       # number is paired and traffic settles.
       LOG_LEVEL: INFO
