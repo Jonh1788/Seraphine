@@ -51,6 +51,15 @@ arboard = "3"
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
 
+# iOS-only: objc2 for tweaking the WKWebView at runtime. Tauri's wry
+# iOS shell binds the WebView to `safeAreaLayoutGuide`, so the WKWebView
+# stops short of the home-indicator zone — the bottom-nav can never reach
+# the physical screen edge. Setting `contentInsetAdjustmentBehavior`
+# = `.never` extends the WebView through safe-area; CSS `env()` keeps
+# returning the real inset for layout adjustments.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.5"
+
 [lib]
 name = "seraphine_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

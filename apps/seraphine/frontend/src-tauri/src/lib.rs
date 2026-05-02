@@ -55,8 +55,41 @@ fn run_mobile() {
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            #[cfg(target_os = "ios")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| unsafe {
+                        ios_extend_into_safe_area(webview.inner());
+                    });
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Tell the iOS WKWebView to render edge-to-edge instead of stopping at
+/// `safeAreaLayoutGuide`. Without this, the home-indicator zone is host
+/// `UIView` (no page content), so the bottom-nav can never sit flush
+/// against the physical screen edge. After this call CSS `env()` still
+/// reports the real inset, so layout code stays correct.
+#[cfg(target_os = "ios")]
+unsafe fn ios_extend_into_safe_area(wkwebview: *mut std::ffi::c_void) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    if wkwebview.is_null() {
+        return;
+    }
+    let wkwebview = wkwebview as *mut AnyObject;
+    // UIScrollViewContentInsetAdjustmentNever = 2
+    let scroll_view: *mut AnyObject = msg_send![wkwebview, scrollView];
+    if !scroll_view.is_null() {
+        let _: () = msg_send![scroll_view, setContentInsetAdjustmentBehavior: 2i64];
+    }
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -89,6 +122,7 @@ fn run_desktop() {
             voice_io::vpio_stop,
             voice_io::vpio_play_chunk,
             voice_io::vpio_flush_output,
+            voice_io::vpio_ring_len,
             clipboard::read_clipboard,
             health::health_request_authorization,
             health::health_get_today_summary,
