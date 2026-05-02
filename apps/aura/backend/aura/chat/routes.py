@@ -1038,6 +1038,10 @@ async def _run_agentic_collect(
     The body intentionally duplicates the loop in ``_run_agentic_stream``
     rather than refactoring it; the SSE generator must keep behaving
     byte-for-byte for the live web chat.
+
+    Raises whatever the underlying LLM/service calls raise; callers must
+    wrap this in their own error handler (the SSE sibling catches and emits
+    an ``error`` frame instead of bubbling).
     """
     acc_parts: list[str] = []
     turn_transactions: list[dict[str, Any]] = []
@@ -1111,6 +1115,10 @@ async def _run_agentic_collect(
             )
 
     reply = "".join(acc_parts).strip() or "(sem resposta)"
+    # Why: chips (reminder/project/habit/note/goal) are NOT persisted to
+    # message metadata — matches _run_agentic_stream behavior. Frontend
+    # renders them transiently from the live event stream / collect return,
+    # never from message reload.
     metadata: dict[str, Any] | None = None
     if turn_transactions or turn_tasks or turn_recurring:
         metadata = {}
