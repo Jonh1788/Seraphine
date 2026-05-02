@@ -55,10 +55,11 @@ services:
       - aura-net
 
   evolution:
-    # Track latest because Baileys version skew with WhatsApp's web
-    # protocol breaks QR generation on older tags. Re-pairing required
-    # if the digest changes.
-    image: atendai/evolution-api:latest
+    # homolog ships the freshest Baileys; the stable v2.x tags lag
+    # behind WhatsApp's web protocol bumps and silently fail to
+    # emit QR codes. CONFIG_SESSION_PHONE_VERSION pins a current
+    # WhatsApp Web version to bypass Baileys' embedded default.
+    image: atendai/evolution-api:homolog
     restart: unless-stopped
     hostname: aura-evolution
     env_file:
@@ -82,6 +83,10 @@ services:
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+      # Pin a recent WhatsApp Web protocol version so Baileys doesn't
+      # fall back to its baked-in (stale) default. Bump if WhatsApp
+      # rotates and the QR stops emitting.
+      CONFIG_SESSION_PHONE_VERSION: 2.3000.1024304906
       # INFO during the bring-up; can be downgraded to WARN once the
       # number is paired and traffic settles.
       LOG_LEVEL: INFO
