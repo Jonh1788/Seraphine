@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BufferGeometry,
-  Float32BufferAttribute,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -19,639 +17,45 @@ import type { VrmAvatarController } from '../avatar/VrmAvatarController';
 import {
   GESTURE_LIBRARY,
   type GestureDefinition,
-  type GestureKeyframe,
+  type GestureLayer,
+  type IKTarget,
   defaultTangents,
 } from '../avatar/gestures';
 import { API_BASE } from '../api';
+import { UndoStack, type Command } from './undoStack';
+import { solveHeadLookAt, solveArmIK, worldQuatToLocal, ikWeightAt } from './ikSolver';
+import { importBVH } from './bvhImport';
+import { migrateGesture } from './gestureMigrations';
+import {
+  FlaskIcon,
+  PlayIcon,
+  PauseIcon,
+  PlusIcon,
+  TrashIcon,
+  RefreshIcon,
+  XIcon,
+} from '../icons/Icons';
 
-const RAD2DEG = 180 / Math.PI;
-const DEG2RAD = Math.PI / 180;
-
-const PICKABLE_BONES = [
-  'head', 'neck', 'chest', 'spine', 'hips',
-  'leftShoulder', 'rightShoulder',
-  'leftUpperArm', 'rightUpperArm',
-  'leftLowerArm', 'rightLowerArm',
-  'leftHand', 'rightHand',
-  'leftUpperLeg', 'rightUpperLeg',
-  'leftLowerLeg', 'rightLowerLeg',
-  'leftFoot', 'rightFoot',
-];
-
-// --- Types ----------------------------------------------------------------
-
-interface KfDeg {
-  bone: string;
-  x: number; y: number; z: number;
-  time: number;
-  tangents?: GestureKeyframe['tangents'];
-}
-
-// Module-scope clipboard for internal copy/cut/paste
-let clipboardRef: KfDeg[] = [];
-
-function defToDegs(def: GestureDefinition): KfDeg[] {
-  return def.keyframes.map(kf => ({
-    bone: kf.bone,
-    x: +(kf.rotation.x * RAD2DEG).toFixed(1),
-    y: +(kf.rotation.y * RAD2DEG).toFixed(1),
-    z: +(kf.rotation.z * RAD2DEG).toFixed(1),
-    time: kf.time,
-    tangents: kf.tangents,
-  }));
-}
-
-function degsToGesture(name: string, duration: number, kfs: KfDeg[]): GestureDefinition {
-  return {
-    name,
-    duration,
-    keyframes: kfs.map(k => ({
-      bone: k.bone,
-      rotation: { x: k.x * DEG2RAD, y: k.y * DEG2RAD, z: k.z * DEG2RAD },
-      time: k.time,
-      tangents: k.tangents,
-    })),
-  };
-}
-
-function generateTsCode(name: string, duration: number, kfs: KfDeg[]): string {
-  const constName = `GESTURE_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-  const kfLines = kfs.map(k => {
-    const rx = k.x !== 0 ? `DEG(${k.x})` : '0';
-    const ry = k.y !== 0 ? `DEG(${k.y})` : '0';
-    const rz = k.z !== 0 ? `DEG(${k.z})` : '0';
-    return `  { bone: "${k.bone}", rotation: { x: ${rx}, y: ${ry}, z: ${rz} }, time: ${k.time} },`;
-  });
-  return `export const ${constName}: GestureDefinition = {\n  name: "${name}",\n  duration: ${duration},\n  keyframes: [\n${kfLines.join('\n')}\n  ],\n};`;
-}
-
-// --- Scrub interpolation --------------------------------------------------
-
-function interpolateBoneAtTime(
-  kfs: KfDeg[],
-  time: number,
-): { x: number; y: number; z: number } {
-  if (kfs.length === 0) return { x: 0, y: 0, z: 0 };
-  if (kfs.length === 1 || time <= kfs[0].time) return { x: kfs[0].x * DEG2RAD, y: kfs[0].y * DEG2RAD, z: kfs[0].z * DEG2RAD };
-  const last = kfs[kfs.length - 1];
-  if (time >= last.time) return { x: last.x * DEG2RAD, y: last.y * DEG2RAD, z: last.z * DEG2RAD };
-  for (let i = 0; i < kfs.length - 1; i++) {
-    if (time >= kfs[i].time && time <= kfs[i + 1].time) {
-      const a = kfs[i];
-      const b = kfs[i + 1];
-      const span = b.time - a.time;
-      const t = span > 0 ? (time - a.time) / span : 0;
-      const s = t * t * (3 - 2 * t); // smoothstep
-      return {
-        x: (a.x + (b.x - a.x) * s) * DEG2RAD,
-        y: (a.y + (b.y - a.y) * s) * DEG2RAD,
-        z: (a.z + (b.z - a.z) * s) * DEG2RAD,
-      };
-    }
-  }
-  return { x: last.x * DEG2RAD, y: last.y * DEG2RAD, z: last.z * DEG2RAD };
-}
-
-// --- Selection helpers ----------------------------------------------------
-
-/** Re-resolve a selection set after keyframes array has been re-sorted.
- *  Uses object identity (reference equality) to find new indices. */
-function resolveSelectionAfterSort(
-  oldKfs: KfDeg[],
-  newKfs: KfDeg[],
-  oldSelection: Set<number>,
-  oldPrimary: number | null,
-): { selection: Set<number>; primaryIdx: number | null } {
-  const selectedObjs = new Set<KfDeg>();
-  let primaryObj: KfDeg | null = null;
-  for (const idx of oldSelection) {
-    if (idx < oldKfs.length) selectedObjs.add(oldKfs[idx]);
-  }
-  if (oldPrimary !== null && oldPrimary < oldKfs.length) {
-    primaryObj = oldKfs[oldPrimary];
-  }
-  const nextSelection = new Set<number>();
-  let nextPrimary: number | null = null;
-  for (let i = 0; i < newKfs.length; i++) {
-    if (selectedObjs.has(newKfs[i])) {
-      nextSelection.add(i);
-    }
-    if (newKfs[i] === primaryObj) {
-      nextPrimary = i;
-    }
-  }
-  if (nextSelection.size === 0) nextPrimary = null;
-  return { selection: nextSelection, primaryIdx: nextPrimary };
-}
-
-// --- Timeline sub-component -----------------------------------------------
-
-const TL_TRACK_H = 26;
-const TL_RULER_H = 22;
-const TL_LABEL_W = 90;
-const TL_DIAMOND = 8;
-
-function diamondPts(cx: number, cy: number, r: number): string {
-  return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`;
-}
-
-interface TimelineProps {
-  duration: number;
-  keyframes: KfDeg[];
-  selection: Set<number>;
-  primaryIdx: number | null;
-  scrubTime: number;
-  onSelectKf: (idx: number, modifier: boolean) => void;
-  onClearSelection: () => void;
-  onMultiKfTimeChange: (indices: number[], dt: number, origTimes: Map<number, number>) => void;
-  onScrubChange: (t: number) => void;
-  onRubberBandSelect: (indices: number[], additive: boolean) => void;
-}
-
-function AnimationTimeline({
-  duration, keyframes, selection, primaryIdx, scrubTime,
-  onSelectKf, onClearSelection, onMultiKfTimeChange, onScrubChange,
-  onRubberBandSelect,
-}: TimelineProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [dragItem, setDragItem] = useState<
-    | { type: 'kf'; idx: number; origTimes: Map<number, number> }
-    | { type: 'playhead' }
-    | { type: 'rubberband'; startX: number; startY: number; additive: boolean }
-    | null
-  >(null);
-  const [rubberRect, setRubberRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [containerW, setContainerW] = useState(600);
-
-  const tracks = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const kf of keyframes) {
-      if (!seen.has(kf.bone)) { seen.add(kf.bone); out.push(kf.bone); }
-    }
-    return out;
-  }, [keyframes]);
-
-  const numTracks = Math.max(tracks.length, 1);
-  const svgH = TL_RULER_H + numTracks * TL_TRACK_H;
-  const tlW = containerW - TL_LABEL_W;
-
-  const measuredRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    const measure = () => setContainerW(node.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-  }, []);
-
-  const tToX = (t: number) => TL_LABEL_W + (t / duration) * tlW;
-  const xToT = (clientX: number) => {
-    const svg = svgRef.current;
-    if (!svg) return 0;
-    const rect = svg.getBoundingClientRect();
-    const x = clientX - rect.left - TL_LABEL_W;
-    return Math.round(Math.max(0, Math.min(duration, (x / tlW) * duration)) * 100) / 100;
-  };
-  const clientToSvg = (clientX: number, clientY: number): { x: number; y: number } => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const rect = svg.getBoundingClientRect();
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  };
-  const trackY = (bone: string) => {
-    const idx = tracks.indexOf(bone);
-    return TL_RULER_H + idx * TL_TRACK_H + TL_TRACK_H / 2;
-  };
-
-  const tickStep = duration > 1 ? 0.5 : 0.25;
-  const ticks: number[] = [];
-  for (let t = 0; t <= duration + 0.001; t += tickStep)
-    ticks.push(Math.round(t * 100) / 100);
-
-  // Diamond pointerdown: select + start drag
-  const onPtrDown = useCallback((e: React.PointerEvent, idx: number) => {
-    e.stopPropagation(); e.preventDefault();
-    (e.target as Element).setPointerCapture(e.pointerId);
-    const modifier = e.shiftKey || e.metaKey || e.ctrlKey;
-
-    if (modifier) {
-      // Toggle in selection
-      onSelectKf(idx, true);
-      // Build origTimes for drag with the updated selection
-      const nextSel = new Set(selection);
-      if (nextSel.has(idx)) nextSel.delete(idx); else nextSel.add(idx);
-      const origTimes = new Map<number, number>();
-      for (const i of nextSel) origTimes.set(i, keyframes[i].time);
-      setDragItem({ type: 'kf', idx, origTimes });
-    } else {
-      // If not already selected, single-select it
-      if (!selection.has(idx)) {
-        onSelectKf(idx, false);
-        const origTimes = new Map<number, number>();
-        origTimes.set(idx, keyframes[idx].time);
-        setDragItem({ type: 'kf', idx, origTimes });
-      } else {
-        // Already selected: start drag of whole selection
-        const origTimes = new Map<number, number>();
-        for (const i of selection) origTimes.set(i, keyframes[i].time);
-        setDragItem({ type: 'kf', idx, origTimes });
-      }
-    }
-  }, [onSelectKf, selection, keyframes]);
-
-  const onPlayheadDown = useCallback((e: React.PointerEvent) => {
-    e.stopPropagation(); e.preventDefault();
-    (e.target as Element).setPointerCapture(e.pointerId);
-    setDragItem({ type: 'playhead' });
-  }, []);
-
-  const onPtrMove = useCallback((e: React.PointerEvent) => {
-    if (!dragItem) return;
-    if (dragItem.type === 'kf') {
-      const newT = xToT(e.clientX);
-      const grabbedOrigT = dragItem.origTimes.get(dragItem.idx);
-      if (grabbedOrigT === undefined) return;
-      let dt = newT - grabbedOrigT;
-      // Clamp dt so no selected kf goes below 0 or above duration
-      for (const [, origT] of dragItem.origTimes) {
-        const projected = origT + dt;
-        if (projected < 0) dt = Math.max(dt, -origT);
-        if (projected > duration) dt = Math.min(dt, duration - origT);
-      }
-      onMultiKfTimeChange(Array.from(dragItem.origTimes.keys()), dt, dragItem.origTimes);
-    } else if (dragItem.type === 'playhead') {
-      onScrubChange(xToT(e.clientX));
-    } else if (dragItem.type === 'rubberband') {
-      const cur = clientToSvg(e.clientX, e.clientY);
-      const x = Math.min(dragItem.startX, cur.x);
-      const y = Math.min(dragItem.startY, cur.y);
-      const w = Math.abs(cur.x - dragItem.startX);
-      const h = Math.abs(cur.y - dragItem.startY);
-      setRubberRect({ x, y, w, h });
-    }
-  }, [dragItem, duration, onMultiKfTimeChange, onScrubChange]);
-
-  const onPtrUp = useCallback(() => {
-    if (dragItem?.type === 'rubberband' && rubberRect) {
-      // Hit-test: which keyframe diamonds fall inside the rect
-      const rx = rubberRect.x;
-      const ry = rubberRect.y;
-      const rw = rubberRect.w;
-      const rh = rubberRect.h;
-      const hits: number[] = [];
-      for (let i = 0; i < keyframes.length; i++) {
-        const cx = tToX(keyframes[i].time);
-        const cy = trackY(keyframes[i].bone);
-        if (cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh) {
-          hits.push(i);
-        }
-      }
-      onRubberBandSelect(hits, dragItem.additive);
-    }
-    setDragItem(null);
-    setRubberRect(null);
-  }, [dragItem, rubberRect, keyframes, onRubberBandSelect]);
-
-  const onBgPointerDown = useCallback((e: React.PointerEvent) => {
-    // Shift+drag on background => rubber-band select
-    if (e.shiftKey) {
-      e.preventDefault();
-      (e.target as Element).setPointerCapture(e.pointerId);
-      const pos = clientToSvg(e.clientX, e.clientY);
-      setDragItem({ type: 'rubberband', startX: pos.x, startY: pos.y, additive: e.shiftKey });
-      return;
-    }
-    // Plain click on background: move playhead + clear selection
-    const t = xToT(e.clientX);
-    onScrubChange(t);
-    onClearSelection();
-  }, [onScrubChange, onClearSelection]);
-
-  // Determine cursor for SVG
-  const svgCursor = dragItem?.type === 'rubberband'
-    ? 'crosshair'
-    : dragItem?.type === 'kf'
-      ? 'grabbing'
-      : undefined;
-
-  return (
-    <div className="anim-timeline" ref={measuredRef}>
-      <svg
-        ref={svgRef}
-        width="100%"
-        height={svgH}
-        className="anim-timeline__svg"
-        style={svgCursor ? { cursor: svgCursor } : undefined}
-        onPointerMove={onPtrMove}
-        onPointerUp={onPtrUp}
-        onPointerDown={onBgPointerDown}
-      >
-        {/* ruler */}
-        <line x1={TL_LABEL_W} y1={TL_RULER_H} x2={TL_LABEL_W + tlW} y2={TL_RULER_H}
-          stroke="var(--glass-border)" strokeWidth={1} />
-        {ticks.map(t => (
-          <g key={`t-${t}`}>
-            <line x1={tToX(t)} y1={TL_RULER_H - 8} x2={tToX(t)} y2={TL_RULER_H}
-              stroke="var(--glass-border)" strokeWidth={1} />
-            <text x={tToX(t)} y={TL_RULER_H - 10} textAnchor="middle"
-              fontSize={9} fill="var(--text-dim)" className="anim-timeline__label">
-              {t.toFixed(1)}
-            </text>
-          </g>
-        ))}
-
-        {/* track baselines */}
-        {tracks.map((bone, ti) => {
-          const y = TL_RULER_H + ti * TL_TRACK_H + TL_TRACK_H / 2;
-          return (
-            <g key={`tr-${bone}`}>
-              <line x1={TL_LABEL_W} y1={y} x2={TL_LABEL_W + tlW} y2={y}
-                stroke="var(--glass-border)" strokeWidth={0.5} strokeDasharray="2,4" />
-              <text x={TL_LABEL_W - 4} y={y + 3} textAnchor="end"
-                fontSize={10} fill="var(--text-dim)" className="anim-timeline__label">
-                {bone.length > 11 ? bone.slice(0, 11) : bone}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* keyframe diamonds */}
-        {keyframes.map((kf, idx) => {
-          const cx = tToX(kf.time);
-          const cy = trackY(kf.bone);
-          const sel = selection.has(idx);
-          const isPrimary = idx === primaryIdx;
-          return (
-            <polygon key={idx} points={diamondPts(cx, cy, TL_DIAMOND / 2)}
-              fill={sel ? 'var(--accent)' : 'var(--text)'}
-              stroke={sel ? 'var(--accent-hi)' : 'none'} strokeWidth={sel ? 1.5 : 0}
-              filter={isPrimary ? 'drop-shadow(0 0 2px #fff)' : undefined}
-              style={{ cursor: dragItem?.type === 'kf' ? 'grabbing' : 'grab' }}
-              onPointerDown={e => onPtrDown(e, idx)}>
-              <title>{`${kf.bone} @ ${kf.time.toFixed(2)}s`}</title>
-            </polygon>
-          );
-        })}
-
-        {/* rubber-band rect */}
-        {rubberRect && (
-          <rect
-            x={rubberRect.x} y={rubberRect.y}
-            width={rubberRect.w} height={rubberRect.h}
-            className="anim-timeline__rubberband"
-          />
-        )}
-
-        {/* playhead */}
-        <line x1={tToX(scrubTime)} y1={0} x2={tToX(scrubTime)} y2={svgH}
-          stroke="var(--accent)" strokeWidth={1.5} pointerEvents="none" />
-        {/* playhead grab handle */}
-        <rect x={tToX(scrubTime) - 5} y={0} width={10} height={TL_RULER_H}
-          fill="var(--accent)" rx={3} opacity={0.6}
-          style={{ cursor: 'ew-resize' }}
-          onPointerDown={onPlayheadDown} />
-      </svg>
-    </div>
-  );
-}
-
-// --- F-Curve Editor sub-component (Phase 3) --------------------------------
-
-interface FCurveProps {
-  bone: string;
-  keyframes: KfDeg[];
-  duration: number;
-  onUpdateTangent: (kfIdx: number, axis: 'x' | 'y' | 'z', handle: 'in' | 'out', dy: number) => void;
-}
-
-function FCurveEditor({ bone, keyframes, duration, onUpdateTangent }: FCurveProps) {
-  const boneKfs = useMemo(() =>
-    keyframes
-      .map((kf, idx) => ({ ...kf, idx }))
-      .filter(kf => kf.bone === bone)
-      .sort((a, b) => a.time - b.time),
-  [keyframes, bone]);
-
-  if (boneKfs.length < 2) {
-    return (
-      <div className="anim-fcurve__empty">
-        Necessarios 2+ keyframes deste bone para editar curvas
-      </div>
-    );
-  }
-
-  const axes: ('x' | 'y' | 'z')[] = ['x', 'y', 'z'];
-  const axisColors = { x: '#ef4444', y: '#22c55e', z: '#3b82f6' };
-
-  const W = 400;
-  const H = 120;
-  const PAD = 24;
-
-  return (
-    <div className="anim-fcurve">
-      {axes.map(axis => {
-        const vals = boneKfs.map(kf => kf[axis]);
-        const minV = Math.min(...vals) - 10;
-        const maxV = Math.max(...vals) + 10;
-        const rangeV = maxV - minV || 1;
-        const toSvgX = (t: number) => PAD + ((t / duration) * (W - 2 * PAD));
-        const toSvgY = (v: number) => H - PAD - ((v - minV) / rangeV) * (H - 2 * PAD);
-
-        // build path
-        let path = '';
-        for (let i = 0; i < boneKfs.length; i++) {
-          const kf = boneKfs[i];
-          const px = toSvgX(kf.time);
-          const py = toSvgY(kf[axis]);
-          if (i === 0) { path += `M${px},${py}`; continue; }
-          const prev = boneKfs[i - 1];
-          if (prev.tangents && kf.tangents) {
-            const cpx1 = toSvgX(prev.time + (prev.tangents[axis].outX * duration));
-            const cpy1 = toSvgY(prev[axis] + prev.tangents[axis].outY * RAD2DEG);
-            const cpx2 = toSvgX(kf.time + (kf.tangents[axis].inX * duration));
-            const cpy2 = toSvgY(kf[axis] + kf.tangents[axis].inY * RAD2DEG);
-            path += ` C${cpx1},${cpy1} ${cpx2},${cpy2} ${px},${py}`;
-          } else {
-            path += ` L${px},${py}`;
-          }
-        }
-
-        return (
-          <div key={axis} className="anim-fcurve__axis">
-            <span className="anim-fcurve__axis-label" style={{ color: axisColors[axis] }}>
-              {axis.toUpperCase()}
-            </span>
-            <svg width={W} height={H} className="anim-fcurve__svg">
-              {/* grid */}
-              <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD}
-                stroke="var(--glass-border)" strokeWidth={0.5} />
-              <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD}
-                stroke="var(--glass-border)" strokeWidth={0.5} />
-              {/* curve */}
-              <path d={path} fill="none" stroke={axisColors[axis]} strokeWidth={1.5} />
-              {/* keyframe dots + tangent handles */}
-              {boneKfs.map((kf, i) => {
-                const px = toSvgX(kf.time);
-                const py = toSvgY(kf[axis]);
-                const tang = kf.tangents?.[axis];
-                return (
-                  <g key={i}>
-                    <circle cx={px} cy={py} r={4} fill={axisColors[axis]} />
-                    {tang && (
-                      <>
-                        {/* in handle */}
-                        <line x1={px} y1={py}
-                          x2={toSvgX(kf.time + tang.inX * duration)}
-                          y2={toSvgY(kf[axis] + tang.inY * RAD2DEG)}
-                          stroke={axisColors[axis]} strokeWidth={0.8} opacity={0.5} />
-                        <circle
-                          cx={toSvgX(kf.time + tang.inX * duration)}
-                          cy={toSvgY(kf[axis] + tang.inY * RAD2DEG)}
-                          r={3} fill="var(--bg-1)" stroke={axisColors[axis]} strokeWidth={1}
-                          style={{ cursor: 'pointer' }}
-                          onPointerDown={e => {
-                            e.stopPropagation();
-                            const startY = e.clientY;
-                            const startVal = tang.inY;
-                            const onMove = (me: PointerEvent) => {
-                              const dy = (startY - me.clientY) * 0.01;
-                              onUpdateTangent(kf.idx, axis, 'in', startVal + dy);
-                            };
-                            const onUp = () => {
-                              window.removeEventListener('pointermove', onMove);
-                              window.removeEventListener('pointerup', onUp);
-                            };
-                            window.addEventListener('pointermove', onMove);
-                            window.addEventListener('pointerup', onUp);
-                          }}
-                        />
-                        {/* out handle */}
-                        <line x1={px} y1={py}
-                          x2={toSvgX(kf.time + tang.outX * duration)}
-                          y2={toSvgY(kf[axis] + tang.outY * RAD2DEG)}
-                          stroke={axisColors[axis]} strokeWidth={0.8} opacity={0.5} />
-                        <circle
-                          cx={toSvgX(kf.time + tang.outX * duration)}
-                          cy={toSvgY(kf[axis] + tang.outY * RAD2DEG)}
-                          r={3} fill="var(--bg-1)" stroke={axisColors[axis]} strokeWidth={1}
-                          style={{ cursor: 'pointer' }}
-                          onPointerDown={e => {
-                            e.stopPropagation();
-                            const startY = e.clientY;
-                            const startVal = tang.outY;
-                            const onMove = (me: PointerEvent) => {
-                              const dy = (startY - me.clientY) * 0.01;
-                              onUpdateTangent(kf.idx, axis, 'out', startVal + dy);
-                            };
-                            const onUp = () => {
-                              window.removeEventListener('pointermove', onMove);
-                              window.removeEventListener('pointerup', onUp);
-                            };
-                            window.addEventListener('pointermove', onMove);
-                            window.addEventListener('pointerup', onUp);
-                          }}
-                        />
-                      </>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// --- Onion skin (Phase 2) --------------------------------------------------
-
-/** Bone parent-child pairs for drawing skeleton lines. */
-const BONE_CONNECTIONS: [string, string][] = [
-  ['hips', 'spine'], ['spine', 'chest'], ['chest', 'neck'], ['neck', 'head'],
-  ['chest', 'leftShoulder'], ['leftShoulder', 'leftUpperArm'],
-  ['leftUpperArm', 'leftLowerArm'], ['leftLowerArm', 'leftHand'],
-  ['chest', 'rightShoulder'], ['rightShoulder', 'rightUpperArm'],
-  ['rightUpperArm', 'rightLowerArm'], ['rightLowerArm', 'rightHand'],
-  ['hips', 'leftUpperLeg'], ['leftUpperLeg', 'leftLowerLeg'],
-  ['leftLowerLeg', 'leftFoot'],
-  ['hips', 'rightUpperLeg'], ['rightUpperLeg', 'rightLowerLeg'],
-  ['rightLowerLeg', 'rightFoot'],
-];
-
-/**
- * Create a frozen LineSegments skeleton at a target keyframe time.
- * We temporarily pose the bones, snapshot their world positions into
- * a static BufferGeometry, then restore the original pose.
- */
-function createOnionLines(
-  vrm: any,
-  keyframes: KfDeg[],
-  time: number,
-  controller: VrmAvatarController,
-  direction: 'before' | 'after',
-): LineSegments | null {
-  const allTimes = [...new Set(keyframes.map(kf => kf.time))].sort((a, b) => a - b);
-  let targetTime: number | null = null;
-  if (direction === 'before') {
-    for (let i = allTimes.length - 1; i >= 0; i--) {
-      if (allTimes[i] < time - 0.01) { targetTime = allTimes[i]; break; }
-    }
-  } else {
-    for (const t of allTimes) {
-      if (t > time + 0.01) { targetTime = t; break; }
-    }
-  }
-  if (targetTime === null) return null;
-
-  // Save current pose
-  const savedDeltas = new Map<string, { x: number; y: number; z: number }>();
-  for (const bone of PICKABLE_BONES) {
-    savedDeltas.set(bone, controller.getBoneDelta(bone));
-  }
-
-  // Apply target time pose
-  const byBone = new Map<string, KfDeg[]>();
-  for (const kf of keyframes) {
-    let arr = byBone.get(kf.bone);
-    if (!arr) { arr = []; byBone.set(kf.bone, arr); }
-    arr.push(kf);
-  }
-  for (const [bone, boneKfs] of byBone) {
-    const sorted = [...boneKfs].sort((a, b) => a.time - b.time);
-    const delta = interpolateBoneAtTime(sorted, targetTime);
-    controller.setBoneDelta(bone, delta);
-  }
-
-  // Snapshot world positions
-  vrm.scene.updateMatrixWorld(true);
-  const positions: number[] = [];
-  const wp = new Vector3();
-  for (const [parentName, childName] of BONE_CONNECTIONS) {
-    const parentNode = vrm.humanoid?.getRawBoneNode(parentName as any) as Object3D | null | undefined;
-    const childNode = vrm.humanoid?.getRawBoneNode(childName as any) as Object3D | null | undefined;
-    if (!parentNode || !childNode) continue;
-    parentNode.getWorldPosition(wp);
-    positions.push(wp.x, wp.y, wp.z);
-    childNode.getWorldPosition(wp);
-    positions.push(wp.x, wp.y, wp.z);
-  }
-
-  // Restore original pose
-  for (const [bone, delta] of savedDeltas) {
-    controller.setBoneDelta(bone, delta);
-  }
-
-  if (positions.length === 0) return null;
-
-  const geom = new BufferGeometry();
-  geom.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  const color = direction === 'before' ? 0x3b82f6 : 0xf97316;
-  const mat = new LineBasicMaterial({ color, transparent: true, opacity: 0.35, depthTest: false });
-  const lines = new LineSegments(geom, mat);
-  lines.renderOrder = 998;
-  return lines;
-}
+import {
+  RAD2DEG,
+  DEG2RAD,
+  PICKABLE_BONES,
+  BONE_INDENT,
+  type KfDeg,
+  defToDegs,
+  degsToGesture,
+  generateTsCode,
+  interpolateBoneAtTime,
+  resolveSelectionAfterSort,
+  mirrorDeg,
+} from './labUtils';
+import { AnimationTimeline } from './AnimationTimeline';
+import { FCurveEditor } from './FCurveEditor';
+import { IKPanel } from './IKPanel';
+import { CheatSheet } from './CheatSheet';
+import { createOnionLines } from './onionSkin';
+import { useLabHotkeys } from './hooks/useLabHotkeys';
+import { useIKProxies } from './hooks/useIKProxies';
 
 // --- Main AnimationLab component -------------------------------------------
 
@@ -674,7 +78,46 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
   const [gizmoMode, setGizmoMode] = useState<'rotate' | 'translate' | 'scale'>('rotate');
   const [playing, setPlaying] = useState(false);
   const [onionSkinOn, setOnionSkinOn] = useState(false);
-  const [fcurveOpen, setFcurveOpen] = useState(false);
+  const [skeletonOn, setSkeletonOn] = useState(true);
+  const [fcurveOpen, setFcurveOpen] = useState(true);
+  const [cheatOpen, setCheatOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [layer, setLayer] = useState<GestureLayer>('full');
+  const [ikTargets, setIkTargets] = useState<IKTarget[]>([]);
+  const [selectedIkId, setSelectedIkId] = useState<string | null>(null);
+  const [hoverInfo, setHoverInfo] = useState<
+    | { x: number; y: number; bone: string; dx: number; dy: number; dz: number }
+    | null
+  >(null);
+
+  // View state for timeline zoom/pan.
+  const [viewStart, setViewStart] = useState(0);
+  const [viewEnd, setViewEnd] = useState(1.5);
+
+  useEffect(() => {
+    setViewStart(0);
+    setViewEnd(duration);
+  }, [duration, gestureName]);
+
+  useEffect(() => {
+    if (scrubTime > duration) setScrubTime(duration);
+  }, [duration, scrubTime]);
+
+  const tickStep = useMemo(() => {
+    const span = viewEnd - viewStart;
+    if (span > 4) return 1.0;
+    if (span > 2) return 0.5;
+    if (span > 1) return 0.25;
+    if (span > 0.5) return 0.1;
+    return 0.05;
+  }, [viewStart, viewEnd]);
+
+  // --- Undo stack ---
+  const undoStackRef = useRef(new UndoStack(100));
+  const [, forceUndoRender] = useState(0);
+  useEffect(() => {
+    return undoStackRef.current.subscribe(() => forceUndoRender(n => n + 1));
+  }, []);
 
   // --- Refs for 3D objects ---
   const previewRef = useRef<HTMLDivElement>(null);
@@ -682,6 +125,7 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
   const orbitRef = useRef<OrbitControls | null>(null);
   const transformRef = useRef<TransformControls | null>(null);
   const pickerMeshes = useRef<Map<string, Mesh>>(new Map());
+  const ikProxyMeshes = useRef<Map<string, Mesh>>(new Map());
   const skelHelperRef = useRef<SkeletonHelper | null>(null);
   const onionHelpersRef = useRef<LineSegments[]>([]);
   const raycaster = useRef(new Raycaster());
@@ -717,21 +161,24 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
   const loadGesture = useCallback((name: string) => {
     let def: GestureDefinition | null = null;
     if (savedGestures[name]) {
-      const raw = savedGestures[name];
-      def = { name: raw.name, duration: raw.duration, keyframes: raw.keyframes };
+      def = migrateGesture(savedGestures[name]);
     }
     if (!def && GESTURE_LIBRARY[name]) {
-      def = JSON.parse(JSON.stringify(GESTURE_LIBRARY[name]));
+      def = migrateGesture(JSON.parse(JSON.stringify(GESTURE_LIBRARY[name])));
     }
     if (!def) def = { name, duration: 1.0, keyframes: [] };
     setGestureName(name);
     setDuration(def.duration);
     setKeyframes(defToDegs(def));
+    setLayer(def.layer ?? 'full');
+    setIkTargets(def.ikTargets ? [...def.ikTargets] : []);
+    setSelectedIkId(null);
     clearSelection();
     setScrubTime(0);
+    setDirty(false);
+    undoStackRef.current.clear();
   }, [savedGestures, clearSelection]);
 
-  // Load initial gesture
   useEffect(() => { loadGesture(gestureName); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Reparent canvas ---
@@ -767,16 +214,14 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     controller.enterPoseMode();
     controller.resetAllBonesToRest();
 
-    // Skeleton helper
     const skelHelper = new SkeletonHelper(vrm.scene);
     (skelHelper.material as any).color.setHex(0xa78bfa);
-    (skelHelper.material as any).opacity = 0.4;
+    (skelHelper.material as any).opacity = 0.45;
     (skelHelper.material as any).transparent = true;
     (skelHelper.material as any).depthTest = false;
     scene.add(skelHelper);
     skelHelperRef.current = skelHelper;
 
-    // Bone picker spheres
     const pickers = new Map<string, Mesh>();
     const sphereGeo = new SphereGeometry(0.015, 8, 8);
     for (const boneName of PICKABLE_BONES) {
@@ -796,26 +241,21 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     }
     pickerMeshes.current = pickers;
 
-    // OrbitControls
     const orbit = new OrbitControls(camera, canvas);
     orbit.enableDamping = true;
     orbit.dampingFactor = 0.1;
     orbit.target.set(0, 1.0, 0);
-    // Left drag rotates (Mac trackpad has no middle button). Pick handler
-    // uses a 4px drag threshold to differentiate short click (= pick bone)
-    // from drag (= orbit). Right button pans; wheel/pinch zooms.
     orbit.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
     orbit.update();
     orbitRef.current = orbit;
 
-    // TransformControls (three r169+: controls is EventDispatcher-based;
-    // the visual helper is an Object3D retrieved via getHelper()).
     const tc = new TransformControls(camera, canvas);
     tc.setMode('rotate');
     tc.setSize(0.6);
-    tc.addEventListener('dragging-changed', (e: any) => {
+    const onDraggingChanged = (e: any): void => {
       orbit.enabled = !e.value;
-    });
+    };
+    tc.addEventListener('dragging-changed', onDraggingChanged);
     const tcHelper = tc.getHelper();
     scene.add(tcHelper);
     transformRef.current = tc;
@@ -828,11 +268,27 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
         mesh.parent?.remove(mesh);
         (mesh.material as MeshBasicMaterial).dispose();
       }
+      // sphereGeo is shared across all picker meshes — dispose AFTER they
+      // are all removed so we never free a geometry still in use.
+      sphereGeo.dispose();
+      try { tc.removeEventListener('dragging-changed', onDraggingChanged); } catch { /* noop */ }
       try { tc.detach(); } catch { /* noop */ }
       scene.remove(tcHelper);
+      // TransformControls (r169) builds its gizmo out of internal meshes
+      // whose geometries/materials are NOT released by tc.dispose(). Walk
+      // the helper subtree and dispose them explicitly to avoid GPU leaks.
+      tcHelper.traverse((obj) => {
+        const o = obj as { geometry?: { dispose?: () => void }; material?: unknown };
+        o.geometry?.dispose?.();
+        const m = o.material;
+        if (Array.isArray(m)) {
+          for (const mm of m) (mm as { dispose?: () => void } | null)?.dispose?.();
+        } else if (m) {
+          (m as { dispose?: () => void }).dispose?.();
+        }
+      });
       try { tc.dispose(); } catch { /* r169 dispose can trip on internal state */ }
       orbit.dispose();
-      // Clean onion skins
       for (const h of onionHelpersRef.current) {
         scene.remove(h);
         h.geometry.dispose();
@@ -845,6 +301,24 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       transformRef.current = null;
     };
   }, [controller]);
+
+  // Skeleton visibility toggle
+  useEffect(() => {
+    if (skelHelperRef.current) skelHelperRef.current.visible = skeletonOn;
+  }, [skeletonOn]);
+
+  // --- IK proxy meshes (delegated to hook) ---
+  const handleUpdateIK = useCallback((id: string, patch: Partial<IKTarget>) => {
+    setIkTargets(prev => prev.map(t => t.id === id ? { ...t, ...patch, target: patch.target ? { ...t.target, ...patch.target } : t.target } : t));
+    markDirty();
+  }, []);
+  const handleUpdateIKRef = useRef(handleUpdateIK);
+  handleUpdateIKRef.current = handleUpdateIK;
+
+  useIKProxies({
+    controller, ikTargets, selectedIkId,
+    ikProxyMeshes, transformRef, handleUpdateIKRef,
+  });
 
   // --- Update gizmo mode ---
   useEffect(() => {
@@ -863,20 +337,20 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
         mat.opacity = 0.6;
       }
     }
-    // Attach/detach transform controls
     const tc = transformRef.current;
     if (!tc || !controller) return;
     const vrm = controller.getVrm();
     if (!vrm) return;
+    if (selectedIkId) return;
     if (selectedBone) {
       const boneNode = vrm.humanoid?.getRawBoneNode(selectedBone as any) as Object3D | null | undefined;
       if (boneNode) tc.attach(boneNode);
     } else {
       tc.detach();
     }
-  }, [selectedBone, controller]);
+  }, [selectedBone, controller, selectedIkId]);
 
-  // --- TransformControls change listener => update inspector ---
+  // --- Inspector delta state ---
   const [inspectorDelta, setInspectorDelta] = useState({ x: 0, y: 0, z: 0 });
   useEffect(() => {
     const tc = transformRef.current;
@@ -891,7 +365,6 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       });
     };
     tc.addEventListener('change', onChange);
-    // Initial read
     if (selectedBone) onChange();
     return () => { tc.removeEventListener('change', onChange); };
   }, [selectedBone, controller]);
@@ -909,7 +382,6 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     };
 
     const onClick = (e: MouseEvent) => {
-      // Skip if it was a drag (orbit/gizmo)
       const dist = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
       if (dist > 4) return;
 
@@ -918,25 +390,70 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       pointer.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.current.setFromCamera(pointer.current, camera);
 
-      const meshArr = Array.from(pickerMeshes.current.values());
+      const boneMeshes = Array.from(pickerMeshes.current.values());
+      const ikMeshes = Array.from(ikProxyMeshes.current.values());
+      const meshArr = [...boneMeshes, ...ikMeshes];
       const hits = raycaster.current.intersectObjects(meshArr, false);
       if (hits.length > 0) {
-        const bone = hits[0].object.userData.boneName as string;
-        setSelectedBone(bone);
+        const hit = hits[0].object;
+        const ikId = hit.userData.ikTargetId as string | undefined;
+        const bone = hit.userData.boneName as string | undefined;
+        if (ikId) {
+          setSelectedIkId(ikId);
+          setSelectedBone(null);
+        } else if (bone) {
+          setSelectedBone(bone);
+          setSelectedIkId(null);
+        }
       } else {
         setSelectedBone(null);
+        setSelectedIkId(null);
       }
     };
 
+    let lastHover = 0;
+    const onHover = (e: PointerEvent) => {
+      const now = performance.now();
+      if (now - lastHover < 40) return;
+      lastHover = now;
+
+      const rect = canvas.getBoundingClientRect();
+      pointer.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.current.setFromCamera(pointer.current, camera);
+      const meshArr = Array.from(pickerMeshes.current.values());
+      const hits = raycaster.current.intersectObjects(meshArr, false);
+      if (hits.length > 0 && controller) {
+        const bone = hits[0].object.userData.boneName as string;
+        const delta = controller.getBoneDelta(bone);
+        setHoverInfo({
+          x: e.clientX,
+          y: e.clientY,
+          bone,
+          dx: +(delta.x * RAD2DEG).toFixed(1),
+          dy: +(delta.y * RAD2DEG).toFixed(1),
+          dz: +(delta.z * RAD2DEG).toFixed(1),
+        });
+      } else {
+        setHoverInfo(null);
+      }
+    };
+
+    const onLeave = () => setHoverInfo(null);
+
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('click', onClick);
+    canvas.addEventListener('pointermove', onHover);
+    canvas.addEventListener('pointerleave', onLeave);
     return () => {
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('pointermove', onHover);
+      canvas.removeEventListener('pointerleave', onLeave);
     };
   }, [controller]);
 
-  // --- Scrub: apply pose at scrubTime ---
+  // --- Scrub: apply pose at scrubTime (FK + IK preview) ---
   useEffect(() => {
     if (!controller) return;
     const byBone = new Map<string, KfDeg[]>();
@@ -950,7 +467,49 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       const delta = interpolateBoneAtTime(sorted, scrubTime);
       controller.setBoneDelta(bone, delta);
     }
-    // Refresh inspector
+
+    const vrm = controller.getVrm();
+    if (vrm && ikTargets.length > 0) {
+      for (const target of ikTargets) {
+        const w = ikWeightAt(target, scrubTime);
+        if (w <= 0) continue;
+        const worldTarget = new Vector3(target.target.x, target.target.y, target.target.z);
+        if (target.space === 'rig') vrm.scene.localToWorld(worldTarget);
+
+        if (target.chain === 'head') {
+          const head = vrm.humanoid?.getRawBoneNode('head' as any) as any;
+          if (!head) continue;
+          head.updateWorldMatrix(true, false);
+          const desiredWorld = solveHeadLookAt(head, worldTarget);
+          const desiredLocal = worldQuatToLocal(desiredWorld, head);
+          head.quaternion.slerp(desiredLocal, Math.min(1, w));
+        } else if (target.chain === 'leftArm' || target.chain === 'rightArm') {
+          const side = target.chain === 'leftArm' ? 'left' : 'right';
+          const shoulder = vrm.humanoid?.getRawBoneNode(`${side}UpperArm` as any) as any;
+          const elbow = vrm.humanoid?.getRawBoneNode(`${side}LowerArm` as any) as any;
+          const hand = vrm.humanoid?.getRawBoneNode(`${side}Hand` as any) as any;
+          if (!shoulder || !elbow || !hand) continue;
+          shoulder.updateWorldMatrix(true, false);
+          elbow.updateWorldMatrix(false, false);
+          hand.updateWorldMatrix(false, false);
+          const pole = new Vector3();
+          shoulder.getWorldPosition(pole);
+          const shoulderWorldX = pole.x - (vrm.scene.position?.x ?? 0);
+          const isRight = side === 'right';
+          const outwardSign = isRight
+            ? (shoulderWorldX < 0 ? -1 : 1)
+            : (shoulderWorldX > 0 ? 1 : -1);
+          pole.x += outwardSign * 0.35;
+          pole.y -= 1.0;
+          try {
+            const res = solveArmIK(shoulder, elbow, hand, worldTarget, pole);
+            shoulder.quaternion.slerp(res.upperArmLocal, w);
+            elbow.quaternion.slerp(res.lowerArmLocal, w);
+          } catch { /* NaN from solver -- skip */ }
+        }
+      }
+    }
+
     if (selectedBone) {
       const delta = controller.getBoneDelta(selectedBone);
       setInspectorDelta({
@@ -959,7 +518,7 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
         z: +(delta.z * RAD2DEG).toFixed(1),
       });
     }
-  }, [scrubTime, keyframes, controller, selectedBone]);
+  }, [scrubTime, keyframes, controller, selectedBone, ikTargets]);
 
   // --- Onion skin ---
   useEffect(() => {
@@ -967,14 +526,12 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     const vrm = controller.getVrm();
     const scene = controller.getScene();
     if (!vrm || !scene) return;
-    // Clear previous
     for (const h of onionHelpersRef.current) {
       scene.remove(h);
       h.geometry.dispose();
       (h.material as LineBasicMaterial).dispose();
     }
     onionHelpersRef.current = [];
-    // Create before/after
     const before = createOnionLines(vrm, keyframes, scrubTime, controller, 'before');
     const after = createOnionLines(vrm, keyframes, scrubTime, controller, 'after');
     if (before) { scene.add(before); onionHelpersRef.current.push(before); }
@@ -989,7 +546,21 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     };
   }, [controller, onionSkinOn, scrubTime, keyframes]);
 
-  // --- Actions ---
+  // --- Keyframe mutations with undo ---
+
+  const markDirty = useCallback(() => setDirty(true), []);
+
+  const recordKfChange = useCallback((label: string, next: KfDeg[]) => {
+    const prev = keyframes;
+    const cmd: Command = {
+      label,
+      apply: () => { setKeyframes(next); },
+      revert: () => { setKeyframes(prev); },
+    };
+    undoStackRef.current.record(cmd);
+    markDirty();
+  }, [keyframes, markDirty]);
+
   const handleInsertKeyframe = useCallback(() => {
     if (!controller) return;
     const newKfs: KfDeg[] = [];
@@ -1005,15 +576,14 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       flash('Nenhum bone modificado');
       return;
     }
-    setKeyframes(prev => {
-      // Remove existing keyframes at this time for these bones
-      const newBones = new Set(newKfs.map(k => k.bone));
-      const filtered = prev.filter(kf => !(newBones.has(kf.bone) && Math.abs(kf.time - scrubTime) < 0.005));
-      const merged = [...filtered, ...newKfs].sort((a, b) => a.time - b.time);
-      return merged;
-    });
+    const newBones = new Set(newKfs.map(k => k.bone));
+    const filtered = keyframes.filter(kf => !(newBones.has(kf.bone) && Math.abs(kf.time - scrubTime) < 0.005));
+    const merged = [...filtered, ...newKfs].sort((a, b) => a.time - b.time);
+    recordKfChange(`Inserir ${newKfs.length} kf`, merged);
     flash(`${newKfs.length} keyframe(s) inseridos`);
-  }, [controller, scrubTime, flash]);
+  }, [controller, scrubTime, flash, keyframes, recordKfChange]);
+
+  const preDragKfsRef = useRef<KfDeg[] | null>(null);
 
   // Refs to avoid stale closures in keyboard handler
   const insertKfRef = useRef(handleInsertKeyframe);
@@ -1029,149 +599,60 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
   durationRef.current = duration;
   const flashRef = useRef(flash);
   flashRef.current = flash;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Ignore when focused on input elements
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-
-      const mod = e.metaKey || e.ctrlKey;
-
-      if (e.key === 'Escape') {
-        // If there's a selection, clear it; otherwise close the lab
-        if (selectionRef.current.size > 0) {
-          e.preventDefault();
-          setSelection(new Set());
-          setPrimaryIdx(null);
-        } else {
-          onClose();
-        }
-        return;
-      }
-      if (e.key === 'i' || e.key === 'I') {
-        e.preventDefault();
-        insertKfRef.current();
-        return;
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectionRef.current.size === 0) return;
-        e.preventDefault();
-        const toDelete = new Set(selectionRef.current);
-        setKeyframes(prev => prev.filter((_, i) => !toDelete.has(i)));
-        setSelection(new Set());
-        setPrimaryIdx(null);
-        return;
-      }
-      if (mod && (e.key === 'a' || e.key === 'A')) {
-        e.preventDefault();
-        const kfs = keyframesRef.current;
-        const all = new Set<number>();
-        for (let i = 0; i < kfs.length; i++) all.add(i);
-        setSelection(all);
-        setPrimaryIdx(kfs.length > 0 ? 0 : null);
-        return;
-      }
-      if (mod && (e.key === 'c' || e.key === 'C') && !e.shiftKey) {
-        e.preventDefault();
-        const sel = selectionRef.current;
-        const kfs = keyframesRef.current;
-        if (sel.size === 0) return;
-        clipboardRef = Array.from(sel).map(i => ({ ...kfs[i] }));
-        flashRef.current(`${sel.size} copiado(s)`);
-        return;
-      }
-      if (mod && (e.key === 'x' || e.key === 'X')) {
-        e.preventDefault();
-        const sel = selectionRef.current;
-        const kfs = keyframesRef.current;
-        if (sel.size === 0) return;
-        clipboardRef = Array.from(sel).map(i => ({ ...kfs[i] }));
-        const toDelete = new Set(sel);
-        setKeyframes(prev => prev.filter((_, i) => !toDelete.has(i)));
-        setSelection(new Set());
-        setPrimaryIdx(null);
-        flashRef.current(`${sel.size} recortado(s)`);
-        return;
-      }
-      if (mod && (e.key === 'v' || e.key === 'V')) {
-        e.preventDefault();
-        if (clipboardRef.length === 0) return;
-        const curScrub = scrubTimeRef.current;
-        const curDuration = durationRef.current;
-        // Find the minimum time in clipboard to use as anchor
-        const minTime = Math.min(...clipboardRef.map(k => k.time));
-        const cloned = clipboardRef.map(k => {
-          const newTime = Math.min(curDuration, Math.max(0, curScrub + (k.time - minTime)));
-          return { ...k, time: Math.round(newTime * 100) / 100 };
-        });
-        setKeyframes(prev => {
-          const merged = [...prev, ...cloned].sort((a, b) => a.time - b.time);
-          // Build selection for the newly-pasted items (by reference)
-          const clonedSet = new Set<KfDeg>(cloned);
-          const newSel = new Set<number>();
-          let newPrimary: number | null = null;
-          for (let i = 0; i < merged.length; i++) {
-            if (clonedSet.has(merged[i])) {
-              newSel.add(i);
-              if (newPrimary === null) newPrimary = i;
-            }
-          }
-          // Defer state updates via setTimeout to avoid batching issues
-          // (setKeyframes is in progress, so we schedule selection update)
-          setTimeout(() => {
-            setSelection(newSel);
-            setPrimaryIdx(newPrimary);
-          }, 0);
-          return merged;
-        });
-        flashRef.current(`${cloned.length} colado(s)`);
-        return;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const handleDeleteSelection = useCallback(() => {
-    if (selection.size === 0) return;
-    const toDelete = new Set(selection);
-    setKeyframes(prev => prev.filter((_, i) => !toDelete.has(i)));
-    clearSelection();
-  }, [selection, clearSelection]);
-
-  const handlePlay = useCallback(() => {
-    if (!controller || playing) return;
+  const handlePlayPause = useCallback(() => {
+    if (!controller) return;
+    if (playingRef.current) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      setPlaying(false);
+      return;
+    }
     setPlaying(true);
-    // Drive playback via scrub (pose mode stays on, scrub effect handles bones)
+    const startScrub = scrubTimeRef.current;
     let start: number | null = null;
     const tick = (now: number) => {
       if (start === null) start = now;
-      const elapsed = (now - start) / 1000;
-      if (elapsed >= duration) {
+      const elapsed = startScrub + (now - start) / 1000;
+      if (elapsed >= durationRef.current) {
         setScrubTime(0);
         setPlaying(false);
+        // Clear the ref so the cleanup effect's cancelAnimationFrame is a
+        // no-op AND a fresh Play press starts from a clean state instead
+        // of cancelling whatever the next render scheduled. (rafRef is
+        // typed as `number` with 0 as the "no active frame" sentinel.)
+        rafRef.current = 0;
         return;
       }
       setScrubTime(elapsed);
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [controller, playing, duration]);
+  }, [controller]);
 
-  useEffect(() => {
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  const stepScrub = useCallback((direction: -1 | 1, toNextKf: boolean) => {
+    const kfs = keyframesRef.current;
+    const cur = scrubTimeRef.current;
+    const dur = durationRef.current;
+    if (toNextKf) {
+      const times = [...new Set(kfs.map(kf => kf.time))].sort((a, b) => a - b);
+      if (direction > 0) {
+        const nxt = times.find(t => t > cur + 0.001);
+        if (nxt !== undefined) setScrubTime(nxt);
+      } else {
+        for (let i = times.length - 1; i >= 0; i--) {
+          if (times[i] < cur - 0.001) { setScrubTime(times[i]); break; }
+        }
+      }
+    } else {
+      const step = 1 / 60;
+      setScrubTime(Math.max(0, Math.min(dur, cur + direction * step)));
+    }
   }, []);
 
-  const handleResetPose = useCallback(() => {
-    if (!controller) return;
-    controller.resetAllBonesToRest();
-    if (selectedBone) {
-      setInspectorDelta({ x: 0, y: 0, z: 0 });
-    }
-  }, [controller, selectedBone]);
-
   const handleSave = useCallback(async () => {
-    const def = degsToGesture(gestureName, duration, keyframes);
+    const def = degsToGesture(gestureName, duration, keyframes, layer, ikTargets);
     try {
       const resp = await fetch(`${API_BASE}/lab/gestures`, {
         method: 'POST',
@@ -1181,16 +662,51 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       setSavedGestures(prev => ({
         ...prev,
-        [gestureName]: { name: def.name, duration: def.duration, keyframes: def.keyframes },
+        [gestureName]: {
+          name: def.name, duration: def.duration, keyframes: def.keyframes,
+          layer: def.layer, version: def.version, ikTargets: def.ikTargets,
+        },
       }));
-      // Register with the live controller so `playGesture(name)` can reach
-      // it immediately — no reload needed.
       controller?.registerGesture?.(gestureName, def);
+      setDirty(false);
       flash('Salvo');
     } catch (err) {
       flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [gestureName, duration, keyframes, flash, controller]);
+  }, [gestureName, duration, keyframes, layer, ikTargets, flash, controller]);
+
+  const saveRef = useRef<(() => void) | null>(handleSave);
+  saveRef.current = handleSave;
+
+  // --- Keyboard hotkeys (delegated to hook) ---
+  useLabHotkeys({
+    selectionRef, keyframesRef, scrubTimeRef, durationRef, flashRef,
+    undoStackRef, insertKfRef, saveRef,
+    cheatOpen,
+    setCheatOpen: (fn) => setCheatOpen(fn),
+    setSelection, setPrimaryIdx, setKeyframes,
+    recordKfChange, onClose, handlePlayPause, stepScrub,
+  });
+
+  useEffect(() => {
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, []);
+
+  const handleDeleteSelection = useCallback(() => {
+    if (selection.size === 0) return;
+    const toDelete = new Set(selection);
+    const next = keyframes.filter((_, i) => !toDelete.has(i));
+    recordKfChange(`Apagar ${toDelete.size} kf`, next);
+    clearSelection();
+  }, [selection, keyframes, recordKfChange, clearSelection]);
+
+  const handleResetPose = useCallback(() => {
+    if (!controller) return;
+    controller.resetAllBonesToRest();
+    if (selectedBone) {
+      setInspectorDelta({ x: 0, y: 0, z: 0 });
+    }
+  }, [controller, selectedBone]);
 
   const handleCopyTs = useCallback(async () => {
     const code = generateTsCode(gestureName, duration, keyframes);
@@ -1208,29 +724,55 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     setKeyframes([]);
     setScrubTime(0);
     clearSelection();
+    undoStackRef.current.clear();
+    setDirty(false);
   }, [clearSelection]);
 
-  const handleSelectGesture = useCallback((name: string) => {
-    loadGesture(name);
-  }, [loadGesture]);
+  const bvhFileRef = useRef<HTMLInputElement>(null);
+  const handleBvhFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const def = await importBVH(file, { name: file.name.replace(/\.bvh$/i, ''), sampleHz: 15 });
+      setGestureName(def.name);
+      setDuration(def.duration);
+      setKeyframes(defToDegs(def));
+      setLayer(def.layer ?? 'full');
+      setIkTargets([]);
+      setSelectedIkId(null);
+      clearSelection();
+      setScrubTime(0);
+      undoStackRef.current.clear();
+      markDirty();
+      flash(`BVH importado: ${def.keyframes.length} kf, ${def.duration.toFixed(1)}s`);
+    } catch (err) {
+      flash(`Falha no import: ${err instanceof Error ? err.message : 'unknown'}`);
+    } finally {
+      if (bvhFileRef.current) bvhFileRef.current.value = '';
+    }
+  }, [clearSelection, flash, markDirty]);
 
-  // Multi-keyframe time change: apply dt to each selected kf using original times
+  const handleSelectGesture = useCallback((name: string) => {
+    if (dirty) {
+      if (!window.confirm('Gesture tem alteracoes nao salvas. Descartar?')) return;
+    }
+    loadGesture(name);
+  }, [loadGesture, dirty]);
+
   const handleMultiKfTimeChange = useCallback((indices: number[], dt: number, origTimes: Map<number, number>) => {
     setKeyframes(prev => {
+      if (!preDragKfsRef.current) {
+        preDragKfsRef.current = [...prev];
+      }
       const next = [...prev];
-      const touchedObjs: KfDeg[] = [];
       for (const idx of indices) {
         const orig = origTimes.get(idx);
         if (orig === undefined) continue;
-        const newObj = { ...next[idx], time: Math.round(Math.max(0, Math.min(duration, orig + dt)) * 100) / 100 };
-        next[idx] = newObj;
-        touchedObjs.push(newObj);
+        next[idx] = { ...next[idx], time: Math.round(Math.max(0, Math.min(duration, orig + dt)) * 100) / 100 };
       }
-      const oldRefs = [...next]; // before sort for identity resolution
+      const oldRefs = [...next];
       next.sort((a, b) => a.time - b.time);
-      // Re-resolve selection by object identity (references preserved from above)
       const resolved = resolveSelectionAfterSort(oldRefs, next, selection, primaryIdx);
-      // Schedule selection update after this render
       setTimeout(() => {
         setSelection(resolved.selection);
         setPrimaryIdx(resolved.primaryIdx);
@@ -1239,14 +781,27 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     });
   }, [duration, selection, primaryIdx]);
 
-  // Timeline: select kf (single or modifier-toggle)
+  const handleMultiKfTimeCommit = useCallback((_indices: number[], _origTimes: Map<number, number>) => {
+    const preKfs = preDragKfsRef.current;
+    preDragKfsRef.current = null;
+    if (!preKfs) return;
+    const postKfs = [...keyframesRef.current];
+    if (preKfs.length === postKfs.length && preKfs.every((kf, i) => Math.abs(kf.time - postKfs[i].time) < 1e-4)) return;
+    const cmd: Command = {
+      label: `Mover kf`,
+      apply: () => setKeyframes(postKfs),
+      revert: () => setKeyframes(preKfs),
+    };
+    undoStackRef.current.record(cmd);
+    markDirty();
+  }, [markDirty]);
+
   const handleTimelineSelectKf = useCallback((idx: number, modifier: boolean) => {
     if (modifier) {
       setSelection(prev => {
         const next = new Set(prev);
         if (next.has(idx)) {
           next.delete(idx);
-          // If we removed the primary, keep primary as-is unless selection is empty
           setPrimaryIdx(p => next.size === 0 ? null : (p === idx ? (next.values().next().value ?? null) : p));
         } else {
           next.add(idx);
@@ -1260,7 +815,6 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     }
   }, []);
 
-  // Rubber-band select result
   const handleRubberBandSelect = useCallback((indices: number[], additive: boolean) => {
     if (additive) {
       setSelection(prev => {
@@ -1276,13 +830,86 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
   }, []);
 
   const handleAddTangents = useCallback(() => {
-    setKeyframes(prev => prev.map(kf => ({
+    const next = keyframes.map(kf => ({
       ...kf,
       tangents: kf.tangents ?? defaultTangents(),
-    })));
+    }));
+    recordKfChange('Adicionar tangentes', next);
     setFcurveOpen(true);
     flash('Tangentes adicionadas');
-  }, [flash]);
+  }, [keyframes, recordKfChange, flash]);
+
+  const handleAddIK = useCallback((chain: IKTarget['chain']) => {
+    if (!controller) return;
+    const vrm = controller.getVrm();
+    if (!vrm) return;
+    const anchorBone = chain === 'head'
+      ? 'head'
+      : chain === 'leftArm' ? 'leftHand' : 'rightHand';
+    const node = vrm.humanoid?.getRawBoneNode(anchorBone as any) as any;
+    if (!node) return;
+    node.updateWorldMatrix(true, false);
+    const wp = new Vector3();
+    node.getWorldPosition(wp);
+    if (chain === 'head') wp.z += 0.6;
+    const target: IKTarget = {
+      id: `ik-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`,
+      chain,
+      time: scrubTime,
+      fadeIn: 0.2,
+      hold: Math.max(0.2, duration - scrubTime - 0.4),
+      fadeOut: 0.2,
+      blend: chain === 'head' ? 0.8 : 0.9,
+      target: { x: wp.x, y: wp.y, z: wp.z },
+      space: 'world',
+    };
+    const prev = ikTargets;
+    const next = [...prev, target];
+    const cmd: Command = {
+      label: `IK ${chain} target`,
+      apply: () => setIkTargets(next),
+      revert: () => setIkTargets(prev),
+    };
+    undoStackRef.current.record(cmd);
+    setSelectedIkId(target.id);
+    markDirty();
+    flash(`IK ${chain} target adicionado`);
+  }, [controller, scrubTime, duration, ikTargets, markDirty, flash]);
+
+  const handleDeleteIK = useCallback((id: string) => {
+    const prev = ikTargets;
+    const next = prev.filter(t => t.id !== id);
+    const cmd: Command = {
+      label: 'Remover IK target',
+      apply: () => setIkTargets(next),
+      revert: () => setIkTargets(prev),
+    };
+    undoStackRef.current.record(cmd);
+    if (selectedIkId === id) setSelectedIkId(null);
+    markDirty();
+  }, [ikTargets, selectedIkId, markDirty]);
+
+  const handleMirror = useCallback(() => {
+    const sourceIdx = selection.size > 0
+      ? Array.from(selection)
+      : keyframes.map((_, i) => i);
+    const sourceKfs = sourceIdx.map(i => keyframes[i]);
+    const mirrored: KfDeg[] = [];
+    for (const kf of sourceKfs) {
+      const m = mirrorDeg(kf);
+      if (m) mirrored.push(m);
+    }
+    if (mirrored.length === 0) {
+      flash('Nenhum keyframe lateral para espelhar');
+      return;
+    }
+    const overlapKey = (k: KfDeg) => `${k.bone}@${k.time.toFixed(3)}`;
+    const mirroredKeys = new Set(mirrored.map(overlapKey));
+    const kept = keyframes.filter(k => !mirroredKeys.has(overlapKey(k)));
+    const merged = [...kept, ...mirrored].sort((a, b) => a.time - b.time);
+    recordKfChange(`Mirror ${mirrored.length} kf`, merged);
+    flash(`${mirrored.length} espelhado(s)`);
+  }, [keyframes, selection, recordKfChange, flash]);
 
   const handleUpdateTangent = useCallback((kfIdx: number, axis: 'x' | 'y' | 'z', handle: 'in' | 'out', dy: number) => {
     setKeyframes(prev => {
@@ -1296,33 +923,90 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       next[kfIdx] = kf;
       return next;
     });
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
-  // --- Bone click from sidebar list ---
   const handleBoneListClick = useCallback((bone: string) => {
     setSelectedBone(bone);
   }, []);
 
-  // --- Inspector manual delta editing ---
+  const inspectorDragStart = useRef<{ axis: 'x' | 'y' | 'z'; bone: string; start: number } | null>(null);
   const handleInspectorAxisChange = useCallback((axis: 'x' | 'y' | 'z', valDeg: number) => {
     if (!selectedBone || !controller) return;
+    if (inspectorDragStart.current?.bone !== selectedBone || inspectorDragStart.current?.axis !== axis) {
+      const cur = controller.getBoneDelta(selectedBone);
+      inspectorDragStart.current = { axis, bone: selectedBone, start: cur[axis] * RAD2DEG };
+    }
     const delta = controller.getBoneDelta(selectedBone);
     delta[axis] = valDeg * DEG2RAD;
     controller.setBoneDelta(selectedBone, delta);
     setInspectorDelta(prev => ({ ...prev, [axis]: valDeg }));
   }, [selectedBone, controller]);
 
-  // Derived: single-selected kf for inspector/F-curve
+  // --- Zoom / pan handlers ---
+  const handleZoom = useCallback((delta: number, centerT: number) => {
+    const factor = Math.exp(delta * 0.0015);
+    const newSpan = Math.max(0.1, Math.min(duration, (viewEnd - viewStart) / factor));
+    let start = centerT - (centerT - viewStart) * (newSpan / (viewEnd - viewStart));
+    let end = start + newSpan;
+    if (start < 0) { end -= start; start = 0; }
+    if (end > duration) { start -= end - duration; end = duration; }
+    setViewStart(Math.max(0, start));
+    setViewEnd(Math.min(duration, end));
+  }, [viewStart, viewEnd, duration]);
+
+  const handlePan = useCallback((dt: number) => {
+    const span = viewEnd - viewStart;
+    let start = viewStart + dt;
+    let end = viewEnd + dt;
+    if (start < 0) { start = 0; end = span; }
+    if (end > duration) { end = duration; start = duration - span; }
+    setViewStart(start);
+    setViewEnd(end);
+  }, [viewStart, viewEnd, duration]);
+
+  const handleZoomReset = useCallback(() => {
+    setViewStart(0);
+    setViewEnd(duration);
+  }, [duration]);
+
+  const zoomPct = Math.round((duration / Math.max(viewEnd - viewStart, 0.001)) * 100);
+
+  const canUndo = undoStackRef.current.canUndo();
+  const canRedo = undoStackRef.current.canRedo();
+
   const singleSelectedKf = selection.size === 1 && primaryIdx !== null ? keyframes[primaryIdx] : null;
+
+  const fcurveBone = useMemo(() => {
+    if (singleSelectedKf) return singleSelectedKf.bone;
+    if (selectedBone && keyframes.some(k => k.bone === selectedBone && k.tangents)) return selectedBone;
+    const first = keyframes.find(k => k.tangents);
+    return first?.bone ?? null;
+  }, [singleSelectedKf, selectedBone, keyframes]);
+  const anyTangents = useMemo(() => keyframes.some(k => k.tangents), [keyframes]);
+
+  const statusCls = playing
+    ? 'anim-lab__status anim-lab__status--playing'
+    : dirty
+      ? 'anim-lab__status anim-lab__status--dirty'
+      : 'anim-lab__status anim-lab__status--saved';
+  const statusLabel = playing ? 'playing' : dirty ? 'unsaved' : 'saved';
+
+  const orderedBones = PICKABLE_BONES;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content anim-lab" onClick={e => e.stopPropagation()}>
+
         {/* Header */}
         <div className="anim-lab__header">
           <div className="anim-lab__header-left">
-            <h2 className="anim-lab__title">Animation Lab</h2>
-            <select className="gesture-editor__select"
+            <h2 className="anim-lab__title">
+              <span className="anim-lab__title-icon"><FlaskIcon size={14} /></span>
+              Animation Lab
+            </h2>
+            <span className="anim-lab__divider" />
+            <select className="anim-lab__gesture-select"
               value={gestureName}
               onChange={e => handleSelectGesture(e.target.value)}>
               <optgroup label="Library">
@@ -1334,45 +1018,154 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
                 </optgroup>
               )}
             </select>
-            <button type="button" className="anim-lab__btn" onClick={handleNewGesture}>Nova</button>
-            <span className="gesture-editor__label">
-              Dur: {duration.toFixed(1)}s
-            </span>
-            <input type="range" min="0.3" max="5.0" step="0.1"
-              value={duration}
-              onChange={e => setDuration(parseFloat(e.target.value))}
-              className="anim-lab__dur-slider" />
+            <button type="button" className="anim-lab__btn anim-lab__btn--sm" onClick={handleNewGesture}>
+              <PlusIcon size={12} /> Nova
+            </button>
+            <button type="button" className="anim-lab__btn anim-lab__btn--sm"
+              onClick={() => bvhFileRef.current?.click()}
+              title="Importar .bvh (Mixamo / motion capture)">
+              BVH
+            </button>
+            <input ref={bvhFileRef} type="file" accept=".bvh"
+              style={{ display: 'none' }} onChange={handleBvhFile} />
+            <span className="anim-lab__divider" />
+            <div className="anim-lab__dur-group">
+              <span className="anim-lab__dur-label">Dur</span>
+              <input type="range" min="0.3" max="5.0" step="0.1"
+                value={duration}
+                onChange={e => { setDuration(parseFloat(e.target.value)); markDirty(); }}
+                className="anim-lab__dur-slider" />
+              <span className="anim-lab__dur-val">{duration.toFixed(1)}s</span>
+            </div>
+            <div className="anim-lab__dur-group" title="Layer: mascara de bones afetados (Phase 2)">
+              <span className="anim-lab__dur-label">Layer</span>
+              <select value={layer}
+                onChange={e => { setLayer(e.target.value as GestureLayer); markDirty(); }}
+                className="anim-lab__gesture-select"
+                style={{ minWidth: 72, padding: '2px 22px 2px 8px', fontSize: 10 }}>
+                <option value="full">full</option>
+                <option value="upper">upper</option>
+                <option value="lower">lower</option>
+              </select>
+            </div>
+            <span className={statusCls}>{statusLabel}</span>
           </div>
+
           <div className="anim-lab__header-right">
             <button type="button"
+              className="anim-lab__btn anim-lab__btn--sm"
+              disabled={!canUndo}
+              onClick={() => { const c = undoStackRef.current.undo(); if (c) flash(`Undo: ${c.label}`); }}
+              title="Undo (Ctrl+Z)">
+              ↶
+            </button>
+            <button type="button"
+              className="anim-lab__btn anim-lab__btn--sm"
+              disabled={!canRedo}
+              onClick={() => { const c = undoStackRef.current.redo(); if (c) flash(`Redo: ${c.label}`); }}
+              title="Redo (Ctrl+Shift+Z)">
+              ↷
+            </button>
+            <span className="anim-lab__divider" />
+            <button type="button"
               className={`anim-lab__btn${playing ? ' anim-lab__btn--active' : ''}`}
-              onClick={handlePlay} disabled={playing}>
-              Play
-            </button>
-            <button type="button" className="anim-lab__btn" onClick={() => void handleSave()}>
-              Salvar
-            </button>
-            <button type="button" className="anim-lab__btn" onClick={() => void handleCopyTs()}>
-              TS
+              onClick={handlePlayPause} title="Play / Pause (Space)">
+              {playing ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
+              {playing ? 'Pause' : 'Play'}
             </button>
             <button type="button"
               className={`anim-lab__btn${onionSkinOn ? ' anim-lab__btn--active' : ''}`}
-              onClick={() => setOnionSkinOn(v => !v)}>
+              onClick={() => setOnionSkinOn(v => !v)}
+              title="Onion skin: silhuetas do kf anterior e proximo">
               Onion
+            </button>
+            <button type="button"
+              className={`anim-lab__btn${skeletonOn ? ' anim-lab__btn--active' : ''}`}
+              onClick={() => setSkeletonOn(v => !v)}
+              title="Skeleton overlay">
+              Skel
+            </button>
+            <span className="anim-lab__divider" />
+            <button type="button" className="anim-lab__btn" onClick={() => void handleCopyTs()} title="Copiar TS">
+              TS
+            </button>
+            <button type="button" className="anim-lab__btn anim-lab__btn--primary" onClick={() => void handleSave()} title="Salvar (Ctrl+S)">
+              Salvar
+            </button>
+            <button type="button"
+              className={`anim-lab__btn anim-lab__btn--icon${cheatOpen ? ' anim-lab__btn--active' : ''}`}
+              onClick={() => setCheatOpen(v => !v)}
+              title="Atalhos (?)">
+              ?
             </button>
             <button type="button"
               className="anim-lab__close"
               aria-label="Fechar"
               onClick={onClose}>
-              &times;
+              <XIcon size={14} />
             </button>
           </div>
         </div>
 
-        {/* Body: 3D + sidebar */}
+        {/* Body: 3-col layout */}
         <div className="anim-lab__body">
+
+          {/* Left panel: bone outliner + library */}
+          <aside className="anim-lab__panel anim-lab__panel--left">
+            <div className="anim-lab__panel-header">
+              Bones
+              <span className="anim-lab__panel-header-count">{orderedBones.length}</span>
+            </div>
+            <div className="anim-lab__panel-body">
+              <div className="anim-lab__outliner">
+                {orderedBones.map(bone => {
+                  const hasKf = keyframes.some(kf => kf.bone === bone);
+                  const sel = selectedBone === bone;
+                  const indent = (BONE_INDENT[bone] ?? 0) * 10;
+                  return (
+                    <button key={bone} type="button"
+                      className={`anim-lab__outliner-item${sel ? ' anim-lab__outliner-item--sel' : ''}`}
+                      onClick={() => handleBoneListClick(bone)}>
+                      <span className="anim-lab__outliner-name">
+                        <span className="anim-lab__outliner-indent" style={{ '--indent': `${indent}px` } as React.CSSProperties} />
+                        <span className="anim-lab__outliner-branch">{indent > 0 ? '└' : ''}</span>
+                        {bone}
+                      </span>
+                      {hasKf && <span className="anim-lab__outliner-dot" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="anim-lab__library">
+                <span className="anim-lab__library-group">Library</span>
+                {libraryNames.map(n => (
+                  <button key={n} type="button"
+                    className={`anim-lab__library-item${n === gestureName ? ' anim-lab__library-item--active' : ''}`}
+                    onClick={() => handleSelectGesture(n)}>
+                    <span>{n}</span>
+                    <span className="anim-lab__library-badge">lib</span>
+                  </button>
+                ))}
+                {discoNames.length > 0 && (
+                  <>
+                    <span className="anim-lab__library-group" style={{ marginTop: 6 }}>Salvas</span>
+                    {discoNames.map(n => (
+                      <button key={n} type="button"
+                        className={`anim-lab__library-item${n === gestureName ? ' anim-lab__library-item--active' : ''}`}
+                        onClick={() => handleSelectGesture(n)}>
+                        <span>{n}</span>
+                        <span className="anim-lab__library-badge">disk</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          {/* Center: viewport */}
           <div className="anim-lab__viewport" ref={previewRef}>
-            {/* Gizmo mode buttons overlaid bottom-left */}
             <div className="anim-lab__gizmo-bar">
               {(['rotate', 'translate', 'scale'] as const).map(mode => (
                 <button key={mode} type="button"
@@ -1382,92 +1175,135 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
                 </button>
               ))}
             </div>
+
+            {hoverInfo && (
+              <div className="anim-lab__bone-hover"
+                style={{ left: hoverInfo.x + 12, top: hoverInfo.y - 40 }}>
+                <span className="anim-lab__bone-hover-name">{hoverInfo.bone}</span>
+                <span className="anim-lab__bone-hover-delta">
+                  {hoverInfo.dx.toFixed(1)}° / {hoverInfo.dy.toFixed(1)}° / {hoverInfo.dz.toFixed(1)}°
+                </span>
+              </div>
+            )}
+
+            {cheatOpen && <CheatSheet onClose={() => setCheatOpen(false)} />}
           </div>
 
-          <div className="anim-lab__sidebar">
-            {/* Bone list */}
-            <div className="anim-lab__bone-list">
-              <h3 className="anim-lab__section-title">Bones</h3>
-              <div className="anim-lab__bone-items">
-                {PICKABLE_BONES.map(bone => {
-                  const hasKf = keyframes.some(kf => kf.bone === bone);
-                  return (
-                    <button key={bone} type="button"
-                      className={`anim-lab__bone-item${selectedBone === bone ? ' anim-lab__bone-item--sel' : ''}${hasKf ? ' anim-lab__bone-item--kf' : ''}`}
-                      onClick={() => handleBoneListClick(bone)}>
-                      {bone}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Inspector */}
-            <div className="anim-lab__inspector">
-              {selection.size > 1 ? (
-                <>
-                  <h3 className="anim-lab__section-title">
-                    {selection.size} keyframes selecionados
-                  </h3>
-                  <button type="button" className="anim-lab__btn anim-lab__btn--sm"
-                    onClick={clearSelection}>
-                    Limpar selecao
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 className="anim-lab__section-title">
-                    {selectedBone ? selectedBone : 'Selecione um bone'}
-                  </h3>
-                  {selectedBone && (
-                    <>
-                      {(['x', 'y', 'z'] as const).map(axis => (
-                        <div key={axis} className="anim-lab__insp-row">
-                          <span className="anim-lab__insp-axis"
-                            style={{ color: axis === 'x' ? '#ef4444' : axis === 'y' ? '#22c55e' : '#3b82f6' }}>
-                            {axis.toUpperCase()}
-                          </span>
-                          <input type="range" min="-180" max="180" step="0.5"
-                            value={inspectorDelta[axis]}
-                            onChange={e => handleInspectorAxisChange(axis, parseFloat(e.target.value))}
-                            className="anim-lab__insp-slider" />
-                          <span className="anim-lab__insp-val">
-                            {inspectorDelta[axis].toFixed(1)}
-                          </span>
-                        </div>
-                      ))}
-                      <button type="button" className="anim-lab__btn anim-lab__btn--sm"
-                        onClick={handleResetPose}>
-                        Reset pose
-                      </button>
-                    </>
-                  )}
-                </>
+          {/* Right panel: inspector */}
+          <aside className="anim-lab__panel anim-lab__panel--right">
+            <div className="anim-lab__panel-header">
+              Inspector
+              {selection.size > 1 && (
+                <span className="anim-lab__panel-header-count">{selection.size} kf</span>
               )}
             </div>
-          </div>
+            <div className="anim-lab__panel-body">
+              <div className="anim-lab__inspector">
+                {(selectedBone === 'head' || selectedBone === 'leftHand' || selectedBone === 'rightHand' || ikTargets.length > 0) && (
+                  <IKPanel
+                    targets={ikTargets}
+                    selectedId={selectedIkId}
+                    duration={duration}
+                    scrubTime={scrubTime}
+                    onSelect={setSelectedIkId}
+                    onAdd={handleAddIK}
+                    onUpdate={handleUpdateIK}
+                    onDelete={handleDeleteIK}
+                    onJumpTo={t => setScrubTime(t)}
+                  />
+                )}
+                {selection.size > 1 ? (
+                  <div className="anim-lab__card">
+                    <div className="anim-lab__card-head">
+                      <span className="anim-lab__card-title">{selection.size} keyframes</span>
+                      <span className="anim-lab__card-meta">selecionados</span>
+                    </div>
+                    <div className="anim-lab__card-actions">
+                      <button type="button" className="anim-lab__btn anim-lab__btn--sm anim-lab__btn--danger"
+                        onClick={handleDeleteSelection}>
+                        <TrashIcon size={11} /> Apagar
+                      </button>
+                      <button type="button" className="anim-lab__btn anim-lab__btn--sm"
+                        onClick={clearSelection}>
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+                ) : !selectedBone ? (
+                  <div className="anim-lab__inspector-empty">
+                    Selecione um bone na cena 3D ou no outliner para editar rotacao.
+                  </div>
+                ) : (
+                  <div className="anim-lab__card">
+                    <div className="anim-lab__card-head">
+                      <span className="anim-lab__card-title">{selectedBone}</span>
+                      <span className="anim-lab__card-meta">delta</span>
+                    </div>
+                    {(['x', 'y', 'z'] as const).map(axis => (
+                      <div key={axis} className="anim-lab__insp-row">
+                        <span className={`anim-lab__insp-axis anim-lab__insp-axis--${axis}`}>
+                          {axis.toUpperCase()}
+                        </span>
+                        <input type="range" min="-180" max="180" step="0.5"
+                          value={inspectorDelta[axis]}
+                          onChange={e => handleInspectorAxisChange(axis, parseFloat(e.target.value))}
+                          className={`anim-lab__insp-slider anim-lab__insp-slider--${axis}`} />
+                        <span className="anim-lab__insp-val">
+                          {inspectorDelta[axis].toFixed(1)}°
+                        </span>
+                      </div>
+                    ))}
+                    <div className="anim-lab__card-actions">
+                      <button type="button" className="anim-lab__btn anim-lab__btn--sm"
+                        onClick={handleResetPose}>
+                        <RefreshIcon size={11} /> Reset pose
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
 
         {/* Timeline */}
         <div className="anim-lab__timeline-area">
           <div className="anim-lab__timeline-actions">
-            <button type="button" className="anim-lab__btn" onClick={handleInsertKeyframe}>
-              Inserir keyframe (I)
+            <button type="button" className="anim-lab__btn anim-lab__btn--sm" onClick={handleInsertKeyframe}>
+              <PlusIcon size={11} /> Keyframe (I)
             </button>
-            <button type="button" className="anim-lab__btn"
+            <button type="button" className="anim-lab__btn anim-lab__btn--sm anim-lab__btn--danger"
               disabled={selection.size === 0} onClick={handleDeleteSelection}>
-              {selection.size > 1 ? 'Apagar selecionados' : 'Apagar selecionado'}
+              <TrashIcon size={11} />
+              {selection.size > 1 ? `Apagar (${selection.size})` : 'Apagar'}
             </button>
-            <button type="button" className="anim-lab__btn" onClick={handleAddTangents}>
-              + F-Curves
+            <span className="anim-lab__divider" />
+            <button type="button" className="anim-lab__btn anim-lab__btn--sm"
+              onClick={handleMirror}
+              title="Mirror L<->R (usa selecao, ou todos se nada selecionado)">
+              Mirror
             </button>
-            {keyframes.some(kf => kf.tangents) && (
+            <span className="anim-lab__divider" />
+            {!anyTangents ? (
+              <button type="button" className="anim-lab__btn anim-lab__btn--sm" onClick={handleAddTangents}>
+                + F-Curves
+              </button>
+            ) : (
               <button type="button"
-                className={`anim-lab__btn${fcurveOpen ? ' anim-lab__btn--active' : ''}`}
+                className={`anim-lab__btn anim-lab__btn--sm${fcurveOpen ? ' anim-lab__btn--active' : ''}`}
                 onClick={() => setFcurveOpen(v => !v)}>
-                {fcurveOpen ? 'Fechar F-Curves' : 'F-Curves'}
+                {fcurveOpen ? 'Fechar curves' : 'Abrir curves'}
               </button>
             )}
+
+            <div className="anim-lab__timeline-spacer" />
+
+            <div className="anim-lab__timeline-zoom" title="Zoom (Ctrl+wheel na timeline)">
+              <button type="button" onClick={() => handleZoom(-120, (viewStart + viewEnd) / 2)}>-</button>
+              <span className="anim-lab__timeline-zoom-val">{zoomPct}%</span>
+              <button type="button" onClick={() => handleZoom(120, (viewStart + viewEnd) / 2)}>+</button>
+              <button type="button" onClick={handleZoomReset} title="Reset zoom">x</button>
+            </div>
           </div>
           <AnimationTimeline
             duration={duration}
@@ -1475,19 +1311,29 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
             selection={selection}
             primaryIdx={primaryIdx}
             scrubTime={scrubTime}
+            viewStart={viewStart}
+            viewEnd={viewEnd}
+            tickStep={tickStep}
+            snapEnabled
             onSelectKf={handleTimelineSelectKf}
             onClearSelection={clearSelection}
             onMultiKfTimeChange={handleMultiKfTimeChange}
+            onMultiKfTimeCommit={handleMultiKfTimeCommit}
             onScrubChange={setScrubTime}
             onRubberBandSelect={handleRubberBandSelect}
+            onZoom={handleZoom}
+            onPan={handlePan}
           />
         </div>
 
-        {/* F-Curve editor (Phase 3) -- only when single kf selected */}
-        {fcurveOpen && selectedBone && singleSelectedKf && (
+        {/* F-Curve editor */}
+        {fcurveOpen && anyTangents && fcurveBone && (
           <div className="anim-lab__fcurve-area">
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              Curves -- <strong style={{ color: 'var(--accent-hi)' }}>{fcurveBone}</strong>
+            </div>
             <FCurveEditor
-              bone={selectedBone}
+              bone={fcurveBone}
               keyframes={keyframes}
               duration={duration}
               onUpdateTangent={handleUpdateTangent}
@@ -1495,7 +1341,6 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
           </div>
         )}
 
-        {/* Feedback toast */}
         {feedback && <div className="anim-lab__feedback">{feedback}</div>}
       </div>
     </div>

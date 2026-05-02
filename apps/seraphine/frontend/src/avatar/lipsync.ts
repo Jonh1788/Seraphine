@@ -1,4 +1,5 @@
 import type { VRM } from "@pixiv/three-vrm";
+import { getSharedAudioContext } from "../audio/sharedContext";
 
 export interface LipsyncOptions {
   thresholds?: { closed: number; aa: number; ih: number };
@@ -10,9 +11,11 @@ export interface VisemeWeights {
   aa: number;
   ih: number;
   ou: number;
-  ee: number;
-  oh: number;
   closed: number;
+  /** Optional — only set in blend regions; absent in closed / fully-ou edge cases. */
+  ee?: number;
+  /** Optional — only set in blend regions; absent in closed / fully-ou edge cases. */
+  oh?: number;
 }
 
 export const DEFAULT_THRESHOLDS = { closed: 0.05, aa: 0.2, ih: 0.4 } as const;
@@ -25,59 +28,47 @@ function clamp01(v: number): number {
   return v;
 }
 
-// Viseme cycle: rotate through mouth shapes to simulate speech variety.
-// Each entry defines relative weights — scaled by current RMS amplitude.
-const VISEME_CYCLE = [
-  { aa: 1.0, ih: 0.0, ou: 0.0, ee: 0.0, oh: 0.0 },
-  { aa: 0.2, ih: 0.7, ou: 0.0, ee: 0.1, oh: 0.0 },
-  { aa: 0.0, ih: 0.0, ou: 0.6, ee: 0.0, oh: 0.4 },
-  { aa: 0.0, ih: 0.2, ou: 0.0, ee: 0.8, oh: 0.0 },
-  { aa: 0.6, ih: 0.0, ou: 0.0, ee: 0.0, oh: 0.4 },
-  { aa: 0.0, ih: 0.5, ou: 0.3, ee: 0.0, oh: 0.2 },
-  { aa: 0.3, ih: 0.0, ou: 0.0, ee: 0.5, oh: 0.2 },
-  { aa: 0.0, ih: 0.0, ou: 0.7, ee: 0.3, oh: 0.0 },
-];
-const CYCLE_SPEED = 8; // shapes per second — natural speech cadence
-
 /**
  * Map an RMS envelope value to viseme weights.
- * Uses a time-based cycle to rotate through different mouth shapes,
- * giving variety instead of the same shape for the same volume level.
- * All 5 visemes (aa, ih, ou, ee, oh) are used.
+ *
+ * Deterministic piecewise interpolation across three thresholds:
+ *   - r < closed       → fully closed (closed=1)
+ *   - closed ≤ r < aa  → blend closed → aa
+ *   - aa     ≤ r < ih  → blend aa → ih
+ *   - r ≥ ih           → fully `ou` (closed=0)
+ *
+ * `aa + ih + ou + closed` always equals 1. `ee` and `oh` are not driven
+ * by amplitude alone — they are set by phoneme-aware paths if any, and
+ * are absent from this function's output (callers should treat missing
+ * keys as 0).
  */
 export function envelopeToVisemes(
   rms: number,
   thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ): VisemeWeights {
   const r = Math.max(0, rms);
-  const { closed: closedTh } = thresholds;
+  const { closed: closedTh, aa: aaTh, ih: ihTh } = thresholds;
 
   if (r < closedTh) {
-    return { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, closed: 1 };
+    return { aa: 0, ih: 0, ou: 0, closed: 1 };
   }
 
-  // Amplitude factor: how open the mouth should be (0-1)
-  const amplitude = clamp01((r - closedTh) / (1 - closedTh));
+  if (r < aaTh) {
+    // Blend closed → aa across [closedTh, aaTh).
+    const span = aaTh - closedTh;
+    const t = span > 0 ? clamp01((r - closedTh) / span) : 1;
+    return { aa: t, ih: 0, ou: 0, closed: 1 - t };
+  }
 
-  // Pick viseme shape from cycle based on time
-  const now = performance.now() / 1000;
-  const cyclePos = (now * CYCLE_SPEED) % VISEME_CYCLE.length;
-  const idx = Math.floor(cyclePos);
-  const frac = cyclePos - idx;
-  const curr = VISEME_CYCLE[idx];
-  const next = VISEME_CYCLE[(idx + 1) % VISEME_CYCLE.length];
+  if (r < ihTh) {
+    // Blend aa → ih across [aaTh, ihTh).
+    const span = ihTh - aaTh;
+    const t = span > 0 ? clamp01((r - aaTh) / span) : 1;
+    return { aa: 1 - t, ih: t, ou: 0, closed: 0 };
+  }
 
-  // Lerp between current and next shape for smooth transitions
-  const aaW = (curr.aa * (1 - frac) + next.aa * frac) * amplitude;
-  const ihW = (curr.ih * (1 - frac) + next.ih * frac) * amplitude;
-  const ouW = (curr.ou * (1 - frac) + next.ou * frac) * amplitude;
-  const eeW = (curr.ee * (1 - frac) + next.ee * frac) * amplitude;
-  const ohW = (curr.oh * (1 - frac) + next.oh * frac) * amplitude;
-
-  const sum = aaW + ihW + ouW + eeW + ohW;
-  const closedW = clamp01(1 - sum);
-
-  return { aa: aaW, ih: ihW, ou: ouW, ee: eeW, oh: ohW, closed: closedW };
+  // r >= ihTh: fully ou.
+  return { aa: 0, ih: 0, ou: 1, closed: 0 };
 }
 
 function u8ToFloat32(chunk: Uint8Array): Float32Array {
@@ -106,11 +97,13 @@ export async function playAudioWithLipSync(
   const thresholds = opts.thresholds ?? { ...DEFAULT_THRESHOLDS };
   const alpha = opts.alpha ?? 0.3;
 
-  const AudioCtxCtor: typeof AudioContext =
-    typeof window !== "undefined" && "AudioContext" in window
-      ? window.AudioContext
-      : (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext;
-  const audioCtx = new AudioCtxCtor({ sampleRate: 24000 });
+  // Share the global AudioContext to avoid macOS HAL contention from
+  // spinning up a second context (CoreAudio deadlocks when multiple
+  // contexts compete for the hardware). The shared context's sampleRate
+  // may not be 24 kHz — that's fine; AudioBufferSourceNode resamples on
+  // playback. We still build buffers at the input rate (24 kHz) so the
+  // PCM is decoded correctly.
+  const audioCtx = getSharedAudioContext();
 
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 512;
@@ -183,8 +176,10 @@ export async function playAudioWithLipSync(
   vrm?.expressionManager?.setValue("ih", 0);
   vrm?.expressionManager?.setValue("ou", 0);
 
+  // Disconnect our analyser so it stops pulling samples; do NOT close
+  // the AudioContext — it's the shared singleton owned by sharedContext.
   try {
-    await audioCtx.close();
+    analyser.disconnect();
   } catch {
     // ignore
   }

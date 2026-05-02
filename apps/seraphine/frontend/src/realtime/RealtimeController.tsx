@@ -151,6 +151,14 @@ export function RealtimeController({
   thinkRef.current = think;
 
   const vadRef = useRef<RealtimeVAD | null>(null);
+  /**
+   * Promise que resolve quando o ultimo VAD parou completamente. Usado
+   * pra serializar open/close rapidos do realtime — sem isso, o stop()
+   * do VAD antigo (que precisa awaitar session.release() do ORT) ainda
+   * ta em voo quando o create() do novo roda, e o WASM global do ORT
+   * colide com "Session already started" / "Out of bounds memory access".
+   */
+  const vadStopPromiseRef = useRef<Promise<void>>(Promise.resolve());
   const vpioRef = useRef<TauriVpioSession | null>(null);
   const audioStartedRef = useRef<boolean>(false);
   /**
@@ -265,8 +273,14 @@ export function RealtimeController({
     if (!active) {
       // Cleanup path
       if (vadRef.current) {
-        void vadRef.current.stop().catch(() => { /* ignore */ });
+        const prev = vadRef.current;
         vadRef.current = null;
+        // Tracka o promise do stop pra que o proximo boot espere ele
+        // terminar antes de criar uma nova session ORT.
+        vadStopPromiseRef.current = vadStopPromiseRef.current
+          .catch(() => { /* swallow prev */ })
+          .then(() => prev.stop())
+          .catch(() => { /* swallow stop */ });
       }
       // If we were mid-interaction, tell the backend to drop the turn.
       if (stateRef.current === 'botSpeaking' || stateRef.current === 'userSpeaking' || stateRef.current === 'processing') {
@@ -297,11 +311,31 @@ export function RealtimeController({
 
     (async () => {
       try {
-        // On macOS Tauri, start VPIO first so Apple's AEC owns the mic
-        // AND the speaker output path. Then hand VAD its mic subscription
-        // and point playback at the VPIO sink.
+        // VPIO é o Apple VoiceProcessingIO — AEC + NS + AGC nativo.
+        // Quando funciona, elimina o echo speaker→mic e o problema do
+        // self-interrupt some por completo.
+        //
+        // Falhava antes com AudioUnitInitialize: -10875 quando o bundle
+        // não tinha entitlement `com.apple.security.device.audio-input`:
+        // o TCC bloqueava o HW audio access e o init do audio unit
+        // retornava kAudioUnitErr_FailedInitialization. Com entitlement
+        // agora no lugar (entitlements.plist), VPIO deve inicializar.
+        //
+        // Se ainda falhar (pode haver um bug separado em voice_io.rs
+        // sobre kAudioOutputUnitProperty_CurrentDevice no macOS), o
+        // try/catch cai no cpal e o hard-mute-durante-TTS abaixo cobre
+        // o self-interrupt. Para forçar cpal pra debug:
+        //   localStorage.setItem('seraphine.realtime.disableVpio', 'true')
+        const vpioDisabled =
+          (() => {
+            try {
+              return localStorage.getItem('seraphine.realtime.disableVpio') === 'true';
+            } catch {
+              return false;
+            }
+          })();
         let externalMic: TauriVpioSession | undefined;
-        if (isTauriVpioAvailable()) {
+        if (isTauriVpioAvailable() && !vpioDisabled) {
           const session = new TauriVpioSession();
           try {
             await session.start();
@@ -314,13 +348,21 @@ export function RealtimeController({
             vpioRef.current = session;
             externalMic = session;
             playbackRef.current?.setVpioSink?.(session);
+            console.log('[realtime] VPIO sink attached to PCMPlayback —', playbackRef.current ? 'playback instance exists' : 'WARNING: playbackRef is null');
           } catch (err) {
-            // VPIO is macOS-only; on Linux/Windows Tauri the command
-            // returns an error. Fall through to cpal-backed mic +
-            // Web Audio playback.
+            // VPIO falhou (macOS init quirk ou Linux/Windows sem suporte).
+            // Fall through para cpal + Web Audio.
             console.warn('[realtime] VPIO unavailable, using cpal+WebAudio:', err);
           }
         }
+
+        // Garante que qualquer VAD anterior terminou seu stop() (e, por
+        // consequencia, session.release() do ORT) antes de criarmos uma
+        // nova session. Sem isso, open+close rapidos do realtime abrem
+        // uma nova session enquanto a antiga ainda ta sendo liberada,
+        // e o WASM global do ORT corrompe.
+        await vadStopPromiseRef.current.catch(() => { /* ignore */ });
+        if (cancelled) return;
 
         const vad = await createRealtimeVAD({
           onSpeechStart: () => {
@@ -339,14 +381,15 @@ export function RealtimeController({
               }
               const micRms = vadRef.current?.getMicRms() ?? 0;
               const playbackRms = botRmsRef.current;
+              const threshold = Math.max(playbackRms * MIC_OVER_PLAYBACK_RATIO, MIN_MIC_RMS);
               if (!shouldAllowBargeIn(micRms, playbackRms)) {
-                console.debug(
-                  `[realtime] barge-in rejected: mic=${micRms.toFixed(4)} playback=${playbackRms.toFixed(4)} (ratio=${MIC_OVER_PLAYBACK_RATIO} floor=${MIN_MIC_RMS})`,
+                console.log(
+                  `[realtime] barge-in REJECTED: micRms=${micRms.toFixed(4)} playbackRms=${playbackRms.toFixed(4)} threshold=${threshold.toFixed(4)} (ratio=${MIC_OVER_PLAYBACK_RATIO} floor=${MIN_MIC_RMS})`,
                 );
                 return;
               }
               console.log(
-                `[realtime] barge-in accepted: mic=${micRms.toFixed(4)} playback=${playbackRms.toFixed(4)}`,
+                `[realtime] barge-in ACCEPTED: micRms=${micRms.toFixed(4)} playbackRms=${playbackRms.toFixed(4)} threshold=${threshold.toFixed(4)}`,
               );
               playbackRef.current?.stop();
               sendInterrupt();
@@ -388,7 +431,13 @@ export function RealtimeController({
           },
         }, externalMic);
         if (cancelled) {
-          void vad.stop();
+          // Tracka esse stop tambem — se o usuario toggle rapido, o proximo
+          // boot precisa esperar essa release() terminar antes de criar
+          // uma nova ORT session.
+          vadStopPromiseRef.current = vadStopPromiseRef.current
+            .catch(() => { /* swallow */ })
+            .then(() => vad.stop())
+            .catch(() => { /* swallow */ });
           return;
         }
         vadRef.current = vad;
@@ -426,44 +475,87 @@ export function RealtimeController({
   }, [active]);
 
   // --- Subscribe to WS messages to drive processing -> botSpeaking -> listening
+  // DEBUG: per-turn binary chunk counter. Declared outside so it persists
+  // across renders (it's reset on tts_start).
+  const turnChunkCountRef = useRef<number>(0);
+  const turnChunkBytesRef = useRef<number>(0);
   useEffect(() => {
     if (!ws) return;
     const off = ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
       if (!active) return;
       if (msg instanceof ArrayBuffer) {
-        // First TTS binary chunk is a signal that playback has begun,
-        // but we already react to tts_start below. Nothing else to do.
+        // DEBUG: count every binary chunk per turn.
+        turnChunkCountRef.current += 1;
+        turnChunkBytesRef.current += msg.byteLength;
+        console.log(
+          '[realtime][ws] binary chunk #%d (%d bytes, turn total: %d bytes) @ %s',
+          turnChunkCountRef.current,
+          msg.byteLength,
+          turnChunkBytesRef.current,
+          new Date().toISOString(),
+        );
         return;
       }
       const type = (msg as { type?: string }).type;
       if (type === 'tts_start') {
-        // No more unconditional mic suspend here. The mic stays live
-        // during botSpeaking so the user CAN interrupt by speaking;
-        // echo from the laptop speakers is rejected by the software
-        // AEC gate in onSpeechStart (see ./gating.ts). The manual
-        // mute toggle is the only thing that hard-mutes the mic now.
+        // DEBUG: reset per-turn counters.
+        turnChunkCountRef.current = 0;
+        turnChunkBytesRef.current = 0;
+        console.log('[realtime][ws] tts_start received @ %s — state=%s', new Date().toISOString(), stateRef.current);
+        // Hard-mute o mic durante TTS APENAS no fallback cpal. Com VPIO
+        // rodando (Apple AEC + NS + AGC), o echo speaker→mic é cancelado
+        // no nível do audio unit e o mic pode ficar vivo pra barge-in
+        // real. Sem VPIO, o coupling acústico de laptop MacBook é forte
+        // demais pro software gate em gating.ts (ratio 1.5×) — a
+        // Seraphine captura a própria fala e se auto-interrompe.
+        if (!vpioRef.current) {
+          vadRef.current?.suspendForPlayback();
+        }
         if (stateRef.current === 'processing' || stateRef.current === 'listening') {
           setState('botSpeaking');
         }
       } else if (type === 'tts_end') {
         // Per-sentence tts_end — no-op. State transitions happen on
         // turn_end (after the full utterance drains) or on barge-in.
+        console.log(
+          '[realtime][ws] tts_end received @ %s — state=%s, chunks_this_turn=%d (%d bytes)',
+          new Date().toISOString(), stateRef.current,
+          turnChunkCountRef.current, turnChunkBytesRef.current,
+        );
       } else if (type === 'turn_end') {
+        console.log(
+          '[realtime][ws] turn_end received @ %s — state=%s, total_chunks=%d (%d bytes)',
+          new Date().toISOString(), stateRef.current,
+          turnChunkCountRef.current, turnChunkBytesRef.current,
+        );
         // Wait for the player to actually drain the last queued
         // segment before transitioning back to listening, so the
         // waveform stays on the 'bot' channel until audio truly stops.
         void (async () => {
+          console.log('[realtime] turn_end -> calling playback.flush()');
           try {
             await playbackRef.current?.flush();
           } catch {
             /* ignore */
           }
+          console.log('[realtime] turn_end -> flush() returned, state=%s', stateRef.current);
           if (stateRef.current === 'botSpeaking' || stateRef.current === 'processing') {
             setState('listening');
           }
+          // Só destrava o mic se a gente mesmo suspendeu (modo cpal).
+          // Com VPIO, nunca chamamos suspend no tts_start — então não
+          // precisa chamar resume aqui. Respeita manualMute: se o
+          // usuário botou mudo, não religa sozinho.
+          if (!vpioRef.current && !manualMuteRef.current) {
+            vadRef.current?.resumeAfterPlayback();
+          }
         })();
       } else if (type === 'error') {
+        console.log('[realtime][ws] error received @ %s — state=%s', new Date().toISOString(), stateRef.current);
         if (stateRef.current !== 'idle') setState('listening');
+        if (!vpioRef.current && !manualMuteRef.current) {
+          vadRef.current?.resumeAfterPlayback();
+        }
       }
     });
     return () => { off(); };
@@ -485,32 +577,49 @@ export function RealtimeController({
   // compare against the mic. We sample inside a RAF loop (~60Hz) which
   // is plenty — Silero fires at most every 32ms and we read from
   // botRmsRef.current synchronously when it does.
+  //
+  // Peak-hold com decay: o RMS digital da playback cai pra 0 imediato
+  // quando a TTS pausa entre frases, MAS o rabo acústico (eco da fala
+  // dela nas paredes + latência do alto-falante) fica na sala por mais
+  // 300-500ms. Se o gate usar o RMS cru, o eco vira falso barge-in
+  // durante a pausa — a Seraphine "se interrompe sozinha" e aparenta
+  // falar só metade da resposta. Armazenamos um pico com decay (~92%
+  // por frame ≈ -0.8dB/16ms) que só vira 0 uns ~500ms depois do último
+  // pico real, cobrindo o rabo acústico.
   useEffect(() => {
     if (!active) {
       botRmsRef.current = 0;
       return;
     }
     let raf = 0;
+    let cancelled = false;
     let buf: Uint8Array<ArrayBuffer> | null = null;
     let bufBins = 0;
 
     const loop = (): void => {
+      // Cleanup may have fired between the last requestAnimationFrame and
+      // this callback running — bail before doing any work or scheduling
+      // the next frame, otherwise we'd extend the loop past unmount.
+      if (cancelled) return;
       const a = botAnalyserRef.current;
+      let current = 0;
       if (a) {
         if (!buf || bufBins !== a.fftSize) {
           buf = new Uint8Array(new ArrayBuffer(a.fftSize));
           bufBins = a.fftSize;
         }
         a.getByteTimeDomainData(buf);
-        botRmsRef.current = computeRmsByteTimeDomain(buf);
-      } else {
-        botRmsRef.current = 0;
+        current = computeRmsByteTimeDomain(buf);
       }
+      // Decay de 0.92 por frame ≈ 500ms pra cair a 10% do pico.
+      const held = Math.max(current, botRmsRef.current * 0.92);
+      botRmsRef.current = held;
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
     return (): void => {
+      cancelled = true;
       if (raf) cancelAnimationFrame(raf);
       botRmsRef.current = 0;
     };

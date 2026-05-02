@@ -24,23 +24,48 @@ const PRE_SPEECH_FRAMES = Math.ceil(64 / MS_PER_FRAME);    // 64ms
 // Silero legacy model I/O
 // Inputs: input (f32[1, 512]), h (f32[2, 1, 64]), c (f32[2, 1, 64]), sr (i64 scalar)
 // Outputs: output (probability), hn, cn (new states)
+//
+// NOTA: a InferenceSession é criada POR INSTÂNCIA de VAD (não módulo-global).
+// ORT-Web não aceita session.run() concorrentes; quando compartilhávamos uma
+// única session entre wake-word VAD e realtime VAD, a transição (tear-down
+// de um + boot do outro) disparava session.run paralelos e causava "Session
+// already started" / "Session mismatch" / "Out of bounds memory access" no
+// ort-wasm-simd-threaded.jsep.mjs. Per-instance isola o estado LSTM e a
+// serialização interna do ORT por session resolve o problema.
 
-let modelPromise: Promise<ort.InferenceSession> | null = null;
-function getModel(): Promise<ort.InferenceSession> {
-  if (!modelPromise) {
-    // ORT env already configured in realtime/vad.ts (wasm paths etc.)
-    modelPromise = ort.InferenceSession.create('/vad/silero_vad_legacy.onnx', {
-      executionProviders: ['wasm'],
-    });
-  }
-  return modelPromise;
+// Lock module-level pra serializar create/release de InferenceSession.
+// ORT-Web compartilha estado WASM global entre sessions — se uma release()
+// estiver em voo quando um create() roda (usuario fecha+reabre realtime
+// rapido), o WASM fica em estado inconsistente e os proximos session.run()
+// falham com "Session already started" / "Session mismatch". Encadeamos
+// todas as operacoes de ciclo de vida numa unica Promise pra garantir que
+// nunca se sobrepoem.
+let sessionLifecycleLock: Promise<void> = Promise.resolve();
+
+function withSessionLock<T>(op: () => Promise<T>): Promise<T> {
+  const prev = sessionLifecycleLock;
+  let release!: () => void;
+  sessionLifecycleLock = new Promise<void>((r) => {
+    release = r;
+  });
+  return prev
+    .catch(() => {
+      /* swallow previous failure; we just need serialization */
+    })
+    .then(op)
+    .finally(() => release());
 }
 
 export async function createTauriRealtimeVAD(
   opts: RealtimeVADOptions,
   externalMic?: ExternalMicSource,
 ): Promise<RealtimeVAD> {
-  const session = await getModel();
+  // ORT env configurado em realtime/vad.ts (wasm paths etc.).
+  const session = await withSessionLock(() =>
+    ort.InferenceSession.create('/vad/silero_vad_legacy.onnx', {
+      executionProviders: ['wasm'],
+    }),
+  );
   // When an external mic is provided (VPIO session), we don't own the
   // mic lifecycle — just subscribe to its chunks. Otherwise fall back to
   // our own cpal-backed MicCapture.
@@ -83,26 +108,46 @@ export async function createTauriRealtimeVAD(
     return Math.sqrt(sum / frame.length);
   };
 
+  let disposed = false;
+
   const runSilero = async (frame: Float32Array): Promise<number> => {
-    const inputs = {
-      input: new ort.Tensor('float32', frame, [1, FRAME_SIZE]),
-      h: new ort.Tensor('float32', h, [2, 1, 64]),
-      c: new ort.Tensor('float32', c, [2, 1, 64]),
-      sr: new ort.Tensor('int64', sr, []),
-    };
-    const results = await session.run(inputs);
-    // Update state. ORT-Web tensors podem apontar pra um WASM arena
-    // compartilhado — usar .buffer.slice() pegava a heap inteira,
-    // gerando arrays com tamanho errado e estado LSTM corrompido (Silero
-    // ficava com prob ~0 pra sempre, eterno "Ouvindo"). .slice(0) no
-    // próprio Float32Array copia respeitando byteOffset/length corretos.
-    h = (results.hn.data as Float32Array).slice(0);
-    c = (results.cn.data as Float32Array).slice(0);
-    const prob = (results.output.data as Float32Array)[0];
-    return prob;
+    // Guard: se stop() rolou enquanto um frame estava na fila, a session
+    // pode já ter sido release()ada. Chamar session.run() nela gera
+    // "Session mismatch" ou acesso a memória inválida do WASM.
+    if (disposed) return 0;
+    // IMPORTANTE: session.run() tambem vai pelo lock. ORT-Web compartilha
+    // o modulo WASM globalmente, entao run() concorrente entre sessions
+    // diferentes (ex: VAD antigo drenando enquanto VAD novo ja comecou)
+    // corrompe o heap — "Session already started", "Out of bounds memory
+    // access", "null is not an object". O lock impede sobreposicao.
+    return withSessionLock(async () => {
+      if (disposed) return 0;
+      const inputs = {
+        input: new ort.Tensor('float32', frame, [1, FRAME_SIZE]),
+        h: new ort.Tensor('float32', h, [2, 1, 64]),
+        c: new ort.Tensor('float32', c, [2, 1, 64]),
+        sr: new ort.Tensor('int64', sr, []),
+      };
+      const results = await session.run(inputs);
+      // Update state. ORT-Web tensors podem apontar pra um WASM arena
+      // compartilhado — usar .buffer.slice() pegava a heap inteira,
+      // gerando arrays com tamanho errado e estado LSTM corrompido (Silero
+      // ficava com prob ~0 pra sempre, eterno "Ouvindo"). .slice(0) no
+      // próprio Float32Array copia respeitando byteOffset/length corretos.
+      h = (results.hn.data as Float32Array).slice(0);
+      c = (results.cn.data as Float32Array).slice(0);
+      const prob = (results.output.data as Float32Array)[0];
+      return prob;
+    });
   };
 
   const processFrame = async (frame: Float32Array): Promise<void> => {
+    // Bail out as early as possible if stop() ran. Without this guard the
+    // pump can still be mid-await on the previous frame when disposed
+    // flips, then resume here and dispatch onSpeechEnd against an
+    // already-torn-down VAD. Also re-check after the await below before
+    // any callback fires.
+    if (disposed) return;
     if (suspended) return;
 
     const energy = rms(frame);
@@ -120,6 +165,11 @@ export async function createTauriRealtimeVAD(
       console.error('[tauri-vad] silero inference failed:', err);
       return;
     }
+    // After the await: if stop() ran while runSilero was in flight, prob
+    // is 0 (runSilero returns 0 when disposed) — but treating 0 as silence
+    // here would still drive the state machine and could fire
+    // onSpeechEnd against partial audio during teardown. Bail out.
+    if (disposed) return;
 
     diagFrames += 1;
     if (prob > diagMaxProb) diagMaxProb = prob;
@@ -182,8 +232,10 @@ export async function createTauriRealtimeVAD(
   const pending: Float32Array[] = [];
   const pump = async (): Promise<void> => {
     if (processing) return;
+    if (disposed) return;
     processing = true;
     while (pending.length > 0) {
+      if (disposed) break;
       const frame = pending.shift()!;
       await processFrame(frame);
     }
@@ -247,6 +299,7 @@ export async function createTauriRealtimeVAD(
     },
     stop: async () => {
       listening = false;
+      disposed = true;
       offChunk?.();
       offChunk = null;
       // Only stop the mic we own; the external mic's lifecycle is the
@@ -260,6 +313,21 @@ export async function createTauriRealtimeVAD(
       speechFrames = 0;
       silenceFrames = 0;
       micAnalyser.reset();
+      // Espera qualquer inferência em voo terminar antes de liberar a
+      // session — release() durante um session.run() ativo trava o WASM.
+      // O runSilero respeita disposed=true e vira no-op pros frames novos,
+      // mas o último que já entrou no await precisa drenar.
+      while (processing) {
+        await new Promise<void>((r) => setTimeout(r, 10));
+      }
+      // release() precisa entrar no mesmo lock do create() — senao
+      // um create() concorrente (usuario reabre realtime antes do stop
+      // terminar) colide no estado WASM global do ORT.
+      try {
+        await withSessionLock(() => session.release());
+      } catch (err) {
+        console.warn('[tauri-vad] session release failed:', err);
+      }
     },
     getAnalyser: () => micAnalyser as unknown as AnalyserNode,
     isListening: () => listening,

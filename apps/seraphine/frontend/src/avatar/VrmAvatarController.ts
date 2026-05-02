@@ -14,6 +14,7 @@ import {
   Quaternion,
   QuaternionKeyframeTrack,
   Scene,
+  Vector3,
   WebGLRenderer,
   type AnimationAction,
   type Object3D,
@@ -25,6 +26,7 @@ import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
 import { resolveEmotion, EMOTION_MAP, type EmotionMapping } from "./expressions";
 import { GesturePlayer, GESTURE_LIBRARY, type GestureDefinition } from "./gestures";
+import { solveHeadLookAt, solveArmIK, worldQuatToLocal } from "../lab/ikSolver";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
 
@@ -667,7 +669,8 @@ export class VrmAvatarController implements AvatarAdapter {
         }
       } else if (this.elapsed >= this.nextBlinkAt) {
         em.setValue("blink", 1);
-        this.blinkingUntil = this.elapsed + 0.12;
+        // Jitter duration: humans blink in 80–180 ms; fixed 120 ms reads robotic.
+        this.blinkingUntil = this.elapsed + 0.09 + Math.random() * 0.09;
       }
     }
   }
@@ -702,8 +705,10 @@ export class VrmAvatarController implements AvatarAdapter {
     em.setValue("aa", w.aa);
     em.setValue("ih", w.ih);
     em.setValue("ou", w.ou);
-    em.setValue("ee", w.ee);
-    em.setValue("oh", w.oh);
+    // `ee`/`oh` are optional in the amplitude-only result — phoneme-aware
+    // paths populate them; here we just zero them out so they don't stick.
+    em.setValue("ee", w.ee ?? 0);
+    em.setValue("oh", w.oh ?? 0);
   }
 
   /** Attach the AnalyserNode from the audio playback pipeline so the
@@ -964,8 +969,11 @@ export class VrmAvatarController implements AvatarAdapter {
    * Play a named gesture. Checks user-saved gestures first (from the
    * AnimationLab) then falls back to `GESTURE_LIBRARY`. Returns a
    * Promise that resolves when the animation finishes.
+   *
+   * Opts (SDD 075, Phase 2): support fade-in/out and queueing so gestures
+   * can crossfade instead of hard-cutting each other.
    */
-  playGesture(name: string): Promise<void> {
+  playGesture(name: string, opts?: Parameters<GesturePlayer['play']>[1]): Promise<void> {
     const def = this.userGestures.get(name) ?? GESTURE_LIBRARY[name];
     if (!def) {
       return Promise.reject(new Error(`Unknown gesture: ${name}`));
@@ -973,7 +981,7 @@ export class VrmAvatarController implements AvatarAdapter {
     // One-shot gestures pause the idle loop so they don't fight for the
     // same bones. Idle resumes on finish.
     this.idleSuppressed = true;
-    const p = this.gesturePlayer.play(def);
+    const p = this.gesturePlayer.play(def, opts);
     void p.finally(() => {
       this.idleSuppressed = false;
       this.kickIdleLoop();
@@ -982,8 +990,8 @@ export class VrmAvatarController implements AvatarAdapter {
   }
 
   /** Play an arbitrary gesture definition (used by the Gesture Editor). */
-  playGestureDef(def: GestureDefinition): Promise<void> {
-    return this.gesturePlayer.play(def);
+  playGestureDef(def: GestureDefinition, opts?: Parameters<GesturePlayer['play']>[1]): Promise<void> {
+    return this.gesturePlayer.play(def, opts);
   }
 
   /**
@@ -1345,6 +1353,62 @@ export class VrmAvatarController implements AvatarAdapter {
         );
         q.multiply(gestureOffset);
         head.quaternion.copy(q);
+
+        // --- IK head look-at (SDD 075 Phase 3) --- Weighted average of
+        // each target's desired local quaternion, then a single slerp from
+        // the FK base. Reads FK base BEFORE the loop so successive targets
+        // don't compound on top of each other (which used to cause
+        // over-rotation / NaN with 2+ active head targets).
+        const ikTargets = this.gesturePlayer.getActiveIKTargets();
+        if (ikTargets.length > 0) {
+          const qFk = head.quaternion.clone();
+          const desiredAccum = new Quaternion(0, 0, 0, 0);
+          let totalWeight = 0;
+          const worldTarget = new Vector3();
+          for (const { target, weight } of ikTargets) {
+            if (target.chain !== 'head') continue;
+            if (weight <= 0) continue;
+            if (target.space === 'world') {
+              worldTarget.set(target.target.x, target.target.y, target.target.z);
+            } else {
+              // 'rig': relative to avatar root.
+              worldTarget.set(target.target.x, target.target.y, target.target.z);
+              vrm.scene.localToWorld(worldTarget);
+            }
+            // Update matrices so solver sees up-to-date FK pose. Note the
+            // head quaternion is still qFk here — we never mutate it inside
+            // the loop, so each target sees the same FK base.
+            head.updateWorldMatrix(true, false);
+            const desiredWorld = solveHeadLookAt(head, worldTarget);
+            const desiredLocal = worldQuatToLocal(desiredWorld, head);
+            // Hemisphere-correct accumulation: flip sign if dot < 0 so we
+            // average along the shorter arc. (Standard quaternion weighted
+            // average via component-add-then-normalize; close to slerp for
+            // small angles and free of the "slerp of slerp" compounding.)
+            const dot =
+              desiredAccum.x * desiredLocal.x +
+              desiredAccum.y * desiredLocal.y +
+              desiredAccum.z * desiredLocal.z +
+              desiredAccum.w * desiredLocal.w;
+            const sign = dot < 0 ? -1 : 1;
+            desiredAccum.x += sign * weight * desiredLocal.x;
+            desiredAccum.y += sign * weight * desiredLocal.y;
+            desiredAccum.z += sign * weight * desiredLocal.z;
+            desiredAccum.w += sign * weight * desiredLocal.w;
+            totalWeight += weight;
+          }
+          if (totalWeight > 0) {
+            const lenSq =
+              desiredAccum.x * desiredAccum.x +
+              desiredAccum.y * desiredAccum.y +
+              desiredAccum.z * desiredAccum.z +
+              desiredAccum.w * desiredAccum.w;
+            if (lenSq > 1e-8) {
+              desiredAccum.normalize();
+              head.quaternion.copy(qFk).slerp(desiredAccum, Math.min(totalWeight, 1));
+            }
+          }
+        }
       }
 
       // --- Eyes: lead head + conversational micro-saccades ---
@@ -1388,6 +1452,52 @@ export class VrmAvatarController implements AvatarAdapter {
             boneNode.quaternion.multiply(offset);
           }
         }
+      }
+    }
+
+    // --- IK arm reach (SDD 075 Phase 4) --- Run AFTER gesture arm offsets so
+    // IK overrides (or blends against) the FK pose for the chain.
+    const ikTargets = this.gesturePlayer.getActiveIKTargets();
+    if (ikTargets.length > 0) {
+      const worldTarget = new Vector3();
+      const pole = new Vector3();
+      for (const { target, weight } of ikTargets) {
+        if (target.chain !== 'leftArm' && target.chain !== 'rightArm') continue;
+        if (target.space === 'world') {
+          worldTarget.set(target.target.x, target.target.y, target.target.z);
+        } else {
+          worldTarget.set(target.target.x, target.target.y, target.target.z);
+          vrm.scene.localToWorld(worldTarget);
+        }
+        const side = target.chain === 'leftArm' ? 'left' : 'right';
+        const shoulder = vrm.humanoid?.getRawBoneNode(`${side}UpperArm` as any) as Object3D | null;
+        const elbow = vrm.humanoid?.getRawBoneNode(`${side}LowerArm` as any) as Object3D | null;
+        const hand = vrm.humanoid?.getRawBoneNode(`${side}Hand` as any) as Object3D | null;
+        if (!shoulder || !elbow || !hand) continue;
+        shoulder.updateWorldMatrix(true, false);
+        elbow.updateWorldMatrix(false, false);
+        hand.updateWorldMatrix(false, false);
+        // Pole hint: character-outward + strongly downward. The down bias
+        // survives projection when the target is up near the head (wave
+        // pose), keeping the elbow from collapsing inward through the
+        // torso. Sign of X flipped for VRM 1.0 (right = -X; in scene we
+        // re-check by checking whether shoulder is on -X side of root).
+        shoulder.getWorldPosition(pole);
+        const isRight = side === 'right';
+        // Outward along world X: for a VRM facing +Z in its rig, right
+        // shoulder has -X world. If the scene rotated the avatar, we flip
+        // so that pole still points character-outward.
+        const shoulderWorldX = pole.x - (vrm.scene.position?.x ?? 0);
+        const outwardSign = isRight
+          ? (shoulderWorldX < 0 ? -1 : 1)
+          : (shoulderWorldX > 0 ? 1 : -1);
+        pole.x += outwardSign * 0.35;
+        pole.y -= 1.0;
+        try {
+          const res = solveArmIK(shoulder, elbow, hand, worldTarget, pole);
+          shoulder.quaternion.slerp(res.upperArmLocal, weight);
+          elbow.quaternion.slerp(res.lowerArmLocal, weight);
+        } catch { /* solver NaN — skip */ }
       }
     }
   }
@@ -1580,6 +1690,17 @@ export class VrmAvatarController implements AvatarAdapter {
       VRMUtils.deepDispose(this.vrm.scene);
       this.vrm = null;
     }
+    // Dispose lights + their shadow maps before clearing the scene.
+    // three's WebGLRenderer.dispose() does NOT release per-light shadow
+    // textures or the light's internal target object, so we have to walk
+    // the graph ourselves.
+    this.scene.traverse((obj) => {
+      if (obj instanceof DirectionalLight || obj instanceof AmbientLight) {
+        obj.shadow?.map?.dispose();
+        (obj as { dispose?: () => void }).dispose?.();
+      }
+    });
+    this.scene.clear();
     this.renderer.dispose();
   }
 }

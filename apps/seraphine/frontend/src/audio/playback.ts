@@ -723,6 +723,11 @@ export class PCMPlayback {
       this.gain = null;
     }
     this.analyserCallbacks = [];
+    // Drop the VPIO playback-chunk subscription if one is active —
+    // otherwise the JS analyser keeps receiving samples after dispose
+    // and prevents listeners from being garbage-collected.
+    this.vpioPlaybackUnsub?.();
+    this.vpioPlaybackUnsub = null;
     this.ctx = null;
   }
 }
