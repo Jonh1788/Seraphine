@@ -193,6 +193,9 @@ async def lifespan(app: FastAPI):
                 "AURA_WHATSAPP_ADMIN_TOKEN unset — /whatsapp/admin/* "
                 "will return 401 (admin operations disabled)"
             )
+        # Late-bind the WhatsApp service onto PushService so reminders
+        # fan out to web push + WhatsApp in parallel.
+        push_service.attach_whatsapp(whatsapp_service)
     else:
         logger.warning(
             "WhatsApp not configured — /whatsapp/* will return 503"

@@ -21,6 +21,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
@@ -104,6 +105,11 @@ class PushService:
                 "Subscriptions will break on restart. Set "
                 "AURA_VAPID_PRIVATE_PEM and AURA_VAPID_PUBLIC_B64 in prod."
             )
+        self._whatsapp: Any = None
+
+    def attach_whatsapp(self, whatsapp_service: Any) -> None:
+        """Late-bind the WhatsApp service so reminders fan out to WA + push."""
+        self._whatsapp = whatsapp_service
 
     # ------------------------------------------------------------------
     # Public properties / metadata
@@ -311,24 +317,70 @@ class PushService:
                     continue
                 if fire_at > now:
                     continue
-                if fire_at < window_start:
-                    # Reminder is older than the lookback window: still
-                    # fire so we don't silently swallow stale ones.
-                    pass
-                payload = {
-                    "title": title,
-                    "body": _format_when(due_date, due_time),
-                    "tag": f"reminder-{task_id}",
-                    "data": {"task_id": task_id, "url": "/mais/lembretes"},
-                }
-                sent = await self.send_to_user(user_id, payload)
-                if sent > 0:
-                    await self._mark_dispatched(task_id, user_id)
+                # fire_at < window_start: still fire (don't silently swallow stale).
+                task = SimpleNamespace(
+                    id=task_id,
+                    user_id=user_id,
+                    title=title,
+                    due_date=due_date,
+                    due_time=due_time,
+                )
+                channels = await self._deliver_reminder(user_id, task)
+                if channels > 0:
                     dispatched += 1
             except Exception:
                 logger.exception("dispatch failed for task=%s", task_id)
 
         return dispatched
+
+    async def _dispatch_push(self, user_id: str, task: Any) -> int:
+        """Send the web-push payload for a reminder + write the
+        push_dispatches idempotency row. Returns count of subscriptions
+        reached (0 = no live subs)."""
+        payload = {
+            "title": task.title,
+            "body": _format_when(task.due_date, task.due_time),
+            "tag": f"reminder-{task.id}",
+            "data": {"task_id": task.id, "url": "/mais/lembretes"},
+        }
+        sent = await self.send_to_user(user_id, payload)
+        if sent > 0:
+            await self._mark_dispatched(task.id, user_id)
+        return sent
+
+    async def _deliver_reminder(self, user_id: str, task: Any) -> int:
+        """Fan-out reminder delivery to push + (when verified) WhatsApp.
+
+        Returns the count of channels that reported success (0..2).
+        Each channel runs in parallel; one failing never blocks the
+        other. Per-channel idempotency lives in their own ledgers
+        (push_dispatches / aura_whatsapp_dispatches).
+        """
+        coros = [self._dispatch_push(user_id, task)]
+        if self._whatsapp is not None:
+            try:
+                verified = await self._whatsapp.is_verified(user_id)
+            except Exception:
+                logger.exception("WA is_verified failed user=%s", user_id)
+                verified = False
+            if verified:
+                coros.append(
+                    self._whatsapp.send_reminder(
+                        user_id=user_id,
+                        task_id=task.id,
+                        title=task.title,
+                        due_time=task.due_time,
+                    )
+                )
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        sent = 0
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("reminder channel failed: %s", r)
+                continue
+            if r:
+                sent += 1
+        return sent
 
     async def _mark_dispatched(self, task_id: str, user_id: str) -> None:
         def _work() -> None:
