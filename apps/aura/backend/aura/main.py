@@ -188,6 +188,11 @@ async def lifespan(app: FastAPI):
             "WhatsApp wired (instance=%s, base=%s)",
             settings.evolution_instance, settings.evolution_base_url,
         )
+        if not settings.whatsapp_admin_token:
+            logger.warning(
+                "AURA_WHATSAPP_ADMIN_TOKEN unset — /whatsapp/admin/* "
+                "will return 401 (admin operations disabled)"
+            )
     else:
         logger.warning(
             "WhatsApp not configured — /whatsapp/* will return 503"

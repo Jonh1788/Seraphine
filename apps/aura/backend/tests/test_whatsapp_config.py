@@ -73,3 +73,32 @@ def test_app_boots_without_whatsapp_configured(monkeypatch, tmp_path):
     paths = {r.path for r in app.routes}
     assert "/whatsapp/webhook" in paths
     assert "/whatsapp/status" in paths
+
+
+def test_app_boots_with_whatsapp_configured(monkeypatch, tmp_path):
+    """When all four required Evolution env vars are set, the lifespan
+    instantiates whatsapp_client + whatsapp_service onto app.state and
+    /whatsapp/status (JWT-protected) returns 401, not 503."""
+    monkeypatch.setenv("AURA_SQLITE_PATH", str(tmp_path / "x.db"))
+    monkeypatch.setenv("AURA_EVOLUTION_BASE_URL", "http://e:8080")
+    monkeypatch.setenv("AURA_EVOLUTION_API_KEY", "k")
+    monkeypatch.setenv("AURA_EVOLUTION_INSTANCE", "main")
+    monkeypatch.setenv("AURA_EVOLUTION_WEBHOOK_TOKEN", "w")
+
+    # Mirror the reload pattern used by the other tests in this file
+    # (auth/routes.py captures `settings` at module load, so reloading
+    # aura.config + aura.main is required for env changes to land).
+    import importlib
+    import aura.config as cfg
+    importlib.reload(cfg)
+    import aura.main as main_mod
+    importlib.reload(main_mod)
+
+    from fastapi.testclient import TestClient
+    app = main_mod.create_app()
+    with TestClient(app) as client:
+        assert app.state.whatsapp_service is not None
+        assert app.state.whatsapp_client is not None
+        # /whatsapp/status is JWT-protected; without auth → 401, not 503.
+        resp = client.get("/whatsapp/status")
+        assert resp.status_code == 401
