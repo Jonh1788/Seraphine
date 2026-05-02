@@ -54,8 +54,48 @@ services:
     networks:
       - aura-net
 
+  evolution:
+    image: atendai/evolution-api:v2.1.0
+    restart: unless-stopped
+    hostname: aura-evolution
+    env_file:
+      - path: .env.prod
+        required: true
+    environment:
+      DATABASE_PROVIDER: sqlite
+      DATABASE_CONNECTION_URI: file:/evolution/instances/evolution.db
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/0
+      AUTHENTICATION_API_KEY: ${AURA_EVOLUTION_API_KEY}
+      WEBHOOK_GLOBAL_URL: http://backend:8001/whatsapp/webhook
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_HEADERS: '{"X-Evolution-Webhook-Token":"${AURA_EVOLUTION_WEBHOOK_TOKEN}"}'
+      LOG_LEVEL: WARN
+    volumes:
+      - evolution-data:/evolution/instances
+    networks:
+      - aura-net
+    expose:
+      - "8080"
+    depends_on:
+      - evolution-redis
+      - backend
+
+  evolution-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    hostname: aura-evolution-redis
+    volumes:
+      - evolution-redis-data:/data
+    networks:
+      - aura-net
+    expose:
+      - "6379"
+
 volumes:
   aura-data:
+  evolution-data:
+  evolution-redis-data:
 
 networks:
   aura-net:
