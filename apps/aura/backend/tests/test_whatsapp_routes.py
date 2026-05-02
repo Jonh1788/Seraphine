@@ -164,3 +164,30 @@ def test_connect_verify_returns_400_when_invalid():
             "/whatsapp/connect/verify", json={"code": "000000"},
         )
     assert resp.status_code == 400
+
+
+def test_webhook_drops_messages_with_empty_text_before_routing():
+    """The adapter should drop a messages.upsert that has no text
+    payload (e.g. an image with no caption) without ever calling
+    route_inbound. This keeps the service-layer router focused."""
+    svc = MagicMock()
+    svc.route_inbound = AsyncMock()
+    svc.process_user_message = AsyncMock()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            headers={"X-Evolution-Webhook-Token": "hooktoken"},
+            json={
+                "event": "messages.upsert",
+                "data": {
+                    "key": {
+                        "remoteJid": "5511987654321@s.whatsapp.net",
+                        "fromMe": False,
+                    },
+                    "message": {"imageMessage": {"caption": ""}},
+                },
+            },
+        )
+    assert resp.status_code == 200
+    svc.route_inbound.assert_not_called()

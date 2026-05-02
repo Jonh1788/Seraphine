@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any, Optional
 
 from fastapi import (
@@ -54,7 +55,9 @@ def _adapt_evolution_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     ``fromMe``). 1:1 chats have ``@s.whatsapp.net`` JIDs; groups end
     in ``@g.us``.
     """
-    if (raw.get("event") or "").lower() != "messages.upsert":
+    event = (raw.get("event") or "").lower()
+    if event != "messages.upsert":
+        logger.debug("wa webhook: ignored event=%r", raw.get("event"))
         return None
     data = raw.get("data") or {}
     key = data.get("key") or {}
@@ -71,7 +74,14 @@ def _adapt_evolution_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
         msg.get("conversation")
         or (msg.get("extendedTextMessage") or {}).get("text")
         or ""
-    )
+    ).strip()
+    if not text:
+        logger.debug(
+            "wa webhook: messages.upsert with no text body "
+            "(message keys=%s); dropping",
+            list(msg.keys()),
+        )
+        return None
     return {"phone_e164": phone, "text": text, "is_group": is_group}
 
 
@@ -84,7 +94,9 @@ async def webhook(
     x_evolution_webhook_token: Optional[str] = Header(None),
 ) -> dict[str, bool]:
     expected = getattr(request.app.state, "whatsapp_webhook_token", None)
-    if not expected or x_evolution_webhook_token != expected:
+    if not expected or not secrets.compare_digest(
+        x_evolution_webhook_token or "", expected
+    ):
         raise HTTPException(status_code=401, detail="bad webhook token")
 
     svc = _service(request)
