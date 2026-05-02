@@ -467,7 +467,16 @@ export class VrmAvatarController implements AvatarAdapter {
       if (this.disposed) return;
       this.rafId = requestAnimationFrame(loop);
       if (this.renderPaused) return;
-      const delta = this.clock.getDelta();
+      // Clamp delta to 100ms. macOS pauses the WebView render thread
+      // during native window operations (Tauri startDragging, dock
+      // activation, screen sleep) — when RAF resumes, clock.getDelta()
+      // can return seconds of accumulated time. Without the clamp, the
+      // next mixer.update / IK / gesture sample fast-forwards by that
+      // amount, producing the "freeze, then jump to final pose" jank.
+      // 100ms is large enough to absorb routine 1-3 frame stutters and
+      // small enough that any catastrophic catch-up just looks like the
+      // animation paused gracefully.
+      const delta = Math.min(this.clock.getDelta(), 0.1);
       this.elapsed += delta;
       if (!this.poseLocked) this.updateCamera(delta);
       this.updateIdle(delta);

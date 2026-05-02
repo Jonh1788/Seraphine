@@ -105,15 +105,14 @@ export function AvatarCompanion(): JSX.Element {
     // Apply saved camera settings
     (ctrl as any).cameraTarget = { ...camera };
 
-    // Render at native DPR (2x on Retina). Previously forced 1.5×DPR
-    // (capped at 3) which on Retina pushed render to 840×1080 for a
-    // 280×360 logical window — that's 2.25× the GPU/CPU work for a
-    // window that only stays sharp because it's tiny. Native 2× is
-    // already crisp; the extra cost made the avatar visibly drop frames
-    // when the user interacted (drag, slider, click).
+    // High DPR for the small companion window so the avatar looks crisp.
+    // Previously dropping to native 2× felt blurry/aliased — the small
+    // window's high pixel density needs supersampling. The animation jump
+    // bug that originally motivated the lower DPR is fixed by the loop's
+    // delta clamp in VrmAvatarController, so we can keep the GPU cost.
     const renderer = (ctrl as any).renderer;
     if (renderer?.setPixelRatio) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
     }
 
     // Max anisotropic filtering on all VRM textures (sharp textures at angles)
