@@ -99,12 +99,18 @@ class Settings(BaseSettings):
 
     @property
     def whatsapp_configured(self) -> bool:
-        """True iff every required Evolution env var is non-empty."""
+        """True iff the core Evolution env vars are non-empty.
+
+        Why: ``evolution_webhook_token`` is treated as optional. Evolution
+        v2.1.0 doesn't reliably attach WEBHOOK_GLOBAL_HEADERS to outgoing
+        events, so the webhook auth gate degrades to "any inbound" when
+        the token is empty. The router still 401s when the token IS set
+        and the inbound header doesn't match (defense in depth).
+        """
         return bool(
             self.evolution_base_url
             and self.evolution_api_key
             and self.evolution_instance
-            and self.evolution_webhook_token
         )
 
 

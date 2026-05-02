@@ -36,11 +36,13 @@ def test_evolution_settings_default_to_empty(monkeypatch, tmp_path):
 
 
 def test_whatsapp_configured_helper(monkeypatch, tmp_path):
+    """webhook_token is intentionally NOT required — Evolution v2 may
+    not propagate WEBHOOK_GLOBAL_HEADERS, so the auth gate degrades
+    to 'any inbound' when empty (Evolution lives on internal net)."""
     monkeypatch.setenv("AURA_SQLITE_PATH", str(tmp_path / "x.db"))
     monkeypatch.setenv("AURA_EVOLUTION_BASE_URL", "http://e:8080")
     monkeypatch.setenv("AURA_EVOLUTION_API_KEY", "k")
     monkeypatch.setenv("AURA_EVOLUTION_INSTANCE", "main")
-    monkeypatch.setenv("AURA_EVOLUTION_WEBHOOK_TOKEN", "w")
     Settings = _fresh_settings_class()
     s = Settings(_env_file=None)
     assert s.whatsapp_configured is True
@@ -50,8 +52,7 @@ def test_whatsapp_configured_false_when_any_required_missing(monkeypatch, tmp_pa
     monkeypatch.setenv("AURA_SQLITE_PATH", str(tmp_path / "x.db"))
     monkeypatch.setenv("AURA_EVOLUTION_BASE_URL", "http://e:8080")
     monkeypatch.setenv("AURA_EVOLUTION_API_KEY", "k")
-    monkeypatch.setenv("AURA_EVOLUTION_INSTANCE", "main")
-    # webhook_token missing
+    # evolution_instance missing — required field
     Settings = _fresh_settings_class()
     s = Settings(_env_file=None)
     assert s.whatsapp_configured is False
