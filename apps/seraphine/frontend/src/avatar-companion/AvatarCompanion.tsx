@@ -67,6 +67,18 @@ export function AvatarCompanion(): JSX.Element {
   const [ws, setWs] = useState<SeraphineWS | null>(null);
   const [playback, setPlayback] = useState<PCMPlayback | null>(null);
   const [debugMsg, setDebugMsg] = useState<string>('');
+  // Persisted thinking toggle — same key the main chat reads, so the
+  // companion can flip it without diverging from the rest of the app.
+  const [think, setThink] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('seraphine.think') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('seraphine.think', String(think)); } catch { /* */ }
+  }, [think]);
 
   // Apply camera to controller whenever it changes
   useEffect(() => {
@@ -185,7 +197,15 @@ export function AvatarCompanion(): JSX.Element {
         pb.pushChunk(msg);
         return;
       }
-      const typed = msg as unknown as { type?: string; [k: string]: unknown };
+      const typed = msg as unknown as { type?: string; conversation_id?: string; [k: string]: unknown };
+      // Capture conversation_id from any message that carries one — the
+      // backend may stamp tokens, openers, and notifications with it.
+      // Persist so the next companion launch is already warm and the
+      // first realtime turn isn't a cold-start.
+      if (typed.conversation_id && conversationIdRef.current !== typed.conversation_id) {
+        conversationIdRef.current = typed.conversation_id;
+        try { localStorage.setItem('seraphine_conversation_id', typed.conversation_id); } catch { /* */ }
+      }
       if (typed.type === 'tts_start') {
         const rate = (typed as { playback_rate?: number }).playback_rate;
         pb.setPlaybackRate?.(rate && rate !== 1.0 ? rate : 1.0);
@@ -353,7 +373,8 @@ export function AvatarCompanion(): JSX.Element {
         conversation_id: conversationIdRef.current,
         content: text,
         speak: true,
-      });
+        think,
+      } as never);
     } catch (err) {
       console.warn('[companion] local whisper failed, falling back:', err);
       ws.send({
@@ -611,6 +632,36 @@ export function AvatarCompanion(): JSX.Element {
           </svg>
         </button>
 
+        {/* Thinking toggle — flips extended-thinking on the backend.
+            Persisted via the same localStorage key the main chat uses, so
+            both surfaces stay in sync. Brain icon for clarity. */}
+        <button
+          onClick={() => setThink((v) => !v)}
+          title={think ? 'Desligar extended thinking' : 'Ligar extended thinking'}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: '50%',
+            background: think
+              ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+              : 'rgba(17, 17, 26, 0.75)',
+            border: think ? 'none' : '1px solid rgba(255,255,255,0.15)',
+            color: think ? '#08080d' : '#c4b5fd',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+            boxShadow: think ? '0 0 20px rgba(245, 158, 11, 0.6)' : '0 4px 10px rgba(0, 0, 0, 0.3)',
+            transition: 'all 150ms',
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/>
+            <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/>
+          </svg>
+        </button>
+
         {/* Realtime toggle */}
         <button
           onClick={() => setRealtimeActive((v) => !v)}
@@ -648,6 +699,7 @@ export function AvatarCompanion(): JSX.Element {
           onToggle={() => setRealtimeActive((v) => !v)}
           conversationId={conversationIdRef.current}
           speak
+          think={think}
           manualMute={false}
           onManualMuteToggle={() => { /* no-op in companion */ }}
         />
