@@ -1010,6 +1010,143 @@ async def _exec_create_goal(
     }
 
 
+async def _run_agentic_collect(
+    *,
+    llm: AnthropicClient,
+    finance: FinanceService,
+    tasks_svc: TaskService,
+    recurring_svc: RecurringService,
+    projects_svc: Optional[ProjectsService],
+    habits_svc: Optional[HabitsService],
+    knowledge_svc: Optional[KnowledgeService],
+    goals_svc: Optional[GoalsService],
+    svc: ConversationService,
+    uid: str,
+    conversation_id: str,
+    user_text: str,
+    msgs: list[ChatMessage],
+    is_first_exchange: bool,
+) -> dict[str, Any]:
+    """Non-streaming sibling of ``_run_agentic_stream``.
+
+    Runs the same LLM → tool-call → LLM agentic loop (up to 6 rounds),
+    accumulates the final assistant reply and structured side effects,
+    persists the assistant message, and optionally generates a title on
+    the first exchange. Returns a plain dict so non-SSE callers (e.g.
+    WhatsApp inbound) can consume it without parsing event-stream bytes.
+
+    The body intentionally duplicates the loop in ``_run_agentic_stream``
+    rather than refactoring it; the SSE generator must keep behaving
+    byte-for-byte for the live web chat.
+    """
+    acc_parts: list[str] = []
+    turn_transactions: list[dict[str, Any]] = []
+    turn_tasks: list[dict[str, Any]] = []
+    turn_recurring: list[dict[str, Any]] = []
+    turn_chips: list[dict[str, Any]] = []
+
+    for _round in range(6):  # safety cap
+        pending_tool_calls: list[dict[str, Any]] | None = None
+        async for token in llm.chat(msgs, tools=_TOOLS, think=False):
+            if token.text:
+                acc_parts.append(token.text)
+            if token.tool_calls:
+                pending_tool_calls = token.tool_calls
+            if token.done:
+                break
+
+        if not pending_tool_calls:
+            break  # plain text turn — we're done
+
+        for tc in pending_tool_calls:
+            name, args = _parse_tool_call(tc)
+            if name == "register_transaction":
+                result = await _exec_register_transaction(finance, uid, args)
+            elif name == "create_task":
+                result = await _exec_create_task(tasks_svc, uid, args)
+            elif name == "complete_task":
+                result = await _exec_complete_task(tasks_svc, uid, args)
+            elif name == "list_tasks":
+                result = await _exec_list_tasks(tasks_svc, uid, args)
+            elif name == "create_recurring_task":
+                result = await _exec_create_recurring_task(
+                    recurring_svc, tasks_svc, uid, args,
+                )
+            elif name == "create_reminder":
+                result = await _exec_create_reminder(tasks_svc, uid, args)
+            elif name == "create_project":
+                result = await _exec_create_project(projects_svc, uid, args)
+            elif name == "create_habit":
+                result = await _exec_create_habit(habits_svc, uid, args)
+            elif name == "create_note":
+                result = await _exec_create_note(knowledge_svc, uid, args)
+            elif name == "create_goal":
+                result = await _exec_create_goal(goals_svc, uid, args)
+            else:
+                result = {"ok": False, "error": f"tool desconhecida: {name}"}
+
+            if result.get("ok") and result.get("entry"):
+                turn_transactions.append(result["entry"])
+            if result.get("ok") and result.get("task"):
+                turn_tasks.append(result["task"])
+            if result.get("ok") and isinstance(result.get("tasks"), list):
+                turn_tasks.extend(result["tasks"])
+            if result.get("ok") and result.get("recurring"):
+                turn_recurring.append(result["recurring"])
+                mat = result.get("materialized_task")
+                if mat:
+                    turn_tasks.append(mat)
+            for chip_kind in ("reminder", "project", "habit", "note", "goal"):
+                if result.get("ok") and result.get(chip_kind):
+                    turn_chips.append({"kind": chip_kind, "item": result[chip_kind]})
+
+            msgs.append(
+                ChatMessage(
+                    role="tool",
+                    content=json.dumps(
+                        {"tool": name, "args": args, **result},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+
+    reply = "".join(acc_parts).strip() or "(sem resposta)"
+    metadata: dict[str, Any] | None = None
+    if turn_transactions or turn_tasks or turn_recurring:
+        metadata = {}
+        if turn_transactions:
+            metadata["transactions"] = turn_transactions
+        if turn_tasks:
+            metadata["tasks"] = turn_tasks
+        if turn_recurring:
+            metadata["recurring"] = turn_recurring
+    try:
+        await svc.add_message(
+            conversation_id, uid, "assistant", reply, metadata=metadata,
+        )
+    except Exception:
+        logger.exception("failed to persist assistant reply")
+
+    title: str | None = None
+    if is_first_exchange:
+        try:
+            title = await _generate_title(llm, user_text, reply)
+            if title:
+                await svc.update_title(conversation_id, uid, title)
+        except Exception:
+            logger.exception("title generation failed")
+            title = None
+
+    return {
+        "reply": reply,
+        "transactions": turn_transactions,
+        "tasks": turn_tasks,
+        "recurring": turn_recurring,
+        "chips": turn_chips,
+        "title": title,
+    }
+
+
 def _run_agentic_stream(
     llm: AnthropicClient,
     finance: FinanceService,
