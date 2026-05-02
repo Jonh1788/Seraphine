@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import secrets
-import sqlite3
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -484,9 +483,12 @@ class WhatsAppService:
     ) -> bool:
         """Send a reminder push via WhatsApp; True only when actually sent.
 
-        Idempotent via aura_whatsapp_dispatches: a duplicate
-        (task_id, user_id) INSERT raises IntegrityError under the
-        composite PK and we treat it as "already sent." On Evolution
+        Idempotent via aura_whatsapp_dispatches: ``ON CONFLICT DO NOTHING``
+        on the (task_id, user_id) PK means a duplicate INSERT silently
+        no-ops and ``rowcount == 0`` flags it as already dispatched.
+        Other IntegrityErrors (e.g. FK violations under
+        ``PRAGMA foreign_keys = ON``) surface so the dispatcher can
+        retry / alert instead of swallowing them as "done." On Evolution
         failure we delete the claim row so the next dispatcher cycle
         retries.
         """
@@ -498,17 +500,14 @@ class WhatsAppService:
 
         def _claim() -> bool:
             conn = self._store._connect()
-            try:
-                with conn:
-                    conn.execute(
-                        "INSERT INTO aura_whatsapp_dispatches"
-                        " (task_id, user_id, sent_at) VALUES (?, ?, ?)",
-                        (task_id, user_id, ts_iso),
-                    )
-                return True
-            except sqlite3.IntegrityError:
-                # PK collision = already dispatched this (task, user) pair.
-                return False
+            with conn:
+                cur = conn.execute(
+                    "INSERT INTO aura_whatsapp_dispatches"
+                    " (task_id, user_id, sent_at) VALUES (?, ?, ?)"
+                    " ON CONFLICT(task_id, user_id) DO NOTHING",
+                    (task_id, user_id, ts_iso),
+                )
+            return (cur.rowcount or 0) == 1
 
         claimed = await asyncio.to_thread(_claim)
         if not claimed:

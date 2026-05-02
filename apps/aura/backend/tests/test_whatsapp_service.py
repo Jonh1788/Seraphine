@@ -476,3 +476,33 @@ async def test_send_reminder_rolls_back_claim_on_evolution_failure(svc):
         user_id="u1", task_id=77, title="X", due_time="09:00",
     )
     assert again is True
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_fk_violation_surfaces(svc):
+    """When PRAGMA foreign_keys = ON and the user row doesn't exist,
+    the dispatch INSERT must NOT be silently swallowed as 'already
+    dispatched' — that would leave the dispatcher with no retry path
+    and no breadcrumb. The corrected ON CONFLICT … DO NOTHING form
+    only handles the PK collision, so an FK violation surfaces.
+    """
+    import sqlite3 as sqlite3_mod
+    conn = svc._store._connect()
+    # Bind the WA phone first (FKs still off in the fixture, so we can
+    # populate aura_user_whatsapp without a parent users(id) row — that
+    # mirrors the production scenario where the user row was deleted
+    # mid-flight after the binding was created).
+    await svc.start_verification("u-orphan", "+5511987654321")
+    await svc.verify("u-orphan", "482910")
+    # Now mirror production: enable FKs and create the parent table so
+    # the dispatch INSERT must satisfy the FK to users(id).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS users ("
+        " id TEXT PRIMARY KEY"
+        ")"
+    )
+    conn.execute("PRAGMA foreign_keys = ON")
+    with pytest.raises(sqlite3_mod.IntegrityError):
+        await svc.send_reminder(
+            user_id="u-orphan", task_id=999, title="X", due_time=None,
+        )
