@@ -146,13 +146,23 @@ async def webhook(
                 )
             return {"ok": True}
 
-        # connection.update — clear cached QR once we're 'open'.
+        # connection.update — clear cached QR once we're 'open'. Full
+        # data dump (TEMP) so we can see lastDisconnect details from
+        # Baileys when the handshake is failing.
         if event_lower in ("connection.update", "connection_update"):
             data = raw.get("data") or {}
             state = data.get("state") if isinstance(data, dict) else None
             if state == "open":
                 svc.clear_qr()
-            logger.info("wa webhook: connection.update state=%r", state)
+            import json as _json
+            try:
+                dump = _json.dumps(data, default=str)[:600]
+            except Exception:
+                dump = str(data)[:600]
+            logger.info(
+                "wa webhook: connection.update state=%r data=%s",
+                state, dump,
+            )
             return {"ok": True}
 
         payload = _adapt_evolution_payload(raw)
