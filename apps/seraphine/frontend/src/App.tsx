@@ -54,9 +54,8 @@ import { VoiceMemoModal } from './voice-memo/VoiceMemoModal';
 import { StickyNotesOverlay } from './sticky-notes/StickyNotes';
 import { SettingsDrawer } from './settings';
 import { OnboardingFlow } from './onboarding';
-import { BottomNav } from './nav';
-import type { BottomNavView } from './nav';
 import { ClipboardAssistModal, useClipboardShortcut } from './clipboard';
+import { useWakeWord } from './realtime/useWakeWord';
 
 type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards';
 
@@ -85,6 +84,16 @@ export function App(): JSX.Element {
   }, [manualMute]);
   const [talking, setTalking] = useState<boolean>(false);
   const [realtimeActive, setRealtimeActive] = useState<boolean>(false);
+  // Wake-word (passive) listening — opt-in via SettingsDrawer. When on,
+  // a second VAD + Whisper pipeline runs while realtime is OFF to watch
+  // for "Oi Sera" / "Olá Seraphine" and auto-activate realtime. Persisted
+  // so the user doesn't have to re-enable every session.
+  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('seraphine.wakeWord') === 'true';
+  });
+  useEffect(() => {
+    localStorage.setItem('seraphine.wakeWord', String(wakeWordEnabled));
+  }, [wakeWordEnabled]);
   // metrics state is set by WS message handlers for latency tracking.
   // Currently not rendered (MetricsBar removed from sidebar) but kept
   // for future settings panel or devtools.
@@ -132,6 +141,15 @@ export function App(): JSX.Element {
           /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
         return true;
       }
+      // iPadOS masquerades as Macintosh in UA; `main.tsx` already
+      // classified the shell and set the dataset attribute — honour it.
+      if (
+        typeof document !== 'undefined' &&
+        (document.documentElement.dataset.shell === 'phone' ||
+          document.documentElement.dataset.shell === 'tablet')
+      ) {
+        return true;
+      }
       if (localStorage.getItem('seraphine.onboarded') === 'true') return true;
       if (localStorage.getItem('seraphine_conversation_id')) {
         localStorage.setItem('seraphine.onboarded', 'true');
@@ -168,7 +186,7 @@ export function App(): JSX.Element {
         }
       }
       const reg = await navigator.serviceWorker.ready;
-      const resp = await fetch('/push/vapid-public-key');
+      const resp = await fetch(`${API_BASE}/push/vapid-public-key`);
       const { key } = await resp.json();
       if (!key) throw new Error('VAPID public key nao configurada no servidor');
 
@@ -182,7 +200,7 @@ export function App(): JSX.Element {
           applicationServerKey: rawKey,
         });
       }
-      const res = await fetch('/push/subscribe', {
+      const res = await fetch(`${API_BASE}/push/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub.toJSON()),
@@ -276,7 +294,7 @@ export function App(): JSX.Element {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (!sub) return; // No prior subscription — wait for user to click the bell.
-        await fetch('/push/subscribe', {
+        await fetch(`${API_BASE}/push/subscribe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sub.toJSON()),
@@ -295,6 +313,19 @@ export function App(): JSX.Element {
     setClipboardAssist({ open: true, content: text });
   }, []);
   useClipboardShortcut(handleClipboardTrigger);
+
+  // Wake-word (passive) listening: active only when the user opted in
+  // AND realtime isn't already running — otherwise two VADs would fight
+  // for the same mic. On a match we flip realtime on and prime the
+  // AudioContext; the realtime pipeline then handles the actual turn.
+  useWakeWord({
+    enabled: wakeWordEnabled && !realtimeActive,
+    onDetect: useCallback(() => {
+      warmSharedAudioContext();
+      playbackRef.current?.ensureCtx();
+      setRealtimeActive(true);
+    }, []),
+  });
 
   // Tauri: listen for quick-capture event from global shortcut (Cmd+Shift+S)
   useEffect(() => {
@@ -442,6 +473,7 @@ export function App(): JSX.Element {
         }
       } else if (type === 'turn_end') {
         // Avatar: back to free look-around
+        console.log('[App][ws] turn_end -> setSpeaking(false) @ %s', new Date().toISOString());
         try { avatarCtrlRef.current?.setSpeaking?.(false); } catch { /* */ }
         // Turn duration
         if (tsSendRef.current) {
@@ -449,6 +481,7 @@ export function App(): JSX.Element {
           tsSendRef.current = 0;
         }
       } else if (type === 'tts_start') {
+        console.log('[App][ws] tts_start -> setSpeaking(true) @ %s', new Date().toISOString());
         tsTtsStartRef.current = now;
         tsTtsFirstChunkRef.current = false;
         // Avatar: switch to forward-facing conversational nods
@@ -463,6 +496,7 @@ export function App(): JSX.Element {
           playbackRef.current?.setPlaybackRate?.(1.0);
         }
       } else if (type === 'tts_end') {
+        console.log('[App][ws] tts_end @ %s', new Date().toISOString());
         tsTtsStartRef.current = 0;
         // Flush any sub-threshold residue in the PCM accumulator so the
         // tail of the last sentence actually gets scheduled. Without
@@ -477,10 +511,20 @@ export function App(): JSX.Element {
         void notify('Seraphine', text);
       } else if (type === 'whatsapp_notification') {
         const wa = msg as { fromMe?: boolean; author?: string; body?: string; chatName?: string; chatId?: string; important?: boolean; timestamp?: number };
-        if (!wa.fromMe) {
+        // Defensive filter: backend already drops these, but handle legacy
+        // state + older backends. "status@broadcast" = contact status
+        // updates (Stories), "@newsletter" = channels, empty chatId = junk.
+        const chatId = wa.chatId || '';
+        const isNoise =
+          !chatId ||
+          chatId === 'status@broadcast' ||
+          chatId === 'status' ||
+          chatId.endsWith('@broadcast') ||
+          chatId.endsWith('@newsletter');
+        if (!wa.fromMe && !isNoise) {
           setWhatsappUnread((prev) => prev + 1);
           setWhatsappMessages((prev) => [{
-            chatId: wa.chatId || 'unknown',
+            chatId,
             chatName: wa.chatName || 'Desconhecido',
             author: wa.author || wa.chatName || 'Desconhecido',
             body: wa.body || '',
@@ -640,10 +684,10 @@ export function App(): JSX.Element {
     const refreshCount = async (): Promise<void> => {
       try {
         const [tasksRes, entriesRes] = await Promise.all([
-          fetch('/tasks?status=pending&limit=200').then((r) =>
+          fetch(`${API_BASE}/tasks?status=pending&limit=200`).then((r) =>
             r.ok ? r.json() : { tasks: [] },
           ),
-          fetch('/finance/entries?status=pending_review&limit=100').then((r) =>
+          fetch(`${API_BASE}/finance/entries?status=pending_review&limit=100`).then((r) =>
             r.ok ? r.json() : { entries: [] },
           ),
         ]);
@@ -722,7 +766,7 @@ export function App(): JSX.Element {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/tasks?status=pending&limit=200');
+        const res = await fetch(`${API_BASE}/tasks?status=pending&limit=200`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const tasks = Array.isArray(data.tasks) ? data.tasks : [];
@@ -1054,7 +1098,7 @@ export function App(): JSX.Element {
     const title = quickTaskTitle.trim();
     if (!title) return;
     try {
-      await fetch('/tasks', {
+      await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -1179,6 +1223,16 @@ export function App(): JSX.Element {
       <header className="topbar">
         <div className="topbar__brand">Seraphine</div>
         <div className="topbar__right">
+          {wakeWordEnabled && !realtimeActive && (
+            <span
+              className="wake-word-indicator"
+              title="Mic em segundo plano, atento a 'oi Sera'"
+              aria-label="Escutando por voz"
+            >
+              <span className="wake-word-indicator__dot" aria-hidden />
+              ouvindo
+            </span>
+          )}
           <FocusPill state={focusState} actions={focusActions} />
           <button
             type="button"
@@ -1219,29 +1273,33 @@ export function App(): JSX.Element {
       <div className="layout">
         {/* Navigation Rail */}
         <nav className="nav-rail">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-rail__btn${item.active ? ' nav-rail__btn--active' : ''}`}
-              title={item.label}
-              aria-label={item.label}
-              onClick={item.onClick}
-            >
-              {item.icon}
-              {item.badgeCount && item.badgeCount > 0 ? (
-                <span className="nav-rail__badge nav-rail__badge--count">
-                  {item.badgeCount > 99 ? '99+' : item.badgeCount}
-                </span>
-              ) : item.badge ? (
-                <span className="nav-rail__badge" />
-              ) : null}
-            </button>
-          ))}
-          <div className="nav-rail__spacer" />
+          <div className="nav-rail__scroll">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-rail__btn${item.active ? ' nav-rail__btn--active' : ''}`}
+                title={item.label}
+                aria-label={item.label}
+                onClick={item.onClick}
+              >
+                {item.icon}
+                {item.badgeCount && item.badgeCount > 0 ? (
+                  <span className="nav-rail__badge nav-rail__badge--count">
+                    {item.badgeCount > 99 ? '99+' : item.badgeCount}
+                  </span>
+                ) : item.badge ? (
+                  <span className="nav-rail__badge" />
+                ) : null}
+              </button>
+            ))}
+          </div>
+          {/* Settings button pinned at the bottom of the rail — stays
+              visible even when the main list overflows and scrolls
+              (e.g., iPad portrait / iPhone). */}
           <button
             type="button"
-            className="nav-rail__btn"
+            className="nav-rail__btn nav-rail__btn--pinned"
             title="Configuracoes"
             aria-label="Configuracoes"
             onClick={() => setSettingsOpen(true)}
@@ -1428,12 +1486,18 @@ export function App(): JSX.Element {
             ) : null}
           </button>
         ))}
+        {/* Settings — nav rail has a pinned gear at the bottom; the
+            mobile drawer needs the equivalent entry so iPhone users can
+            open SettingsDrawer (theme, Google, HealthKit, wake word). */}
+        <button
+          type="button"
+          className="mobile-drawer__btn"
+          onClick={() => { setSettingsOpen(true); setMobileMenuOpen(false); }}
+        >
+          <SettingsIcon size={22} />
+          <span>Configurações</span>
+        </button>
       </div>
-
-      <BottomNav
-        activeView={activeView}
-        onNavigate={(view: BottomNavView) => setActiveView(view as ActiveView)}
-      />
 
       <CalendarModal
         open={calendarOpen}
@@ -1503,6 +1567,8 @@ export function App(): JSX.Element {
       <SettingsDrawer
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        wakeWordEnabled={wakeWordEnabled}
+        onWakeWordToggle={setWakeWordEnabled}
       />
 
       {!onboarded && (

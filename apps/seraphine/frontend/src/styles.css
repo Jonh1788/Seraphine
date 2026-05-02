@@ -92,8 +92,16 @@ body,
   padding: 0;
 }
 
+/* Solid dark base on html so any region the body's gradient doesn't paint
+   (iOS WKWebView host UIView, safe-area inset zones, scroll bounce in
+   PWA) shows the same dark color instead of the system black/white. */
+html {
+  background-color: var(--bg-0);
+}
+
 body {
   background: var(--bg-gradient);
+  background-color: var(--bg-0);
   color: var(--text);
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
     sans-serif;
@@ -242,11 +250,44 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   padding: 16px 0;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
   gap: 8px;
   background: var(--bg-0);
   border-right: 1px solid var(--border);
   position: relative;
   z-index: 15;
+  /* Bounded so the inner .nav-rail__scroll can overflow independently
+     while the pinned settings button stays anchored. */
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Scrollable region that holds the main nav buttons. Overflows on iPad
+   portrait / iPhone where 14 items don't fit vertically. Scrollbar
+   hidden because the rail is 60 px wide — a visible track would
+   clutter. Users can scroll with touch or trackpad without needing a
+   visible indicator. */
+.nav-rail__scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.nav-rail__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Settings button anchored at the bottom — never scrolls off-screen. */
+.nav-rail__btn--pinned {
+  margin-top: 8px;
+  flex-shrink: 0;
 }
 
 .nav-rail__btn {
@@ -345,9 +386,18 @@ button:disabled {
   background: var(--bg-1);
   border-left: 1px solid var(--border);
   padding: var(--space-4);
+  /* Pad top + bottom for the iOS dynamic island / home indicator so the
+     header and the last item aren't hidden. */
+  padding-top: max(var(--space-4), calc(var(--space-4) + env(safe-area-inset-top, 0px)));
+  padding-bottom: max(var(--space-4), calc(var(--space-4) + env(safe-area-inset-bottom, 0px)));
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* Overflow scroll — the nav list has 13+ items on mobile and
+     doesn't fit on iPhone SE-class screens without scrolling. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   transform: translateX(100%);
   visibility: hidden;
   transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0ms 250ms;
@@ -455,11 +505,39 @@ button:disabled {
     justify-content: center;
   }
 
-  /* Mobile: hide sidebar on non-chat views but keep it mounted off-screen
-     so the VRM avatar's WebGL canvas doesn't get disposed and rebuilt
-     every time the user revisits the chat view. `position: absolute` +
-     offset pops it out of the flex flow so the layout looks identical
-     to `display: none`. */
+  /* Phone shell: avatar stage doesn't fit the small viewport anyway, so
+     hide the sidebar entirely on every view. `display: none` keeps it
+     out of grid track sizing (`position: absolute` still claimed an
+     intrinsic height on the grid and compressed the chat/dashboard
+     below). The VRM canvas isn't mounted on phone so we don't pay the
+     WebGL-teardown cost for hiding it. */
+  html[data-shell="phone"] .sidebar,
+  html[data-shell="phone"] .sidebar--hidden {
+    display: none !important;
+  }
+  /* Phone layout is a single-column single-row grid once the sidebar is
+     gone — the `auto` row would otherwise still reserve space for the
+     sidebar's intrinsic height. */
+  html[data-shell="phone"] .layout {
+    grid-template-rows: 1fr;
+  }
+  /* `.app` already pads the home-indicator inset; dropping it on phone
+     so the layout itself can own that reserve below. */
+  html[data-shell="phone"] .app {
+    padding-bottom: 0;
+  }
+  html[data-shell="phone"] .dashboard {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+  }
+  /* Reserve only the home-indicator safe area — navigation lives in the
+     hamburger drawer now, no fixed bar to clear. */
+  html[data-shell="phone"] .layout {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Tablet/unknown shells still use the off-screen trick so the VRM
+     canvas survives an iPad going into laptop-width range. */
   .sidebar--hidden {
     position: absolute !important;
     left: -99999px !important;
@@ -478,9 +556,18 @@ button:disabled {
   flex-direction: column;
   gap: var(--space-4);
   overflow-y: auto;
+  /* min-height:0 inside the grid cell so the flex children can shrink
+     and the overflow:auto engages — without it the flex column takes
+     intrinsic height and sidebar content below the fold is unreachable
+     on short viewports (iPad mini portrait, landscape on narrow iPads). */
+  min-height: 0;
   padding: var(--space-4);
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
   border-right: 1px solid var(--border);
   transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms ease, opacity 200ms ease;
+  /* Smooth touch scrolling on iOS WKWebView — still honored by some
+     Safari versions even though the property is "standard" now. */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Desktop: sidebar stays visible (avatar always shown) */
@@ -503,8 +590,16 @@ button:disabled {
   padding: var(--space-3);
   display: flex;
   justify-content: center;
+  align-items: center;
   position: relative;
   overflow: hidden;
+  /* Lock a portrait aspect ratio so the flex item has a definite size
+     even before the canvas finishes mounting. Without this, iOS Safari
+     can collapse `<canvas style="height: auto">` to 0 height when the
+     parent hasn't fully laid out yet, leaving an empty dark box on
+     first paint. */
+  aspect-ratio: 3 / 4;
+  min-height: 220px;
 }
 
 .avatar-stage::before {
@@ -519,8 +614,12 @@ button:disabled {
   border-radius: var(--r-md);
   background: #0a0a14;
   width: 100% !important;
-  height: auto !important;
+  /* 100% of the parent so the canvas matches the aspect-ratio'd stage,
+     instead of relying on `height: auto` which iOS occasionally
+     collapses to 0 during first layout. */
+  height: 100% !important;
   max-width: 360px;
+  object-fit: contain;
   display: block;
   position: relative;
   z-index: 1;
@@ -637,7 +736,12 @@ button:disabled {
 
 .chat {
   display: grid;
-  grid-template-rows: 1fr auto;
+  /* Single-row grid: chat-layer spans everything and holds both the
+     message list AND the composer. The old `1fr auto` was from when
+     ChatView and the composer were separate grid children — now it
+     just risks giving the auto row a non-zero height on some WebKit
+     builds, squeezing the overlay. */
+  grid-template-rows: 1fr;
   grid-template-columns: minmax(0, 1fr);
   background: rgba(17, 17, 26, 0.5);
   backdrop-filter: blur(8px);
@@ -694,10 +798,17 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Bounded by `.chat`'s full height; inner views scroll on their own. */
+  overflow: hidden;
 }
 .chat > .view-overlay > * {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  /* Don't pin `height: 100%` here — on iOS WKWebView that resolves to
+     content-height inside the absolute-positioned flex column and
+     pushes the view below the fold. Let `flex: 1 1 0 + min-height: 0`
+     bound the child to the available space instead. Inner views use
+     their own `overflow-y: auto` to scroll. */
 }
 
 /* Wrapper inside .chat for drag & drop events */
@@ -779,6 +890,12 @@ button:disabled {
   gap: var(--space-4);
   scroll-behavior: smooth;
   min-width: 0;
+  /* chat-layer is a flex column; composer has flex-shrink: 0. Messages
+     take the remaining vertical space. Without `flex: 1 1 0 + min-height: 0`
+     the list inherits its intrinsic content height and pushes the
+     composer off-screen at the bottom. */
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .chat__messages::-webkit-scrollbar { width: 8px; }
@@ -1044,6 +1161,11 @@ button:disabled {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  /* Never shrink below its intrinsic size — messages take the remaining
+     space via `flex: 1 1 0`. Also absorb the iOS home-indicator inset
+     so the input doesn't sit on top of the gesture bar. */
+  flex-shrink: 0;
+  padding-bottom: max(16px, calc(16px + env(safe-area-inset-bottom, 0px)));
 }
 
 .chat__input {
@@ -4043,24 +4165,45 @@ button:disabled {
 
 /* ---------- Animation Lab ---------- */
 
+/* ===== Animation Lab — repaginated (SDD 075, Fase 1) ===== */
+
 .anim-lab {
+  --lab-bg-panel: color-mix(in srgb, var(--bg-1) 82%, var(--accent) 3%);
+  --lab-bg-panel-raised: color-mix(in srgb, var(--bg-2) 92%, var(--accent) 4%);
+  --lab-border-soft: rgba(255, 255, 255, 0.05);
+  --lab-border-hi: rgba(255, 255, 255, 0.1);
+  --lab-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --lab-axis-x: #f87171;
+  --lab-axis-y: #4ade80;
+  --lab-axis-z: #60a5fa;
+  --lab-track-stripe: rgba(255, 255, 255, 0.015);
+
   max-width: 100vw;
   width: 100%;
   max-height: 100vh;
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  background: var(--bg-0);
   border-radius: 0;
+  color: var(--text);
+  font-size: 12px;
 }
+
+/* Header --------------------------------------------------------------- */
 
 .anim-lab__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--lab-border-soft);
+  gap: var(--space-3);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--bg-1) 88%, transparent) 0%,
+    var(--bg-1) 100%);
+  box-shadow: var(--lab-shadow-inset);
   flex-shrink: 0;
 }
 
@@ -4069,22 +4212,84 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .anim-lab__title {
   margin: 0;
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--accent-hi);
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
+.anim-lab__title-icon {
+  color: var(--accent);
+  display: inline-flex;
+}
+
+.anim-lab__divider {
+  width: 1px;
+  height: 18px;
+  background: var(--lab-border-soft);
+  margin: 0 2px;
+}
+
+.anim-lab__gesture-select {
+  padding: 4px 26px 4px 10px;
+  font-size: 11px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-sm);
+  appearance: none;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  min-width: 140px;
+}
+
+.anim-lab__gesture-select:hover {
+  border-color: var(--accent-dim);
+}
+
+.anim-lab__dur-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+
+.anim-lab__dur-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.anim-lab__dur-val {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text);
+  min-width: 32px;
+  text-align: right;
+}
+
 .anim-lab__dur-slider {
-  width: 80px;
+  width: 72px;
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
   background: var(--bg-3);
   cursor: pointer;
@@ -4092,77 +4297,196 @@ button:disabled {
 
 .anim-lab__dur-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
+  box-shadow: 0 0 0 2px var(--bg-1);
 }
+
+.anim-lab__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  border: 1px solid var(--lab-border-soft);
+}
+
+.anim-lab__status--dirty { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
+.anim-lab__status--saved { color: var(--user); border-color: color-mix(in srgb, var(--user) 35%, transparent); }
+.anim-lab__status--playing { color: var(--accent-hi); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+.anim-lab__status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.anim-lab__status--playing::before { animation: animlab-pulse 900ms ease-in-out infinite; }
+
+@keyframes animlab-pulse { 50% { opacity: 0.3; transform: scale(0.85); } }
 
 .anim-lab__btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
   font-size: 11px;
+  font-weight: 500;
   border-radius: var(--r-sm);
-  background: var(--bg-3);
+  background: var(--bg-2);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lab-border-soft);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
   white-space: nowrap;
 }
 
-.anim-lab__btn:hover {
-  background: var(--bg-2);
-  border-color: var(--accent-dim);
+.anim-lab__btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--lab-border-hi);
+  color: var(--accent-hi);
 }
 
-.anim-lab__btn--active {
-  background: var(--accent-dim);
+.anim-lab__btn:active:not(:disabled) { transform: translateY(1px); }
+
+.anim-lab__btn--active,
+.anim-lab__btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-2));
   border-color: var(--accent);
+  color: var(--accent-hi);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.anim-lab__btn--primary {
+  background: var(--accent-gradient);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.anim-lab__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
   color: #fff;
 }
 
 .anim-lab__btn--sm {
-  padding: 2px 8px;
+  height: 22px;
+  padding: 0 8px;
   font-size: 10px;
 }
 
+.anim-lab__btn--icon {
+  width: 26px;
+  padding: 0;
+}
+
+.anim-lab__btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-2));
+}
+
 .anim-lab__btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
+.anim-lab__btn-icon {
+  display: inline-flex;
+  align-items: center;
+  color: currentColor;
+}
+
 .anim-lab__close {
-  width: 28px;
-  height: 28px;
-  display: flex;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
   border-radius: var(--r-sm);
   color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
   transition: background 120ms ease, color 120ms ease;
+  cursor: pointer;
 }
 
 .anim-lab__close:hover {
   background: var(--bg-3);
   color: var(--text);
+  border-color: var(--lab-border-soft);
 }
+
+/* Body ---------------------------------------------------------------- */
 
 .anim-lab__body {
   display: grid;
-  grid-template-columns: 1fr 220px;
-  flex: 1;
+  grid-template-columns: 220px 1fr 260px;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg-0);
 }
+
+.anim-lab__panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--lab-bg-panel);
+}
+
+.anim-lab__panel--left { border-right: 1px solid var(--lab-border-soft); }
+.anim-lab__panel--right { border-left: 1px solid var(--lab-border-soft); }
+
+.anim-lab__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--lab-border-soft);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.anim-lab__panel-header-count {
+  padding: 1px 6px;
+  font-size: 9px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.anim-lab__panel-body {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Viewport + overlays */
 
 .anim-lab__viewport {
   position: relative;
-  background: var(--bg-0);
+  background:
+    radial-gradient(ellipse at 50% 30%, color-mix(in srgb, var(--accent) 6%, var(--bg-0)) 0%, var(--bg-0) 70%),
+    var(--bg-0);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -4174,186 +4498,449 @@ button:disabled {
   height: 100% !important;
 }
 
+.anim-lab__viewport-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-md);
+  padding: 3px;
+}
+
 .anim-lab__gizmo-bar {
   position: absolute;
   bottom: 8px;
   left: 8px;
   display: flex;
-  gap: 4px;
+  gap: 3px;
+  padding: 3px;
   z-index: 10;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-md);
 }
 
 .anim-lab__gizmo-btn {
-  padding: 4px 8px;
+  padding: 4px 10px;
   font-size: 10px;
+  font-weight: 500;
   border-radius: var(--r-sm);
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  background: transparent;
   color: var(--text-dim);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
+  letter-spacing: 0.04em;
 }
+
+.anim-lab__gizmo-btn:hover { color: var(--text); }
 
 .anim-lab__gizmo-btn--active {
-  background: var(--accent-dim);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   color: #fff;
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
-.anim-lab__sidebar {
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
+.anim-lab__bone-hover {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-md);
 }
 
-.anim-lab__bone-list {
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.anim-lab__section-title {
-  margin: 0 0 6px;
-  font-size: 11px;
+.anim-lab__bone-hover-name {
+  color: var(--accent-hi);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  margin-right: 6px;
+}
+
+.anim-lab__bone-hover-delta {
   color: var(--text-dim);
 }
 
-.anim-lab__bone-items {
+/* Outliner (left panel) */
+
+.anim-lab__outliner {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 280px;
-  overflow-y: auto;
 }
 
-.anim-lab__bone-item {
-  padding: 3px 8px;
+.anim-lab__outliner-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding: 4px 8px 4px 0;
   font-size: 11px;
   text-align: left;
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-dim);
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: background 80ms ease;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+  width: 100%;
 }
 
-.anim-lab__bone-item:hover {
+.anim-lab__outliner-item:hover {
   background: var(--bg-3);
   color: var(--text);
 }
 
-.anim-lab__bone-item--sel {
-  background: var(--accent-dim);
-  color: #fff;
+.anim-lab__outliner-item--sel {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-hi);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
-.anim-lab__bone-item--kf::after {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: var(--accent);
-  border-radius: 50%;
-  margin-left: 6px;
-  vertical-align: middle;
+.anim-lab__outliner-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+.anim-lab__outliner-indent {
+  width: var(--indent, 0px);
+  flex-shrink: 0;
+}
+
+.anim-lab__outliner-branch {
+  width: 10px;
+  color: var(--text-faint);
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.anim-lab__outliner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent);
+  margin-right: 8px;
+}
+
+.anim-lab__library {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--lab-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anim-lab__library-group {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  padding: 0 4px;
+}
+
+.anim-lab__library-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.anim-lab__library-item:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.anim-lab__library-item--active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-hi);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.anim-lab__library-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--text-faint);
+}
+
+/* Inspector (right panel) */
 
 .anim-lab__inspector {
-  padding: 8px;
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.anim-lab__inspector-empty {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 20px 12px;
+  text-align: center;
+  border: 1px dashed var(--lab-border-soft);
+  border-radius: var(--r-sm);
+  line-height: 1.5;
+}
+
+.anim-lab__card {
+  background: var(--lab-bg-panel-raised);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-md);
+  padding: 10px;
+  box-shadow: var(--lab-shadow-inset);
+}
+
+.anim-lab__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.anim-lab__card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.anim-lab__card-meta {
+  font-size: 9px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .anim-lab__insp-row {
   display: grid;
-  grid-template-columns: 18px 1fr 48px;
+  grid-template-columns: 14px 1fr 56px;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
+.anim-lab__insp-row:last-child { margin-bottom: 0; }
+
 .anim-lab__insp-axis {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.anim-lab__insp-axis--x { color: var(--lab-axis-x); }
+.anim-lab__insp-axis--y { color: var(--lab-axis-y); }
+.anim-lab__insp-axis--z { color: var(--lab-axis-z); }
 
 .anim-lab__insp-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
   background: var(--bg-3);
   cursor: pointer;
 }
 
+.anim-lab__insp-slider--x { background: linear-gradient(90deg, color-mix(in srgb, var(--lab-axis-x) 30%, var(--bg-3)) 0%, var(--bg-3) 100%); }
+.anim-lab__insp-slider--y { background: linear-gradient(90deg, color-mix(in srgb, var(--lab-axis-y) 30%, var(--bg-3)) 0%, var(--bg-3) 100%); }
+.anim-lab__insp-slider--z { background: linear-gradient(90deg, color-mix(in srgb, var(--lab-axis-z) 30%, var(--bg-3)) 0%, var(--bg-3) 100%); }
+
 .anim-lab__insp-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--text);
   cursor: pointer;
+  box-shadow: 0 0 0 2px var(--bg-1), 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .anim-lab__insp-val {
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--text);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--bg-3);
 }
 
+.anim-lab__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--lab-border-soft);
+}
+
+/* Timeline area */
+
 .anim-lab__timeline-area {
-  border-top: 1px solid var(--border);
-  padding: 6px 8px;
+  border-top: 1px solid var(--lab-border-soft);
+  background: var(--lab-bg-panel);
+  padding: 6px 10px 10px;
   flex-shrink: 0;
 }
 
 .anim-lab__timeline-actions {
   display: flex;
-  gap: var(--space-2);
+  gap: 4px;
+  align-items: center;
   margin-bottom: 6px;
   flex-wrap: wrap;
+}
+
+.anim-lab__timeline-spacer { flex: 1; }
+
+.anim-lab__timeline-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--lab-border-soft);
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.anim-lab__timeline-zoom button {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.anim-lab__timeline-zoom button:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.anim-lab__timeline-zoom-val {
+  min-width: 36px;
+  text-align: center;
+  padding: 0 4px;
 }
 
 .anim-timeline {
   width: 100%;
   overflow: hidden;
-  border-radius: var(--r-sm);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  border: 1px solid var(--lab-border-soft);
+  box-shadow: var(--lab-shadow-inset);
 }
 
 .anim-timeline__svg {
   display: block;
   user-select: none;
+  touch-action: none;
+}
+
+.anim-timeline__track-stripe {
+  fill: var(--lab-track-stripe);
 }
 
 .anim-timeline__label {
-  font-family: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   pointer-events: none;
 }
 
 .anim-timeline__rubberband {
   fill: var(--accent);
-  fill-opacity: 0.15;
+  fill-opacity: 0.12;
   stroke: var(--accent);
-  stroke-opacity: 0.8;
+  stroke-opacity: 0.9;
   stroke-width: 1;
   stroke-dasharray: 4,2;
   pointer-events: none;
 }
 
+.anim-timeline__snap-guide {
+  stroke: var(--accent-hi);
+  stroke-width: 1;
+  stroke-dasharray: 2,3;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.anim-timeline__playhead-line {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 50%, transparent));
+}
+
+.anim-timeline__playhead-head {
+  fill: var(--accent);
+  cursor: ew-resize;
+}
+
+.anim-timeline__diamond {
+  fill: var(--text);
+  cursor: grab;
+  transition: fill 80ms ease;
+}
+
+.anim-timeline__diamond:hover { fill: var(--accent-hi); }
+
+.anim-timeline__diamond--sel {
+  fill: var(--accent);
+  stroke: var(--accent-hi);
+  stroke-width: 1.2;
+}
+
+.anim-timeline__diamond--primary {
+  filter: drop-shadow(0 0 3px #fff);
+}
+
+/* F-Curve editor */
+
 .anim-lab__fcurve-area {
-  border-top: 1px solid var(--border);
-  padding: 8px;
+  border-top: 1px solid var(--lab-border-soft);
+  padding: 8px 10px;
   flex-shrink: 0;
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
+  background: var(--lab-bg-panel);
 }
 
 .anim-fcurve {
@@ -4372,32 +4959,89 @@ button:disabled {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .anim-fcurve__svg {
-  background: var(--bg-3);
+  background: var(--bg-1);
+  border: 1px solid var(--lab-border-soft);
   border-radius: var(--r-sm);
 }
 
 .anim-fcurve__empty {
   font-size: 11px;
   color: var(--text-dim);
-  padding: 12px;
+  padding: 16px;
   text-align: center;
 }
 
+/* Feedback + cheat sheet */
+
 .anim-lab__feedback {
-  position: absolute;
-  bottom: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 16px;
-  background: var(--accent-dim);
-  color: #fff;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 7px 14px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--accent-dim);
   border-radius: var(--r-md);
-  font-size: 12px;
+  font-size: 11px;
   pointer-events: none;
-  animation: fadeIn 150ms ease;
+  animation: animlab-slideup 150ms ease;
+  box-shadow: var(--shadow-md), 0 0 16px color-mix(in srgb, var(--accent) 25%, transparent);
+  z-index: 60;
+}
+
+@keyframes animlab-slideup {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.anim-lab__cheatsheet {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  z-index: 50;
+  padding: 12px 14px;
+  background: rgba(17, 17, 26, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  font-size: 11px;
+  width: 280px;
+  animation: animlab-slideup 150ms ease;
+}
+
+.anim-lab__cheatsheet h4 {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-hi);
+}
+
+.anim-lab__cheatsheet-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+}
+
+.anim-lab__cheatsheet-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text);
+  padding: 1px 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: 3px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* WhatsApp notification badge */
@@ -7986,6 +8630,15 @@ button:disabled {
   height: 12px;
 }
 
+.task-chat-card__overflow {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  border-top: 1px dashed var(--border);
+  letter-spacing: 0.02em;
+}
+
 .task-chat-card__remind {
   display: inline-flex;
   align-items: center;
@@ -8301,8 +8954,18 @@ button:disabled {
   max-width: 900px;
   margin: 0 auto;
   padding: var(--space-5);
+  /* Pad the bottom extra on devices with a home indicator / dock so
+     the last card isn't stuck under the iOS safe area. `max()` keeps
+     the normal padding when no inset is present. */
+  padding-bottom: max(var(--space-5), calc(var(--space-5) + env(safe-area-inset-bottom, 0px)));
   overflow-y: auto;
-  height: 100%;
+  /* Occupy the full flex cell and let min-height:0 unlock overflow.
+     `height: 100%` was unreliable on WKWebView when the flex parent's
+     height was computed from content vs. viewport. */
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* --- Header --- */
@@ -10843,6 +11506,85 @@ body.qc-window .quick-capture {
   font-style: italic;
 }
 
+.settings-drawer__hint {
+  margin: 0 0 var(--space-3) 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.settings-drawer__action-btn {
+  width: 100%;
+  padding: 10px var(--space-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.settings-drawer__action-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--accent);
+}
+.settings-drawer__action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-drawer__status {
+  margin: var(--space-2) 0 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+.settings-drawer__status--ok { color: var(--accent); }
+.settings-drawer__status--err { color: #ef4444; }
+
+.settings-drawer__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  padding: 6px 0;
+}
+.settings-drawer__toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+/* Wake-word indicator in the topbar — small pulsing dot that appears
+   only while passive listening is armed. Signals "the mic is live but
+   only matching the wake word locally." */
+.wake-word-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+.wake-word-indicator__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: wake-pulse 1.8s ease-in-out infinite;
+}
+@keyframes wake-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -11323,83 +12065,53 @@ body.qc-window .quick-capture {
   }
 }
 
-/* Compact tier: bottom-nav-specific adjustments. Most layout rules are
-   already in the (max-width: 900px) block above. */
+/* ---------- Tablet (iPad) overrides ---------- */
+/*
+ * main.tsx tags <html data-shell="tablet"> when the runtime detects an
+ * iPad (or iPadOS masquerading as Mac). iPad portrait at 1032 CSS px
+ * matches the "laptop" media query above and would hide the sidebar,
+ * but the iPad has enough real estate + the user explicitly wants the
+ * VRM avatar visible. These rules restore the sidebar in the flow for
+ * tablets and scale it down so content still breathes on 820–834 px
+ * portrait (iPad Air/Pro 11).
+ */
+html[data-shell="tablet"] .layout {
+  grid-template-columns: 60px 240px 1fr;
+}
+html[data-shell="tablet"] .sidebar,
+html[data-shell="tablet"] .sidebar--hidden {
+  position: static !important;
+  left: auto !important;
+  top: auto !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  width: auto !important;
+  /* Keep the base `.sidebar` height (grid cell fill) so overflow:auto
+     has a bounded height — `height: auto` would collapse to content
+     and break scrolling on iPad mini portrait when the avatar + toggles
+     exceed the viewport. */
+  display: flex !important;
+}
+html[data-shell="tablet"] .avatar-stage {
+  max-height: none;
+}
+/* Bottom-nav padding still needed at sub-900 widths (iPad mini portrait). */
+html[data-shell="tablet"] .layout {
+  padding-bottom: 0;
+}
+/* Small iPad portrait (mini, Air 11): tighten the sidebar further so
+   the chat content doesn't squeeze below legibility. */
 @media (max-width: 900px) {
-  /* Reserve space so the fixed bottom-nav doesn't cover content. The
-     iOS home-indicator safe area is already absorbed by `.app`'s outer
-     padding — here we only account for the 56px bar itself. */
-  .layout {
-    padding-bottom: 56px;
+  html[data-shell="tablet"] .layout {
+    grid-template-columns: 60px 200px 1fr;
   }
 }
 
-/* ---------- Bottom navigation (SDD 016-E) ---------- */
-.bottom-nav {
-  display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: calc(56px + env(safe-area-inset-bottom, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border-top: 1px solid var(--glass-border);
-  z-index: 40;
-  align-items: stretch;
-  justify-content: space-around;
-  gap: 4px;
-}
-
-.bottom-nav__btn {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 6px 4px;
-  background: transparent;
-  border: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  transition: color 150ms ease, background 150ms ease;
-}
-
-.bottom-nav__btn:hover {
-  color: var(--text);
-}
-
-.bottom-nav__btn--active {
-  color: var(--accent-hi);
-}
-
-.bottom-nav__btn--active .bottom-nav__icon {
-  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.35));
-}
-
-.bottom-nav__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 22px;
-}
-
-.bottom-nav__label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1;
-  white-space: nowrap;
-}
-
 @media (max-width: 900px) {
-  .bottom-nav {
-    display: flex;
+  /* Tablet shell keeps the vertical nav rail even at narrow widths;
+     phone shell uses the hamburger drawer (no bottom bar). */
+  html[data-shell="tablet"] .layout {
+    padding-bottom: 0;
   }
 }
 
@@ -11408,7 +12120,6 @@ body.qc-window .quick-capture {
    the 44×44px minimum Apple HIG / WCAG 2.5.5 target. */
 @media (pointer: coarse) {
   .nav-rail__btn,
-  .bottom-nav__btn,
   .mobile-drawer__btn,
   .mobile-menu-btn,
   .btn,
