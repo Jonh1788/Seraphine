@@ -191,3 +191,94 @@ def test_webhook_drops_messages_with_empty_text_before_routing():
         )
     assert resp.status_code == 200
     svc.route_inbound.assert_not_called()
+
+
+def test_status_returns_service_payload():
+    svc = MagicMock()
+    svc.get_status = AsyncMock(return_value={
+        "verified": True, "phone_masked": "+55 11 9••••-••42",
+    })
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get("/whatsapp/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"verified": True, "phone_masked": "+55 11 9••••-••42"}
+
+
+def test_disconnect_calls_service():
+    svc = MagicMock()
+    svc.disconnect = AsyncMock(return_value=True)
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post("/whatsapp/disconnect")
+    assert resp.status_code == 200
+    svc.disconnect.assert_awaited_once_with("u1")
+
+
+def test_admin_qr_requires_admin_token():
+    svc = MagicMock()
+    svc._client = MagicMock()
+    svc._client.get_qr = AsyncMock(return_value=("iVBOR", None))
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get("/whatsapp/admin/qr")
+    assert resp.status_code == 401
+
+
+def test_admin_qr_returns_base64_and_state():
+    svc = MagicMock()
+    svc._client = MagicMock()
+    svc._client.get_qr = AsyncMock(return_value=("iVBOR", None))
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get(
+            "/whatsapp/admin/qr",
+            headers={"X-Aura-Admin-Token": "admintoken"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"qr": "iVBOR", "state": None}
+
+
+def test_admin_qr_when_already_connected():
+    """get_qr returns (None, "open") when the instance is already
+    linked — the endpoint exposes that so the admin UI can show
+    'connected' without falling back to /admin/status."""
+    svc = MagicMock()
+    svc._client = MagicMock()
+    svc._client.get_qr = AsyncMock(return_value=(None, "open"))
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get(
+            "/whatsapp/admin/qr",
+            headers={"X-Aura-Admin-Token": "admintoken"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"qr": None, "state": "open"}
+
+
+def test_admin_status_returns_service_state():
+    svc = MagicMock()
+    svc._client = MagicMock()
+    svc._client.get_status = AsyncMock(return_value={
+        "connected": True, "phone": "+5511987654321", "state": "open",
+    })
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get(
+            "/whatsapp/admin/status",
+            headers={"X-Aura-Admin-Token": "admintoken"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["connected"] is True
+
+
+def test_admin_status_requires_admin_token():
+    svc = MagicMock()
+    svc._client = MagicMock()
+    svc._client.get_status = AsyncMock(return_value={
+        "connected": True, "phone": "+5511987654321", "state": "open",
+    })
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get("/whatsapp/admin/status")
+    assert resp.status_code == 401

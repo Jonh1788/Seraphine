@@ -48,6 +48,14 @@ def _require_user(user_id: str | None) -> str:
     return user_id
 
 
+def _require_admin(request: Request, header_value: str | None) -> None:
+    expected = getattr(request.app.state, "whatsapp_admin_token", None)
+    if not expected or not secrets.compare_digest(
+        header_value or "", expected,
+    ):
+        raise HTTPException(status_code=401, detail="admin token required")
+
+
 def _adapt_evolution_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Map Evolution's webhook envelope to the routing-layer shape.
 
@@ -152,3 +160,45 @@ async def connect_verify(
     if not ok:
         raise HTTPException(status_code=400, detail="código inválido ou expirado")
     return {"ok": True}
+
+
+@router.get("/status")
+async def status(
+    request: Request,
+    user_id: Optional[str] = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    uid = _require_user(user_id)
+    svc = _service(request)
+    return await svc.get_status(uid)
+
+
+@router.post("/disconnect")
+async def disconnect(
+    request: Request,
+    user_id: Optional[str] = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    uid = _require_user(user_id)
+    svc = _service(request)
+    await svc.disconnect(uid)
+    return {"ok": True}
+
+
+@router.get("/admin/qr")
+async def admin_qr(
+    request: Request,
+    x_aura_admin_token: Optional[str] = Header(None),
+) -> dict[str, Optional[str]]:
+    _require_admin(request, x_aura_admin_token)
+    svc = _service(request)
+    qr, state = await svc._client.get_qr()
+    return {"qr": qr, "state": state}
+
+
+@router.get("/admin/status")
+async def admin_status(
+    request: Request,
+    x_aura_admin_token: Optional[str] = Header(None),
+) -> dict[str, Any]:
+    _require_admin(request, x_aura_admin_token)
+    svc = _service(request)
+    return await svc._client.get_status()
