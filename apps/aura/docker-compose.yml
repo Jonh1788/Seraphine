@@ -55,7 +55,10 @@ services:
       - aura-net
 
   evolution:
-    image: atendai/evolution-api:v2.1.0
+    # Why: v2.1.0 ships an older Baileys that fails the WhatsApp Web
+    # handshake (QR never emits, connection cycles close↔connecting).
+    # Pin a recent stable tag — bumping requires re-pairing the number.
+    image: atendai/evolution-api:v2.2.3
     restart: unless-stopped
     hostname: aura-evolution
     env_file:
@@ -79,7 +82,9 @@ services:
       WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
       WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
-      LOG_LEVEL: WARN
+      # INFO during the bring-up; can be downgraded to WARN once the
+      # number is paired and traffic settles.
+      LOG_LEVEL: INFO
     volumes:
       - evolution-data:/evolution/instances
     networks:
