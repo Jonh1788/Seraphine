@@ -25,6 +25,10 @@ VERIFICATION_COOLDOWN = timedelta(seconds=60)
 MAX_VERIFICATION_ATTEMPTS = 3
 
 
+class CooldownError(RuntimeError):
+    """Raised when start_verification is called within the cooldown window."""
+
+
 def _gen_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
@@ -60,12 +64,19 @@ class WhatsAppService:
     # ------------------------------------------------------------------
 
     async def start_verification(self, user_id: str, phone_raw: str) -> None:
+        """Issue a 6-digit code to ``phone_raw`` for ``user_id``.
+
+        Enforces a 60-second cooldown per user; replaces any existing
+        in-flight code so the user always sees the latest one.
+        """
         phone = normalize_e164(phone_raw)
         ts = self._now()
+        code = self._code()
 
         def _check_and_upsert() -> None:
             conn = self._store._connect()
-            with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
                 row = conn.execute(
                     "SELECT created_at FROM aura_whatsapp_verification"
                     " WHERE user_id = ?",
@@ -74,7 +85,7 @@ class WhatsAppService:
                 if row:
                     last = datetime.fromisoformat(row[0])
                     if ts - last < VERIFICATION_COOLDOWN:
-                        raise RuntimeError(
+                        raise CooldownError(
                             "aguarde alguns segundos antes de pedir outro código"
                         )
                 conn.execute(
@@ -88,31 +99,25 @@ class WhatsAppService:
                     "   attempts = 0,"
                     "   created_at = excluded.created_at",
                     (
-                        user_id,
-                        phone,
-                        self._code(),
-                        _iso(ts + VERIFICATION_TTL),
-                        _iso(ts),
+                        user_id, phone, code,
+                        _iso(ts + VERIFICATION_TTL), _iso(ts),
                     ),
                 )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
         await asyncio.to_thread(_check_and_upsert)
 
-        # After persisting we re-read the code so the in-memory copy
-        # matches what's on disk (handles ON CONFLICT path cleanly).
-        def _read_code() -> str:
-            conn = self._store._connect()
-            row = conn.execute(
-                "SELECT code FROM aura_whatsapp_verification WHERE user_id = ?",
-                (user_id,),
-            ).fetchone()
-            return str(row[0])
-
-        code = await asyncio.to_thread(_read_code)
         text = f"Aura: seu código de verificação é {code} (válido por 5 min)."
         try:
             await self._client.send_text(phone, text)
         except EvolutionError:
+            # Why: leave the verification row in place even if Evolution's
+            # response said "fail". The SMS may still have been delivered;
+            # the user can submit the code anyway. The 60s cooldown will
+            # block immediate re-issuance — fine, the user can retry shortly.
             logger.exception("verification send failed user=%s", user_id)
             raise
 
@@ -121,13 +126,15 @@ class WhatsAppService:
 
         def _verify() -> bool:
             conn = self._store._connect()
-            with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
                 row = conn.execute(
                     "SELECT phone_e164, code, expires_at, attempts"
                     " FROM aura_whatsapp_verification WHERE user_id = ?",
                     (user_id,),
                 ).fetchone()
                 if not row:
+                    conn.commit()
                     return False
                 phone, expected, expires_at, attempts = row
                 if datetime.fromisoformat(expires_at) <= ts:
@@ -135,6 +142,7 @@ class WhatsAppService:
                         "DELETE FROM aura_whatsapp_verification WHERE user_id = ?",
                         (user_id,),
                     )
+                    conn.commit()
                     return False
                 if str(code) != str(expected):
                     new_attempts = (attempts or 0) + 1
@@ -149,8 +157,8 @@ class WhatsAppService:
                             " WHERE user_id = ?",
                             (new_attempts, user_id),
                         )
+                    conn.commit()
                     return False
-                # Success — bind and clear.
                 ts_iso = _iso(ts)
                 conn.execute(
                     "INSERT INTO aura_user_whatsapp"
@@ -166,7 +174,11 @@ class WhatsAppService:
                     "DELETE FROM aura_whatsapp_verification WHERE user_id = ?",
                     (user_id,),
                 )
+                conn.commit()
                 return True
+            except Exception:
+                conn.rollback()
+                raise
 
         return await asyncio.to_thread(_verify)
 

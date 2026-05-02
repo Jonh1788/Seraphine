@@ -179,3 +179,18 @@ async def test_start_verification_throttled(svc):
     with pytest.raises(RuntimeError) as exc:
         await svc.start_verification("u1", "+5511987654321")
     assert "aguarde" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_start_verification_cooldown_boundary(svc):
+    from datetime import timedelta
+    await svc.start_verification("u1", "+5511987654321")
+    base = svc._now()
+    # 59s elapsed — still within cooldown.
+    svc._now = lambda: base + timedelta(seconds=59)
+    import pytest
+    with pytest.raises(RuntimeError):
+        await svc.start_verification("u1", "+5511987654321")
+    # 60s elapsed — re-issuance allowed (strict less-than check).
+    svc._now = lambda: base + timedelta(seconds=60)
+    await svc.start_verification("u1", "+5511987654321")  # must not raise
