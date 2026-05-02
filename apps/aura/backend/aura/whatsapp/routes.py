@@ -102,10 +102,20 @@ async def webhook(
     x_evolution_webhook_token: Optional[str] = Header(None),
 ) -> dict[str, bool]:
     expected = getattr(request.app.state, "whatsapp_webhook_token", None)
-    if not expected or not secrets.compare_digest(
-        x_evolution_webhook_token or "", expected
-    ):
-        raise HTTPException(status_code=401, detail="bad webhook token")
+    # Why: Evolution v2 only attaches WEBHOOK_GLOBAL_HEADERS in some
+    # event paths; per-instance webhooks silently drop custom headers.
+    # When the operator leaves AURA_EVOLUTION_WEBHOOK_TOKEN empty in
+    # .env.prod we accept any inbound (Evolution lives on the internal
+    # docker network, no public exposure). When set we still enforce
+    # constant-time compare. On mismatch we log header keys to help
+    # diagnose Evolution's header shape (no values logged).
+    if expected:
+        if not secrets.compare_digest(x_evolution_webhook_token or "", expected):
+            logger.warning(
+                "whatsapp webhook 401 — header keys=%s",
+                sorted(request.headers.keys()),
+            )
+            raise HTTPException(status_code=401, detail="bad webhook token")
 
     svc = _service(request)
     raw = await request.json()
