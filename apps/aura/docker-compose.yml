@@ -73,6 +73,12 @@ services:
       WEBHOOK_GLOBAL_URL: http://backend:8001/whatsapp/webhook
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_HEADERS: '{"X-Evolution-Webhook-Token":"${AURA_EVOLUTION_WEBHOOK_TOKEN}"}'
+      # Per-event opt-ins for the GLOBAL webhook. v2 dropped support
+      # for custom headers on per-instance webhooks, so we route via
+      # global and enumerate which events get dispatched.
+      WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       LOG_LEVEL: WARN
     volumes:
       - evolution-data:/evolution/instances
