@@ -102,6 +102,11 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Clear debounce timer on unmount so a closed modal doesn't fire a stale PATCH.
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
   const patchField = useCallback(
     (body: Record<string, unknown>) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

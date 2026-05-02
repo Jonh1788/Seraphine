@@ -149,6 +149,8 @@ export interface McpApprovalRequestMessage {
   title: string;
   body: string;
   plan: string;
+  /** Optional: who the approval is delegated to (e.g. "user", agent name). */
+  assignee?: string;
 }
 
 export interface McpApprovalResponseMessage {

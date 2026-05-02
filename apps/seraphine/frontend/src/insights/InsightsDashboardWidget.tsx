@@ -75,17 +75,21 @@ export function InsightsDashboardWidget({
 
   const handleDismiss = useCallback(
     async (id: string): Promise<void> => {
-      // Optimistic removal.
-      const previous = insights;
-      setInsights((prev) => prev.filter((i) => i.id !== id));
+      // Snapshot prev inside the functional setter so the callback
+      // identity stays stable across fetches; otherwise every refresh
+      // would invalidate every InsightCard's onDismiss prop ref.
+      let previous: Insight[] = [];
+      setInsights((prev) => {
+        previous = prev;
+        return prev.filter((i) => i.id !== id);
+      });
       try {
         await dismissInsight(id);
       } catch {
-        // Roll back on failure.
         if (mountedRef.current) setInsights(previous);
       }
     },
-    [insights],
+    [],
   );
 
   const active = insights.filter((i) => !i.dismissed);

@@ -10,7 +10,7 @@ import type {
   HabitWithStatus,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -25,28 +25,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // DELETE may return empty body.
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return undefined as unknown as T;
+    return null;
   }
   return (await res.json()) as T;
 }
 
 export async function listHabits(): Promise<HabitWithStatus[]> {
   const data = await request<HabitListResponse>('/habits');
-  return Array.isArray(data.habits) ? data.habits : [];
+  return Array.isArray(data?.habits) ? data!.habits : [];
 }
 
 export async function createHabit(body: HabitCreateInput): Promise<Habit> {
-  return request<Habit>('/habits', {
+  const res = await request<Habit>('/habits', {
     method: 'POST',
     body: JSON.stringify(body),
   });
+  if (!res) throw new Error('Empty response from POST /habits');
+  return res;
 }
 
 export async function updateHabit(id: string, body: HabitUpdateInput): Promise<Habit> {
-  return request<Habit>(`/habits/${encodeURIComponent(id)}`, {
+  const res = await request<Habit>(`/habits/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+  if (!res) throw new Error('Empty response from PATCH /habits');
+  return res;
 }
 
 export async function deleteHabit(id: string): Promise<void> {
@@ -54,14 +58,18 @@ export async function deleteHabit(id: string): Promise<void> {
 }
 
 export async function toggleHabit(id: string, date?: string): Promise<HabitToggleResponse> {
-  return request<HabitToggleResponse>(`/habits/${encodeURIComponent(id)}/toggle`, {
+  const res = await request<HabitToggleResponse>(`/habits/${encodeURIComponent(id)}/toggle`, {
     method: 'POST',
     body: JSON.stringify(date ? { date } : {}),
   });
+  if (!res) throw new Error('Empty response from POST /habits/toggle');
+  return res;
 }
 
 export async function getStreaks(id: string): Promise<HabitStreaks> {
-  return request<HabitStreaks>(`/habits/${encodeURIComponent(id)}/streaks`);
+  const res = await request<HabitStreaks>(`/habits/${encodeURIComponent(id)}/streaks`);
+  if (!res) throw new Error('Empty response from GET /habits/streaks');
+  return res;
 }
 
 export async function getCalendar(
@@ -70,7 +78,9 @@ export async function getCalendar(
   year: number,
 ): Promise<HabitCalendarResponse> {
   const params = new URLSearchParams({ month: String(month), year: String(year) });
-  return request<HabitCalendarResponse>(
+  const res = await request<HabitCalendarResponse>(
     `/habits/${encodeURIComponent(id)}/calendar?${params.toString()}`,
   );
+  if (!res) throw new Error('Empty response from GET /habits/calendar');
+  return res;
 }

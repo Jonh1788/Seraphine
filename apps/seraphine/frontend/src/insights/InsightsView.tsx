@@ -63,18 +63,23 @@ export function InsightsView({ onBack }: InsightsViewProps): JSX.Element {
 
   const handleDismiss = useCallback(
     async (insight: Insight): Promise<void> => {
-      const previous = insights;
-      // Optimistic removal from list; parent InsightCard already fired onDismiss.
-      setInsights((prev) => prev.filter((i) => i.id !== insight.id));
+      // Capture previous state inside the functional setter so we don't
+      // close over the `insights` array — the callback would otherwise
+      // be recreated on every fetch and cascade fresh prop refs through
+      // every InsightCard. Roll-back on failure restores the snapshot.
+      let previous: Insight[] = [];
+      setInsights((prev) => {
+        previous = prev;
+        return prev.filter((i) => i.id !== insight.id);
+      });
       try {
         await dismissInsight(insight.id);
       } catch (e) {
-        // Roll back.
         setInsights(previous);
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [insights],
+    [],
   );
 
   const filtered = useMemo(() => {

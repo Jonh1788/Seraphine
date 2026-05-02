@@ -7,7 +7,7 @@ import type {
   WaterToday,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -21,7 +21,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return undefined as unknown as T;
+    return null;
   }
   return (await res.json()) as T;
 }
@@ -38,21 +38,27 @@ export async function getWaterProfile(): Promise<WaterProfile | null> {
 }
 
 export async function saveWaterProfile(body: WaterProfileInput): Promise<WaterProfile> {
-  return request<WaterProfile>('/water/profile', {
+  const res = await request<WaterProfile>('/water/profile', {
     method: 'PUT',
     body: JSON.stringify(body),
   });
+  if (!res) throw new Error('Empty response from /water/profile');
+  return res;
 }
 
 export async function addWaterIntake(amount_ml: number): Promise<WaterIntakeResponse> {
-  return request<WaterIntakeResponse>('/water/intake', {
+  const res = await request<WaterIntakeResponse>('/water/intake', {
     method: 'POST',
     body: JSON.stringify({ amount_ml }),
   });
+  if (!res) throw new Error('Empty response from /water/intake');
+  return res;
 }
 
 export async function getWaterToday(): Promise<WaterToday> {
-  return request<WaterToday>('/water/today');
+  const res = await request<WaterToday>('/water/today');
+  if (!res) throw new Error('Empty response from /water/today');
+  return res;
 }
 
 export async function getWaterHistory(days = 7): Promise<WaterHistoryDay[]> {
@@ -60,6 +66,7 @@ export async function getWaterHistory(days = 7): Promise<WaterHistoryDay[]> {
   const data = await request<{ days: WaterHistoryDay[] } | WaterHistoryDay[]>(
     `/water/history?${params.toString()}`,
   );
+  if (!data) return [];
   // Backend may return either { days: [...] } or a bare array; normalise.
   if (Array.isArray(data)) return data;
   return Array.isArray(data.days) ? data.days : [];

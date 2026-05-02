@@ -7,7 +7,7 @@ import type {
   WeeklyReportEnvelope,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -21,14 +21,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return undefined as unknown as T;
+    return null;
   }
   return (await res.json()) as T;
 }
 
 export async function listInsights(): Promise<Insight[]> {
   const data = await request<InsightsListResponse>('/insights');
-  return Array.isArray(data.insights) ? data.insights : [];
+  return Array.isArray(data?.insights) ? data!.insights : [];
 }
 
 export async function refreshInsights(): Promise<Insight[]> {
@@ -36,14 +36,16 @@ export async function refreshInsights(): Promise<Insight[]> {
     method: 'POST',
     body: JSON.stringify({}),
   });
-  return Array.isArray(data.insights) ? data.insights : [];
+  return Array.isArray(data?.insights) ? data!.insights : [];
 }
 
 export async function dismissInsight(id: string): Promise<InsightDismissResponse> {
-  return request<InsightDismissResponse>(
+  const data = await request<InsightDismissResponse>(
     `/insights/${encodeURIComponent(id)}/dismiss`,
     { method: 'POST', body: JSON.stringify({}) },
   );
+  if (!data) throw new Error('Empty response from /insights/dismiss');
+  return data;
 }
 
 export async function getWeeklyReport(): Promise<WeeklyReport | null> {

@@ -57,6 +57,11 @@ import { OnboardingFlow } from './onboarding';
 import { ClipboardAssistModal, useClipboardShortcut } from './clipboard';
 import { useWakeWord } from './realtime/useWakeWord';
 
+interface BadgingNavigator {
+  setAppBadge?: (n: number) => Promise<void>;
+  clearAppBadge?: () => Promise<void>;
+}
+
 type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards';
 
 export function App(): JSX.Element {
@@ -363,10 +368,11 @@ export function App(): JSX.Element {
   useEffect(() => {
     const total = whatsappUnread + unreadCount;
     if ('setAppBadge' in navigator) {
+      const nav = navigator as unknown as BadgingNavigator;
       if (total > 0) {
-        (navigator as any).setAppBadge(total).catch(() => {});
+        nav.setAppBadge?.(total).catch(() => {});
       } else {
-        (navigator as any).clearAppBadge?.().catch(() => {});
+        nav.clearAppBadge?.().catch(() => {});
       }
     }
   }, [whatsappUnread, unreadCount]);
@@ -473,7 +479,7 @@ export function App(): JSX.Element {
         }
       } else if (type === 'turn_end') {
         // Avatar: back to free look-around
-        console.log('[App][ws] turn_end -> setSpeaking(false) @ %s', new Date().toISOString());
+        if (import.meta.env.DEV) console.log('[App][ws] turn_end -> setSpeaking(false) @ %s', new Date().toISOString());
         try { avatarCtrlRef.current?.setSpeaking?.(false); } catch { /* */ }
         // Turn duration
         if (tsSendRef.current) {
@@ -481,7 +487,7 @@ export function App(): JSX.Element {
           tsSendRef.current = 0;
         }
       } else if (type === 'tts_start') {
-        console.log('[App][ws] tts_start -> setSpeaking(true) @ %s', new Date().toISOString());
+        if (import.meta.env.DEV) console.log('[App][ws] tts_start -> setSpeaking(true) @ %s', new Date().toISOString());
         tsTtsStartRef.current = now;
         tsTtsFirstChunkRef.current = false;
         // Avatar: switch to forward-facing conversational nods
@@ -496,7 +502,7 @@ export function App(): JSX.Element {
           playbackRef.current?.setPlaybackRate?.(1.0);
         }
       } else if (type === 'tts_end') {
-        console.log('[App][ws] tts_end @ %s', new Date().toISOString());
+        if (import.meta.env.DEV) console.log('[App][ws] tts_end @ %s', new Date().toISOString());
         tsTtsStartRef.current = 0;
         // Flush any sub-threshold residue in the PCM accumulator so the
         // tail of the last sentence actually gets scheduled. Without
@@ -746,7 +752,7 @@ export function App(): JSX.Element {
     };
 
     window.addEventListener('keydown', onActivity);
-    window.addEventListener('mousemove', onActivity);
+    window.addEventListener('mousemove', onActivity, { passive: true });
     window.addEventListener('click', onActivity);
     window.addEventListener('touchstart', onActivity);
     resetIdle();

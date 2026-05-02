@@ -7,7 +7,7 @@ import type {
   NoteUpdateInput,
 } from './types';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -21,7 +21,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return undefined as unknown as T;
+    return null;
   }
   return (await res.json()) as T;
 }
@@ -31,11 +31,12 @@ export async function listNotes(q?: string, limit = 100): Promise<Note[]> {
   if (q && q.trim()) params.set('q', q.trim());
   params.set('limit', String(limit));
   const data = await request<NoteListResponse>(`/notes?${params.toString()}`);
-  return Array.isArray(data.notes) ? data.notes : [];
+  return Array.isArray(data?.notes) ? data!.notes : [];
 }
 
 export async function getNote(id: string): Promise<Note> {
   const data = await request<NoteResponse>(`/notes/${encodeURIComponent(id)}`);
+  if (!data) throw new Error('Empty response from GET /notes');
   return data.note;
 }
 
@@ -44,6 +45,7 @@ export async function createNote(body: NoteCreateInput): Promise<Note> {
     method: 'POST',
     body: JSON.stringify(body),
   });
+  if (!data) throw new Error('Empty response from POST /notes');
   return data.note;
 }
 
@@ -52,6 +54,7 @@ export async function updateNote(id: string, body: NoteUpdateInput): Promise<Not
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+  if (!data) throw new Error('Empty response from PATCH /notes');
   return data.note;
 }
 

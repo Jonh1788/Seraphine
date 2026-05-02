@@ -950,7 +950,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
         Array.from(months).map(async (ym) => {
           const [y, m] = ym.split('-').map(Number);
           const res = await fetch(
-            `/finance/entries?year=${y}&month=${m}&limit=500`,
+            `${API_BASE}/finance/entries?year=${y}&month=${m}&limit=500`,
           );
           if (!res.ok) return [] as FinanceEntry[];
           const data = await res.json();

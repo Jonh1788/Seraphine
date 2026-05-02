@@ -76,7 +76,7 @@ export async function getRecentFromBridge(days: number): Promise<HealthSnapshot[
 // Backend REST
 // ---------------------------------------------------------------------------
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -90,7 +90,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return undefined as unknown as T;
+    return null;
   }
   return (await res.json()) as T;
 }
@@ -101,12 +101,13 @@ export async function postHealthSnapshot(snapshot: HealthSnapshot): Promise<Heal
     method: 'POST',
     body: JSON.stringify(body),
   });
+  if (!res) throw new Error('Empty response from /health/snapshot');
   return res.snapshot;
 }
 
 export async function getBackendToday(): Promise<HealthSnapshot | null> {
   const res = await request<{ snapshot: HealthSnapshot | null }>('/health/today');
-  return res.snapshot;
+  return res?.snapshot ?? null;
 }
 
 export async function getBackendRecent(days = 7): Promise<HealthSnapshot[]> {
@@ -114,7 +115,7 @@ export async function getBackendRecent(days = 7): Promise<HealthSnapshot[]> {
   const res = await request<{ snapshots: HealthSnapshot[] }>(
     `/health/recent?${params.toString()}`,
   );
-  return res.snapshots;
+  return res?.snapshots ?? [];
 }
 
 export async function getBackendTrend(
@@ -122,11 +123,15 @@ export async function getBackendTrend(
   days = 14,
 ): Promise<HealthTrendResponse> {
   const params = new URLSearchParams({ metric, days: String(days) });
-  return request<HealthTrendResponse>(`/health/trend?${params.toString()}`);
+  const res = await request<HealthTrendResponse>(`/health/trend?${params.toString()}`);
+  if (!res) throw new Error('Empty response from /health/trend');
+  return res;
 }
 
 export async function getBackendWeekly(): Promise<HealthWeeklyReport> {
-  return request<HealthWeeklyReport>('/health/weekly');
+  const res = await request<HealthWeeklyReport>('/health/weekly');
+  if (!res) throw new Error('Empty response from /health/weekly');
+  return res;
 }
 
 // ---------------------------------------------------------------------------

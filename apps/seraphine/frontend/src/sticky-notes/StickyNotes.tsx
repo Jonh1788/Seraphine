@@ -60,6 +60,10 @@ export function StickyNotesOverlay(): JSX.Element {
     } catch { /* */ }
   }, []);
 
+  // Keep a ref in sync so the mouseup handler sees the latest position.
+  const notesRef = useRef<StickyNote[]>([]);
+  useEffect(() => { notesRef.current = notes; }, [notes]);
+
   useEffect(() => {
     const onMove = (ev: MouseEvent): void => {
       if (!dragRef.current) return;
@@ -82,10 +86,6 @@ export function StickyNotesOverlay(): JSX.Element {
       window.removeEventListener('mouseup', onUp);
     };
   }, [saveMove]);
-
-  // Keep a ref in sync so the mouseup handler sees the latest position.
-  const notesRef = useRef<StickyNote[]>([]);
-  useEffect(() => { notesRef.current = notes; }, [notes]);
 
   if (notes.length === 0) return <></>;
 

@@ -783,7 +783,7 @@ export function ChatView({
           title: req.title,
           body: req.body,
           plan: req.plan,
-          assignee: (req as any).assignee || '',
+          assignee: req.assignee || '',
         };
         setTurns((prev) => {
           // Try to attach to the most recent assistant turn (the notification message)
@@ -817,6 +817,8 @@ export function ChatView({
             }
           });
         }
+      } else {
+        console.warn('[ws] unknown msg.type', (msg as { type?: string }).type);
       }
     });
   }, [ws, triggerAvatarFromTag, avatarController]);

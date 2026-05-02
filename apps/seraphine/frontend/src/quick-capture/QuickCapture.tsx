@@ -15,6 +15,13 @@ export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element 
   const [priority, setPriority] = useState<Priority | null>(null);
   const [success, setSuccess] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear pending auto-close timer on unmount so a closed overlay doesn't
+  // call onClose after the parent has already torn it down.
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
 
   // Reset state when opening
   useEffect(() => {
@@ -52,7 +59,9 @@ export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element 
     }
 
     setSuccess(true);
-    setTimeout(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
       onClose();
     }, 500);
   }, [title, dueDate, dueTime, priority, onClose]);

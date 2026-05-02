@@ -179,9 +179,18 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     }
   }, [deckTopic, creating, fetchDue]);
 
+  // Stash the latest action handlers in a ref so the global keydown
+  // listener stays attached for the lifetime of the view. Without this
+  // the effect was re-binding window.addEventListener on every card —
+  // `rate`/`forget`/`skip` are useCallbacks that depend on `queue`,
+  // which mutates after every review.
+  const handlersRef = useRef({ rate, forget, skip, current, flipped });
+  handlersRef.current = { rate, forget, skip, current, flipped };
+
   useEffect(() => {
     const onKey = (ev: KeyboardEvent): void => {
-      if (!current) return;
+      const { current: card, flipped: isFlipped, rate: r, forget: f, skip: s } = handlersRef.current;
+      if (!card) return;
       const target = ev.target as HTMLElement;
       if (target && target.tagName === 'INPUT') return;
       if (ev.code === 'Space') {
@@ -189,20 +198,20 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
         setFlipped((p) => !p);
       } else if (ev.key === 'Delete' || (ev.key === 'Backspace' && ev.shiftKey)) {
         ev.preventDefault();
-        void forget();
+        void f();
       } else if (ev.key === 'ArrowRight' || ev.key === 's' || ev.key === 'S') {
         ev.preventDefault();
-        skip();
-      } else if (flipped) {
-        if (ev.key === '1') void rate(0);
-        else if (ev.key === '2') void rate(3);
-        else if (ev.key === '3') void rate(4);
-        else if (ev.key === '4') void rate(5);
+        s();
+      } else if (isFlipped) {
+        if (ev.key === '1') void r(0);
+        else if (ev.key === '2') void r(3);
+        else if (ev.key === '3') void r(4);
+        else if (ev.key === '4') void r(5);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, flipped, rate, forget, skip]);
+  }, []);
 
   // Shimmer skeleton for loading
   const renderSkeleton = (): JSX.Element => (
