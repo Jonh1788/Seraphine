@@ -173,21 +173,47 @@ pub fn list_dir_local(path: String) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Capture the primary screen via `screencapture`. Returns base64-encoded PNG.
+/// Capture the primary screen via `screencapture`, resize to 1280px-wide JPEG
+/// q60 via `sips`, and return base64. Raw PNG from `screencapture` on a
+/// Retina display is 15-25 MB; the WebSocket frame to the backend is 1 MB
+/// max, so the response was being silently dropped — the broker timed out
+/// and the LLM saw "client did not respond in time". Mirroring the
+/// backend's `screen.py` resize keeps the payload around ~100 KB.
 #[tauri::command]
 pub fn screen_capture_local() -> Result<String, String> {
-    let tmp = std::env::temp_dir().join(format!("seraphine-capture-{}.png", std::process::id()));
-    let tmp_path = tmp.as_path();
+    let pid = std::process::id();
+    let png = std::env::temp_dir().join(format!("seraphine-capture-{}.png", pid));
+    let jpg = std::env::temp_dir().join(format!("seraphine-capture-{}.jpg", pid));
+
     let status = Command::new("/usr/sbin/screencapture")
-        .arg("-x") // no sound
-        .arg(tmp_path)
+        .arg("-x") // no shutter sound
+        .arg(&png)
         .status()
         .map_err(|e| format!("screencapture spawn failed: {}", e))?;
     if !status.success() {
+        let _ = fs::remove_file(&png);
         return Err("screencapture exit != 0".into());
     }
-    let bytes = fs::read(tmp_path).map_err(|e| format!("read capture: {}", e))?;
-    let _ = fs::remove_file(tmp_path);
+
+    let resize = Command::new("/usr/bin/sips")
+        .args([
+            "--resampleWidth", "1280",
+            "-s", "format", "jpeg",
+            "-s", "formatOptions", "60",
+        ])
+        .arg(&png)
+        .arg("--out")
+        .arg(&jpg)
+        .status()
+        .map_err(|e| format!("sips spawn failed: {}", e))?;
+    let _ = fs::remove_file(&png);
+    if !resize.success() {
+        let _ = fs::remove_file(&jpg);
+        return Err("sips resize failed".into());
+    }
+
+    let bytes = fs::read(&jpg).map_err(|e| format!("read capture: {}", e))?;
+    let _ = fs::remove_file(&jpg);
     Ok(B64.encode(bytes))
 }
 

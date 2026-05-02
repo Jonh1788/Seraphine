@@ -98,7 +98,7 @@ const handlers: Record<string, Handler> = {
       // tool) returns.
       return wrapOk(
         'Screenshot taken. I can see the screen.',
-        { image: `data:image/png;base64,${b64}` },
+        { image: `data:image/jpeg;base64,${b64}` },
       );
     } catch (e) {
       return wrapErr(e);
@@ -320,15 +320,28 @@ const handlers: Record<string, Handler> = {
 
 /** Attach to a WS instance. Must be invoked after the runtime is Tauri. */
 export function attachToolProxy(ws: SeraphineWS): () => void {
+  console.log('[tool-proxy] attached', { handlers: Object.keys(handlers) });
   const off = ws.onMessage(async (msg) => {
     if (msg instanceof ArrayBuffer) return;
     const raw = msg as { type?: string };
     if (raw.type !== 'tool_proxy_request') return;
     const req = msg as unknown as ToolProxyRequest;
+    console.log('[tool-proxy] request', { tool: req.tool, request_id: req.request_id, args: req.args });
     const handler = handlers[req.tool];
+    if (!handler) {
+      console.warn('[tool-proxy] no handler for', req.tool);
+    }
     const baseResp: ProxyResponse = handler
       ? await handler(req.args || {}).catch(wrapErr)
       : { request_id: '', ok: false, error: `no handler for ${req.tool}` };
+    console.log('[tool-proxy] response', {
+      tool: req.tool,
+      request_id: req.request_id,
+      ok: baseResp.ok,
+      error: baseResp.error,
+      output_preview: typeof baseResp.output === 'string' ? baseResp.output.slice(0, 80) : undefined,
+      has_image: Boolean(baseResp.metadata && 'image' in baseResp.metadata),
+    });
     ws.send({
       ...(baseResp as unknown as Record<string, unknown>),
       type: 'tool_proxy_response',

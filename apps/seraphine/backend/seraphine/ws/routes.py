@@ -968,6 +968,32 @@ async def conversation_ws(ws: WebSocket) -> None:
                             # speech worker sees the same event and
                             # drops queued items / exits in-flight TTS.
                             turn_cancel_event.set()
+                        elif inner_type == "tool_proxy_response":
+                            # 033 — proxied tool finished on the Tauri
+                            # client. The outer receive loop already
+                            # handles this same message, but during an
+                            # active turn the outer loop is parked at
+                            # `await turn_task`, so the inner recv_task
+                            # is what's actually pulling messages off
+                            # the wire. Without this branch, the
+                            # response is silently discarded and the
+                            # broker future times out at 90s — the LLM
+                            # then sees "client did not respond in
+                            # time" instead of the screenshot.
+                            broker = getattr(ws.app.state, "proxy_broker", None)
+                            if broker is not None:
+                                rid = str(inner_payload.get("request_id", ""))
+                                if rid:
+                                    from seraphine.tools.base import ToolResult
+                                    broker.resolve(
+                                        rid,
+                                        ToolResult(
+                                            ok=bool(inner_payload.get("ok", False)),
+                                            output=inner_payload.get("output"),
+                                            error=inner_payload.get("error"),
+                                            metadata=inner_payload.get("metadata") or {},
+                                        ),
+                                    )
                         elif inner_type == "ping":
                             await ws.send_json(PongMessage(ts=_now_iso()).model_dump())
                 if recv_task is not None and not recv_task.done():
