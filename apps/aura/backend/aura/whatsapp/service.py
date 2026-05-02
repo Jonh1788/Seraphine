@@ -13,8 +13,11 @@ import json
 import logging
 import secrets
 import uuid
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
+
+from llm_adapters.types import ChatMessage
 
 from aura.whatsapp.client import EvolutionClient, EvolutionError
 from aura.whatsapp.phone import InvalidPhone, mask_e164, normalize_e164
@@ -25,6 +28,15 @@ logger = logging.getLogger(__name__)
 VERIFICATION_TTL = timedelta(minutes=5)
 VERIFICATION_COOLDOWN = timedelta(seconds=60)
 MAX_VERIFICATION_ATTEMPTS = 3
+WA_SUFFIX = (
+    "Você está respondendo via WhatsApp. Seja conciso (1-3 frases quando "
+    "possível), evite listas longas e markdown pesado. Negrito com "
+    "*asterisco* funciona; títulos `#`, links e tabelas não."
+)
+RATE_LIMIT_MAX = 30
+RATE_LIMIT_WINDOW = timedelta(hours=1)
+# Why: in-memory rate limiter is intentional — at our scale we accept the
+# reset-on-restart trade-off in exchange for zero infra and trivial code.
 
 
 class CooldownError(RuntimeError):
@@ -316,3 +328,119 @@ class WhatsAppService:
             "conversation_id": conversation_id,
             "text": text,
         }
+
+    # ------------------------------------------------------------------
+    # Agentic processing (chat-side late-bound)
+    # ------------------------------------------------------------------
+
+    def bind_dependencies(
+        self,
+        *,
+        llm: Any,
+        finance: Any,
+        tasks: Any,
+        recurring: Any,
+        projects: Any,
+        habits: Any,
+        knowledge: Any,
+        goals: Any,
+        conversations: Any,
+    ) -> None:
+        """Late-bind chat-side services. Called once on lifespan startup."""
+        self._llm = llm
+        self._finance = finance
+        self._tasks = tasks
+        self._recurring = recurring
+        self._projects = projects
+        self._habits = habits
+        self._knowledge = knowledge
+        self._goals = goals
+        self._conversations = conversations
+        self._rate: dict[str, deque[datetime]] = {}
+
+    def _mark_user_send(self, user_id: str) -> None:
+        q = self._rate.setdefault(user_id, deque())
+        q.append(self._now())
+
+    def _is_over_cap(self, user_id: str) -> bool:
+        q = self._rate.get(user_id)
+        if not q:
+            return False
+        cutoff = self._now() - RATE_LIMIT_WINDOW
+        while q and q[0] < cutoff:
+            q.popleft()
+        return len(q) >= RATE_LIMIT_MAX
+
+    async def _phone_for_user(self, user_id: str) -> str | None:
+        def _work() -> str | None:
+            row = self._store._connect().execute(
+                "SELECT phone_e164 FROM aura_user_whatsapp WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            return str(row[0]) if row else None
+
+        return await asyncio.to_thread(_work)
+
+    async def process_user_message(
+        self, user_id: str, conversation_id: str, text: str,
+    ) -> None:
+        """Persist inbound, run the agentic loop, send reply via Evolution.
+
+        Best-effort: any failure is logged, never raised. Rate limited
+        to RATE_LIMIT_MAX messages per RATE_LIMIT_WINDOW per user.
+        """
+        if self._is_over_cap(user_id):
+            logger.warning(
+                "WA rate-limit hit for user=%s; dropping inbound", user_id,
+            )
+            return
+
+        await self._conversations.add_message(
+            conversation_id, user_id, "user", text, metadata=None,
+        )
+        history = await self._conversations.get_messages_for_llm(
+            conversation_id, user_id,
+        )
+        if history is None:
+            return
+
+        # Deferred import to avoid a chat <-> whatsapp import cycle.
+        from aura.chat.routes import _build_system_prompt, _run_agentic_collect
+
+        msgs: list[ChatMessage] = [
+            ChatMessage(role="system", content=_build_system_prompt()),
+            ChatMessage(role="system", content=WA_SUFFIX),
+        ]
+        for m in history:
+            msgs.append(ChatMessage(role=m["role"], content=m["content"]))
+        is_first_exchange = len(history) == 1
+
+        try:
+            out = await _run_agentic_collect(
+                llm=self._llm,
+                finance=self._finance,
+                tasks_svc=self._tasks,
+                recurring_svc=self._recurring,
+                projects_svc=self._projects,
+                habits_svc=self._habits,
+                knowledge_svc=self._knowledge,
+                goals_svc=self._goals,
+                svc=self._conversations,
+                uid=user_id,
+                conversation_id=conversation_id,
+                user_text=text,
+                msgs=msgs,
+                is_first_exchange=is_first_exchange,
+            )
+        except Exception:
+            logger.exception("WA agentic loop failed user=%s", user_id)
+            return
+
+        phone = await self._phone_for_user(user_id)
+        if phone is None:
+            return
+        try:
+            await self._client.send_text(phone, out["reply"])
+            self._mark_user_send(user_id)
+        except EvolutionError:
+            logger.exception("WA reply send failed user=%s", user_id)

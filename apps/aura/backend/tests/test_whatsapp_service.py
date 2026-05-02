@@ -1,6 +1,8 @@
 import sqlite3
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -288,3 +290,103 @@ async def test_route_inbound_normalizes_phone_before_lookup(svc):
     })
     assert out is not None
     assert out["user_id"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_process_user_message_sends_reply_via_client(monkeypatch, svc):
+    from aura.chat import schema as chat_schema
+    chat_schema.migrate(svc._store._connect())
+
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    cid = await svc.find_or_create_conversation("u1")
+
+    captured: dict = {}
+
+    async def fake_collect(**kwargs):
+        captured.update(kwargs)
+        return {
+            "reply": "Anotado!",
+            "transactions": [],
+            "tasks": [],
+            "recurring": [],
+            "chips": [],
+            "title": None,
+        }
+
+    import aura.chat.routes as chat_routes
+    monkeypatch.setattr(chat_routes, "_run_agentic_collect", fake_collect)
+
+    fake_conv_svc = AsyncMock()
+    fake_conv_svc.add_message = AsyncMock(return_value="m1")
+    fake_conv_svc.get_messages_for_llm = AsyncMock(return_value=[
+        {"role": "user", "content": "lembra de comprar pão"},
+    ])
+
+    svc.bind_dependencies(
+        llm=MagicMock(),
+        finance=AsyncMock(),
+        tasks=AsyncMock(),
+        recurring=AsyncMock(),
+        projects=None, habits=None, knowledge=None, goals=None,
+        conversations=fake_conv_svc,
+    )
+
+    await svc.process_user_message("u1", cid, "lembra de comprar pão")
+
+    assert svc._client.sent[-1] == ("+5511987654321", "Anotado!")
+    fake_conv_svc.add_message.assert_any_await(
+        cid, "u1", "user", "lembra de comprar pão", metadata=None,
+    )
+    assert captured["uid"] == "u1"
+    assert captured["conversation_id"] == cid
+
+
+@pytest.mark.asyncio
+async def test_process_user_message_rate_limited(monkeypatch, svc):
+    from aura.chat import schema as chat_schema
+    chat_schema.migrate(svc._store._connect())
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    cid = await svc.find_or_create_conversation("u1")
+
+    async def fake_collect(**kwargs):
+        return {
+            "reply": "ok",
+            "transactions": [], "tasks": [], "recurring": [],
+            "chips": [], "title": None,
+        }
+
+    import aura.chat.routes as chat_routes
+    monkeypatch.setattr(chat_routes, "_run_agentic_collect", fake_collect)
+
+    fake_conv_svc = AsyncMock()
+    fake_conv_svc.add_message = AsyncMock(return_value="m")
+    fake_conv_svc.get_messages_for_llm = AsyncMock(return_value=[])
+
+    svc.bind_dependencies(
+        llm=MagicMock(), finance=AsyncMock(), tasks=AsyncMock(),
+        recurring=AsyncMock(), projects=None, habits=None,
+        knowledge=None, goals=None, conversations=fake_conv_svc,
+    )
+
+    # Push 30 fake recent timestamps into the limiter window.
+    for _ in range(30):
+        svc._mark_user_send("u1")
+
+    await svc.process_user_message("u1", cid, "more")
+    assert ("+5511987654321", "ok") not in svc._client.sent
+    fake_conv_svc.add_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_window_evicts_old_entries(svc):
+    """A timestamp older than RATE_LIMIT_WINDOW must be evicted on the
+    next _is_over_cap check, allowing fresh sends."""
+    from aura.whatsapp.service import RATE_LIMIT_WINDOW
+    from datetime import timedelta
+
+    base = svc._now()
+    svc._rate = {"u1": deque([base - RATE_LIMIT_WINDOW - timedelta(seconds=1)] * 30)}
+    # All 30 timestamps are stale → evicted → not over cap.
+    assert svc._is_over_cap("u1") is False
