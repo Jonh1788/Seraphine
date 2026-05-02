@@ -29,9 +29,11 @@ multi-instance and webhook-driven) is the right fit.
 
 ## 2. Goals
 
-- Aura sends reminders/lembretes to a verified user via WhatsApp instead
-  of (or in addition to) Web Push, with WA-first / push-fallback
-  semantics.
+- Aura sends reminders/lembretes to a verified user via WhatsApp **in
+  addition to** Web Push. Both channels fire in parallel for the same
+  reminder; the user effectively gets two pings (one in the browser/PWA,
+  one in WhatsApp). If a user has no verified WA number, only push
+  fires.
 - Users can reply to Aura on WhatsApp and trigger the full agentic chat
   loop (same tools as the web chat: `create_task`, `register_transaction`,
   etc.).
@@ -103,6 +105,16 @@ CREATE TABLE aura_whatsapp_verification (
   expires_at  TEXT NOT NULL,           -- ISO; 5 min from issue
   attempts    INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL
+);
+
+-- Idempotency ledger for outbound reminder dispatch via WhatsApp,
+-- mirroring the existing push_dispatches table. Prevents double-send
+-- when the dispatcher loop restarts mid-minute.
+CREATE TABLE aura_whatsapp_dispatches (
+  task_id    INTEGER NOT NULL,
+  user_id    TEXT NOT NULL,
+  sent_at    TEXT NOT NULL,            -- ISO; minute granularity is enough
+  PRIMARY KEY (task_id, user_id)
 );
 ```
 
@@ -187,21 +199,25 @@ once via Evolution.
 
 ### 6.4 Outbound integration with PushService
 
-`aura/push/service.py::dispatch_due_reminders` gets a tiny extension:
+`aura/push/service.py::dispatch_due_reminders` gets a tiny extension —
+**parallel fan-out**, not fallback:
 
 ```python
 async def _deliver_reminder(user_id, task):
+    coros = [self._dispatch_push(user_id, task)]
     if await whatsapp_svc.is_verified(user_id):
-        try:
-            await whatsapp_svc.send_reminder(user_id, task.title, task.due_time)
-            return True   # done — do NOT also push
-        except EvolutionError:
-            logger.warning("WA send failed; falling back to push")
-    await self._dispatch_push(user_id, task)
+        coros.append(whatsapp_svc.send_reminder(user_id, task.title, task.due_time))
+    # asyncio.gather with return_exceptions so one channel's failure
+    # never silences the other; per-channel errors logged inside each
+    # coroutine.
+    await asyncio.gather(*coros, return_exceptions=True)
 ```
 
-Idempotency is preserved because `push_dispatches` is keyed by
-`(task_id, dispatched_at_minute)` regardless of channel.
+Both channels fire for every reminder of a verified user. WA failure
+does not suppress push and vice-versa. Push idempotency continues to
+be tracked via `push_dispatches`; WhatsApp gets its own dispatch
+ledger row in `aura_whatsapp_dispatches(task_id, sent_at)` so a
+restart of the dispatcher loop mid-minute doesn't double-message.
 
 ## 7. Routes
 
@@ -340,14 +356,14 @@ months-long stability typical).
 
 | Failure                              | Behavior                                                  |
 |--------------------------------------|-----------------------------------------------------------|
-| Evolution down (timeout)             | Outbound: fall back to web push. Inbound: lost (Evolution buffers). |
-| WA session expired                   | Outbound fails → push fallback. Admin sees status; re-QR. |
-| User unbinds in WhatsApp (blocks)    | Send fails 4xx → log, push fallback. Cleanup manual.      |
+| Evolution down (timeout)             | Outbound: WA arm errors, push still goes. Inbound: lost (Evolution buffers).      |
+| WA session expired                   | Outbound: WA arm errors, push still goes. Admin sees status; re-QR.               |
+| User unbinds in WhatsApp (blocks)    | WA send fails 4xx → log, push still goes. Cleanup manual.                          |
 | Webhook token mismatch               | 401, no processing.                                       |
 | Unknown phone hits webhook           | Logged at INFO, dropped silently.                         |
 | Group chat from verified user        | Dropped silently.                                         |
 | LLM tool error during inbound        | Reply with friendly error message via WA.                 |
-| Reminder dispatcher crashes mid-send | Idempotency key in `push_dispatches` prevents dup.        |
+| Reminder dispatcher crashes mid-send | Idempotency keys (`push_dispatches` + `aura_whatsapp_dispatches`) prevent dup on either channel. |
 
 ## 12. Testing Strategy
 
