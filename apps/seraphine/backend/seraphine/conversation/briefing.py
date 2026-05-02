@@ -236,7 +236,6 @@ async def generate_dashboard_summary(
     pending_titles: list[str] = []
     completed_titles: list[str] = []
     overdue_items: list[dict[str, str]] = []
-    now_time_str = now_br.strftime("%H:%M")
 
     if task_service is not None:
         try:
@@ -246,7 +245,7 @@ async def generate_dashboard_summary(
                 due_time = getattr(t, "due_time", None)
                 title = getattr(t, "title", "?")
                 if due is not None and str(due) < today_str:
-                    # Past date = overdue
+                    # Past calendar date = overdue.
                     tasks_overdue += 1
                     overdue_items.append({
                         "title": title,
@@ -254,17 +253,14 @@ async def generate_dashboard_summary(
                         "due_time": str(due_time)[:5] if due_time else None,
                     })
                 elif due is not None and str(due) == today_str:
-                    if due_time and str(due_time)[:5] < now_time_str:
-                        # Today but past time = overdue
-                        tasks_overdue += 1
-                        overdue_items.append({
-                            "title": title,
-                            "due_date": str(due),
-                            "due_time": str(due_time)[:5],
-                        })
-                    else:
-                        tasks_total += 1
-                        pending_titles.append(title)
+                    # Today's tasks stay "pending" all day even after the
+                    # due_time passes — counting them as overdue made the
+                    # dashboard double-count and hid them from the
+                    # next_events list. Marking overdue strictly by date
+                    # also keeps the count stable across test runs (no
+                    # dependency on now_time_str).
+                    tasks_total += 1
+                    pending_titles.append(title)
             # Also count completed today
             all_completed = await task_service.list_tasks(status="completed", limit=200)
             for t in all_completed:

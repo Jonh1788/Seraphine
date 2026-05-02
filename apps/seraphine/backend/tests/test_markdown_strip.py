@@ -54,7 +54,9 @@ def test_drops_image_syntax_entirely() -> None:
     out = strip_markdown_for_tts("![alt text](https://example.com/img.png) depois")
     assert "alt text" not in out
     assert "depois" in out
-    assert "!" not in out or "depois" in out
+    # Image syntax `![...](...)` is dropped entirely — no leading `!`
+    # should remain. Previous version was a no-op tautology.
+    assert "!" not in out
 
 
 def test_strips_bullet_list_markers() -> None:
@@ -85,8 +87,13 @@ def test_strips_horizontal_rule() -> None:
 
 
 def test_strips_html_tags() -> None:
-    assert strip_markdown_for_tts("<b>olá</b> <br>mundo") == "olá  mundo" or \
-           "olá" in strip_markdown_for_tts("<b>olá</b> <br>mundo")
+    # HTML tags are stripped: content survives, no angle brackets remain.
+    # Previous version short-circuited via `or` and never validated the
+    # tag-removal invariant.
+    out = strip_markdown_for_tts("<b>olá</b> <br>mundo")
+    assert "<" not in out and ">" not in out
+    assert "olá" in out
+    assert "mundo" in out
 
 
 def test_strikethrough() -> None:

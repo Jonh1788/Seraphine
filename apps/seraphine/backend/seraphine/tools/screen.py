@@ -87,20 +87,23 @@ async def _capture_screen() -> str:
         png_path = f.name
     jpg_path = png_path.replace(".png", ".jpg")
 
-    # Silent screenshot (no shutter sound)
-    await _run(["screencapture", "-x", "-t", "png", png_path])
+    try:
+        # Silent screenshot (no shutter sound)
+        await _run(["screencapture", "-x", "-t", "png", png_path])
 
-    # Resize + convert to JPEG for much smaller base64 (~100KB vs ~700KB)
-    await _run([
-        "sips", "--resampleWidth", str(_MAX_WIDTH),
-        "-s", "format", "jpeg",
-        "-s", "formatOptions", "60",
-        png_path, "--out", jpg_path,
-    ])
+        # Resize + convert to JPEG for much smaller base64 (~100KB vs ~700KB)
+        await _run([
+            "sips", "--resampleWidth", str(_MAX_WIDTH),
+            "-s", "format", "jpeg",
+            "-s", "formatOptions", "60",
+            png_path, "--out", jpg_path,
+        ])
 
-    data = Path(jpg_path).read_bytes()
-    Path(png_path).unlink(missing_ok=True)
-    Path(jpg_path).unlink(missing_ok=True)
+        data = Path(jpg_path).read_bytes()
+    finally:
+        # Always clean up temp files even if subprocess raised mid-flight.
+        Path(png_path).unlink(missing_ok=True)
+        Path(jpg_path).unlink(missing_ok=True)
 
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:image/jpeg;base64,{b64}"

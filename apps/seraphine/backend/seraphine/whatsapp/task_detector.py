@@ -84,6 +84,11 @@ class WhatsAppTaskDetector:
         self._llm = llm_client
         self._buffers: dict[str, list[BufferedMessage]] = {}
         self._timers: dict[str, asyncio.Task[None]] = {}
+        # Per-chat lock to serialize concurrent webhook coroutines that
+        # mutate _buffers/_timers for the same chat_id. Without this,
+        # two near-simultaneous messages can race the timer (re)start
+        # and either drop the first message or leak an orphan task.
+        self._locks: dict[str, asyncio.Lock] = {}
 
     # ── public entry point (called from webhook) ──────────────────
 
@@ -121,16 +126,22 @@ class WhatsAppTaskDetector:
             body=body, message_id=message_id, timestamp=ts,
         )
 
-        self._buffers.setdefault(chat_id, []).append(msg)
+        # Serialize per-chat enqueue + timer (re)start. Two concurrent
+        # webhook coroutines for the same chat would otherwise race on
+        # _timers.pop / create_task and could drop a message or leak a
+        # cancelled-but-not-collected timer.
+        lock = self._locks.setdefault(chat_id, asyncio.Lock())
+        async with lock:
+            self._buffers.setdefault(chat_id, []).append(msg)
 
-        # Cancel existing timer and start a new one
-        existing = self._timers.pop(chat_id, None)
-        if existing is not None and not existing.done():
-            existing.cancel()
+            # Cancel existing timer and start a new one
+            existing = self._timers.pop(chat_id, None)
+            if existing is not None and not existing.done():
+                existing.cancel()
 
-        self._timers[chat_id] = asyncio.create_task(
-            self._delayed_analyse(chat_id)
-        )
+            self._timers[chat_id] = asyncio.create_task(
+                self._delayed_analyse(chat_id)
+            )
 
     # ── timer / analysis pipeline ─────────────────────────────────
 
@@ -142,8 +153,13 @@ class WhatsAppTaskDetector:
         await self._analyse_buffer(chat_id)
 
     async def _analyse_buffer(self, chat_id: str) -> None:
-        messages = self._buffers.pop(chat_id, [])
-        self._timers.pop(chat_id, None)
+        # Hold the per-chat lock while draining the buffer so a webhook
+        # coroutine arriving at the same instant cannot append a message
+        # we're about to discard.
+        lock = self._locks.setdefault(chat_id, asyncio.Lock())
+        async with lock:
+            messages = self._buffers.pop(chat_id, [])
+            self._timers.pop(chat_id, None)
         if not messages:
             return
 

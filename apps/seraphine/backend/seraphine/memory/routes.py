@@ -366,6 +366,17 @@ async def get_profile(request: Request) -> dict[str, Any]:
     return {"profile": profile}
 
 
+# Whitelist of memory tables exposed via the browser UI. Any SQL that
+# interpolates a table name (no SQLite parameter binding for identifiers)
+# MUST validate against this set to prevent SQL injection if the source
+# of `table` ever becomes user-controlled.
+_BROWSER_TABLES: frozenset[str] = frozenset({
+    "facts", "conversation_narratives", "decisions", "people",
+    "person_mentions", "open_loops", "discoveries",
+    "finance_nudges", "anticipation_rules", "voice_memos",
+})
+
+
 @router.get("/browser")
 async def memory_browser_overview(request: Request) -> dict[str, Any]:
     """038 — Summary of every memory table for the browser UI."""
@@ -374,14 +385,12 @@ async def memory_browser_overview(request: Request) -> dict[str, Any]:
 
     def _counts() -> dict[str, int]:
         with store._connect() as conn:
-            tables = [
-                "facts", "conversation_narratives", "decisions",
-                "people", "person_mentions",
-                "open_loops", "discoveries", "finance_nudges",
-                "anticipation_rules", "voice_memos",
-            ]
             counts: dict[str, int] = {}
-            for t in tables:
+            for t in _BROWSER_TABLES:
+                # Defensive: only ever interpolate identifiers from the
+                # allowlist, never raw input.
+                if t not in _BROWSER_TABLES:
+                    continue
                 try:
                     row = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()
                     counts[t] = int(row[0]) if row else 0
@@ -397,12 +406,7 @@ async def memory_browser_table(
     table: str, request: Request, limit: int = 50, offset: int = 0,
 ) -> dict[str, Any]:
     store = request.app.state.store
-    allowed = {
-        "facts", "conversation_narratives", "decisions", "people",
-        "person_mentions", "open_loops", "discoveries",
-        "finance_nudges", "anticipation_rules", "voice_memos",
-    }
-    if table not in allowed:
+    if table not in _BROWSER_TABLES:
         raise HTTPException(status_code=404, detail="unknown table")
 
     import asyncio as _aio

@@ -573,10 +573,10 @@ class MemoryManager:
                 created_at = (
                     datetime.fromisoformat(ca_raw)
                     if isinstance(ca_raw, str)
-                    else datetime.now()
+                    else datetime.now(timezone.utc)
                 )
             except ValueError:
-                created_at = datetime.now()
+                created_at = datetime.now(timezone.utc)
             if kind_str == "fact":
                 mem_kind: Literal["episode", "fact", "window"] = "fact"
             elif kind_str == "window":

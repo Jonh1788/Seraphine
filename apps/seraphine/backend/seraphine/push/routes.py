@@ -8,9 +8,22 @@ from pydantic import BaseModel
 router = APIRouter(tags=["push"])
 
 
-class SubscriptionPayload(BaseModel):
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribePayload(BaseModel):
     endpoint: str
-    keys: dict  # {p256dh, auth}
+    keys: PushKeys
+    expirationTime: int | None = None
+
+
+class PushUnsubscribePayload(BaseModel):
+    """Unsubscribe only needs the endpoint, but we accept the full
+    PushSubscription shape from the browser for symmetry."""
+
+    endpoint: str
 
 
 @router.get("/push/vapid-public-key")
@@ -22,16 +35,19 @@ async def get_vapid_key(request: Request):
 
 
 @router.post("/push/subscribe")
-async def subscribe(request: Request, payload: SubscriptionPayload):
+async def subscribe(request: Request, payload: PushSubscribePayload):
     push = getattr(request.app.state, "push_service", None)
     if not push:
         return {"ok": False, "error": "push not configured"}
-    await push.add_subscription({"endpoint": payload.endpoint, "keys": payload.keys})
+    await push.add_subscription({
+        "endpoint": payload.endpoint,
+        "keys": {"p256dh": payload.keys.p256dh, "auth": payload.keys.auth},
+    })
     return {"ok": True}
 
 
 @router.post("/push/unsubscribe")
-async def unsubscribe(request: Request, payload: SubscriptionPayload):
+async def unsubscribe(request: Request, payload: PushUnsubscribePayload):
     push = getattr(request.app.state, "push_service", None)
     if push:
         await push.remove_subscription(payload.endpoint)

@@ -74,8 +74,18 @@ _SENTENCE_EOS: object = object()
 #
 # Sentinel ``None`` queued during disconnect tells the worker to exit.
 SpeechItem = "tuple[str, str, asyncio.Event, asyncio.Event | None] | None"
-_speech_queues: dict[int, "asyncio.Queue[SpeechItem]"] = {}
-_speech_workers: dict[int, asyncio.Task[None]] = {}
+# Keys are per-connection UUIDs (str). We deliberately do NOT use
+# ``id(ws)`` because CPython reuses object ids after GC, so a stale
+# slot from a freshly-collected connection can collide with a brand-new
+# one and silently route speech to the wrong queue.
+_speech_queues: dict[str, "asyncio.Queue[SpeechItem]"] = {}
+_speech_workers: dict[str, asyncio.Task[None]] = {}
+
+
+def _ws_client_id(ws: WebSocket) -> str | None:
+    """Return the per-connection UUID stamped on *ws* at accept time,
+    or ``None`` if the WS predates registration (shutdown race)."""
+    return getattr(ws, "_seraphine_client_id", None)
 
 
 async def _enqueue_speech(
@@ -99,7 +109,10 @@ async def _enqueue_speech(
     Returns ``None`` (and skips queueing) when the WS has no speech queue
     (e.g. shutdown raced us) or when the text is empty.
     """
-    q = _speech_queues.get(id(ws))
+    cid = _ws_client_id(ws)
+    if cid is None:
+        return None
+    q = _speech_queues.get(cid)
     if q is None:
         return None
     if not text or not text.strip():
@@ -581,14 +594,19 @@ async def _deliver_pending_notifications(ws: WebSocket) -> None:
 async def conversation_ws(ws: WebSocket) -> None:
     await ws.accept()
     client = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
-    logger.info("WS connected: %s", client)
+    # Stable per-connection identifier. Using ``id(ws)`` would let a
+    # GC'd connection's int be reused for a new WS, silently routing
+    # this connection's speech queue/worker to a stale dict slot.
+    client_id = uuid.uuid4().hex
+    ws._seraphine_client_id = client_id  # type: ignore[attr-defined]
+    logger.info("WS connected: %s (cid=%s)", client, client_id)
 
     # Per-WS speech queue + serial worker. All TTS playback funnels
     # through this so notifications never interrupt in-flight speech.
     speech_queue: "asyncio.Queue[SpeechItem]" = asyncio.Queue()
-    _speech_queues[id(ws)] = speech_queue
+    _speech_queues[client_id] = speech_queue
     speech_worker = asyncio.create_task(_speech_worker(ws, speech_queue))
-    _speech_workers[id(ws)] = speech_worker
+    _speech_workers[client_id] = speech_worker
 
     # Determine once whether to strip ElevenLabs audio tags before TTS.
     # v3 renders tags as real emotion; other models would say them literally.
@@ -623,7 +641,7 @@ async def conversation_ws(ws: WebSocket) -> None:
             if text:
                 cleaned = strip_markdown_for_tts(text, strip_audio_tags=_strip_audio_tags)
                 if cleaned.strip():
-                    await _enqueue_speech(ws, cleaned, turn_id=f"opener-{id(ws)}")
+                    await _enqueue_speech(ws, cleaned, turn_id=f"opener-{client_id}")
         asyncio.create_task(_opener_task())
         while True:
             message = await ws.receive()
@@ -1165,12 +1183,12 @@ async def conversation_ws(ws: WebSocket) -> None:
         # Drain the speech queue and shut down the worker. Pop the queue
         # from the registry first so any racing notification callback
         # finds nothing to enqueue on.
-        _speech_queues.pop(id(ws), None)
+        _speech_queues.pop(client_id, None)
         try:
             await speech_queue.put(None)
         except Exception:
             pass
-        worker = _speech_workers.pop(id(ws), None)
+        worker = _speech_workers.pop(client_id, None)
         if worker is not None:
             try:
                 await asyncio.wait_for(worker, timeout=2.0)

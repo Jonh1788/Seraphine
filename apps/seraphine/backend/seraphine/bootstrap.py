@@ -48,13 +48,18 @@ def _pgrep(pattern: str) -> list[int]:
 
 
 def _spawn_detached(cmd: list[str], log_path: str) -> None:
-    with open(log_path, "w") as log:
-        subprocess.Popen(
-            cmd,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    # Open the log file WITHOUT a `with` block: Popen inherits the FD,
+    # so the parent's handle is no longer needed once spawn completes.
+    # Closing it inside a `with` while the child still writes can cause
+    # confusing log truncation in some shells. Line-buffered so log
+    # tailers see output as it arrives.
+    log = open(log_path, "w", buffering=1)  # noqa: SIM115 — Popen owns FD
+    subprocess.Popen(
+        cmd,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
 
 
 def _start_frontend() -> None:
@@ -66,14 +71,16 @@ def _start_frontend() -> None:
         _log(f"Frontend dir not found at {frontend_dir} — skipping", "⚠")
         return
     _log("Starting Vite dev server (pnpm dev)")
-    with open("/tmp/vite.log", "w") as log:
-        subprocess.Popen(
-            ["pnpm", "dev"],
-            cwd=str(frontend_dir),
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    # See _spawn_detached: open without `with`, line-buffered, let Popen
+    # own the FD so closing the parent handle can't truncate the log.
+    log = open("/tmp/vite.log", "w", buffering=1)  # noqa: SIM115
+    subprocess.Popen(
+        ["pnpm", "dev"],
+        cwd=str(frontend_dir),
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
     for _ in range(15):  # up to 30s
         time.sleep(2)
         if _check_url("http://127.0.0.1:5173"):

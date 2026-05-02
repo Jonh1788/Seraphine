@@ -270,8 +270,25 @@ class RecurringService:
         to claim the day -- if another loop already materialized, the
         UPDATE affects zero rows and we skip insert."""
 
-        def _claim() -> bool:
+        # Atomically claim today's slot AND remember the prior value so
+        # we can roll it back if task creation fails. Without this
+        # claim-before-create order, two concurrent runs would both see
+        # the gate as open and create duplicate tasks.
+        def _claim() -> str | None:
+            """Return the prior ``last_materialized_date`` (possibly None)
+            on successful claim, or the sentinel ``"__not_claimed__"``
+            when the row was already advanced by another loop."""
             with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT last_materialized_date FROM recurring_tasks"
+                    " WHERE id = ? AND active = 1"
+                    "   AND (last_materialized_date IS NULL"
+                    "        OR last_materialized_date < ?)",
+                    (rule.id, today_iso),
+                ).fetchone()
+                if row is None:
+                    return "__not_claimed__"
+                prior = row[0]
                 cur = conn.execute(
                     "UPDATE recurring_tasks"
                     " SET last_materialized_date = ?, updated_at = ?"
@@ -281,23 +298,49 @@ class RecurringService:
                     "        OR last_materialized_date < ?)",
                     (today_iso, _now_iso(), rule.id, today_iso),
                 )
-                return (cur.rowcount or 0) > 0
+                if (cur.rowcount or 0) == 0:
+                    return "__not_claimed__"
+                return prior  # may legitimately be None
 
-        claimed = await asyncio.to_thread(_claim)
-        if not claimed:
+        claim_result = await asyncio.to_thread(_claim)
+        if claim_result == "__not_claimed__":
             return None
+        prior_date = claim_result  # str | None
 
-        task_id = await self._tasks.create_task(
-            type="generic",
-            title=rule.title,
-            description=rule.description or "",
-            source="recurring",
-            payload={"recurring_id": rule.id},
-            status="pending",
-            due_date=today_iso,
-            due_time=rule.time,
-            user_id=None,  # single-tenant
-        )
+        try:
+            task_id = await self._tasks.create_task(
+                type="generic",
+                title=rule.title,
+                description=rule.description or "",
+                source="recurring",
+                payload={"recurring_id": rule.id},
+                status="pending",
+                due_date=today_iso,
+                due_time=rule.time,
+                user_id=None,  # single-tenant
+            )
+        except Exception:
+            # Restore the prior value so today's loop can retry. Guard
+            # by current value = today_iso so we don't clobber a
+            # subsequent successful claim by another caller.
+            def _rollback() -> None:
+                with self._store._connect() as conn:
+                    conn.execute(
+                        "UPDATE recurring_tasks"
+                        " SET last_materialized_date = ?, updated_at = ?"
+                        " WHERE id = ? AND last_materialized_date = ?",
+                        (prior_date, _now_iso(), rule.id, today_iso),
+                    )
+
+            try:
+                await asyncio.to_thread(_rollback)
+            except Exception:
+                logger.exception(
+                    "materialize_rule: rollback of last_materialized_date"
+                    " failed for rule %s",
+                    rule.id,
+                )
+            raise
         return task_id
 
     async def materialize_for_rule_if_due(

@@ -68,7 +68,7 @@ def _parse_scored(raw: str) -> list[dict]:
         try:
             score = float(it.get("score") or 0)
         except (TypeError, ValueError):
-            score = 0
+            score = 0.0
         if headline and 10 <= len(headline) <= 200:
             out.append({"headline": headline, "url": url,
                         "summary": summary, "score": score})

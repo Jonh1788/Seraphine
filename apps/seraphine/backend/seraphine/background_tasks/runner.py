@@ -57,30 +57,38 @@ class BackgroundTaskManager:
         self.tool_registry = tool_registry
         self._running: dict[str, asyncio.Task[None]] = {}
         self._cancels: dict[str, asyncio.Event] = {}
+        # Serialize the concurrency-gate + insert + register sequence
+        # so concurrent start() callers cannot all observe
+        # len(_running) < MAX_CONCURRENT and slip past the cap.
+        self._lock = asyncio.Lock()
 
     async def start(self, goal: str, max_duration_min: int = 30) -> str:
-        if len(self._running) >= self.MAX_CONCURRENT:
-            raise RuntimeError("max concurrent background tasks reached")
+        # Hold the lock across the gate check, DB insert, and task
+        # registration. The to_thread(_insert) call is fast (a single
+        # local sqlite write), so the lock-hold is bounded.
+        async with self._lock:
+            if len(self._running) >= self.MAX_CONCURRENT:
+                raise RuntimeError("max concurrent background tasks reached")
 
-        task_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+            task_id = str(uuid.uuid4())
+            now = datetime.now(timezone.utc).isoformat()
 
-        def _insert() -> None:
-            with self.store._connect() as conn:
-                conn.execute(
-                    "INSERT INTO background_tasks"
-                    " (id, goal, status, started_at, max_duration_min)"
-                    " VALUES (?, ?, 'pending', ?, ?)",
-                    (task_id, goal, now, max_duration_min),
-                )
+            def _insert() -> None:
+                with self.store._connect() as conn:
+                    conn.execute(
+                        "INSERT INTO background_tasks"
+                        " (id, goal, status, started_at, max_duration_min)"
+                        " VALUES (?, ?, 'pending', ?, ?)",
+                        (task_id, goal, now, max_duration_min),
+                    )
 
-        await asyncio.to_thread(_insert)
-        cancel = asyncio.Event()
-        self._cancels[task_id] = cancel
-        self._running[task_id] = asyncio.create_task(
-            self._run(task_id, goal, max_duration_min, cancel),
-        )
-        return task_id
+            await asyncio.to_thread(_insert)
+            cancel = asyncio.Event()
+            self._cancels[task_id] = cancel
+            self._running[task_id] = asyncio.create_task(
+                self._run(task_id, goal, max_duration_min, cancel),
+            )
+            return task_id
 
     async def cancel(self, task_id: str) -> bool:
         ev = self._cancels.get(task_id)

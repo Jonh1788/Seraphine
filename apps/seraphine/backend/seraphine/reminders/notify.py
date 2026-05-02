@@ -17,6 +17,27 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
+
+def _fire_and_log(coro, *, name: str) -> None:
+    """Schedule ``coro`` as a background task and log any exception it raises.
+
+    Plain ``asyncio.create_task`` swallows exceptions when nobody awaits
+    the task; this helper attaches a done-callback that surfaces failures
+    to the module logger so background work can't fail silently.
+    """
+
+    task = asyncio.create_task(coro, name=name)
+
+    def _on_done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.exception("Background task %s failed", name, exc_info=exc)
+
+    task.add_done_callback(_on_done)
+
+
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 
 # Seconds to wait before sending email fallback. If a WS client
@@ -33,7 +54,10 @@ async def notify_reminder(app_state: object, reminder_id: str, message: str) -> 
     ws_clients: set = getattr(app_state, "ws_clients", set())
     delivered_to_ws = False
     dead: list = []
-    for ws in ws_clients:
+    # Snapshot the set: TTS/send coroutines below may add or remove
+    # clients concurrently, which would raise "set changed size during
+    # iteration" on the live set.
+    for ws in list(ws_clients):
         try:
             await ws.send_json({
                 "type": "reminder",
@@ -110,7 +134,10 @@ async def notify_reminder(app_state: object, reminder_id: str, message: str) -> 
 
     # 4. Email fallback — if nobody was connected, send via Gmail
     if not delivered_to_ws:
-        asyncio.create_task(_email_fallback(app_state, reminder_id, message, fired_at_human))
+        _fire_and_log(
+            _email_fallback(app_state, reminder_id, message, fired_at_human),
+            name=f"reminder_email_fallback:{reminder_id}",
+        )
 
 
 async def _email_fallback(

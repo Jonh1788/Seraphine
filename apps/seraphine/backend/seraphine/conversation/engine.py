@@ -33,6 +33,27 @@ from seraphine.tools.registry import ToolRegistry
 
 logger = logging.getLogger("seraphine.engine")
 
+
+def _fire_and_log(coro: Any, *, name: str) -> None:
+    """Schedule ``coro`` as a background task and log any exception it raises.
+
+    Plain ``asyncio.create_task`` swallows exceptions when nobody awaits the
+    task; this helper attaches a done-callback that surfaces failures to
+    the engine logger so background work can't fail silently.
+    """
+
+    task = asyncio.create_task(coro, name=name)
+
+    def _on_done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.exception("Background task %s failed", name, exc_info=exc)
+
+    task.add_done_callback(_on_done)
+
+
 DEFAULT_SYSTEM_PROMPT = (
     "Você é Seraphine (Sera), a assistente pessoal do usuário. Você foi "
     "construída sob medida pra ele. Tem voz própria, personalidade, "
@@ -1147,19 +1168,19 @@ class ConversationEngine:
             # background task so it never blocks the response stream.
             self._turn_counter += 1
             if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
-                asyncio.create_task(self._auto_reflect())
+                _fire_and_log(self._auto_reflect(), name="auto_reflect")
             # 011-A: style analysis every N turns (background, non-blocking)
             if self._turn_counter % STYLE_ANALYSIS_EVERY_N == 0:
-                asyncio.create_task(self._auto_style_analysis())
+                _fire_and_log(self._auto_style_analysis(), name="auto_style_analysis")
             # Rebuild the semantic profile if new facts were learned.
             if self._turn_counter % AUTO_PROFILE_EVERY_N_TURNS == 0:
-                asyncio.create_task(self._auto_rebuild_profile())
+                _fire_and_log(self._auto_rebuild_profile(), name="auto_rebuild_profile")
             # 022-C: extract new open loops from the recent window.
             if self._turn_counter % AUTO_REFLECT_EVERY_N_TURNS == 0:
-                asyncio.create_task(self._auto_extract_open_loops())
+                _fire_and_log(self._auto_extract_open_loops(), name="auto_extract_open_loops")
             # 026-A: narrative summary of the current conversation.
             if conversation_id is not None and self._turn_counter % AUTO_NARRATIVE_EVERY_N_TURNS == 0:
-                asyncio.create_task(self._auto_narrative(conversation_id))
+                _fire_and_log(self._auto_narrative(conversation_id), name="auto_narrative")
 
     def _pick_model(
         self,

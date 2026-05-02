@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -115,7 +116,6 @@ def start_tools_changed_watcher(
     This makes tool additions/removals on the Supertasks server show up
     in Seraphine without a restart.
     """
-    import asyncio
     import httpx as _httpx
 
     async def _watch() -> None:
@@ -156,5 +156,4 @@ def start_tools_changed_watcher(
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
 
-    import asyncio
     return asyncio.create_task(_watch())

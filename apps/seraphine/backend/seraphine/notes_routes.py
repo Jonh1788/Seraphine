@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -10,9 +10,15 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/desktop_notes", tags=["desktop_notes"])
 
 
+# Keep this Literal in sync with the StickyNoteCreateTool enum
+# (seraphine/tools/sticky.py) and the desktop_notes table default
+# (seraphine/memory/store.py).
+NoteColor = Literal["yellow", "pink", "blue", "green"]
+
+
 class NoteCreate(BaseModel):
     text: str = Field(..., min_length=1, max_length=800)
-    color: str = Field(default="yellow")
+    color: NoteColor = "yellow"
     x: int = Field(default=120)
     y: int = Field(default=120)
 
