@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import secrets
+import sqlite3
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -472,3 +473,70 @@ class WhatsAppService:
             self._mark_user_send(user_id)
         except EvolutionError:
             logger.exception("WA reply send failed user=%s", user_id)
+
+    async def send_reminder(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        title: str,
+        due_time: str | None,
+    ) -> bool:
+        """Send a reminder push via WhatsApp; True only when actually sent.
+
+        Idempotent via aura_whatsapp_dispatches: a duplicate
+        (task_id, user_id) INSERT raises IntegrityError under the
+        composite PK and we treat it as "already sent." On Evolution
+        failure we delete the claim row so the next dispatcher cycle
+        retries.
+        """
+        phone = await self._phone_for_user(user_id)
+        if phone is None:
+            return False
+
+        ts_iso = _iso(self._now())
+
+        def _claim() -> bool:
+            conn = self._store._connect()
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT INTO aura_whatsapp_dispatches"
+                        " (task_id, user_id, sent_at) VALUES (?, ?, ?)",
+                        (task_id, user_id, ts_iso),
+                    )
+                return True
+            except sqlite3.IntegrityError:
+                # PK collision = already dispatched this (task, user) pair.
+                return False
+
+        claimed = await asyncio.to_thread(_claim)
+        if not claimed:
+            return False
+
+        text = f"*{title}* às {due_time}" if due_time else f"*{title}* hoje"
+        try:
+            await self._client.send_text(phone, text)
+            return True
+        except EvolutionError:
+            logger.exception(
+                "WA reminder send failed user=%s task=%s — rolling back claim",
+                user_id, task_id,
+            )
+
+            def _rollback() -> None:
+                conn = self._store._connect()
+                with conn:
+                    conn.execute(
+                        "DELETE FROM aura_whatsapp_dispatches"
+                        " WHERE task_id = ? AND user_id = ?",
+                        (task_id, user_id),
+                    )
+
+            try:
+                await asyncio.to_thread(_rollback)
+            except Exception:
+                logger.exception(
+                    "WA reminder rollback failed user=%s task=%s", user_id, task_id,
+                )
+            return False

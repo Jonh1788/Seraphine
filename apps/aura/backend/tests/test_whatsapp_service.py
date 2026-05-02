@@ -406,3 +406,73 @@ async def test_process_user_message_unbound_is_silent_noop(svc, caplog):
         "before bind_dependencies" in record.message
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_writes_dispatch_and_sends(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    sent = await svc.send_reminder(
+        user_id="u1", task_id=42, title="Dentista", due_time="14:00",
+    )
+    assert sent is True
+    assert svc._client.sent[-1] == ("+5511987654321", "*Dentista* às 14:00")
+    rows = svc._store._connect().execute(
+        "SELECT task_id, user_id FROM aura_whatsapp_dispatches"
+    ).fetchall()
+    assert rows == [(42, "u1")]
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_idempotent(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    await svc.send_reminder(
+        user_id="u1", task_id=42, title="Dentista", due_time="14:00",
+    )
+    sent_count_before = len(svc._client.sent)
+    again = await svc.send_reminder(
+        user_id="u1", task_id=42, title="Dentista", due_time="14:00",
+    )
+    assert again is False
+    assert len(svc._client.sent) == sent_count_before
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_no_time_uses_hoje(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    await svc.send_reminder(
+        user_id="u1", task_id=43, title="Pagar boleto", due_time=None,
+    )
+    assert svc._client.sent[-1] == ("+5511987654321", "*Pagar boleto* hoje")
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_skips_unverified(svc):
+    sent = await svc.send_reminder(
+        user_id="u-nope", task_id=99, title="X", due_time=None,
+    )
+    assert sent is False
+    assert svc._client.sent == []
+
+
+@pytest.mark.asyncio
+async def test_send_reminder_rolls_back_claim_on_evolution_failure(svc):
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    # Force the next send to fail.
+    svc._client.fail_next = True
+    sent = await svc.send_reminder(
+        user_id="u1", task_id=77, title="X", due_time="09:00",
+    )
+    assert sent is False
+    rows = svc._store._connect().execute(
+        "SELECT COUNT(*) FROM aura_whatsapp_dispatches WHERE task_id = 77"
+    ).fetchone()
+    assert rows == (0,)
+    # Retry on the next cycle should succeed.
+    again = await svc.send_reminder(
+        user_id="u1", task_id=77, title="X", due_time="09:00",
+    )
+    assert again is True
