@@ -90,23 +90,31 @@ class Settings(BaseSettings):
     whisper_compute_type: str = "int8"
     whisper_cache_dir: Path = Path("/data/whisper-models")
 
-    # --- WhatsApp (Evolution API)
+    # --- WhatsApp
+    # backend: "bridge" (whatsapp-web.js, default) or "evolution"
+    # (Baileys-based Evolution API). Bridge is the operational default
+    # because Evolution v2 + current Baileys can't complete the WA Web
+    # handshake on this VPS.
+    whatsapp_backend: str = "bridge"
+    whatsapp_bridge_url: str = "http://whatsapp-bridge:3001"
+    whatsapp_admin_token: str = ""
+
+    # --- WhatsApp (Evolution API — kept available behind the backend switch)
     evolution_base_url: str = ""
     evolution_api_key: str = ""
     evolution_instance: str = ""
     evolution_webhook_token: str = ""
-    whatsapp_admin_token: str = ""
 
     @property
     def whatsapp_configured(self) -> bool:
-        """True iff the core Evolution env vars are non-empty.
+        """True iff the chosen WhatsApp backend has its required env set.
 
-        Why: ``evolution_webhook_token`` is treated as optional. Evolution
-        v2.1.0 doesn't reliably attach WEBHOOK_GLOBAL_HEADERS to outgoing
-        events, so the webhook auth gate degrades to "any inbound" when
-        the token is empty. The router still 401s when the token IS set
-        and the inbound header doesn't match (defense in depth).
+        - bridge: always available (built into the compose stack)
+        - evolution: needs base_url + api_key + instance. The webhook
+          token is optional (v2 doesn't reliably propagate it).
         """
+        if self.whatsapp_backend == "bridge":
+            return bool(self.whatsapp_bridge_url)
         return bool(
             self.evolution_base_url
             and self.evolution_api_key

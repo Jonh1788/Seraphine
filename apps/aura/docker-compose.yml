@@ -129,11 +129,38 @@ services:
     expose:
       - "6379"
 
+  # whatsapp-web.js bridge — Puppeteer-based fallback for when Evolution
+  # /Baileys can't establish the WhatsApp Web handshake. Same image as
+  # Seraphine's bridge, separate volume so the two stacks have
+  # independent sessions.
+  whatsapp-bridge:
+    build:
+      context: ../../services/whatsapp-bridge
+      dockerfile: Dockerfile
+    image: aura-whatsapp-bridge:latest
+    restart: unless-stopped
+    hostname: aura-whatsapp-bridge
+    environment:
+      PORT: "3001"
+      WEBHOOK_URL: http://backend:8001/whatsapp/webhook
+      TZ: America/Sao_Paulo
+      LOG_LEVEL: info
+    volumes:
+      - aura-whatsapp-data:/app/.wwebjs_auth
+      - aura-whatsapp-cache:/app/.wwebjs_cache
+    shm_size: "512m"
+    networks:
+      - aura-net
+    expose:
+      - "3001"
+
 volumes:
   aura-data:
   evolution-data:
   evolution-postgres-data:
   evolution-redis-data:
+  aura-whatsapp-data:
+  aura-whatsapp-cache:
 
 networks:
   aura-net:

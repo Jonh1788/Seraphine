@@ -93,6 +93,38 @@ def _adapt_evolution_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     return {"phone_e164": phone, "text": text, "is_group": is_group}
 
 
+def _adapt_bridge_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Map the whatsapp-web.js bridge payload to the routing shape.
+
+    Bridge sends ``{event:"message", chatId, chatName, message:
+    {id, body, timestamp, fromMe, author, type}}``. We accept only
+    text-shaped events from non-self senders.
+    """
+    if (raw.get("event") or "").lower() != "message":
+        return None
+    msg = raw.get("message") or {}
+    if msg.get("fromMe"):
+        return None
+    chat_id = raw.get("chatId") or ""
+    if not chat_id:
+        return None
+    is_group = chat_id.endswith("@g.us")
+    bare = chat_id.split("@", 1)[0]
+    phone = ("+" + bare) if bare.isdigit() else None
+    text = (msg.get("body") or "").strip()
+    if not text:
+        return None
+    return {"phone_e164": phone, "text": text, "is_group": is_group}
+
+
+def _adapt_inbound(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Dispatch to the right adapter by sniffing the payload shape."""
+    event = (raw.get("event") or "").lower()
+    if event == "message" and "chatId" in raw:
+        return _adapt_bridge_payload(raw)
+    return _adapt_evolution_payload(raw)
+
+
 # ---- Routes -----------------------------------------------------------
 
 @router.post("/webhook")
@@ -172,7 +204,7 @@ async def webhook(
             )
             return {"ok": True}
 
-        payload = _adapt_evolution_payload(raw)
+        payload = _adapt_inbound(raw)
         if payload is None:
             return {"ok": True}
         decision = await svc.route_inbound(payload)

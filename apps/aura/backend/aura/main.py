@@ -18,6 +18,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,6 +67,7 @@ from aura.recurring.service import RecurringService
 from aura.stt.routes import router as stt_router
 from aura.stt.service import STTService
 from aura.whatsapp import schema as whatsapp_schema
+from aura.whatsapp.bridge_client import BridgeClient
 from aura.whatsapp.client import EvolutionClient
 from aura.whatsapp.routes import router as whatsapp_router
 from aura.whatsapp.service import WhatsAppService
@@ -163,15 +165,26 @@ async def lifespan(app: FastAPI):
         settings.whisper_cache_dir,
     )
 
-    # ---- WhatsApp (Evolution API) — optional
-    whatsapp_client: EvolutionClient | None = None
+    # ---- WhatsApp — backend chosen by settings.whatsapp_backend
+    whatsapp_client: Any = None
     whatsapp_service: WhatsAppService | None = None
     if settings.whatsapp_configured:
-        whatsapp_client = EvolutionClient(
-            base_url=settings.evolution_base_url,
-            api_key=settings.evolution_api_key,
-            instance=settings.evolution_instance,
-        )
+        if settings.whatsapp_backend == "bridge":
+            whatsapp_client = BridgeClient(base_url=settings.whatsapp_bridge_url)
+            logger.info(
+                "WhatsApp wired via bridge backend (url=%s)",
+                settings.whatsapp_bridge_url,
+            )
+        else:
+            whatsapp_client = EvolutionClient(
+                base_url=settings.evolution_base_url,
+                api_key=settings.evolution_api_key,
+                instance=settings.evolution_instance,
+            )
+            logger.info(
+                "WhatsApp wired via evolution backend (instance=%s, base=%s)",
+                settings.evolution_instance, settings.evolution_base_url,
+            )
         whatsapp_service = WhatsAppService(store=store, client=whatsapp_client)
         whatsapp_service.bind_dependencies(
             llm=llm,
@@ -183,10 +196,6 @@ async def lifespan(app: FastAPI):
             knowledge=knowledge_service,
             goals=goals_service,
             conversations=conversations_service,
-        )
-        logger.info(
-            "WhatsApp wired (instance=%s, base=%s)",
-            settings.evolution_instance, settings.evolution_base_url,
         )
         if not settings.whatsapp_admin_token:
             logger.warning(
