@@ -13,7 +13,11 @@
  * if one lands late. AnalyserNode connects naturally for lipsync.
  */
 import { FFTAnalyser } from './fftAnalyser';
-import { getSharedAudioContext } from './sharedContext';
+import {
+  getSharedAudioContext,
+  recreateSharedAudioContext,
+  subscribeContextRecreated,
+} from './sharedContext';
 import type { TauriVpioSession } from './tauriVpio';
 
 /** Input PCM sample rate from the TTS server. */
@@ -102,11 +106,32 @@ export class PCMPlayback {
    */
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private watchdogResumeFailures = 0;
+  /**
+   * Last observed ctx.currentTime. Usado pra detectar o bug do WebKit
+   * onde currentTime volta pra tras apos suspend/resume. Drift positivo
+   * grande NAO e sintoma de bug — e consequencia normal de TTS streamar
+   * o PCM muito mais rapido que realtime. So cancelamos sources quando
+   * currentTime efetivamente REGRIDE.
+   */
+  private lastSeenCurrentTime = 0;
+  /**
+   * Counter for the stuck-pending watchdog. WebKit has a zombie state
+   * after AirPods disconnect/connect where ctx.state stays 'running' and
+   * currentTime advances normally, but scheduled sources play silently
+   * and `onended` never fires — pending grows unbounded while audio is
+   * dead. When pending > 0 and currentTime crosses lastScheduledEnd by
+   * 0.5s for 2 consecutive watchdog ticks (~6s), we force-recreate the
+   * AudioContext to break out of zombie state.
+   */
+  private stuckPendingTicks = 0;
+  private contextRecreatedUnsub: (() => void) | null = null;
 
   constructor() {}
 
   /** Route TTS output to the VPIO sink. Pass `null` to restore Web Audio. */
   setVpioSink(sink: TauriVpioSession | null): void {
+    console.log('[PCMPlayback] setVpioSink called —', sink ? 'VPIO sink SET' : 'VPIO sink CLEARED (Web Audio mode)');
+    console.trace('[PCMPlayback] setVpioSink stack');
     const prev = this.activeAnalyser();
     // Unsubscribe any previous playback-chunk listener before swapping.
     this.vpioPlaybackUnsub?.();
@@ -152,19 +177,36 @@ export class PCMPlayback {
   ensureCtx(): AudioContext {
     if (this.ctx) return this.ctx;
     this.ctx = getSharedAudioContext();
+    this.attachToContext(this.ctx);
 
-    this.gain = this.ctx.createGain();
+    if (!this.contextRecreatedUnsub) {
+      this.contextRecreatedUnsub = subscribeContextRecreated((newCtx) => {
+        this.handleContextRecreated(newCtx);
+      });
+    }
+
+    this.startWatchdog();
+    return this.ctx;
+  }
+
+  /**
+   * Build the gain → analyser → destination graph against `ctx` and
+   * wire the statechange listener. Called on first `ensureCtx` and
+   * again on every shared-context recreation.
+   */
+  private attachToContext(ctx: AudioContext): void {
+    this.gain = ctx.createGain();
     this.gain.gain.value = 1.0;
 
-    this.analyser = this.ctx.createAnalyser();
+    this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 512;
     this.analyser.smoothingTimeConstant = 0;
 
     // Source chain: AudioBufferSourceNode → gain → analyser → destination.
     this.gain.connect(this.analyser);
-    this.analyser.connect(this.ctx.destination);
+    this.analyser.connect(ctx.destination);
 
-    console.log('[PCMPlayback] AudioContext created, state:', this.ctx.state);
+    console.log('[PCMPlayback] AudioContext attached, state:', ctx.state);
 
     // macOS/Safari can drop the AudioContext into 'suspended' or
     // 'interrupted' between utterances. Auto-resume so the next buffer
@@ -177,24 +219,75 @@ export class PCMPlayback {
           console.warn('[PCMPlayback] resume on statechange failed:', err),
         );
       }
+      // Proactive drift check: when coming back to 'running' after a
+      // suspend/resume cycle, currentTime may have jumped backwards
+      // relative to lastScheduledEnd (WebKit quirk). Catch this
+      // immediately instead of waiting for the 3s watchdog interval.
+      if (state === 'running' && this.ctx) {
+        const now = this.ctx.currentTime;
+        if (now < this.lastSeenCurrentTime - 1) {
+          console.warn(
+            `[PCMPlayback] statechange→running: currentTime regressed ${this.lastSeenCurrentTime.toFixed(2)}→${now.toFixed(2)}s — cancelling orphaned sources`,
+          );
+          this.cancelOrphanedSources();
+        }
+        this.lastSeenCurrentTime = now;
+      }
     };
     try {
-      this.ctx.addEventListener('statechange', onStateChange);
+      ctx.addEventListener('statechange', onStateChange);
     } catch {
       /* old browsers */
     }
 
     // Fire registered callbacks so avatar/bot-RMS subscribers attach.
-    // We KEEP the callback list (instead of clearing it) so a later
-    // `setVpioSink` toggle can re-fire them with the JS FFT analyser.
     const active = this.activeAnalyser();
     if (active) {
       for (const cb of this.analyserCallbacks) {
         try { cb(active); } catch { /* */ }
       }
     }
-    this.startWatchdog();
-    return this.ctx;
+  }
+
+  /**
+   * Shared AudioContext was torn down (devicechange or stuck-pending
+   * watchdog) — drop in-flight state and rebuild the graph against the
+   * fresh context so the next TTS chunk schedules correctly.
+   */
+  private handleContextRecreated(newCtx: AudioContext): void {
+    console.log('[PCMPlayback] context recreated — rebuilding graph');
+
+    // Old scheduled sources are orphaned (they belong to a closed ctx).
+    for (const src of this.scheduledSources) {
+      try { src.onended = null; } catch { /* */ }
+      try { src.disconnect(); } catch { /* */ }
+    }
+    this.scheduledSources.clear();
+    this.pending = 0;
+    this.lastScheduledEnd = 0;
+    this.lastSeenCurrentTime = newCtx.currentTime;
+    this.stuckPendingTicks = 0;
+    this.watchdogResumeFailures = 0;
+
+    if (this.flushing) {
+      this.flushing = false;
+      if (this.flushResolve) {
+        const r = this.flushResolve;
+        this.flushResolve = null;
+        r();
+      }
+    }
+
+    // Disconnect old graph nodes — they reference the closed context.
+    if (this.gain) {
+      try { this.gain.disconnect(); } catch { /* */ }
+    }
+    if (this.analyser) {
+      try { this.analyser.disconnect(); } catch { /* */ }
+    }
+
+    this.ctx = newCtx;
+    this.attachToContext(newCtx);
   }
 
   private startWatchdog(): void {
@@ -237,14 +330,87 @@ export class PCMPlayback {
 
     // 2) Scheduling drift — if `lastScheduledEnd` got far ahead of real
     // time (can happen after suspend/resume on WebKit where currentTime
-    // semantics diverge), re-anchor so the next segment starts "now"
-    // instead of decades in the future.
-    const drift = this.lastScheduledEnd - ctx.currentTime;
-    if (drift > 10) {
+    // semantics diverge), cancel orphaned sources and re-anchor so the
+    // next segment starts "now" instead of decades in the future.
+    // Detecta regressao de currentTime (WebKit bug pos-suspend/resume).
+    // NAO usamos drift "lastScheduledEnd - currentTime" porque TTS que
+    // streama PCM mais rapido que realtime agenda muitos segundos no
+    // futuro — e comportamento normal, nao sintoma de bug.
+    const now = ctx.currentTime;
+    if (now < this.lastSeenCurrentTime - 1) {
       console.warn(
-        `[PCMPlayback] watchdog: scheduling drift ${drift.toFixed(2)}s — re-anchoring`,
+        `[PCMPlayback] watchdog: currentTime regressed ${this.lastSeenCurrentTime.toFixed(2)}→${now.toFixed(2)}s — cancelling orphaned sources`,
       );
-      this.lastScheduledEnd = ctx.currentTime;
+      this.cancelOrphanedSources();
+    }
+    this.lastSeenCurrentTime = now;
+
+    // 3) Stuck-pending detector — WebKit zombie state after AirPods
+    // disconnect/connect. ctx.state stays 'running', currentTime
+    // advances, but scheduled sources play silently and `onended`
+    // never fires. devicechange normally catches this preemptively;
+    // this watchdog is the fallback when devicechange doesn't fire
+    // (some WKWebView contexts) or fires after the failure.
+    if (
+      this.pending > 0 &&
+      this.lastScheduledEnd > 0 &&
+      now > this.lastScheduledEnd + 0.5
+    ) {
+      this.stuckPendingTicks += 1;
+      console.warn(
+        `[PCMPlayback] watchdog: stuck pending=${this.pending} (currentTime=${now.toFixed(2)} > lastEnd=${this.lastScheduledEnd.toFixed(2)}+0.5) — tick ${this.stuckPendingTicks}/2`,
+      );
+      if (this.stuckPendingTicks >= 2) {
+        this.stuckPendingTicks = 0;
+        console.warn('[PCMPlayback] watchdog: forcing AudioContext recreation (zombie state)');
+        await recreateSharedAudioContext();
+        // handleContextRecreated fires via subscription.
+      }
+    } else {
+      this.stuckPendingTicks = 0;
+    }
+  }
+
+  /**
+   * Cancel all scheduled AudioBufferSourceNodes that haven't played yet,
+   * clear the set, resolve any pending flush promise, and re-anchor
+   * `lastScheduledEnd` to `ctx.currentTime`.
+   *
+   * Called by the watchdog and the proactive `statechange→running`
+   * listener when scheduling drift exceeds the threshold. Unlike
+   * `stop()`, this preserves the accumulator so new chunks arriving
+   * after the re-anchor rebuild the schedule from scratch.
+   */
+  private cancelOrphanedSources(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    const count = this.scheduledSources.size;
+    for (const src of this.scheduledSources) {
+      try { src.onended = null; } catch { /* */ }
+      try { src.stop(); } catch { /* already ended */ }
+      try { src.disconnect(); } catch { /* */ }
+    }
+    this.scheduledSources.clear();
+    this.pending = 0;
+    this.lastScheduledEnd = ctx.currentTime;
+    // Re-sincroniza o tracker de regressao com o estado atual pra
+    // nao re-disparar no proximo tick.
+    this.lastSeenCurrentTime = ctx.currentTime;
+
+    console.log(
+      `[PCMPlayback] cancelled ${count} orphaned source(s) — re-anchored to ${ctx.currentTime.toFixed(3)}`,
+    );
+
+    // A pending flush() is waiting for pending to hit 0. Since we just
+    // cancelled everything, resolve it now — there is nothing left playing.
+    if (this.flushing) {
+      this.flushing = false;
+      if (this.flushResolve) {
+        const r = this.flushResolve;
+        this.flushResolve = null;
+        r();
+      }
     }
   }
 
@@ -268,6 +434,9 @@ export class PCMPlayback {
     // events from the render callback so lipsync aligns with actual
     // playback time, not WS arrival time.
     if (this.vpioSink) {
+      // DEBUG: log EVERY chunk, not just the first, so we can count
+      // exactly how many arrive and confirm they all route to VPIO.
+      console.log('[PCMPlayback] pushChunk(%d bytes) -> vpio', bytes.byteLength);
       let input = bytes;
       if (this.carry) {
         const merged = new Uint8Array(this.carry.byteLength + bytes.byteLength);
@@ -284,6 +453,11 @@ export class PCMPlayback {
       void this.vpioSink.playChunk(input.slice(0, evenLen));
       return;
     }
+
+    // Web Audio path (no VPIO sink).
+    // DEBUG: log EVERY chunk so we can see if any chunks fall through
+    // to Web Audio when they should have gone to VPIO.
+    console.log('[PCMPlayback] pushChunk(%d bytes) -> webaudio', bytes.byteLength);
 
     // Handle carry byte from odd-sized previous chunk
     let input = bytes;
@@ -429,10 +603,27 @@ export class PCMPlayback {
   }
 
   async flush(): Promise<void> {
-    // VPIO path: Rust keeps its own ~2s ring buffer; nothing to drain
-    // from JS. Caller (RealtimeController) decides when to call
-    // flushOutput() for barge-in.
+    // VPIO path: wait for the Rust output ring to drain so the user
+    // hears the full utterance before the state machine transitions to
+    // `listening`. Without this, turn_end → flush → immediate reset
+    // flips the state while audio is still playing, opening the door
+    // for false-positive barge-in on the AEC residual of the tail.
     if (this.vpioSink) {
+      const sink = this.vpioSink;
+      console.log('[PCMPlayback] flush() VPIO path — polling ring until empty');
+      // Poll every 80ms until the ring is empty or 8s timeout.
+      const deadline = Date.now() + 8000;
+      let polls = 0;
+      while (Date.now() < deadline) {
+        const len = await sink.ringLen();
+        polls += 1;
+        if (polls <= 5 || polls % 10 === 0) {
+          console.log('[PCMPlayback] flush() poll #%d — ring_len=%d', polls, len);
+        }
+        if (len <= 0) break;
+        await new Promise<void>((r) => setTimeout(r, 80));
+      }
+      console.log('[PCMPlayback] flush() VPIO drain done after %d polls — calling reset()', polls);
       this.reset();
       return;
     }
@@ -469,6 +660,9 @@ export class PCMPlayback {
     this.flushing = false;
     this.flushResolve = null;
     this.lastScheduledEnd = 0;
+    // Re-ancora o tracker de regressao ao currentTime atual — entre
+    // utterances o ctx pode ter avancado muito, nao e regressao.
+    if (this.ctx) this.lastSeenCurrentTime = this.ctx.currentTime;
   }
 
   /**
@@ -478,6 +672,8 @@ export class PCMPlayback {
    * pending promise. Keeps ctx/analyser alive for reuse.
    */
   stop(): void {
+    console.log('[PCMPlayback] stop() called');
+    console.trace('[PCMPlayback] stop() stack');
     this.carry = null;
     this.accumBytes = [];
     this.accumSamples = 0;
@@ -485,6 +681,7 @@ export class PCMPlayback {
     // VPIO path: also drain Rust's ring so the user hears silence
     // immediately on barge-in.
     if (this.vpioSink) {
+      console.log('[PCMPlayback] stop() -> calling vpioSink.flushOutput()');
       void this.vpioSink.flushOutput();
     }
 
@@ -512,6 +709,10 @@ export class PCMPlayback {
     if (this.watchdogTimer) {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
+    }
+    if (this.contextRecreatedUnsub) {
+      this.contextRecreatedUnsub();
+      this.contextRecreatedUnsub = null;
     }
     if (this.analyser) {
       try { this.analyser.disconnect(); } catch { /* */ }
