@@ -65,6 +65,10 @@ from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
 from aura.stt.routes import router as stt_router
 from aura.stt.service import STTService
+from aura.whatsapp import schema as whatsapp_schema
+from aura.whatsapp.client import EvolutionClient
+from aura.whatsapp.routes import router as whatsapp_router
+from aura.whatsapp.service import WhatsAppService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,6 +92,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("aura_projects", projects_schema.migrate)
     store.register_migrator("aura_goals", goals_schema.migrate)
     store.register_migrator("aura_push", push_schema.migrate)
+    store.register_migrator("aura_whatsapp", whatsapp_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -158,6 +163,36 @@ async def lifespan(app: FastAPI):
         settings.whisper_cache_dir,
     )
 
+    # ---- WhatsApp (Evolution API) — optional
+    whatsapp_client: EvolutionClient | None = None
+    whatsapp_service: WhatsAppService | None = None
+    if settings.whatsapp_configured:
+        whatsapp_client = EvolutionClient(
+            base_url=settings.evolution_base_url,
+            api_key=settings.evolution_api_key,
+            instance=settings.evolution_instance,
+        )
+        whatsapp_service = WhatsAppService(store=store, client=whatsapp_client)
+        whatsapp_service.bind_dependencies(
+            llm=llm,
+            finance=finance_service,
+            tasks=task_service,
+            recurring=recurring_service,
+            projects=projects_service,
+            habits=habits_service,
+            knowledge=knowledge_service,
+            goals=goals_service,
+            conversations=conversations_service,
+        )
+        logger.info(
+            "WhatsApp wired (instance=%s, base=%s)",
+            settings.evolution_instance, settings.evolution_base_url,
+        )
+    else:
+        logger.warning(
+            "WhatsApp not configured — /whatsapp/* will return 503"
+        )
+
     app.state.store = store
     app.state.llm = llm
     app.state.users_service = users_service
@@ -173,6 +208,10 @@ async def lifespan(app: FastAPI):
     app.state.goals_service = goals_service
     app.state.push_service = push_service
     app.state.stt_service = stt_service
+    app.state.whatsapp_client = whatsapp_client
+    app.state.whatsapp_service = whatsapp_service
+    app.state.whatsapp_webhook_token = settings.evolution_webhook_token
+    app.state.whatsapp_admin_token = settings.whatsapp_admin_token
 
     # Background materialize loop — every 10 minutes, create today's
     # occurrences for any active rule that is due and hasn't fired yet.
@@ -241,6 +280,11 @@ async def lifespan(app: FastAPI):
                     await t
                 except (asyncio.CancelledError, Exception):
                     pass
+        if whatsapp_client is not None:
+            try:
+                await whatsapp_client.aclose()
+            except Exception:
+                logger.exception("whatsapp client aclose failed")
         await store.aclose()
 
 
@@ -279,6 +323,7 @@ def create_app() -> FastAPI:
     app.include_router(projects_router)
     app.include_router(goals_router)
     app.include_router(push_router)
+    app.include_router(whatsapp_router)
 
     @app.get("/health")
     async def health() -> dict:

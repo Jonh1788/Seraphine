@@ -90,5 +90,22 @@ class Settings(BaseSettings):
     whisper_compute_type: str = "int8"
     whisper_cache_dir: Path = Path("/data/whisper-models")
 
+    # --- WhatsApp (Evolution API)
+    evolution_base_url: str = ""
+    evolution_api_key: str = ""
+    evolution_instance: str = ""
+    evolution_webhook_token: str = ""
+    whatsapp_admin_token: str = ""
+
+    @property
+    def whatsapp_configured(self) -> bool:
+        """True iff every required Evolution env var is non-empty."""
+        return bool(
+            self.evolution_base_url
+            and self.evolution_api_key
+            and self.evolution_instance
+            and self.evolution_webhook_token
+        )
+
 
 settings = Settings()
