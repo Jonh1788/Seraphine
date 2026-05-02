@@ -260,3 +260,31 @@ async def test_route_inbound_returns_user_and_conversation_for_verified(svc):
     assert out["user_id"] == "u1"
     assert isinstance(out["conversation_id"], str)
     assert out["text"] == "lembra de comprar pão"
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_drops_malformed_phone(svc):
+    out = await svc.route_inbound({
+        "phone_e164": "not-a-phone",
+        "text": "oi",
+        "is_group": False,
+    })
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_route_inbound_normalizes_phone_before_lookup(svc):
+    """Webhook adapter accidentally sent the bare digits — Aura must
+    still find the verified binding because route_inbound normalizes
+    defensively before querying."""
+    from aura.chat import schema as chat_schema
+    chat_schema.migrate(svc._store._connect())
+    await svc.start_verification("u1", "+5511987654321")
+    await svc.verify("u1", "482910")
+    out = await svc.route_inbound({
+        "phone_e164": "5511987654321",  # no leading '+'
+        "text": "oi",
+        "is_group": False,
+    })
+    assert out is not None
+    assert out["user_id"] == "u1"

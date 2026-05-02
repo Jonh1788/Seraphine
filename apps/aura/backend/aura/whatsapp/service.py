@@ -275,22 +275,41 @@ class WhatsAppService:
         """Map an Evolution-shaped payload to a routing decision.
 
         Returns ``{user_id, conversation_id, text}`` for messages that
-        should be processed. Returns ``None`` (silent drop) for any
-        of these: empty/whitespace text, group chat, missing phone,
-        unknown (unverified) phone.
+        should be processed. Returns ``None`` (silent drop) for: empty
+        text, missing/malformed phone, group chat, or unknown
+        (unverified) phone.
+
+        ``payload['phone_e164']`` should already be E.164 with a leading
+        '+' from the webhook adapter; we still normalize defensively so
+        a buggy adapter degrades to a clean miss instead of a silent
+        lookup failure.
         """
         text = (payload.get("text") or "").strip()
         if not text:
             return None
+        phone_raw = payload.get("phone_e164")
+        if not phone_raw:
+            return None
+        try:
+            phone = normalize_e164(phone_raw)
+        except InvalidPhone:
+            logger.warning("inbound dropped: malformed phone %r", phone_raw)
+            return None
+
         if payload.get("is_group"):
+            # Verified-user group messages get a breadcrumb so future UX
+            # can surface "groups not supported yet" without having to
+            # re-derive the verification check.
+            user_id_for_log = await self._user_id_for_phone(phone)
+            if user_id_for_log:
+                logger.debug("group inbound from verified phone %s — dropped", phone)
             return None
-        phone = payload.get("phone_e164")
-        if not phone:
-            return None
+
         user_id = await self._user_id_for_phone(phone)
         if user_id is None:
             logger.info("inbound from unknown phone %s — dropped", phone)
             return None
+
         conversation_id = await self.find_or_create_conversation(user_id)
         return {
             "user_id": user_id,
