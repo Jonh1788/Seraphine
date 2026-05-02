@@ -9,7 +9,7 @@ class InvalidPhone(ValueError):
     pass
 
 
-_E164_RE = re.compile(r"^\+\d{10,15}$")
+_E164_RE = re.compile(r"^\+[1-9]\d{9,14}$")
 _BRAZIL_CC = "55"
 
 
@@ -22,6 +22,10 @@ def normalize_e164(raw: str) -> str:
     else:
         if not cleaned.isdigit():
             raise InvalidPhone(f"invalid characters: {raw!r}")
+        if cleaned.startswith("00"):
+            cleaned = cleaned[2:]
+        if cleaned and cleaned[0] == "0":
+            raise InvalidPhone(f"unexpected leading zero: {raw!r}")
         candidate = "+" + cleaned
 
     if not candidate[1:].isdigit():
@@ -46,10 +50,12 @@ def normalize_e164(raw: str) -> str:
 def mask_e164(phone: str) -> str:
     if not phone or not phone.startswith("+"):
         return phone
-    if len(phone) >= 14 and phone.startswith("+55"):
+    digits = phone[1:]
+    if digits.startswith("55") and len(digits) in (12, 13):
         cc = phone[:3]
         ddd = phone[3:5]
         last2 = phone[-2:]
-        return f"{cc} {ddd} 9••••-••{last2}"
+        middle_len = max(0, len(digits) - 6)
+        return f"{cc} {ddd} {'•' * middle_len}{last2}"
     last4 = phone[-4:]
     return f"+••••{last4}"

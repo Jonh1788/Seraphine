@@ -40,8 +40,26 @@ def test_non_digits_after_strip_raises():
 
 
 def test_mask_keeps_country_ddd_and_last_two():
-    assert mask_e164("+5511987654321") == "+55 11 9••••-••21"
+    assert mask_e164("+5511987654321") == "+55 11 •••••••21"
 
 
 def test_mask_short_number_falls_back_safe():
     assert mask_e164("+155512345") == "+••••2345"
+
+
+def test_strips_double_zero_idd_prefix():
+    assert normalize_e164("005511987654321") == "+5511987654321"
+
+
+def test_leading_zero_rejected():
+    with pytest.raises(InvalidPhone):
+        normalize_e164("011987654321")
+
+
+def test_us_e164_roundtrip():
+    assert normalize_e164("+14155552671") == "+14155552671"
+
+
+def test_mask_brazilian_landline_keeps_country_ddd_last_two():
+    # 12-digit normalized BR landline (no 9 cell prefix)
+    assert mask_e164("+551133334444") == "+55 11 ••••••44"
