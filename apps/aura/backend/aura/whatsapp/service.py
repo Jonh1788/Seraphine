@@ -86,6 +86,30 @@ class WhatsAppService:
         self._goals: Any = None
         self._conversations: Any = None
         self._rate: dict[str, deque[datetime]] = {}
+        # Latest QR base64 received via the qrcode.updated webhook
+        # (Evolution v2 only delivers QRs through events, not via
+        # /instance/connect responses). Cleared when state flips to
+        # 'open' via connection.update.
+        self._latest_qr: str | None = None
+        self._latest_qr_at: datetime | None = None
+
+    # ------------------------------------------------------------------
+    # QR cache (fed by webhook qrcode.updated events)
+    # ------------------------------------------------------------------
+
+    def cache_qr(self, base64_png: str | None) -> None:
+        if not base64_png:
+            return
+        self._latest_qr = base64_png
+        self._latest_qr_at = self._now()
+
+    def clear_qr(self) -> None:
+        self._latest_qr = None
+        self._latest_qr_at = None
+
+    @property
+    def latest_qr(self) -> str | None:
+        return self._latest_qr
 
     # ------------------------------------------------------------------
     # Verification

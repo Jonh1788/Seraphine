@@ -120,6 +120,41 @@ async def webhook(
     svc = _service(request)
     raw = await request.json()
     try:
+        event_lower = (raw.get("event") or "").lower()
+
+        # qrcode.updated — Evolution v2 only delivers QRs through the
+        # webhook stream (the /instance/connect endpoint just returns a
+        # subscriber count). Cache the latest base64 so /admin/qr can
+        # serve it. Tolerate both the data.qrcode.{base64,code} and
+        # data.{base64,code} shapes that v2 has used across versions.
+        if event_lower in ("qrcode.updated", "qrcode_updated"):
+            data = raw.get("data") or {}
+            qrobj = data.get("qrcode") if isinstance(data, dict) else None
+            if not isinstance(qrobj, dict):
+                qrobj = data if isinstance(data, dict) else {}
+            b64 = qrobj.get("base64") or qrobj.get("code")
+            if isinstance(b64, str):
+                svc.cache_qr(b64)
+                logger.info(
+                    "wa webhook: cached qrcode.updated (len=%d)", len(b64),
+                )
+            else:
+                logger.info(
+                    "wa webhook: qrcode.updated received but no base64/code "
+                    "in data; data keys=%s",
+                    sorted((data or {}).keys()) if isinstance(data, dict) else "<non-dict>",
+                )
+            return {"ok": True}
+
+        # connection.update — clear cached QR once we're 'open'.
+        if event_lower in ("connection.update", "connection_update"):
+            data = raw.get("data") or {}
+            state = data.get("state") if isinstance(data, dict) else None
+            if state == "open":
+                svc.clear_qr()
+            logger.info("wa webhook: connection.update state=%r", state)
+            return {"ok": True}
+
         payload = _adapt_evolution_payload(raw)
         if payload is None:
             return {"ok": True}
@@ -198,8 +233,20 @@ async def admin_qr(
     request: Request,
     x_aura_admin_token: Optional[str] = Header(None),
 ) -> dict[str, Optional[str]]:
+    """Latest QR for the operator one-shot scan.
+
+    Why two sources: Evolution v2 only delivers QR codes through the
+    qrcode.updated webhook (the /instance/connect endpoint just opens
+    a subscriber count). We cache the latest one in WhatsAppService and
+    serve it from memory. Older Evolution variants and the client.get_qr
+    fallback are kept for compatibility — if the cache is empty we ask
+    the upstream just in case.
+    """
     _require_admin(request, x_aura_admin_token)
     svc = _service(request)
+    cached = svc.latest_qr
+    if cached:
+        return {"qr": cached, "state": "qr_ready"}
     qr, state = await svc._client.get_qr()
     return {"qr": qr, "state": state}
 
