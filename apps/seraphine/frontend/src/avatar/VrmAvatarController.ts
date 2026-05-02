@@ -155,6 +155,14 @@ export class VrmAvatarController implements AvatarAdapter {
   private springBoneManager: any = null;
   private rafId: number | null = null;
   private disposed = false;
+  /**
+   * When true, the RAF loop short-circuits before doing per-frame work
+   * (mixer.update, IK, render). Used by the companion window during
+   * native drag — macOS deprioritizes the WebView render thread while
+   * dragging anyway, so we explicitly pause to free CPU. Time is
+   * discarded on resume so the animation doesn't jump.
+   */
+  private renderPaused = false;
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
   // @ts-expect-error write-only field kept for setEmotion() backward compat
   private _currentEmotion: string | null = null;
@@ -444,10 +452,21 @@ export class VrmAvatarController implements AvatarAdapter {
     this.idleLookSpeed = 1.5 + Math.random() * 1.0;
   }
 
+  /** Pause/resume the per-frame work without killing the RAF chain. */
+  public setRenderPaused(paused: boolean): void {
+    if (this.renderPaused === paused) return;
+    this.renderPaused = paused;
+    if (!paused) {
+      // Discard accumulated pause time so animations don't jump.
+      this.clock.getDelta();
+    }
+  }
+
   private startLoop(): void {
     const loop = (): void => {
       if (this.disposed) return;
       this.rafId = requestAnimationFrame(loop);
+      if (this.renderPaused) return;
       const delta = this.clock.getDelta();
       this.elapsed += delta;
       if (!this.poseLocked) this.updateCamera(delta);
