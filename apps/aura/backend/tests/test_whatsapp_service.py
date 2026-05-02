@@ -390,3 +390,19 @@ async def test_rate_limit_window_evicts_old_entries(svc):
     svc._rate = {"u1": deque([base - RATE_LIMIT_WINDOW - timedelta(seconds=1)] * 30)}
     # All 30 timestamps are stale → evicted → not over cap.
     assert svc._is_over_cap("u1") is False
+
+
+@pytest.mark.asyncio
+async def test_process_user_message_unbound_is_silent_noop(svc, caplog):
+    """If process_user_message fires before bind_dependencies (boot
+    race / misconfig), the call must log and return without touching
+    the client or any DB row."""
+    import logging
+    caplog.set_level(logging.ERROR)
+    # NOTE: svc fixture does NOT call bind_dependencies — _conversations is None.
+    await svc.process_user_message("u1", "c1", "oi")
+    assert svc._client.sent == []
+    assert any(
+        "before bind_dependencies" in record.message
+        for record in caplog.records
+    )

@@ -72,6 +72,20 @@ class WhatsAppService:
         self._client = client
         self._code = code_factory
         self._now = now
+        # Late-bound by bind_dependencies(); a None _conversations means
+        # the service was wired without the chat-side collaborators yet
+        # (e.g. background webhook arriving during lifespan startup).
+        # process_user_message logs and no-ops in that case.
+        self._llm: Any = None
+        self._finance: Any = None
+        self._tasks: Any = None
+        self._recurring: Any = None
+        self._projects: Any = None
+        self._habits: Any = None
+        self._knowledge: Any = None
+        self._goals: Any = None
+        self._conversations: Any = None
+        self._rate: dict[str, deque[datetime]] = {}
 
     # ------------------------------------------------------------------
     # Verification
@@ -356,7 +370,6 @@ class WhatsAppService:
         self._knowledge = knowledge
         self._goals = goals
         self._conversations = conversations
-        self._rate: dict[str, deque[datetime]] = {}
 
     def _mark_user_send(self, user_id: str) -> None:
         q = self._rate.setdefault(user_id, deque())
@@ -389,6 +402,13 @@ class WhatsAppService:
         Best-effort: any failure is logged, never raised. Rate limited
         to RATE_LIMIT_MAX messages per RATE_LIMIT_WINDOW per user.
         """
+        if self._conversations is None:
+            logger.error(
+                "WA process_user_message called before bind_dependencies "
+                "(user=%s); dropping silently",
+                user_id,
+            )
+            return
         if self._is_over_cap(user_id):
             logger.warning(
                 "WA rate-limit hit for user=%s; dropping inbound", user_id,
@@ -402,6 +422,11 @@ class WhatsAppService:
             conversation_id, user_id,
         )
         if history is None:
+            logger.warning(
+                "WA inbound: history is None after add_message "
+                "(conversation deleted? user=%s cid=%s); dropping reply",
+                user_id, conversation_id,
+            )
             return
 
         # Deferred import to avoid a chat <-> whatsapp import cycle.
@@ -415,6 +440,9 @@ class WhatsAppService:
             msgs.append(ChatMessage(role=m["role"], content=m["content"]))
         is_first_exchange = len(history) == 1
 
+        # Why: webhook background task — anything that escapes here gets
+        # logged by uvicorn with no user-actionable context. Swallow so a
+        # single bad LLM/tool round doesn't crash the task.
         try:
             out = await _run_agentic_collect(
                 llm=self._llm,
