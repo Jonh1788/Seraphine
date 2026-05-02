@@ -16,6 +16,10 @@ import { useAuth } from "../auth/AuthContext";
 import { usePushSubscription } from "../pwa/usePushSubscription";
 import * as googleApi from "../api/google";
 import type { GoogleOAuthStatus } from "../api/google";
+import * as waApi from "../api/whatsapp";
+import type { WhatsAppStatus } from "../api/whatsapp";
+import { WhatsAppConnectModal } from "../components/WhatsAppConnectModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 function pickInitial(email: string | undefined): string {
   if (!email) return "A";
@@ -39,6 +43,19 @@ export function PerfilPage() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [google, setGoogle] = useState<GoogleOAuthStatus | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [whatsapp, setWhatsapp] = useState<WhatsAppStatus | null>(null);
+  const [waModalOpen, setWaModalOpen] = useState(false);
+  const [waDisconnectOpen, setWaDisconnectOpen] = useState(false);
+  const [waBusy, setWaBusy] = useState(false);
+
+  const refreshWhatsapp = async () => {
+    try {
+      const s = await waApi.getStatus();
+      setWhatsapp(s);
+    } catch {
+      setWhatsapp({ verified: false, phone_masked: null });
+    }
+  };
 
   const refreshGoogle = async () => {
     try {
@@ -52,6 +69,7 @@ export function PerfilPage() {
   useEffect(() => {
     void refreshGoogle();
   }, []);
+  useEffect(() => { void refreshWhatsapp(); }, []);
 
   const onGoogleConnect = async () => {
     setGoogleBusy(true);
@@ -176,8 +194,42 @@ export function PerfilPage() {
           iconBg="#25D366"
           icon={<WppIcon />}
           label="WhatsApp"
-          value="Não conectado"
-          right={<ConnectBtn />}
+          valueNode={
+            whatsapp === null ? (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>Verificando…</span>
+            ) : whatsapp.verified ? (
+              <span className="text-[12px] truncate block" style={{ color: "#2DD4BF" }}>
+                ● {whatsapp.phone_masked}
+              </span>
+            ) : (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>
+                Receba lembretes e converse via WhatsApp
+              </span>
+            )
+          }
+          right={
+            whatsapp === null ? null : whatsapp.verified ? (
+              <button
+                type="button"
+                onClick={() => setWaDisconnectOpen(true)}
+                disabled={waBusy}
+                className="text-[11px] px-2.5 py-1 rounded-md disabled:opacity-50"
+                style={{ background: "rgba(255,255,255,0.05)", color: "#8B9CC8" }}
+              >
+                Sair
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setWaModalOpen(true)}
+                disabled={waBusy}
+                className="text-[11px] px-2.5 py-1 rounded-md text-white font-medium disabled:opacity-50"
+                style={{ background: "#25D366" }}
+              >
+                Conectar
+              </button>
+            )
+          }
         />
         <Row
           iconBg="#229ED9"
@@ -309,6 +361,31 @@ export function PerfilPage() {
       <span className="hidden">
         <Calendar />
       </span>
+
+      <WhatsAppConnectModal
+        open={waModalOpen}
+        onClose={() => setWaModalOpen(false)}
+        onConnected={() => void refreshWhatsapp()}
+      />
+      <ConfirmDialog
+        open={waDisconnectOpen}
+        tone="danger"
+        title="Desconectar WhatsApp"
+        description="Você não vai mais receber lembretes nem conseguir conversar com a Aura por WhatsApp até reconectar."
+        confirmLabel="Desconectar"
+        cancelLabel="Cancelar"
+        onCancel={() => setWaDisconnectOpen(false)}
+        onConfirm={async () => {
+          setWaBusy(true);
+          try {
+            await waApi.disconnect();
+            setWaDisconnectOpen(false);
+            await refreshWhatsapp();
+          } finally {
+            setWaBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }
