@@ -104,7 +104,7 @@ pub fn start_mic_capture(
             .build_input_stream(
                 &config,
                 move |data: &[u16], _| {
-                    let mono = to_mono_f32_from_u16(data, input_channels);
+                    let mono = to_mono_f32_from_u16_slice(data, input_channels);
                     let resampled = resampler.process_f32(&mono);
                     for s in resampled {
                         let v = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
@@ -178,11 +178,17 @@ fn to_mono_f32_from_i16(data: &[i16], channels: usize) -> Vec<f32> {
     to_mono_f32(&conv, channels)
 }
 
-fn to_mono_f32_from_u16(data: &[u16], channels: usize) -> Vec<f32> {
-    let conv: Vec<f32> = data
-        .iter()
-        .map(|&s| (s as f32 - 32768.0) / 32768.0)
-        .collect();
+/// Convert a single unsigned-offset PCM u16 sample to f32 in `[-1.0, 1.0)`.
+///
+/// Linear PCM u16 is unsigned-offset: range `[0, 65535]` with mid-point
+/// `32768` representing silence. Using `i32` as the intermediate avoids
+/// any silent f32 precision loss for the `u16::MAX` endpoint.
+fn to_mono_f32_from_u16(s: u16) -> f32 {
+    ((s as i32) - 32768) as f32 / 32768.0
+}
+
+fn to_mono_f32_from_u16_slice(data: &[u16], channels: usize) -> Vec<f32> {
+    let conv: Vec<f32> = data.iter().map(|&s| to_mono_f32_from_u16(s)).collect();
     to_mono_f32(&conv, channels)
 }
 
@@ -226,5 +232,21 @@ impl LinearResampler {
             self.position = 0.0;
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_mono_f32_from_u16_endpoints() {
+        // Min: 0 -> -1.0
+        assert!((to_mono_f32_from_u16(0) - (-1.0)).abs() < 1e-6);
+        // Mid: 32768 -> 0.0 (silence)
+        assert!((to_mono_f32_from_u16(32768) - 0.0).abs() < 1e-6);
+        // Max: 65535 -> just under 1.0 (i.e. range is [-1, 1))
+        let max = to_mono_f32_from_u16(65535);
+        assert!(max < 1.0 && max > 0.999, "got {max}");
     }
 }

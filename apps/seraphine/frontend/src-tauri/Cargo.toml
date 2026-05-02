@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 # Core Tauri surface. `macos-private-api` is required here because the
 # feature is referenced in tauri.conf.json; it's a no-op on iOS/Android.
 # `tray-icon` is desktop-only so we only add it under the desktop cfg.
+# WARN: devtools feature exposes Web Inspector in release builds. Acceptable
+# for personal app; remove for any public release. TODO: gate behind cfg.
 tauri = { version = "2", features = ["devtools", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
@@ -37,6 +39,8 @@ base64 = "0.22"
 # VoiceProcessingIO for realtime with AEC), clipboard, shortcuts, tray.
 # iOS has its own equivalents via UIKit and requires none of these crates.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# WARN: see core `tauri` line above — `devtools` is also enabled here
+# for desktop targets and ships in release builds. Tracked for cfg gating.
 tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 cpal = "0.15"

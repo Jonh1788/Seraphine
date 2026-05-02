@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -54,9 +54,42 @@ fn model_path(model_id: &str) -> Result<PathBuf, String> {
     Ok(cache_dir()?.join(format!("{model_id}.bin")))
 }
 
+// Sanity threshold for downloaded model integrity. The default model
+// (`ggml-large-v3-turbo`) is ~1.62 GB; any partial transfer will be
+// orders of magnitude smaller. 100 MB is conservative — well below the
+// real size, well above any plausible HTML error page that a
+// misconfigured CDN might serve with HTTP 200.
+const MIN_MODEL_BYTES: u64 = 100_000_000;
+
+// Serializes concurrent `download_model` calls so two callers racing
+// `ensure_ctx` don't both download the same 1.6 GB blob.
+static MODEL_DOWNLOAD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Returns `Ok(true)` if `path` exists AND its size is at least
+/// `MIN_MODEL_BYTES`. Returns `Ok(false)` if the file is missing or
+/// short (i.e. needs re-download). Real IO errors (permission denied,
+/// truncated read after the fact) are *logged* and treated as
+/// "unusable" so the caller will re-download — but we do NOT swallow
+/// them silently the way `unwrap_or(0)` did.
+fn cached_model_is_complete(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    match fs::metadata(path) {
+        Ok(m) => m.len() >= MIN_MODEL_BYTES,
+        Err(e) => {
+            log::warn!(
+                "[whisper] cached model {} present but metadata failed: {e} — will re-download",
+                path.display()
+            );
+            false
+        }
+    }
+}
+
 fn download_model(model_id: &str) -> Result<PathBuf, String> {
     let target = model_path(model_id)?;
-    if target.exists() && fs::metadata(&target).map(|m| m.len()).unwrap_or(0) > 0 {
+    if cached_model_is_complete(&target) {
         return Ok(target);
     }
     // Blocking download via ureq — keeps the Rust side dependency-light.
@@ -66,12 +99,25 @@ fn download_model(model_id: &str) -> Result<PathBuf, String> {
         return Err(format!("unknown model id: {model_id}"));
     }
 
+    // Hold the lock for the entire download so a second concurrent caller
+    // skips the (re)download once the first finishes successfully.
+    let _guard = MODEL_DOWNLOAD_LOCK.lock().map_err(|e| format!("download lock: {e}"))?;
+
+    // Re-check after acquiring the lock — another thread may have already
+    // completed the download while we were waiting.
+    if cached_model_is_complete(&target) {
+        return Ok(target);
+    }
+
     let tmp = target.with_extension("bin.partial");
-    // Use reqwest/ureq lazily without adding a dep — fall back to `curl`.
+    // `--fail` drops 4xx/5xx; `--fail-with-body` keeps the response body
+    // for diagnostics. We ignore the printed line because we validate
+    // the on-disk size below — that's the source of truth.
     let status = std::process::Command::new("curl")
         .args([
             "-L",
             "--fail",
+            "--fail-with-body",
             "--silent",
             "--show-error",
             "-o",
@@ -84,11 +130,38 @@ fn download_model(model_id: &str) -> Result<PathBuf, String> {
         let _ = fs::remove_file(&tmp);
         return Err(format!("curl exited {status}"));
     }
+
+    // Validate the partial file is plausibly the full model before
+    // promoting it to `model.bin`. A truncated download (curl exits 0
+    // mid-transfer due to network blip on a chunk boundary) would
+    // otherwise leave a permanently corrupt cache. We bail with the
+    // real IO error instead of silently defaulting to 0 — a metadata
+    // failure here means the partial file is unreadable, which is its
+    // own diagnostic surface, not "size 0 → re-download forever".
+    let size = fs::metadata(&tmp)
+        .map(|m| m.len())
+        .map_err(|e| format!("stat partial download {}: {e}", tmp.display()))?;
+    if size < MIN_MODEL_BYTES {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!(
+            "downloaded model too small: {size} bytes (expected >= {MIN_MODEL_BYTES})"
+        ));
+    }
+
     fs::rename(&tmp, &target).map_err(|e| format!("rename: {e}"))?;
     Ok(target)
 }
 
 fn ensure_ctx(model_id: &str) -> Result<&'static WhisperContext, String> {
+    if let Some(ctx) = WHISPER_CTX.get() {
+        return Ok(ctx);
+    }
+    // `download_model` already serializes via MODEL_DOWNLOAD_LOCK, so a
+    // race here only costs one extra `WhisperContext::new_with_params`
+    // (~hundreds of MB mmap) — still wasteful. Use a separate init lock
+    // so only one caller actually loads the model into memory.
+    static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = INIT_LOCK.lock().map_err(|e| format!("init lock: {e}"))?;
     if let Some(ctx) = WHISPER_CTX.get() {
         return Ok(ctx);
     }
@@ -101,7 +174,10 @@ fn ensure_ctx(model_id: &str) -> Result<&'static WhisperContext, String> {
         WhisperContextParameters::default(),
     )
     .map_err(|e| format!("whisper load: {e}"))?;
-    let _ = WHISPER_CTX.set(ctx);
+    // Under INIT_LOCK we're the only writer; `set` always succeeds here.
+    WHISPER_CTX
+        .set(ctx)
+        .map_err(|_| "whisper ctx already set (race)".to_string())?;
     WHISPER_CTX
         .get()
         .ok_or_else(|| "whisper ctx race".to_string())
@@ -164,7 +240,14 @@ pub async fn whisper_prepare() -> Result<WhisperStatus, String> {
     blocking(|| {
         ensure_ctx(DEFAULT_MODEL_ID)?;
         let path = model_path(DEFAULT_MODEL_ID)?;
-        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        // `ensure_ctx` already loaded the model — the file MUST exist and
+        // be readable here. Any metadata error is a real IO problem
+        // (permission revoked, fs unmount); propagate instead of
+        // silently reporting 0 bytes which would falsely look like a
+        // missing/empty model in the UI.
+        let size = fs::metadata(&path)
+            .map(|m| m.len())
+            .map_err(|e| format!("stat loaded model {}: {e}", path.display()))?;
         Ok(WhisperStatus {
             ready: true,
             model_id: DEFAULT_MODEL_ID.to_string(),

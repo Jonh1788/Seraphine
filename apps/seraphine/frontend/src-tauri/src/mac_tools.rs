@@ -21,6 +21,32 @@ const MAX_READ_BYTES: usize = 256 * 1024;
 const MAX_OUTPUT_BYTES: usize = 8 * 1024;
 const SHELL_TIMEOUT_SECS: u64 = 60;
 
+/// Defensive blocklist of clearly-destructive shell substrings.
+///
+/// IMPORTANT: this is a *guardrail*, NOT a security boundary. A motivated
+/// caller can trivially evade substring matches (whitespace, env vars,
+/// `${IFS}`, base64 + `eval`, etc.). The full mitigation is an allowlist
+/// of permitted commands gated through Settings — see design doc. Until
+/// that lands, this catches the obvious self-foot-shooting cases like
+/// `rm -rf /` and fork bombs that would survive an LLM hallucination.
+const SUSPICIOUS_PATTERNS: &[&str] = &[
+    "rm -rf /",
+    "rm -rf ~",
+    "rm -rf $HOME",
+    "rm -rf .",
+    ":(){:|:&};:",
+    "mkfs.",
+    "> /dev/sd",
+    "chmod -R 777 /",
+];
+
+/// `dd if=` is only flagged when paired with `of=/dev/` — `dd` itself is
+/// useful for benign operations, but writing to a raw device is the
+/// disk-overwrite footgun we want to block.
+fn is_suspicious_dd(command: &str) -> bool {
+    command.contains("dd if=") && command.contains("of=/dev/")
+}
+
 fn expand_path(raw: &str) -> PathBuf {
     if let Some(stripped) = raw.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -49,6 +75,17 @@ pub fn run_shell_local(command: String, cwd: Option<String>) -> Result<ShellOutp
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
+
+    // Defensive guardrail. See `SUSPICIOUS_PATTERNS` doc — this is NOT a
+    // security boundary; it just catches obvious destructive shapes
+    // before passing the string to `sh -c`. The proper mitigation is a
+    // user-managed allowlist (tracked in design); until then this blocks
+    // the easiest self-foot-shooting cases.
+    if SUSPICIOUS_PATTERNS.iter().any(|p| command.contains(p)) || is_suspicious_dd(&command) {
+        return Err(
+            "Blocked: suspicious shell pattern. Allowlist requested via Settings.".into(),
+        );
+    }
 
     let (tx, rx) = mpsc::channel();
 
@@ -204,9 +241,29 @@ pub fn osascript_local(script: String) -> Result<String, String> {
     }
 }
 
+/// Maximum bytes accepted on `shortcuts_run_local` stdin. Synchronous
+/// `write_all` to a pipe blocks once the kernel buffer (typically 16-64
+/// KB on macOS) fills, and a Shortcut that doesn't read stdin would
+/// deadlock the calling Tauri command. We refuse anything larger; a
+/// proper streaming variant can be added if a real use case appears.
+const SHORTCUTS_MAX_INPUT_BYTES: usize = 16 * 1024;
+
 /// Run a named Shortcut (Shortcuts.app). Optional input piped in.
+///
+/// `input`, if present, must be at most `SHORTCUTS_MAX_INPUT_BYTES`
+/// (16 KiB) to avoid a stdin pipe-fill deadlock when the target
+/// shortcut doesn't drain its input.
 #[tauri::command]
 pub fn shortcuts_run_local(name: String, input: Option<String>) -> Result<String, String> {
+    if let Some(body) = input.as_ref() {
+        if body.len() > SHORTCUTS_MAX_INPUT_BYTES {
+            return Err(format!(
+                "shortcuts_run_local input too large: {} bytes (max {})",
+                body.len(),
+                SHORTCUTS_MAX_INPUT_BYTES
+            ));
+        }
+    }
     let mut cmd = Command::new("/usr/bin/shortcuts");
     cmd.arg("run").arg(&name);
     let output = if let Some(body) = input {

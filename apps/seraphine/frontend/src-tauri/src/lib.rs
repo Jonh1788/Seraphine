@@ -76,6 +76,14 @@ fn run_mobile() {
 /// `UIView` (no page content), so the bottom-nav can never sit flush
 /// against the physical screen edge. After this call CSS `env()` still
 /// reports the real inset, so layout code stays correct.
+///
+/// # Safety
+/// `wkwebview` must be a valid Objective-C `WKWebView` pointer that
+/// remains live for the duration of this call. Only invoke from the
+/// Tauri `setup` hook (or another main-thread context) using the
+/// pointer obtained from `Webview::inner()`; calling with a dangling
+/// pointer or off-thread is undefined behavior. A null pointer is
+/// tolerated as a no-op.
 #[cfg(target_os = "ios")]
 unsafe fn ios_extend_into_safe_area(wkwebview: *mut std::ffi::c_void) {
     use objc2::msg_send;

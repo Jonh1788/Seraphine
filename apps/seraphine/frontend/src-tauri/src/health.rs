@@ -58,6 +58,12 @@ pub struct AuthorizationStatus {
     pub message: String,
 }
 
+// TODO(phase 2 — iOS HealthKit auto-sync): this struct + the matching
+// Tauri command + Swift FFI extern are wired only into the mobile
+// `invoke_handler` (lib.rs:run_mobile). On the macOS desktop build they
+// are dead code until we expose a "Sync HealthKit in background"
+// toggle in the Settings drawer. Revisit when the Settings UI ships.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackgroundScheduleStatus {
     pub scheduled: bool,
@@ -74,6 +80,9 @@ extern "C" {
     fn seraphine_health_request_authorization() -> *mut c_char;
     fn seraphine_health_get_today_summary() -> *mut c_char;
     fn seraphine_health_get_recent(days: i32) -> *mut c_char;
+    // TODO(phase 2 — iOS HealthKit auto-sync): only invoked from the
+    // mobile build. Dead on macOS desktop until Settings drawer ships.
+    #[allow(dead_code)]
     fn seraphine_health_schedule_background_sync() -> *mut c_char;
     fn seraphine_health_free_string(ptr: *mut c_char);
 }
@@ -241,6 +250,10 @@ pub async fn health_get_today_summary() -> Result<HealthSnapshot, String> {
     .await
 }
 
+// TODO(phase 2 — iOS HealthKit auto-sync): wired into the mobile
+// invoke_handler only; desktop will gain this command when the
+// Settings drawer exposes a "background sync" toggle.
+#[allow(dead_code)]
 #[tauri::command]
 pub async fn health_schedule_background() -> Result<BackgroundScheduleStatus, String> {
     if mock_enabled() {
