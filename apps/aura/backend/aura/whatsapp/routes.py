@@ -121,6 +121,13 @@ async def webhook(
     raw = await request.json()
     try:
         event_lower = (raw.get("event") or "").lower()
+        # TEMP debug: log every event name + top-level keys so we can
+        # see what Evolution v2 actually emits.
+        logger.info(
+            "wa webhook IN: event=%r top_keys=%s",
+            raw.get("event"),
+            sorted(raw.keys()) if isinstance(raw, dict) else "<non-dict>",
+        )
 
         # qrcode.updated — Evolution v2 only delivers QRs through the
         # webhook stream (the /instance/connect endpoint just returns a
