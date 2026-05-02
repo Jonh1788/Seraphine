@@ -291,22 +291,25 @@ def build_default_registry(
         reg.register(DeleteNoteTool(note_service))
         reg.register(ListNotesTool(note_service))
         reg.register(SearchNotesTool(note_service))
-    # macOS screen tools — always registered (no client needed, uses subprocess)
-    import sys
-    if sys.platform == "darwin":
-        from seraphine.tools.screen import (
-            ScreenCaptureTool,
-            ScreenClickTool,
-            ScreenCopyToClipboardTool,
-            ScreenKeyTool,
-            ScreenReadClipboardTool,
-            ScreenTypeTool,
-        )
+    # macOS screen tools — registered unconditionally because they're
+    # `proxy_to_client = True`: the backend just ships the call over WS
+    # and the Tauri client runs `screencapture` / `cliclick` locally.
+    # Previously gated on `sys.platform == 'darwin'`, which hid them
+    # whenever the backend ran on Linux (VPS) — i.e., always in prod —
+    # so the LLM had no idea these tools existed.
+    from seraphine.tools.screen import (
+        ScreenCaptureTool,
+        ScreenClickTool,
+        ScreenCopyToClipboardTool,
+        ScreenKeyTool,
+        ScreenReadClipboardTool,
+        ScreenTypeTool,
+    )
 
-        reg.register(ScreenCaptureTool())
-        reg.register(ScreenClickTool())
-        reg.register(ScreenTypeTool())
-        reg.register(ScreenKeyTool())
-        reg.register(ScreenCopyToClipboardTool())
-        reg.register(ScreenReadClipboardTool())
+    reg.register(ScreenCaptureTool())
+    reg.register(ScreenClickTool())
+    reg.register(ScreenTypeTool())
+    reg.register(ScreenKeyTool())
+    reg.register(ScreenCopyToClipboardTool())
+    reg.register(ScreenReadClipboardTool())
     return reg

@@ -91,7 +91,15 @@ const handlers: Record<string, Handler> = {
   screen_capture: async () => {
     try {
       const b64 = await tauriInvoke<string>('screen_capture_local');
-      return wrapOk(b64, { format: 'png', encoding: 'base64' });
+      // engine.py:1081 forwards `metadata.image` to the Anthropic adapter
+      // as a vision content block. It expects a full data URL — output
+      // alone is treated as plain text and never reaches the model as an
+      // image. Mirror what `browser_screenshot` (a known-working vision
+      // tool) returns.
+      return wrapOk(
+        'Screenshot taken. I can see the screen.',
+        { image: `data:image/png;base64,${b64}` },
+      );
     } catch (e) {
       return wrapErr(e);
     }

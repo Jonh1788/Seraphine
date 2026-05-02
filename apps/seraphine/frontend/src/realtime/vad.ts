@@ -20,6 +20,14 @@ import { isTauriMicAvailable } from '../audio/tauriMic';
 // transform it as a module, and errors out because public files can't
 // be imported from source. Silero VAD is ~1.5MB and runs comfortably
 // single-threaded — disabling the worker sidesteps the whole problem.
+//
+// Tried `proxy = true` (run WASM inside a Worker, off main thread) but
+// onnxruntime-web's proxy mode spawns a worker from the *bundle*'s URL,
+// which loads the entire app bundle into the worker — including the
+// @tauri-apps/api chunk that touches `document` at top level, which
+// doesn't exist in Worker context. Result: "no available backend found".
+// To move Silero off main thread we'd need a custom worker we control
+// (separate entrypoint, no Tauri/document deps).
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;
 // wasm binaries are still served from /public/ort as static files.

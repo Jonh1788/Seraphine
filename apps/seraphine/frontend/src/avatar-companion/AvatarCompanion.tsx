@@ -109,6 +109,27 @@ export function AvatarCompanion(): JSX.Element {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // --- Diagnostic: main-thread freeze watchdog ---
+  // setInterval expected to fire every 100ms. If the gap between fires
+  // is >150ms, the main thread was blocked for the difference. Logs are
+  // grep-friendly (`[FREEZE]`) so the user can correlate cadence with
+  // the 5s ActiveAppReactor / 3s audio watchdog / 45s ambient ticks.
+  useEffect(() => {
+    const t0 = performance.now();
+    let last = performance.now();
+    const id = setInterval(() => {
+      const now = performance.now();
+      const gap = now - last;
+      last = now;
+      if (gap > 150) {
+        console.warn(
+          `[FREEZE] +${((now - t0) / 1000).toFixed(1)}s blocked=${gap.toFixed(0)}ms`,
+        );
+      }
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+
   const handleReady = useCallback((ctrl: VrmAvatarController) => {
     controllerRef.current = ctrl;
 
@@ -131,36 +152,21 @@ export function AvatarCompanion(): JSX.Element {
     // Apply saved camera settings
     (ctrl as any).cameraTarget = { ...camera };
 
-    // High DPR for the small companion window so the avatar looks crisp.
-    // Previously dropping to native 2× felt blurry/aliased — the small
-    // window's high pixel density needs supersampling. The animation jump
-    // bug that originally motivated the lower DPR is fixed by the loop's
-    // delta clamp in VrmAvatarController, so we can keep the GPU cost.
+    // Pixel ratio: cap at native (2× on Retina). The 1.5× boost we
+    // tried before pushed effective DPR to 3 on M4, which is 9× pixels
+    // of GPU work per frame — combined with VRM humanoid + spring bones
+    // + lipsync analyser it produced visible stutter under load. Native
+    // DPR with anisotropic filtering still looks crisp.
     const renderer = (ctrl as any).renderer;
     if (renderer?.setPixelRatio) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     }
 
-    // Max anisotropic filtering on all VRM textures (sharp textures at angles)
-    setTimeout(() => {
-      const vrm = (ctrl as any).vrm;
-      if (!vrm || !renderer) return;
-      const maxAniso = renderer.capabilities.getMaxAnisotropy();
-      vrm.scene.traverse((obj: any) => {
-        const mat = obj.material;
-        if (!mat) return;
-        const materials = Array.isArray(mat) ? mat : [mat];
-        for (const m of materials) {
-          for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) {
-            const tex = m[key];
-            if (tex) {
-              tex.anisotropy = maxAniso;
-              tex.needsUpdate = true;
-            }
-          }
-        }
-      });
-    }, 500);
+    // (Anisotropy bump removed — empirically caused ~6s of 1000ms-each
+    // freezes at boot. Marking every VRM texture `needsUpdate=true` forced
+    // synchronous WebGL re-uploads of every texture on the next render,
+    // each ~1s for the larger ones. With DPR clamped to native (2 on
+    // Retina), three-vrm's default anisotropy looks fine.)
 
     // Attach audio analyser for lipsync.
     // NOTE: we must NOT create the AudioContext during mount. WKWebView
@@ -173,6 +179,31 @@ export function AvatarCompanion(): JSX.Element {
     playbackRef.current = pb;
     pb.getAnalyser((analyser) => ctrl.attachAudioAnalyser(analyser));
     setPlayback(pb);
+
+    // Warm up the embedded Whisper so the first realtime turn isn't
+    // paying the 1-2s ggml model load on top of inference. Deferred 5s
+    // because boot is already heavy (VRM mesh+textures, spring bones,
+    // WS connect, audio init) and stacking the model load on top of
+    // that contended for CPU. Five seconds in, the user hasn't pressed
+    // PTT yet but the load happens before they do.
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const w = window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
+          if (!(w.__TAURI_INTERNALS__ || w.__TAURI__)) return;
+          const { invoke } = await import('@tauri-apps/api/core');
+          // 50ms of silence is enough to trigger ensure_ctx + a quick
+          // inference. Smaller buffer = less main-thread serialization
+          // cost on the IPC bridge.
+          const silence = new Uint8Array(800 * 2); // 50ms @ 16 kHz, s16le
+          await invoke('whisper_transcribe_pcm', {
+            pcm: Array.from(silence),
+            sampleRate: 16000,
+            language: 'pt',
+          });
+        } catch { /* warmup is best-effort */ }
+      })();
+    }, 5000);
 
     // Pull user-saved gestures + persisted idle choice so the companion
     // window can also play them by name and loop the chosen idle.

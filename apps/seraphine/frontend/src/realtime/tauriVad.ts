@@ -18,7 +18,11 @@ const POSITIVE_SPEECH_THRESHOLD = 0.7;
 const NEGATIVE_SPEECH_THRESHOLD = 0.3;
 
 const MIN_SPEECH_FRAMES = Math.ceil(200 / MS_PER_FRAME);   // 200ms
-const REDEMPTION_FRAMES = Math.ceil(750 / MS_PER_FRAME);   // 750ms
+// 500ms of silence before declaring "speech ended". 750ms (Silero/MicVAD
+// default) was a perceptible "she's slow" pause in realtime conversation
+// — humans pause ~250-400ms mid-sentence, so 500ms still survives natural
+// pauses while shaving ~250ms off every reply's floor latency.
+const REDEMPTION_FRAMES = Math.ceil(500 / MS_PER_FRAME);   // 500ms
 const PRE_SPEECH_FRAMES = Math.ceil(64 / MS_PER_FRAME);    // 64ms
 
 // Silero legacy model I/O
@@ -61,9 +65,15 @@ export async function createTauriRealtimeVAD(
   externalMic?: ExternalMicSource,
 ): Promise<RealtimeVAD> {
   // ORT env configurado em realtime/vad.ts (wasm paths etc.).
+  // Tenta WebGPU primeiro: roda inferência no GPU via Metal, async
+  // por natureza, sem bloquear o JS main thread. Se WKWebView não
+  // suportar WebGPU (ou o modelo tiver ops não suportados), o ORT
+  // cai automaticamente pra wasm. Antes: 100% das inferências (a
+  // cada 32ms) bloqueavam o main thread por 5-15ms cada — visível
+  // como engasgos de 150-400ms quando combinava com GC do WASM.
   const session = await withSessionLock(() =>
     ort.InferenceSession.create('/vad/silero_vad_legacy.onnx', {
-      executionProviders: ['wasm'],
+      executionProviders: ['webgpu', 'wasm'],
     }),
   );
   // When an external mic is provided (VPIO session), we don't own the

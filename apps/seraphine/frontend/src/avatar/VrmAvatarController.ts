@@ -247,6 +247,17 @@ export class VrmAvatarController implements AvatarAdapter {
   // --- Spring bone debug counter ---
   private _springDebugCount = 0;
 
+  // --- Per-frame scratch math (avoid GC-induced stutter) ---
+  // applyPostUpdate / applyRestPose run every frame; allocating fresh
+  // Quaternion/Euler/Vector3 instances each call accumulates into noticeable
+  // GC pauses on long sessions. These are mutated in place inside the loop.
+  private readonly _sQ1 = new Quaternion();
+  private readonly _sQFk = new Quaternion();
+  private readonly _sQAccum = new Quaternion();
+  private readonly _sE = new Euler();
+  private readonly _sV = new Vector3();
+  private readonly _sV2 = new Vector3();
+
   // Camera presets — smooth transition via lerp in the RAF loop
   private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
   private cameraCurrent = { ...this.cameraTarget };
@@ -770,22 +781,25 @@ export class VrmAvatarController implements AvatarAdapter {
   private applyRestPose(): void {
     const humanoid = this.vrm?.humanoid;
     if (!humanoid) return;
+    // The four rotations are constants; cache the tuples + the dict
+    // shape setNormalizedPose expects so each frame only does the call.
+    humanoid.setNormalizedPose(VrmAvatarController._restPoseDict);
+  }
 
+  private static readonly _restPoseDict: Record<string, { rotation: [number, number, number, number] }> = (() => {
     const UPPER_ARM = MathUtils.degToRad(78);
     const LOWER_ARM = MathUtils.degToRad(8);
-
-    const q = (e: Euler): [number, number, number, number] => {
-      const quat = new Quaternion().setFromEuler(e);
+    const q = (x: number, y: number, z: number): [number, number, number, number] => {
+      const quat = new Quaternion().setFromEuler(new Euler(x, y, z));
       return [quat.x, quat.y, quat.z, quat.w];
     };
-
-    humanoid.setNormalizedPose({
-      leftUpperArm: { rotation: q(new Euler(0, 0, UPPER_ARM)) },
-      rightUpperArm: { rotation: q(new Euler(0, 0, -UPPER_ARM)) },
-      leftLowerArm: { rotation: q(new Euler(0, LOWER_ARM, 0)) },
-      rightLowerArm: { rotation: q(new Euler(0, -LOWER_ARM, 0)) },
-    });
-  }
+    return {
+      leftUpperArm: { rotation: q(0, 0, UPPER_ARM) },
+      rightUpperArm: { rotation: q(0, 0, -UPPER_ARM) },
+      leftLowerArm: { rotation: q(0, LOWER_ARM, 0) },
+      rightLowerArm: { rotation: q(0, -LOWER_ARM, 0) },
+    };
+  })();
 
   async loadAvatar(url: string): Promise<void> {
     const loader = new GLTFLoader();
@@ -1333,11 +1347,9 @@ export class VrmAvatarController implements AvatarAdapter {
         | undefined;
       if (chest) {
         const gestureOffset = this.gesturePlayer.getOffset("chest");
-        const idleQuat = new Quaternion().setFromEuler(
-          new Euler(this._idleBreathPhase * 0.015, 0, 0),
-        );
-        idleQuat.multiply(gestureOffset);
-        chest.quaternion.copy(idleQuat);
+        this._sE.set(this._idleBreathPhase * 0.015, 0, 0);
+        this._sQ1.setFromEuler(this._sE).multiply(gestureOffset);
+        chest.quaternion.copy(this._sQ1);
         chest.position.y = this._idleBreathPhase * 0.002;
       }
 
@@ -1347,11 +1359,9 @@ export class VrmAvatarController implements AvatarAdapter {
         | undefined;
       if (spine) {
         const gestureOffset = this.gesturePlayer.getOffset("spine");
-        const idleQuat = new Quaternion().setFromEuler(
-          new Euler(this._idleSpineRotX, 0, this._idleSpineRotZ),
-        );
-        idleQuat.multiply(gestureOffset);
-        spine.quaternion.copy(idleQuat);
+        this._sE.set(this._idleSpineRotX, 0, this._idleSpineRotZ);
+        this._sQ1.setFromEuler(this._sE).multiply(gestureOffset);
+        spine.quaternion.copy(this._sQ1);
       }
     }
 
@@ -1376,11 +1386,9 @@ export class VrmAvatarController implements AvatarAdapter {
           Math.sin(t * 0.4) * 0.003 +
           this.emotionHeadTilt.z;
         const gestureOffset = this.gesturePlayer.getOffset("head");
-        const q = new Quaternion().setFromEuler(
-          new Euler(idleRotX, idleRotY, idleRotZ),
-        );
-        q.multiply(gestureOffset);
-        head.quaternion.copy(q);
+        this._sE.set(idleRotX, idleRotY, idleRotZ);
+        this._sQ1.setFromEuler(this._sE).multiply(gestureOffset);
+        head.quaternion.copy(this._sQ1);
 
         // --- IK head look-at (SDD 075 Phase 3) --- Weighted average of
         // each target's desired local quaternion, then a single slerp from
@@ -1389,10 +1397,10 @@ export class VrmAvatarController implements AvatarAdapter {
         // over-rotation / NaN with 2+ active head targets).
         const ikTargets = this.gesturePlayer.getActiveIKTargets();
         if (ikTargets.length > 0) {
-          const qFk = head.quaternion.clone();
-          const desiredAccum = new Quaternion(0, 0, 0, 0);
+          const qFk = this._sQFk.copy(head.quaternion);
+          const desiredAccum = this._sQAccum.set(0, 0, 0, 0);
           let totalWeight = 0;
-          const worldTarget = new Vector3();
+          const worldTarget = this._sV;
           for (const { target, weight } of ikTargets) {
             if (target.chain !== 'head') continue;
             if (weight <= 0) continue;
@@ -1487,8 +1495,8 @@ export class VrmAvatarController implements AvatarAdapter {
     // IK overrides (or blends against) the FK pose for the chain.
     const ikTargets = this.gesturePlayer.getActiveIKTargets();
     if (ikTargets.length > 0) {
-      const worldTarget = new Vector3();
-      const pole = new Vector3();
+      const worldTarget = this._sV;
+      const pole = this._sV2;
       for (const { target, weight } of ikTargets) {
         if (target.chain !== 'leftArm' && target.chain !== 'rightArm') continue;
         if (target.space === 'world') {
