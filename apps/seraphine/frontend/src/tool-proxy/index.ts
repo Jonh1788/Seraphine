@@ -192,6 +192,17 @@ const handlers: Record<string, Handler> = {
       return wrapErr(e);
     }
   },
+  screen_run_command: async (args) => {
+    try {
+      const command = String(args.command ?? args.text ?? '');
+      if (!command) return wrapErr('command is required');
+      await tauriInvoke<void>('screen_type_local', { text: command });
+      await tauriInvoke<void>('screen_key_local', { combo: 'enter' });
+      return wrapOk(`ran: ${command.slice(0, 60)}${command.length > 60 ? '...' : ''}`);
+    } catch (e) {
+      return wrapErr(e);
+    }
+  },
   screen_key: async (args) => {
     try {
       await tauriInvoke<void>('screen_key_local', {

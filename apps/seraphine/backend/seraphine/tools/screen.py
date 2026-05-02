@@ -204,9 +204,17 @@ class ScreenClickTool(Tool):
 class ScreenTypeTool(Tool):
     name = "screen_type"
     description = (
-        "Type text into the currently focused application on the Mac. "
-        "Click on a text field first using screen_click, then use this "
-        "to type. Supports any Unicode text."
+        "Type text into whatever app/field already has keyboard focus "
+        "on the Mac. The user usually focuses the target themselves "
+        "(clicks on terminal, Notes, a chat input, etc.) and then asks "
+        "you to write something — in that case do NOT call screen_click "
+        "first; just type. Only use screen_click if the user explicitly "
+        "asks you to find and click a target via vision. "
+        "For commands that should be executed (e.g. shell commands), "
+        "prefer `screen_run_command` which types + presses Enter in one "
+        "step. Use `screen_type` for prose, snippets, or text the user "
+        "wants to review/edit before submitting. Supports any Unicode "
+        "text including special chars like `&&`, `|`, quotes, accents."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -232,6 +240,55 @@ class ScreenTypeTool(Tool):
             return ToolResult(ok=True, output=f"Typed: \"{text[:50]}{'...' if len(text)>50 else ''}\"")
         except Exception as e:
             return ToolResult(ok=False, error=f"Type failed: {e}")
+
+
+class ScreenRunCommandTool(Tool):
+    name = "screen_run_command"
+    description = (
+        "Type a command into the currently focused app on the Mac and "
+        "press Enter — i.e. *execute* it. Use whenever the user asks you "
+        "to run something in their terminal, send a message, submit a "
+        "search, or any 'do this now' intent where you'd otherwise call "
+        "screen_type then screen_key('enter') back-to-back. The user is "
+        "expected to have already focused the target window themselves "
+        "(clicked on the terminal / chat input / address bar / etc.). "
+        "For text the user wants to review before submitting, use "
+        "`screen_type` instead — that one does NOT press Enter."
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": (
+                    "The full command/text to type before Enter is "
+                    "pressed. e.g. 'ls -la', 'git status', 'oi tudo bem?'."
+                ),
+            },
+        },
+        "required": ["command"],
+    }
+    requires_confirmation = False
+    category = "system"
+    proxy_to_client = True
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        # Local fallback (only runs when the backend is on macOS, which
+        # in prod it isn't — Tauri client handles the proxy path).
+        command = args.get("command", "")
+        if not command:
+            return ToolResult(ok=False, error="command is required")
+        try:
+            type_res = await _run(["cliclick", f"t:{command}"])
+            if type_res.returncode != 0:
+                return ToolResult(ok=False, error=f"Type failed: {type_res.stderr}")
+            key_res = await _run(["cliclick", "kp:return"])
+            if key_res.returncode != 0:
+                return ToolResult(ok=False, error=f"Enter failed: {key_res.stderr}")
+            preview = command[:60] + ("..." if len(command) > 60 else "")
+            return ToolResult(ok=True, output=f"Ran: \"{preview}\"")
+        except Exception as e:
+            return ToolResult(ok=False, error=f"Run command failed: {e}")
 
 
 class ScreenKeyTool(Tool):

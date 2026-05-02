@@ -303,12 +303,14 @@ def build_default_registry(
         ScreenCopyToClipboardTool,
         ScreenKeyTool,
         ScreenReadClipboardTool,
+        ScreenRunCommandTool,
         ScreenTypeTool,
     )
 
     reg.register(ScreenCaptureTool())
     reg.register(ScreenClickTool())
     reg.register(ScreenTypeTool())
+    reg.register(ScreenRunCommandTool())
     reg.register(ScreenKeyTool())
     reg.register(ScreenCopyToClipboardTool())
     reg.register(ScreenReadClipboardTool())
