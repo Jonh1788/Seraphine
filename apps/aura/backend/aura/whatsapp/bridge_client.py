@@ -106,7 +106,7 @@ class BridgeClient:
 
     async def send_text(self, phone_e164: str, text: str) -> str:
         body = {"chatId": _phone_to_chat_id(phone_e164), "message": text}
-        resp = await self._request("POST", "/send", json=body)
+        resp = await self._request("POST", "/api/send", json=body)
         data = resp.json() or {}
         msg_id = (
             (data.get("messageId") if isinstance(data, dict) else None)
@@ -131,7 +131,7 @@ class BridgeClient:
         "auth_failure" | "disconnected"``. We map ``"ready"`` →
         ``connected: True``.
         """
-        resp = await self._request("GET", "/status")
+        resp = await self._request("GET", "/api/status")
         data = resp.json() or {}
         status = data.get("status")
         # Bridge returns the bare phone digits (no '+'). Normalize.
@@ -163,7 +163,7 @@ class BridgeClient:
             # loading / disconnected / auth_failure → no QR yet
             return None, str(state) if state else None
 
-        resp = await self._request("GET", "/qr")
+        resp = await self._request("GET", "/api/qr")
         data = resp.json() or {}
         qr = data.get("qr") if isinstance(data, dict) else None
         if isinstance(qr, str) and qr:
