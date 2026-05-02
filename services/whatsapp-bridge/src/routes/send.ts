@@ -25,17 +25,45 @@ router.post("/send", async (req: Request, res: Response) => {
   try {
     const client = getClient();
 
-    // Verify chat exists
-    let chat;
+    // Resolve the chat. For cold-start sends (no prior message
+    // history with the recipient — e.g. Aura's verification code
+    // delivery to a brand-new user), getChatById throws/returns null.
+    // In that case, validate the number is on WhatsApp via
+    // getNumberId and fall through to client.sendMessage which handles
+    // the implicit chat creation.
+    let chat: Awaited<ReturnType<typeof client.getChatById>> | null = null;
     try {
       chat = await client.getChatById(chatId);
     } catch {
-      res.status(404).json({ error: "Chat not found" });
-      return;
+      chat = null;
     }
 
     if (!chat) {
-      res.status(404).json({ error: "Chat not found" });
+      // Audio-only sends still need an existing chat (we'd need to
+      // construct a Chat instance to attach media via the same path).
+      if (!message) {
+        res.status(404).json({ error: "Chat not found (audio cold-start unsupported)" });
+        return;
+      }
+      // Validate number exists on WhatsApp before sending blind.
+      const numberId = await client.getNumberId(chatId);
+      if (!numberId) {
+        res.status(404).json({ error: "Number not on WhatsApp" });
+        return;
+      }
+      const directOptions: { quotedMessageId?: string } = {};
+      if (quoteMsgId) directOptions.quotedMessageId = quoteMsgId;
+      const sent = await client.sendMessage(
+        numberId._serialized,
+        message,
+        directOptions,
+      );
+      res.json({
+        ok: true,
+        messageId: sent.id._serialized,
+        messageIds: [sent.id._serialized],
+        timestamp: Math.floor(Date.now() / 1000),
+      });
       return;
     }
 
