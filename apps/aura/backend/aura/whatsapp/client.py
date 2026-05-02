@@ -78,17 +78,29 @@ class EvolutionClient:
         )
         if resp.status_code >= 400:
             body = resp.text or ""
+            reason: str = body[:200]
             try:
                 payload = resp.json()
-                reason = (
-                    payload.get("message")
-                    or payload.get("error")
-                    or body[:200]
-                )
+                if isinstance(payload, dict):
+                    err = payload.get("error")
+                    if isinstance(err, dict):
+                        reason = (
+                            err.get("message")
+                            or err.get("reason")
+                            or body[:200]
+                        )
+                    else:
+                        reason = (
+                            payload.get("message")
+                            or err
+                            or body[:200]
+                        )
             except Exception:
-                reason = body[:200]
+                pass
             raise EvolutionError(
-                status_code=resp.status_code, body=body, reason=str(reason),
+                status_code=resp.status_code,
+                body=body,
+                reason=str(reason),
             )
         return resp
 
@@ -101,10 +113,23 @@ class EvolutionClient:
         }
         resp = await self._request("POST", path, json=body)
         data = resp.json() or {}
-        key = data.get("key") if isinstance(data, dict) else None
-        msg_id = key.get("id") if isinstance(key, dict) else None
+        msg_id: str | None = None
+        if isinstance(data, dict):
+            key = data.get("key")
+            if isinstance(key, dict):
+                raw_id = key.get("id")
+                if raw_id:
+                    msg_id = str(raw_id)
+            if msg_id is None:
+                fallback = data.get("messageId")
+                if fallback:
+                    msg_id = str(fallback)
         if not msg_id:
-            msg_id = str(data.get("messageId") or "")
+            raise EvolutionError(
+                status_code=resp.status_code,
+                body=resp.text or "",
+                reason="missing message id in send_text response",
+            )
         return msg_id
 
     async def get_status(self) -> dict[str, Any]:
@@ -121,15 +146,22 @@ class EvolutionClient:
             "state": state,
         }
 
-    async def get_qr(self) -> str | None:
-        """Return the base64 QR PNG, or ``None`` if already connected."""
+    async def get_qr(self) -> tuple[str | None, str | None]:
+        """Return ``(base64_png, state)`` for the linking QR.
+
+        - ``(base64, None)`` — QR ready to scan.
+        - ``(None, "open")`` — instance already linked; no QR needed.
+        - ``(None, None)`` — neither QR nor a recognized state in the
+          response (transient; caller may want to retry).
+        """
         path = f"/instance/connect/{self._instance}"
         resp = await self._request("GET", path)
         data = resp.json() or {}
         if isinstance(data, dict):
-            if data.get("base64"):
-                return str(data["base64"])
+            b64 = data.get("base64")
+            if b64:
+                return str(b64), None
             instance = data.get("instance") or {}
-            if instance.get("state") == "open":
-                return None
-        return None
+            state = instance.get("state") if isinstance(instance, dict) else None
+            return None, (str(state) if state else None)
+        return None, None

@@ -75,15 +75,61 @@ async def test_get_qr_returns_base64_when_present():
         return httpx.Response(200, json={"base64": "iVBORw0KGgo=AAAA"})
 
     client = _client(handler)
-    qr = await client.get_qr()
+    qr, state = await client.get_qr()
     assert qr == "iVBORw0KGgo=AAAA"
+    assert state is None
 
 
 @pytest.mark.asyncio
-async def test_get_qr_returns_none_when_already_connected():
+async def test_get_qr_returns_open_state_when_already_connected():
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"instance": {"state": "open"}})
 
     client = _client(handler)
-    qr = await client.get_qr()
+    qr, state = await client.get_qr()
     assert qr is None
+    assert state == "open"
+
+
+@pytest.mark.asyncio
+async def test_get_qr_returns_none_none_when_response_has_neither():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    qr, state = await client.get_qr()
+    assert qr is None
+    assert state is None
+
+
+@pytest.mark.asyncio
+async def test_send_text_falls_back_to_messageId_shape():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"messageId": "OLD_ID"})
+
+    client = _client(handler)
+    msg_id = await client.send_text("+5511987654321", "x")
+    assert msg_id == "OLD_ID"
+
+
+@pytest.mark.asyncio
+async def test_send_text_raises_when_no_id_in_response():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": True})
+
+    client = _client(handler)
+    with pytest.raises(EvolutionError) as exc:
+        await client.send_text("+5511987654321", "x")
+    assert "missing message id" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_send_text_error_with_nested_message_shape():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": {"message": "denied"}})
+
+    client = _client(handler)
+    with pytest.raises(EvolutionError) as exc:
+        await client.send_text("+5511987654321", "x")
+    assert exc.value.status_code == 403
+    assert "denied" in exc.value.reason
