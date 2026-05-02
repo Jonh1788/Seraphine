@@ -356,7 +356,8 @@ class PushService:
         other. Per-channel idempotency lives in their own ledgers
         (push_dispatches / aura_whatsapp_dispatches).
         """
-        coros = [self._dispatch_push(user_id, task)]
+        labels: list[str] = ["push"]
+        coros: list = [self._dispatch_push(user_id, task)]
         if self._whatsapp is not None:
             try:
                 verified = await self._whatsapp.is_verified(user_id)
@@ -364,6 +365,7 @@ class PushService:
                 logger.exception("WA is_verified failed user=%s", user_id)
                 verified = False
             if verified:
+                labels.append("whatsapp")
                 coros.append(
                     self._whatsapp.send_reminder(
                         user_id=user_id,
@@ -374,9 +376,12 @@ class PushService:
                 )
         results = await asyncio.gather(*coros, return_exceptions=True)
         sent = 0
-        for r in results:
+        for label, r in zip(labels, results):
             if isinstance(r, Exception):
-                logger.warning("reminder channel failed: %s", r)
+                logger.warning(
+                    "reminder channel %s failed user=%s task=%s: %s",
+                    label, user_id, task.id, r,
+                )
                 continue
             if r:
                 sent += 1

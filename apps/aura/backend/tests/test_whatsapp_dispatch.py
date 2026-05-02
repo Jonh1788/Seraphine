@@ -120,3 +120,24 @@ async def test_dispatcher_zero_when_both_fail():
     push._dispatch_push = AsyncMock(side_effect=RuntimeError("vapid signing died"))
     sent = await push._deliver_reminder("u1", _task(id="46"))
     assert sent == 0
+
+
+import logging
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_logs_channel_label_on_failure(caplog):
+    push = _build_push()
+    wa = MagicMock()
+    wa.is_verified = AsyncMock(return_value=True)
+    wa.send_reminder = AsyncMock(side_effect=RuntimeError("evolution down"))
+    push.attach_whatsapp(wa)
+    push._dispatch_push = AsyncMock(return_value=1)
+
+    caplog.set_level(logging.WARNING)
+    await push._deliver_reminder("u1", _task(id="50"))
+
+    relevant = [r for r in caplog.records if "reminder channel" in r.getMessage()]
+    assert any("whatsapp" in r.getMessage() for r in relevant), (
+        "WA failure must be logged with the 'whatsapp' label"
+    )
