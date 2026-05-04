@@ -80,12 +80,14 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         tags=tags,
         priority=row[13] if len(row) > 13 else None,
         remind=row[14] if len(row) > 14 else None,
+        completed_by=row[15] if len(row) > 15 else None,
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
-    " updated_at, due_date, due_time, user_id, tags, priority, remind"
+    " updated_at, due_date, due_time, user_id, tags, priority, remind,"
+    " completed_by"
 )
 
 

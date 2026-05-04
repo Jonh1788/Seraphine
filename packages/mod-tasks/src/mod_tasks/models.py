@@ -11,17 +11,21 @@ TASK_PRIORITIES = ["low", "med", "high"]
 @dataclass
 class SeraphineTask:
     id: int | None
-    type: str  # finance_import, calendar_add, whatsapp_reply, generic
-    status: str  # pending, approved, rejected, completed, failed
+    type: str
+    status: str
     title: str
     description: str
-    source: str  # email, whatsapp, system, chat
-    payload: dict[str, Any] = field(default_factory=dict)  # JSON-serializable dict
+    source: str
+    payload: dict[str, Any] = field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
-    due_date: str | None = None  # YYYY-MM-DD (optional user-facing deadline)
-    due_time: str | None = None  # HH:MM 24h (optional, pairs with due_date)
-    user_id: str | None = None  # NULL for single-tenant (Seraphine), set for Aura
-    priority: str | None = None  # low / med / high (optional)
-    tags: list[str] = field(default_factory=list)  # free-form short labels
-    remind: str | None = None  # at_time / 1h_before / 1d_before
+    due_date: str | None = None
+    due_time: str | None = None
+    user_id: str | None = None
+    priority: str | None = None
+    tags: list[str] = field(default_factory=list)
+    remind: str | None = None
+    completed_by: str | None = None                  # stored: user_id
+    participants: list[str] = field(default_factory=list)  # computed: emails
+    is_owner: bool = False                           # computed for caller
+    completed_by_email: str | None = None            # computed
