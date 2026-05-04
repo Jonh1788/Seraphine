@@ -507,21 +507,69 @@ class TaskService:
     ) -> int:
         ts = _now()
 
-        def _work() -> int:
+        def _work() -> tuple[int, str | None, str | None]:
             with self._store._connect() as conn:
                 if user_id is None:
-                    cur = conn.execute(
-                        "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
-                        " WHERE id = ?",
-                        (status, ts, task_id),
-                    )
+                    cur_row = conn.execute(
+                        "SELECT status, title FROM seraphine_tasks WHERE id = ?",
+                        (task_id,),
+                    ).fetchone()
                 else:
-                    cur = conn.execute(
-                        "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
-                        " WHERE id = ? AND user_id = ?",
-                        (status, ts, task_id, user_id),
-                    )
-                return cur.rowcount or 0
+                    cur_row = conn.execute(
+                        "SELECT t.status, t.title FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        "   ON p.task_id = t.id AND p.user_id = ?"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
+                    ).fetchone()
+                if cur_row is None:
+                    return 0, None, None
+                prev_status, title = cur_row[0], cur_row[1]
+                if prev_status == status:
+                    return 0, prev_status, title  # idempotent
+                completed_by = user_id if status == "completed" else None
+                conn.execute(
+                    "UPDATE seraphine_tasks"
+                    " SET status = ?, updated_at = ?, completed_by = ?"
+                    " WHERE id = ?",
+                    (status, ts, completed_by, task_id),
+                )
+                return 1, prev_status, title
+
+        affected, prev_status, title = await asyncio.to_thread(_work)
+        if affected and user_id is not None and self._push is not None and self._user_id_to_email is not None:
+            actor_email = await self._user_id_to_email(user_id) or user_id
+            recipients = await self._other_participants(task_id, user_id)
+            if status == "completed":
+                payload = {
+                    "title": "Tarefa concluída",
+                    "body": f"{actor_email} concluiu: {title}",
+                    "url": f"/tasks?focus={task_id}",
+                }
+            elif prev_status == "completed":  # reopened
+                payload = {
+                    "title": "Tarefa reaberta",
+                    "body": f"{actor_email} reabriu: {title}",
+                    "url": f"/tasks?focus={task_id}",
+                }
+            else:
+                payload = None
+            if payload is not None:
+                for uid in recipients:
+                    asyncio.create_task(self._safe_push(uid, payload))
+        return affected
+
+    async def _other_participants(
+        self, task_id: int, exclude_user_id: str,
+    ) -> list[str]:
+        def _work() -> list[str]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM task_participants"
+                    " WHERE task_id = ? AND user_id != ?",
+                    (task_id, exclude_user_id),
+                ).fetchall()
+            return [r[0] for r in rows]
 
         return await asyncio.to_thread(_work)
 
