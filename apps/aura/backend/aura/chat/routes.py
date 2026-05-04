@@ -264,6 +264,28 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "share_task",
+        "description": (
+            "Compartilha uma tarefa existente com outro usuário Aura por email. "
+            "Apenas o dono da tarefa pode compartilhar. O destinatário precisa "
+            "ter conta na Aura cadastrada com este email."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "ID numérico da tarefa (obtido via list_tasks).",
+                },
+                "email": {
+                    "type": "string",
+                    "description": "Email do usuário Aura a quem compartilhar.",
+                },
+            },
+            "required": ["task_id", "email"],
+        },
+    },
+    {
         "name": "create_recurring_task",
         "description": (
             "Cria uma regra de tarefa recorrente (diária, semanal ou mensal). "
@@ -750,6 +772,28 @@ async def _exec_complete_task(
     return {"ok": True, "task": _task_to_inline(updated)}
 
 
+async def _exec_share_task(
+    tasks_svc: Any, uid: str, args: dict[str, Any],
+) -> dict[str, Any]:
+    task_id = args.get("task_id")
+    email = (args.get("email") or "").strip()
+    if not isinstance(task_id, int) or not email:
+        return {"ok": False, "error": "task_id e email são obrigatórios"}
+    try:
+        emails = await tasks_svc.add_participant(
+            int(task_id), caller_id=uid, target_email=email,
+        )
+    except PermissionError:
+        return {"ok": False, "error": "Só o dono da tarefa pode compartilhar."}
+    except LookupError:
+        return {"ok": False, "error": "Não encontrei conta na Aura com esse email."}
+    except ValueError:
+        return {"ok": False, "error": "Esse usuário já participa dessa tarefa."}
+    except Exception as e:
+        return {"ok": False, "error": f"erro ao compartilhar: {e}"}
+    return {"ok": True, "participants": emails, "task_id": task_id}
+
+
 async def _exec_create_recurring_task(
     recurring: RecurringService,
     tasks: TaskService,
@@ -1086,6 +1130,8 @@ async def _run_agentic_collect(
                 result = await _exec_create_note(knowledge_svc, uid, args)
             elif name == "create_goal":
                 result = await _exec_create_goal(goals_svc, uid, args)
+            elif name == "share_task":
+                result = await _exec_share_task(tasks_svc, uid, args)
             else:
                 result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -1227,6 +1273,8 @@ def _run_agentic_stream(
                         result = await _exec_create_note(knowledge_svc, uid, args)
                     elif name == "create_goal":
                         result = await _exec_create_goal(goals_svc, uid, args)
+                    elif name == "share_task":
+                        result = await _exec_share_task(tasks_svc, uid, args)
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
