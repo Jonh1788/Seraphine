@@ -165,3 +165,25 @@ async def test_update_task_non_participant_returns_zero(svc: TaskService) -> Non
     )
     affected = await svc.update_task(tid, user_id="user-x", title="hax")
     assert affected == 0
+
+
+async def test_delete_task_member_forbidden(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    affected = await svc.delete_task(tid, user_id="user-b")
+    assert affected == 0  # not owner — silent no-op (matches existing convention)
+    # Task still exists
+    assert (await svc.get_task(tid, user_id="user-a")) is not None
+
+
+async def test_delete_task_owner_succeeds(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    affected = await svc.delete_task(tid, user_id="user-a")
+    assert affected == 1
+    assert (await svc.get_task(tid, user_id="user-a")) is None

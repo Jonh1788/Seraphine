@@ -671,8 +671,6 @@ class TaskService:
     ) -> int:
         def _work() -> tuple[int, dict[str, Any]]:
             with self._store._connect() as conn:
-                # Capture payload before delete so hooks can read sidecar
-                # data (e.g. google_event_id) for cascade deletion.
                 if user_id is None:
                     row = conn.execute(
                         "SELECT payload FROM seraphine_tasks WHERE id = ?",
@@ -680,9 +678,12 @@ class TaskService:
                     ).fetchone()
                 else:
                     row = conn.execute(
-                        "SELECT payload FROM seraphine_tasks"
-                        " WHERE id = ? AND user_id = ?",
-                        (task_id, user_id),
+                        "SELECT t.payload FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        "   ON p.task_id = t.id AND p.user_id = ?"
+                        "   AND p.role = 'owner'"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
                     ).fetchone()
                 payload: dict[str, Any] = {}
                 if row and row[0]:
@@ -692,7 +693,6 @@ class TaskService:
                             payload = parsed
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
-
                 if user_id is None:
                     cur = conn.execute(
                         "DELETE FROM seraphine_tasks WHERE id = ?",
@@ -700,8 +700,11 @@ class TaskService:
                     )
                 else:
                     cur = conn.execute(
-                        "DELETE FROM seraphine_tasks WHERE id = ?"
-                        " AND user_id = ?",
+                        "DELETE FROM seraphine_tasks"
+                        " WHERE id = ? AND id IN ("
+                        "   SELECT task_id FROM task_participants"
+                        "   WHERE user_id = ? AND role = 'owner'"
+                        " )",
                         (task_id, user_id),
                     )
                 return cur.rowcount or 0, payload
