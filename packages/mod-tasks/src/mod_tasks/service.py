@@ -398,62 +398,109 @@ class TaskService:
         due_to: str | None = None,
         user_id: str | None = None,
     ) -> list[SeraphineTask]:
-        def _work() -> list[SeraphineTask]:
+        def _work() -> list[tuple]:
             clauses: list[str] = []
             params: list[Any] = []
-            # When user_id is set, scope to that user. When None,
-            # callers in single-tenant mode see ALL rows (legacy
-            # Seraphine behavior — every row has user_id IS NULL).
             if user_id is not None:
-                clauses.append("user_id = ?")
+                # JOIN scope: caller must be a participant
+                join = (
+                    " JOIN task_participants p ON p.task_id = t.id"
+                    " AND p.user_id = ?"
+                )
                 params.append(user_id)
+            else:
+                # Single-tenant Seraphine: no scoping
+                join = ""
             if status is not None:
-                clauses.append("status = ?")
+                clauses.append("t.status = ?")
                 params.append(status)
             if type is not None:
-                clauses.append("type = ?")
+                clauses.append("t.type = ?")
                 params.append(type)
             if due_from is not None:
-                clauses.append("due_date IS NOT NULL AND due_date >= ?")
+                clauses.append("t.due_date IS NOT NULL AND t.due_date >= ?")
                 params.append(due_from)
             if due_to is not None:
-                clauses.append("due_date IS NOT NULL AND due_date <= ?")
+                clauses.append("t.due_date IS NOT NULL AND t.due_date <= ?")
                 params.append(due_to)
             where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
 
+            cols_t = ", ".join(f"t.{c.strip()}" for c in _SELECT_COLS.split(","))
             with self._store._connect() as conn:
-                rows = conn.execute(
-                    f"SELECT {_SELECT_COLS} FROM seraphine_tasks{where}"
-                    " ORDER BY created_at DESC, id DESC LIMIT ?",
+                return conn.execute(
+                    f"SELECT {cols_t} FROM seraphine_tasks t{join}{where}"
+                    " ORDER BY t.created_at DESC, t.id DESC LIMIT ?",
                     params,
                 ).fetchall()
-            return [_row_to_task(r) for r in rows]
 
-        return await asyncio.to_thread(_work)
+        rows = await asyncio.to_thread(_work)
+        tasks = [_row_to_task(r) for r in rows]
+        # Populate computed fields
+        for t in tasks:
+            await self._populate_computed(t, caller_id=user_id)
+        return tasks
+
+    async def _populate_computed(
+        self, task: SeraphineTask, *, caller_id: str | None,
+    ) -> None:
+        """Fill participants[], is_owner, completed_by_email. No-op for
+        single-tenant tasks (caller_id is None) or when lookup not wired."""
+        if task.id is None or caller_id is None:
+            return
+        if self._user_id_to_email is None:
+            return  # not wired (Seraphine path) — leave defaults
+
+        def _work() -> tuple[list[str], str | None]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id, role FROM task_participants"
+                    " WHERE task_id = ?"
+                    " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,"
+                    " joined_at ASC",
+                    (task.id,),
+                ).fetchall()
+            uids = [r[0] for r in rows]
+            caller_role = next((r[1] for r in rows if r[0] == caller_id), None)
+            return uids, caller_role
+
+        uids, caller_role = await asyncio.to_thread(_work)
+        emails: list[str] = []
+        for u in uids:
+            e = await self._user_id_to_email(u)
+            if e:
+                emails.append(e)
+        task.participants = emails
+        task.is_owner = caller_role == "owner"
+        if task.completed_by:
+            task.completed_by_email = await self._user_id_to_email(task.completed_by)
 
     async def get_task(
         self, task_id: int, *, user_id: str | None = None,
     ) -> SeraphineTask | None:
-        def _work() -> SeraphineTask | None:
+        def _work() -> tuple | None:
+            cols_t = ", ".join(f"t.{c.strip()}" for c in _SELECT_COLS.split(","))
             with self._store._connect() as conn:
                 if user_id is None:
-                    row = conn.execute(
-                        f"SELECT {_SELECT_COLS} FROM seraphine_tasks"
-                        " WHERE id = ?",
+                    return conn.execute(
+                        f"SELECT {cols_t} FROM seraphine_tasks t WHERE t.id = ?",
                         (task_id,),
                     ).fetchone()
                 else:
-                    row = conn.execute(
-                        f"SELECT {_SELECT_COLS} FROM seraphine_tasks"
-                        " WHERE id = ? AND user_id = ?",
-                        (task_id, user_id),
+                    return conn.execute(
+                        f"SELECT {cols_t} FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        " ON p.task_id = t.id AND p.user_id = ?"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
                     ).fetchone()
-            if row is None:
-                return None
-            return _row_to_task(row)
 
-        return await asyncio.to_thread(_work)
+        row = await asyncio.to_thread(_work)
+        if row is None:
+            return None
+        task = _row_to_task(row)
+        await self._populate_computed(task, caller_id=user_id)
+        return task
 
     async def update_status(
         self, task_id: int, status: str, *, user_id: str | None = None,
