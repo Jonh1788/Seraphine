@@ -81,6 +81,10 @@ class TaskExecute(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class AddParticipantBody(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+
+
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
@@ -324,3 +328,105 @@ async def scan_email(request: Request, hours_back: int = 24) -> dict[str, Any]:
         logger.exception("email scan failed")
         raise HTTPException(status_code=500, detail=str(e))
     return {"ok": True, "created": created}
+
+
+@router.post("/tasks/{task_id}/participants")
+async def add_participant(
+    request: Request,
+    task_id: int,
+    body: AddParticipantBody,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        emails = await svc.add_participant(
+            task_id, caller_id=user_id, target_email=body.email,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can add participants")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="email not registered on Aura")
+    except ValueError:
+        raise HTTPException(status_code=409, detail="already a participant")
+    return {"participants": emails}
+
+
+@router.get("/tasks/{task_id}/participants")
+async def get_participants(
+    request: Request,
+    task_id: int,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, list[str]]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        await svc._authorize_participant(task_id, user_id)
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"participants": await svc.list_participants(task_id)}
+
+
+@router.delete("/tasks/{task_id}/participants/me")
+async def leave_task(
+    request: Request,
+    task_id: int,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        await svc.leave_task(task_id, caller_id=user_id)
+    except PermissionError as e:
+        msg = str(e)
+        if "owner" in msg:
+            raise HTTPException(status_code=400, detail="owner cannot leave the task")
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"ok": True}
+
+
+@router.delete("/tasks/{task_id}/participants/by-email/{email}")
+async def remove_participant_by_email(
+    request: Request,
+    task_id: int,
+    email: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        await svc.remove_participant_by_email(
+            task_id, caller_id=user_id, target_email=email,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can remove participants")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="email not registered on Aura")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="owner cannot remove self")
+    return {"ok": True}
+
+
+@router.delete("/tasks/{task_id}/participants/{target_user_id}")
+async def remove_participant(
+    request: Request,
+    task_id: int,
+    target_user_id: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        await svc.remove_participant(
+            task_id, caller_id=user_id, target_user_id=target_user_id,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can remove participants")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="owner cannot remove self")
+    return {"ok": True}

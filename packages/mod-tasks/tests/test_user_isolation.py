@@ -92,3 +92,61 @@ async def test_legacy_row_invisible_to_authenticated_users(store: Store) -> None
     assert await svc.get_task(legacy_id, user_id="user-a") is None
     # Single-tenant query still sees it.
     assert (await svc.get_task(legacy_id, user_id=None)) is not None
+
+
+async def test_create_task_inserts_owner_participant(store: Store) -> None:
+    svc = TaskService(store)
+    tid = await svc.create_task(
+        type="generic", title="solo", description="", source="chat",
+        payload={}, user_id="user-z",
+    )
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT user_id, role FROM task_participants WHERE task_id = ?",
+            (tid,),
+        ).fetchall()
+    assert rows == [("user-z", "owner")]
+
+
+async def test_create_task_seraphine_no_participant_row(store: Store) -> None:
+    svc = TaskService(store)
+    tid = await svc.create_task(
+        type="generic", title="legacy", description="", source="chat",
+        payload={}, user_id=None,
+    )
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT 1 FROM task_participants WHERE task_id = ?", (tid,),
+        ).fetchall()
+    assert rows == []
+
+
+async def test_member_sees_shared_task(store: Store) -> None:
+    svc = TaskService(store)
+
+    async def email_to_uid(email: str) -> str | None:
+        local = email.split("@", 1)[0] if "@" in email else None
+        return local if local and local.startswith("user-") else None
+
+    async def uid_to_email(uid: str) -> str | None:
+        return f"{uid}@x.com"
+
+    svc.attach_user_lookup(email_to_user_id=email_to_uid, user_id_to_email=uid_to_email)
+
+    tid = await svc.create_task(
+        type="generic", title="shared", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+
+    a_list = await svc.list_tasks(user_id="user-a")
+    b_list = await svc.list_tasks(user_id="user-b")
+    assert {t.id for t in a_list} == {tid}
+    assert {t.id for t in b_list} == {tid}
+
+    # Computed fields
+    a_task = next(t for t in a_list if t.id == tid)
+    b_task = next(t for t in b_list if t.id == tid)
+    assert a_task.is_owner is True
+    assert b_task.is_owner is False
+    assert set(a_task.participants) == {"user-a@x.com", "user-b@x.com"}

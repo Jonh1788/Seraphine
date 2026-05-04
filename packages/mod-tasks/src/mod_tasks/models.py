@@ -25,3 +25,7 @@ class SeraphineTask:
     priority: str | None = None  # low / med / high (optional)
     tags: list[str] = field(default_factory=list)  # free-form short labels
     remind: str | None = None  # at_time / 1h_before / 1d_before
+    completed_by: str | None = None                  # stored: user_id
+    participants: list[str] = field(default_factory=list)  # computed: emails
+    is_owner: bool = False                           # computed for caller
+    completed_by_email: str | None = None            # computed

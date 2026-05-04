@@ -26,6 +26,14 @@ export interface Task {
   tags?: string[] | null;
   created_at?: string;
   updated_at?: string;
+  // Aura sharing (077)
+  participants?: string[];
+  completed_by_email?: string | null;
+  is_owner?: boolean;
+}
+
+export interface ParticipantsResponse {
+  participants: string[];
 }
 
 export interface TaskListResponse {

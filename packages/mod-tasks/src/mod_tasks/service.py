@@ -80,12 +80,14 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         tags=tags,
         priority=row[13] if len(row) > 13 else None,
         remind=row[14] if len(row) > 14 else None,
+        completed_by=row[15] if len(row) > 15 else None,
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
-    " updated_at, due_date, due_time, user_id, tags, priority, remind"
+    " updated_at, due_date, due_time, user_id, tags, priority, remind,"
+    " completed_by"
 )
 
 
@@ -104,6 +106,10 @@ class TaskService:
         self._app_state = app_state
         self._on_created: list[TaskCreatedHook] = []
         self._on_deleted: list[TaskDeletedHook] = []
+        self._email_to_user_id: Callable[[str], Awaitable[str | None]] | None = None
+        self._user_id_to_email: Callable[[str], Awaitable[str | None]] | None = None
+        # Duck-typed: must expose `async send_to_user(user_id, payload) -> int`.
+        self._push: Any | None = None
 
     async def aclose(self) -> None:  # pragma: no cover - trivial
         return None
@@ -124,6 +130,220 @@ class TaskService:
         Exceptions are swallowed.
         """
         self._on_deleted.append(hook)
+
+    def attach_user_lookup(
+        self,
+        *,
+        email_to_user_id: Callable[[str], Awaitable[str | None]],
+        user_id_to_email: Callable[[str], Awaitable[str | None]],
+    ) -> None:
+        """Wire app-level email <-> user_id lookups.
+
+        Required for participant management (Aura). When unset, methods
+        that need email lookup raise RuntimeError.
+        """
+        self._email_to_user_id = email_to_user_id
+        self._user_id_to_email = user_id_to_email
+
+    def attach_push(self, push: Any) -> None:
+        """Wire a PushService for participant notifications.
+
+        The object must expose ``async send_to_user(user_id, payload)``.
+        Push delivery is fire-and-forget — failures are logged, never
+        propagated.
+        """
+        self._push = push
+
+    # ------------------------------------------------------------------
+    # Participants (Aura sharing)
+    # ------------------------------------------------------------------
+
+    async def list_participants(self, task_id: int) -> list[str]:
+        """Return participant emails for a task (owner first, then members
+        by joined_at). Empty list if task has no participants (Seraphine)
+        or doesn't exist."""
+        if self._user_id_to_email is None:
+            raise RuntimeError("user_id_to_email lookup not attached")
+
+        def _work() -> list[str]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM task_participants"
+                    " WHERE task_id = ?"
+                    " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,"
+                    " joined_at ASC",
+                    (task_id,),
+                ).fetchall()
+            return [r[0] for r in rows]
+
+        user_ids = await asyncio.to_thread(_work)
+        emails: list[str] = []
+        for uid in user_ids:
+            email = await self._user_id_to_email(uid)
+            if email:
+                emails.append(email)
+        return emails
+
+    async def _authorize_participant(
+        self, task_id: int, caller_id: str,
+    ) -> str:
+        """Returns the caller's role ('owner'|'member') or raises
+        PermissionError if not a participant."""
+
+        def _work() -> str | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT role FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ?",
+                    (task_id, caller_id),
+                ).fetchone()
+            return row[0] if row else None
+
+        role = await asyncio.to_thread(_work)
+        if role is None:
+            raise PermissionError(
+                f"user {caller_id} is not a participant of task {task_id}"
+            )
+        return role
+
+    async def add_participant(
+        self, task_id: int, *, caller_id: str, target_email: str,
+    ) -> list[str]:
+        """Owner-only. Resolves email to user_id, inserts a member row,
+        fires a push notification. Returns the updated participant emails.
+
+        Raises:
+            PermissionError: caller is not the owner.
+            LookupError: email is not a registered Aura user.
+            ValueError: target is already a participant.
+        """
+        if self._email_to_user_id is None or self._user_id_to_email is None:
+            raise RuntimeError("user lookup not attached")
+
+        role = await self._authorize_participant(task_id, caller_id)
+        if role != "owner":
+            raise PermissionError("only the task owner can add participants")
+
+        target_uid = await self._email_to_user_id(target_email.strip().lower())
+        if target_uid is None:
+            raise LookupError("no aura user for that email")
+
+        ts = _now()
+
+        def _work() -> str:
+            with self._store._connect() as conn:
+                try:
+                    conn.execute(
+                        "INSERT INTO task_participants"
+                        " (task_id, user_id, role, joined_at) VALUES"
+                        " (?, ?, 'member', ?)",
+                        (task_id, target_uid, ts),
+                    )
+                except sqlite3.IntegrityError:
+                    raise ValueError("already a participant") from None
+            return target_uid
+
+        added_uid = await asyncio.to_thread(_work)
+
+        # Fire-and-forget push
+        if self._push is not None:
+            owner_email = await self._user_id_to_email(caller_id) or "alguém"
+            task = await self.get_task_raw(task_id)
+            title = task.title if task else "tarefa"
+            payload = {
+                "title": "Nova tarefa compartilhada",
+                "body": f"{owner_email}: {title}",
+                "url": f"/tasks?focus={task_id}",
+            }
+            asyncio.create_task(self._safe_push(added_uid, payload))
+
+        return await self.list_participants(task_id)
+
+    async def _safe_push(self, user_id: str, payload: dict[str, Any]) -> None:
+        """Internal: fire push and log failures, never raise."""
+        if self._push is None:
+            return
+        try:
+            await self._push.send_to_user(user_id, payload)
+        except Exception:
+            logger.exception("push send_to_user failed for %s", user_id)
+
+    async def get_task_raw(self, task_id: int) -> SeraphineTask | None:
+        """Like get_task but bypasses caller scoping. INTERNAL USE only —
+        callers must already have authorized."""
+
+        def _work() -> SeraphineTask | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    f"SELECT {_SELECT_COLS} FROM seraphine_tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+            return _row_to_task(row) if row else None
+
+        return await asyncio.to_thread(_work)
+
+    async def leave_task(self, task_id: int, *, caller_id: str) -> None:
+        """Any non-owner participant leaves. Owner gets PermissionError
+        (must delete the task or remove members individually)."""
+        role = await self._authorize_participant(task_id, caller_id)
+        if role == "owner":
+            raise PermissionError("owner cannot leave the task")
+
+        def _work() -> None:
+            with self._store._connect() as conn:
+                conn.execute(
+                    "DELETE FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ?",
+                    (task_id, caller_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def remove_participant(
+        self, task_id: int, *, caller_id: str, target_user_id: str,
+    ) -> None:
+        """Owner-only. Removes a member. Owner cannot remove themselves
+        (use delete_task or transfer flow)."""
+        role = await self._authorize_participant(task_id, caller_id)
+        if role != "owner":
+            raise PermissionError("only the owner can remove participants")
+        if target_user_id == caller_id:
+            raise ValueError("owner cannot remove self")
+
+        def _work() -> int:
+            with self._store._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ? AND role = 'member'",
+                    (task_id, target_user_id),
+                )
+            return cur.rowcount or 0
+
+        affected = await asyncio.to_thread(_work)
+
+        if affected and self._push is not None and self._user_id_to_email is not None:
+            owner_email = await self._user_id_to_email(caller_id) or "alguém"
+            task = await self.get_task_raw(task_id)
+            title = task.title if task else "tarefa"
+            payload = {
+                "title": "Removido de tarefa",
+                "body": f"{owner_email} removeu você de: {title}",
+            }
+            asyncio.create_task(self._safe_push(target_user_id, payload))
+
+    async def remove_participant_by_email(
+        self, task_id: int, *, caller_id: str, target_email: str,
+    ) -> None:
+        """Owner-only. Resolves email to user_id, then calls
+        remove_participant. Raises LookupError if email is unknown."""
+        if self._email_to_user_id is None:
+            raise RuntimeError("email_to_user_id lookup not attached")
+        target_uid = await self._email_to_user_id(target_email.strip().lower())
+        if target_uid is None:
+            raise LookupError("no aura user for that email")
+        await self.remove_participant(
+            task_id, caller_id=caller_id, target_user_id=target_uid,
+        )
 
     # ------------------------------------------------------------------
     # CRUD
@@ -161,7 +381,15 @@ class TaskService:
                      payload_json, ts, ts, due_date, due_time, user_id,
                      tags_json, priority, remind),
                 )
-                return int(cur.lastrowid or 0)
+                new_id = int(cur.lastrowid or 0)
+                if user_id is not None and new_id > 0:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO task_participants"
+                        " (task_id, user_id, role, joined_at) VALUES"
+                        " (?, ?, 'owner', ?)",
+                        (new_id, user_id, ts),
+                    )
+                return new_id
 
         task_id = await asyncio.to_thread(_work)
         for hook in self._on_created:
@@ -184,83 +412,178 @@ class TaskService:
         due_to: str | None = None,
         user_id: str | None = None,
     ) -> list[SeraphineTask]:
-        def _work() -> list[SeraphineTask]:
+        def _work() -> list[tuple]:
             clauses: list[str] = []
             params: list[Any] = []
-            # When user_id is set, scope to that user. When None,
-            # callers in single-tenant mode see ALL rows (legacy
-            # Seraphine behavior — every row has user_id IS NULL).
             if user_id is not None:
-                clauses.append("user_id = ?")
+                # JOIN scope: caller must be a participant
+                join = (
+                    " JOIN task_participants p ON p.task_id = t.id"
+                    " AND p.user_id = ?"
+                )
                 params.append(user_id)
+            else:
+                # Single-tenant Seraphine: no scoping
+                join = ""
             if status is not None:
-                clauses.append("status = ?")
+                clauses.append("t.status = ?")
                 params.append(status)
             if type is not None:
-                clauses.append("type = ?")
+                clauses.append("t.type = ?")
                 params.append(type)
             if due_from is not None:
-                clauses.append("due_date IS NOT NULL AND due_date >= ?")
+                clauses.append("t.due_date IS NOT NULL AND t.due_date >= ?")
                 params.append(due_from)
             if due_to is not None:
-                clauses.append("due_date IS NOT NULL AND due_date <= ?")
+                clauses.append("t.due_date IS NOT NULL AND t.due_date <= ?")
                 params.append(due_to)
             where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
 
+            cols_t = ", ".join(f"t.{c.strip()}" for c in _SELECT_COLS.split(","))
             with self._store._connect() as conn:
-                rows = conn.execute(
-                    f"SELECT {_SELECT_COLS} FROM seraphine_tasks{where}"
-                    " ORDER BY created_at DESC, id DESC LIMIT ?",
+                return conn.execute(
+                    f"SELECT {cols_t} FROM seraphine_tasks t{join}{where}"
+                    " ORDER BY t.created_at DESC, t.id DESC LIMIT ?",
                     params,
                 ).fetchall()
-            return [_row_to_task(r) for r in rows]
 
-        return await asyncio.to_thread(_work)
+        rows = await asyncio.to_thread(_work)
+        tasks = [_row_to_task(r) for r in rows]
+        # Populate computed fields
+        for t in tasks:
+            await self._populate_computed(t, caller_id=user_id)
+        return tasks
+
+    async def _populate_computed(
+        self, task: SeraphineTask, *, caller_id: str | None,
+    ) -> None:
+        """Fill participants[], is_owner, completed_by_email. No-op for
+        single-tenant tasks (caller_id is None) or when lookup not wired."""
+        if task.id is None or caller_id is None:
+            return
+        if self._user_id_to_email is None:
+            return  # not wired (Seraphine path) — leave defaults
+
+        def _work() -> tuple[list[str], str | None]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id, role FROM task_participants"
+                    " WHERE task_id = ?"
+                    " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,"
+                    " joined_at ASC",
+                    (task.id,),
+                ).fetchall()
+            uids = [r[0] for r in rows]
+            caller_role = next((r[1] for r in rows if r[0] == caller_id), None)
+            return uids, caller_role
+
+        uids, caller_role = await asyncio.to_thread(_work)
+        emails: list[str] = []
+        for u in uids:
+            e = await self._user_id_to_email(u)
+            if e:
+                emails.append(e)
+        task.participants = emails
+        task.is_owner = caller_role == "owner"
+        if task.completed_by:
+            task.completed_by_email = await self._user_id_to_email(task.completed_by)
 
     async def get_task(
         self, task_id: int, *, user_id: str | None = None,
     ) -> SeraphineTask | None:
-        def _work() -> SeraphineTask | None:
+        def _work() -> tuple | None:
+            cols_t = ", ".join(f"t.{c.strip()}" for c in _SELECT_COLS.split(","))
             with self._store._connect() as conn:
                 if user_id is None:
-                    row = conn.execute(
-                        f"SELECT {_SELECT_COLS} FROM seraphine_tasks"
-                        " WHERE id = ?",
+                    return conn.execute(
+                        f"SELECT {cols_t} FROM seraphine_tasks t WHERE t.id = ?",
                         (task_id,),
                     ).fetchone()
                 else:
-                    row = conn.execute(
-                        f"SELECT {_SELECT_COLS} FROM seraphine_tasks"
-                        " WHERE id = ? AND user_id = ?",
-                        (task_id, user_id),
+                    return conn.execute(
+                        f"SELECT {cols_t} FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        " ON p.task_id = t.id AND p.user_id = ?"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
                     ).fetchone()
-            if row is None:
-                return None
-            return _row_to_task(row)
 
-        return await asyncio.to_thread(_work)
+        row = await asyncio.to_thread(_work)
+        if row is None:
+            return None
+        task = _row_to_task(row)
+        await self._populate_computed(task, caller_id=user_id)
+        return task
 
     async def update_status(
         self, task_id: int, status: str, *, user_id: str | None = None,
     ) -> int:
         ts = _now()
 
-        def _work() -> int:
+        def _work() -> tuple[int, str | None, str | None]:
             with self._store._connect() as conn:
                 if user_id is None:
-                    cur = conn.execute(
-                        "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
-                        " WHERE id = ?",
-                        (status, ts, task_id),
-                    )
+                    cur_row = conn.execute(
+                        "SELECT status, title FROM seraphine_tasks WHERE id = ?",
+                        (task_id,),
+                    ).fetchone()
                 else:
-                    cur = conn.execute(
-                        "UPDATE seraphine_tasks SET status = ?, updated_at = ?"
-                        " WHERE id = ? AND user_id = ?",
-                        (status, ts, task_id, user_id),
-                    )
-                return cur.rowcount or 0
+                    cur_row = conn.execute(
+                        "SELECT t.status, t.title FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        "   ON p.task_id = t.id AND p.user_id = ?"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
+                    ).fetchone()
+                if cur_row is None:
+                    return 0, None, None
+                prev_status, title = cur_row[0], cur_row[1]
+                if prev_status == status:
+                    return 0, prev_status, title  # idempotent
+                completed_by = user_id if status == "completed" else None
+                conn.execute(
+                    "UPDATE seraphine_tasks"
+                    " SET status = ?, updated_at = ?, completed_by = ?"
+                    " WHERE id = ?",
+                    (status, ts, completed_by, task_id),
+                )
+                return 1, prev_status, title
+
+        affected, prev_status, title = await asyncio.to_thread(_work)
+        if affected and user_id is not None and self._push is not None and self._user_id_to_email is not None:
+            actor_email = await self._user_id_to_email(user_id) or user_id
+            recipients = await self._other_participants(task_id, user_id)
+            if status == "completed":
+                payload = {
+                    "title": "Tarefa concluída",
+                    "body": f"{actor_email} concluiu: {title}",
+                    "url": f"/tasks?focus={task_id}",
+                }
+            elif prev_status == "completed":  # reopened
+                payload = {
+                    "title": "Tarefa reaberta",
+                    "body": f"{actor_email} reabriu: {title}",
+                    "url": f"/tasks?focus={task_id}",
+                }
+            else:
+                payload = None
+            if payload is not None:
+                for uid in recipients:
+                    asyncio.create_task(self._safe_push(uid, payload))
+        return affected
+
+    async def _other_participants(
+        self, task_id: int, exclude_user_id: str,
+    ) -> list[str]:
+        def _work() -> list[str]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM task_participants"
+                    " WHERE task_id = ? AND user_id != ?",
+                    (task_id, exclude_user_id),
+                ).fetchall()
+            return [r[0] for r in rows]
 
         return await asyncio.to_thread(_work)
 
@@ -341,10 +664,16 @@ class TaskService:
                     )
                     cur = conn.execute(sql, (*params, task_id))
                 else:
+                    # Authorize via task_participants JOIN — any
+                    # participant can edit fields except status (handled
+                    # by update_status).
                     sql = (
                         "UPDATE seraphine_tasks SET "
                         + ", ".join(sets)
-                        + " WHERE id = ? AND user_id = ?"
+                        + " WHERE id = ? AND id IN ("
+                        "   SELECT task_id FROM task_participants"
+                        "   WHERE user_id = ?"
+                        " )"
                     )
                     cur = conn.execute(sql, (*params, task_id, user_id))
                 return cur.rowcount or 0
@@ -356,8 +685,6 @@ class TaskService:
     ) -> int:
         def _work() -> tuple[int, dict[str, Any]]:
             with self._store._connect() as conn:
-                # Capture payload before delete so hooks can read sidecar
-                # data (e.g. google_event_id) for cascade deletion.
                 if user_id is None:
                     row = conn.execute(
                         "SELECT payload FROM seraphine_tasks WHERE id = ?",
@@ -365,9 +692,12 @@ class TaskService:
                     ).fetchone()
                 else:
                     row = conn.execute(
-                        "SELECT payload FROM seraphine_tasks"
-                        " WHERE id = ? AND user_id = ?",
-                        (task_id, user_id),
+                        "SELECT t.payload FROM seraphine_tasks t"
+                        " JOIN task_participants p"
+                        "   ON p.task_id = t.id AND p.user_id = ?"
+                        "   AND p.role = 'owner'"
+                        " WHERE t.id = ?",
+                        (user_id, task_id),
                     ).fetchone()
                 payload: dict[str, Any] = {}
                 if row and row[0]:
@@ -377,7 +707,6 @@ class TaskService:
                             payload = parsed
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
-
                 if user_id is None:
                     cur = conn.execute(
                         "DELETE FROM seraphine_tasks WHERE id = ?",
@@ -385,8 +714,11 @@ class TaskService:
                     )
                 else:
                     cur = conn.execute(
-                        "DELETE FROM seraphine_tasks WHERE id = ?"
-                        " AND user_id = ?",
+                        "DELETE FROM seraphine_tasks"
+                        " WHERE id = ? AND id IN ("
+                        "   SELECT task_id FROM task_participants"
+                        "   WHERE user_id = ? AND role = 'owner'"
+                        " )",
                         (task_id, user_id),
                     )
                 return cur.rowcount or 0, payload

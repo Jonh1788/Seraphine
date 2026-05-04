@@ -57,6 +57,12 @@ def migrate(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+    # Aura task sharing — completed_by tracks who closed the task.
+    try:
+        conn.execute("ALTER TABLE seraphine_tasks ADD COLUMN completed_by TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
     # Step 3: indexes — safe now that all columns exist.
     conn.executescript(
         """
@@ -68,5 +74,25 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON seraphine_tasks(due_date);
         CREATE INDEX IF NOT EXISTS idx_seraphine_tasks_user
           ON seraphine_tasks(user_id);
+
+        CREATE TABLE IF NOT EXISTS task_participants (
+          task_id    INTEGER NOT NULL,
+          user_id    TEXT    NOT NULL,
+          role       TEXT    NOT NULL DEFAULT 'member',
+          joined_at  TEXT    NOT NULL,
+          PRIMARY KEY (task_id, user_id),
+          FOREIGN KEY (task_id) REFERENCES seraphine_tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_participants_user
+          ON task_participants(user_id);
+        CREATE INDEX IF NOT EXISTS idx_task_participants_task
+          ON task_participants(task_id);
         """
+    )
+    # Backfill: every Aura task gets an 'owner' participant row.
+    # Idempotent via INSERT OR IGNORE.
+    conn.execute(
+        "INSERT OR IGNORE INTO task_participants (task_id, user_id, role, joined_at)"
+        " SELECT id, user_id, 'owner', created_at FROM seraphine_tasks"
+        " WHERE user_id IS NOT NULL"
     )

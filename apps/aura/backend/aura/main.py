@@ -136,6 +136,13 @@ async def lifespan(app: FastAPI):
         vapid_public_b64=settings.vapid_public_b64 or None,
     )
 
+    # Wire participant features (Aura sharing) into the shared TaskService.
+    task_service.attach_user_lookup(
+        email_to_user_id=users_service.get_user_id_by_email,
+        user_id_to_email=users_service.get_email,
+    )
+    task_service.attach_push(push_service)
+
     # Best-effort: mirror every newly created task/reminder to the user's
     # Google Calendar (no-op when the user hasn't connected Google).
     google_calendar_sync.register(task_service, google_auth_service)
