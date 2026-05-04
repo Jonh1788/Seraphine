@@ -207,10 +207,42 @@ class ImageGenService:
             elif model == "openai/gpt-image-2":
                 input_payload["input_images"] = [reference_url]
         body = {"input": input_payload}
-        async with httpx.AsyncClient(verify=ssl_ctx, timeout=90.0) as client:
-            resp = await client.post(endpoint, headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
+
+        # Retry budget: 429 (rate limit) and 5xx (transient server errors)
+        # get exponential backoff. Most other 4xx (auth, validation) fail
+        # fast — no point retrying. Total wall budget ~30s extra worst case.
+        backoff = [2.0, 5.0, 10.0]  # 3 retries
+        async with httpx.AsyncClient(verify=ssl_ctx, timeout=120.0) as client:
+            data: dict[str, Any] | None = None
+            last_status: int | None = None
+            for attempt in range(len(backoff) + 1):
+                resp = await client.post(endpoint, headers=headers, json=body)
+                last_status = resp.status_code
+                if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                    if attempt < len(backoff):
+                        retry_after = resp.headers.get("retry-after")
+                        try:
+                            sleep_s = float(retry_after) if retry_after else backoff[attempt]
+                        except ValueError:
+                            sleep_s = backoff[attempt]
+                        logger.warning(
+                            "replicate %s on %s — backoff %.1fs (attempt %d/%d)",
+                            resp.status_code, model, sleep_s, attempt + 1, len(backoff) + 1,
+                        )
+                        await asyncio.sleep(sleep_s)
+                        continue
+                    # Out of retries: surface the actual server message
+                    detail = (resp.text or "").strip()[:200]
+                    raise RuntimeError(
+                        f"replicate {resp.status_code} after retries on {model}"
+                        + (f": {detail}" if detail else "")
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+                break
+
+            if data is None:
+                raise RuntimeError(f"replicate request failed (status={last_status})")
 
             # Poll if the sync wait timed out and the prediction is still running.
             status = data.get("status")
@@ -218,7 +250,7 @@ class ImageGenService:
                 poll_url = (data.get("urls") or {}).get("get")
                 if not poll_url:
                     return None
-                for _ in range(60):  # ~60s budget at 1s intervals
+                for _ in range(90):  # ~90s budget at 1s intervals
                     await asyncio.sleep(1)
                     pr = await client.get(
                         poll_url,
@@ -231,15 +263,22 @@ class ImageGenService:
 
         if data.get("status") != "succeeded":
             err = data.get("error") or data.get("status") or "unknown"
-            logger.warning("replicate prediction failed: %s", err)
-            return None
+            logger.warning("replicate prediction failed on %s: %s", model, err)
+            # Surface the actual error so the LLM can decide to retry
+            # with a different model instead of seeing "no image url".
+            raise RuntimeError(f"replicate {model} failed: {err}")
 
-        # FLUX models return a list of URLs; some return a single string.
+        # Most models return a list of URLs; nano-banana family + gpt-image-2
+        # return a single string. Both shapes handled.
         output = data.get("output")
         if isinstance(output, list) and output:
             return str(output[0])
         if isinstance(output, str):
             return output
+        logger.warning(
+            "replicate %s succeeded but output shape unexpected: %r",
+            model, type(output).__name__,
+        )
         return None
 
     async def _call_fal(self, model: str, prompt: str) -> str | None:
