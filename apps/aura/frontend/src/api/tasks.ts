@@ -79,3 +79,12 @@ export function removeParticipant(
     { method: "DELETE" },
   );
 }
+
+export function removeParticipantByEmail(
+  taskId: string, email: string,
+): Promise<{ ok: boolean }> {
+  return request(
+    `/tasks/${encodeURIComponent(taskId)}/participants/by-email/${encodeURIComponent(email)}`,
+    { method: "DELETE" },
+  );
+}

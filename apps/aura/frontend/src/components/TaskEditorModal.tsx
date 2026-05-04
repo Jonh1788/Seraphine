@@ -18,6 +18,7 @@ import {
   Tag as TagIcon,
   Check,
   Loader2,
+  Users,
 } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -131,6 +132,10 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
   const [statusOpen, setStatusOpen] = useState(false);
   const [prioOpen, setPrioOpen] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [addingParticipant, setAddingParticipant] = useState(false);
+  const [participants, setParticipants] = useState<string[]>(task?.participants ?? []);
+  const [isOwner, setIsOwner] = useState<boolean>(task?.is_owner ?? false);
 
   // Pending patch accumulator + debounced flusher.
   const pendingRef = useRef<UpdateTaskBody>({});
@@ -240,6 +245,12 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
+  // Sync participants + is_owner from loaded task.
+  useEffect(() => {
+    setParticipants(task?.participants ?? []);
+    setIsOwner(task?.is_owner ?? false);
+  }, [task?.id, task?.participants, task?.is_owner]);
+
   // Flush pending changes on close.
   const handleClose = useCallback(() => {
     if (Object.keys(pendingRef.current).length > 0) {
@@ -336,6 +347,46 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
       setSaveState("error");
     }
   };
+
+  // -------- participants -------------------------------------------------
+  async function handleAddParticipant(): Promise<void> {
+    if (!task?.id || !inviteEmail.trim()) return;
+    setAddingParticipant(true);
+    try {
+      const updated = await tasksApi.addParticipant(task.id, inviteEmail.trim());
+      setParticipants(updated);
+      setInviteEmail("");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("404")) alert("Este email não tem conta na Aura.");
+      else if (msg.includes("409")) alert("Este usuário já participa.");
+      else if (msg.includes("403")) alert("Apenas o dono pode compartilhar.");
+      else alert("Erro ao compartilhar.");
+    } finally {
+      setAddingParticipant(false);
+    }
+  }
+
+  async function handleRemoveParticipant(email: string): Promise<void> {
+    if (!task?.id) return;
+    try {
+      await tasksApi.removeParticipantByEmail(task.id, email);
+      setParticipants((prev) => prev.filter((e) => e !== email));
+    } catch {
+      alert("Erro ao remover participante.");
+    }
+  }
+
+  async function handleLeaveTask(): Promise<void> {
+    if (!task?.id) return;
+    if (!confirm("Sair desta tarefa?")) return;
+    try {
+      await tasksApi.leaveTask(task.id);
+      onClose();
+    } catch {
+      alert("Erro ao sair.");
+    }
+  }
 
   if (!taskId) return null;
 
@@ -534,6 +585,67 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
               />
             </div>
           </div>
+
+          {/* Participants */}
+          {task?.id ? (
+            <div className="mt-4 pt-4 border-t border-[rgba(99,130,255,0.10)]">
+              <div className="text-[11px] uppercase tracking-wider text-ink-faint mb-2 flex items-center gap-1.5">
+                <Users className="h-3 w-3" />
+                Participantes
+              </div>
+              <ul className="space-y-1.5 mb-3">
+                {participants.map((email, idx) => {
+                  const isYou = idx === 0 && isOwner;
+                  const showRemove = isOwner && !isYou;
+                  return (
+                    <li key={email} className="flex items-center justify-between text-sm">
+                      <span className="text-ink-primary truncate">
+                        {email}
+                        {isYou ? <span className="text-ink-faint ml-1">(você, dono)</span> : null}
+                      </span>
+                      {showRemove ? (
+                        <button
+                          type="button"
+                          aria-label={`Remover ${email}`}
+                          onClick={() => handleRemoveParticipant(email)}
+                          className="text-ink-faint hover:text-red-400 text-xs px-2"
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+              {isOwner ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="email"
+                    placeholder="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="flex-1 px-2 py-1.5 text-sm bg-[#0C1228] border border-[rgba(99,130,255,0.20)] rounded"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddParticipant}
+                    disabled={!inviteEmail || addingParticipant}
+                    className="px-3 py-1.5 text-sm rounded bg-cyan-500 text-white hover:bg-cyan-400 disabled:opacity-50"
+                  >
+                    {addingParticipant ? "..." : "Adicionar"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleLeaveTask}
+                  className="w-full px-3 py-2 text-sm text-red-300 border border-red-400/30 rounded hover:bg-red-500/10"
+                >
+                  Sair desta tarefa
+                </button>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="mx-5 h-px bg-white/5" />
