@@ -84,3 +84,63 @@ async def test_add_participant_already_member_raises(svc: TaskService) -> None:
     await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
     with pytest.raises(ValueError):
         await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+
+
+async def test_leave_task_member_succeeds(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    await svc.leave_task(tid, caller_id="user-b")
+    emails = await svc.list_participants(tid)
+    assert emails == ["user-a@x.com"]
+
+
+async def test_leave_task_owner_forbidden(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    with pytest.raises(PermissionError):
+        await svc.leave_task(tid, caller_id="user-a")
+
+
+async def test_leave_task_non_participant_raises(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    with pytest.raises(PermissionError):
+        await svc.leave_task(tid, caller_id="user-x")
+
+
+async def test_remove_participant_owner_succeeds(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    await svc.remove_participant(tid, caller_id="user-a", target_user_id="user-b")
+    emails = await svc.list_participants(tid)
+    assert emails == ["user-a@x.com"]
+
+
+async def test_remove_participant_member_forbidden(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-c@x.com")
+    with pytest.raises(PermissionError):
+        await svc.remove_participant(tid, caller_id="user-b", target_user_id="user-c")
+
+
+async def test_remove_participant_owner_cannot_remove_self(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    with pytest.raises(ValueError):
+        await svc.remove_participant(tid, caller_id="user-a", target_user_id="user-a")

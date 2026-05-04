@@ -282,6 +282,55 @@ class TaskService:
 
         return await asyncio.to_thread(_work)
 
+    async def leave_task(self, task_id: int, *, caller_id: str) -> None:
+        """Any non-owner participant leaves. Owner gets PermissionError
+        (must delete the task or remove members individually)."""
+        role = await self._authorize_participant(task_id, caller_id)
+        if role == "owner":
+            raise PermissionError("owner cannot leave the task")
+
+        def _work() -> None:
+            with self._store._connect() as conn:
+                conn.execute(
+                    "DELETE FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ?",
+                    (task_id, caller_id),
+                )
+
+        await asyncio.to_thread(_work)
+
+    async def remove_participant(
+        self, task_id: int, *, caller_id: str, target_user_id: str,
+    ) -> None:
+        """Owner-only. Removes a member. Owner cannot remove themselves
+        (use delete_task or transfer flow)."""
+        role = await self._authorize_participant(task_id, caller_id)
+        if role != "owner":
+            raise PermissionError("only the owner can remove participants")
+        if target_user_id == caller_id:
+            raise ValueError("owner cannot remove self")
+
+        def _work() -> int:
+            with self._store._connect() as conn:
+                cur = conn.execute(
+                    "DELETE FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ? AND role = 'member'",
+                    (task_id, target_user_id),
+                )
+            return cur.rowcount or 0
+
+        affected = await asyncio.to_thread(_work)
+
+        if affected and self._push is not None and self._user_id_to_email is not None:
+            owner_email = await self._user_id_to_email(caller_id) or "alguém"
+            task = await self.get_task_raw(task_id)
+            title = task.title if task else "tarefa"
+            payload = {
+                "title": "Removido de tarefa",
+                "body": f"{owner_email} removeu você de: {title}",
+            }
+            asyncio.create_task(self._safe_push(target_user_id, payload))
+
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
