@@ -106,6 +106,10 @@ class TaskService:
         self._app_state = app_state
         self._on_created: list[TaskCreatedHook] = []
         self._on_deleted: list[TaskDeletedHook] = []
+        self._email_to_user_id: Callable[[str], Awaitable[str | None]] | None = None
+        self._user_id_to_email: Callable[[str], Awaitable[str | None]] | None = None
+        # Duck-typed: must expose `async send_to_user(user_id, payload) -> int`.
+        self._push: Any | None = None
 
     async def aclose(self) -> None:  # pragma: no cover - trivial
         return None
@@ -126,6 +130,29 @@ class TaskService:
         Exceptions are swallowed.
         """
         self._on_deleted.append(hook)
+
+    def attach_user_lookup(
+        self,
+        *,
+        email_to_user_id: Callable[[str], Awaitable[str | None]],
+        user_id_to_email: Callable[[str], Awaitable[str | None]],
+    ) -> None:
+        """Wire app-level email <-> user_id lookups.
+
+        Required for participant management (Aura). When unset, methods
+        that need email lookup raise RuntimeError.
+        """
+        self._email_to_user_id = email_to_user_id
+        self._user_id_to_email = user_id_to_email
+
+    def attach_push(self, push: Any) -> None:
+        """Wire a PushService for participant notifications.
+
+        The object must expose ``async send_to_user(user_id, payload)``.
+        Push delivery is fire-and-forget — failures are logged, never
+        propagated.
+        """
+        self._push = push
 
     # ------------------------------------------------------------------
     # CRUD
