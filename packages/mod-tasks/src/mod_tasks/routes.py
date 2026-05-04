@@ -388,6 +388,29 @@ async def leave_task(
     return {"ok": True}
 
 
+@router.delete("/tasks/{task_id}/participants/by-email/{email}")
+async def remove_participant_by_email(
+    request: Request,
+    task_id: int,
+    email: str,
+    user_id: str | None = Depends(get_current_user_id),
+) -> dict[str, bool]:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="auth required")
+    svc = _service_or_503(request)
+    try:
+        await svc.remove_participant_by_email(
+            task_id, caller_id=user_id, target_email=email,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can remove participants")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="email not registered on Aura")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="owner cannot remove self")
+    return {"ok": True}
+
+
 @router.delete("/tasks/{task_id}/participants/{target_user_id}")
 async def remove_participant(
     request: Request,

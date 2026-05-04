@@ -168,3 +168,35 @@ def test_list_participants(app: FastAPI) -> None:
     r = c.get(f"/tasks/{tid}/participants", headers={"X-User": "user-a"})
     assert r.status_code == 200
     assert r.json() == {"participants": ["user-a@x.com"]}
+
+
+def test_remove_participant_by_email_owner(app: FastAPI) -> None:
+    c = TestClient(app)
+    r = c.post(
+        "/tasks", json={"type": "generic", "title": "t", "description": ""},
+        headers={"X-User": "user-a"},
+    )
+    tid = r.json()["id"]
+    c.post(
+        f"/tasks/{tid}/participants", json={"email": "user-b@x.com"},
+        headers={"X-User": "user-a"},
+    )
+    r = c.delete(
+        f"/tasks/{tid}/participants/by-email/user-b@x.com",
+        headers={"X-User": "user-a"},
+    )
+    assert r.status_code == 200
+
+
+def test_remove_participant_by_email_unknown_returns_404(app: FastAPI) -> None:
+    c = TestClient(app)
+    r = c.post(
+        "/tasks", json={"type": "generic", "title": "t", "description": ""},
+        headers={"X-User": "user-a"},
+    )
+    tid = r.json()["id"]
+    r = c.delete(
+        f"/tasks/{tid}/participants/by-email/ghost@nowhere.com",
+        headers={"X-User": "user-a"},
+    )
+    assert r.status_code == 404

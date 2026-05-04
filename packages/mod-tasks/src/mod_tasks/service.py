@@ -331,6 +331,20 @@ class TaskService:
             }
             asyncio.create_task(self._safe_push(target_user_id, payload))
 
+    async def remove_participant_by_email(
+        self, task_id: int, *, caller_id: str, target_email: str,
+    ) -> None:
+        """Owner-only. Resolves email to user_id, then calls
+        remove_participant. Raises LookupError if email is unknown."""
+        if self._email_to_user_id is None:
+            raise RuntimeError("email_to_user_id lookup not attached")
+        target_uid = await self._email_to_user_id(target_email.strip().lower())
+        if target_uid is None:
+            raise LookupError("no aura user for that email")
+        await self.remove_participant(
+            task_id, caller_id=caller_id, target_user_id=target_uid,
+        )
+
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
