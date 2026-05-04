@@ -150,11 +150,17 @@ services:
       - aura-whatsapp-cache:/app/.wwebjs_cache
     shm_size: "512m"
     networks:
-      # aura-net: reachable by aura backend
+      # aura-net: reachable by aura backend as `whatsapp-bridge`.
+      aura-net: {}
       # seraphine-net: reachable by the unified WhatsApp Manager UI
-      #   running in the seraphine backend (sera.jonhdev.io/wa)
-      - aura-net
-      - seraphine-net
+      #   running in the seraphine backend (sera.jonhdev.io/wa).
+      # IMPORTANT: override the default service-name alias so we do
+      # NOT register `whatsapp-bridge` on seraphine-net (collides
+      # with seraphine's own bridge service of the same name and
+      # makes DNS round-robin between the two).
+      seraphine-net:
+        aliases:
+          - aura-whatsapp-bridge
     expose:
       - "3001"
 
