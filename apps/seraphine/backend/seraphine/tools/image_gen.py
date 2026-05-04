@@ -110,11 +110,14 @@ class GenerateImageTool(Tool):
             return ToolResult(ok=False, error=str(e))
         public_url = f"https://sera.jonhdev.io/images/{result['id']}"
         markdown = f"![{prompt[:80]}]({public_url})"
+        used_model = result.get("model", "?")
         return ToolResult(
             ok=True,
             output=(
-                f"imagem gerada (custo ~${result['cost_usd']:.3f}). "
-                f"Responda ao usuário incluindo este markdown exato:\n\n"
+                f"imagem gerada com `{used_model}` "
+                f"(custo ~${result['cost_usd']:.3f}). "
+                f"Mencione brevemente qual modelo foi usado pro usuário "
+                f"saber, e inclua este markdown exato:\n\n"
                 f"{markdown}\n"
             ),
             metadata={
@@ -122,5 +125,6 @@ class GenerateImageTool(Tool):
                 "url": result["url"],
                 "public_url": public_url,
                 "markdown": markdown,
+                "model": used_model,
             },
         )
