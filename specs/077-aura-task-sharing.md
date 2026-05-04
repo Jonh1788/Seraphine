@@ -1,6 +1,6 @@
 # 077 — Aura Task Sharing
 
-**Status:** Draft
+**Status:** Implemented
 **Scope:** Aura only (Seraphine remains single-tenant)
 **Owner:** Jonathan
 
