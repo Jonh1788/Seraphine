@@ -67,11 +67,35 @@ class GenerateImageTool(Tool):
                     "send a photo so you can save it first."
                 ),
             },
+            "use_attached_image": {
+                "type": "boolean",
+                "description": (
+                    "Set true when the user attached a reference image "
+                    "to the current message and wants the generation to "
+                    "use it as visual input (e.g. 'gera uma versão do "
+                    "objeto nessa foto vista de cima', 'extrai o item X "
+                    "da imagem e mostra de frente'). Only takes effect "
+                    "with image-input models — pick `nano-banana-2`, "
+                    "`nano-banana-pro`, or `gpt-image-2`. For other "
+                    "models the flag is silently ignored. To produce "
+                    "multiple views (front/back/top/etc), call this "
+                    "tool MULTIPLE TIMES in the same turn — once per "
+                    "view — each with use_attached_image=true and a "
+                    "prompt describing that specific angle. Anthropic "
+                    "tool-use lets you parallelize them."
+                ),
+            },
         },
         "required": ["prompt"],
     }
     requires_confirmation = False
     category = "network"
+    # Engine auto-saves the most recent chat-attached photo and injects
+    # its URL into args["reference_url"]. The tool only uses it when
+    # `use_attached_image=True` (or `as_self=True` falls back to the
+    # saved appearance reference). Lets the user paste a concept/sketch
+    # and ask for variations / extracted-item views without hosting it.
+    consumes_attached_image = True
 
     def __init__(self, store: Any) -> None:
         self.store = store
@@ -84,7 +108,18 @@ class GenerateImageTool(Tool):
         quality = str(args.get("quality") or "fast")
         model = args.get("model")
         as_self = bool(args.get("as_self", False))
+        use_attached = bool(args.get("use_attached_image", False))
+
+        # Reference URL precedence: use_attached (most specific, just
+        # pasted) → as_self saved reference → none. Engine pre-fills
+        # args["reference_url"] from the chat-attached photo whenever
+        # a tool with consumes_attached_image=True is called and there
+        # IS an attachment; we only honor that URL when use_attached
+        # is set, otherwise it's noise.
         reference_url: str | None = None
+        injected = args.get("reference_url")  # set by engine if attached
+        if use_attached and injected:
+            reference_url = str(injected)
         if as_self:
             saved = await get_saved_appearance(self.store)
             if not saved:
@@ -97,9 +132,12 @@ class GenerateImageTool(Tool):
                 )
             # Prefix the saved description so the model knows what 'you'
             # looks like. Done at the prompt boundary, not inside style/
-                # quality, so the user-provided prompt still drives composition.
+            # quality, so the user-provided prompt still drives composition.
             prompt = f"{saved['description']}. {prompt}"
-            reference_url = saved.get("reference_url")
+            # use_attached wins; fall back to saved appearance reference.
+            if reference_url is None:
+                reference_url = saved.get("reference_url")
+
         svc = ImageGenService(self.store, settings)
         try:
             result = await svc.generate(
