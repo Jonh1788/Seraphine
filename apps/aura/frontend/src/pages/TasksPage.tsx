@@ -16,6 +16,7 @@ import {
   Loader2,
   Plus,
   TrendingUp,
+  Users,
 } from "lucide-react";
 import * as tasksApi from "../api/tasks";
 import type { Task, TaskStatus } from "../types/api";
@@ -764,14 +765,27 @@ function TaskItem({ task, groupKey, isLast, onCheck, onOpen }: TaskItemProps) {
         {isDone ? <Check className="h-[10px] w-[10px] text-white" strokeWidth={3} /> : null}
       </button>
       <div className="flex-1 min-w-0">
-        <div
-          className="text-[13px] font-medium truncate mb-0.5"
-          style={{
-            color: isDone ? "#4D5E8A" : "#EEF2FF",
-            textDecoration: isDone ? "line-through" : undefined,
-          }}
-        >
-          {task.title}
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <div
+            className="text-[13px] font-medium truncate"
+            style={{
+              color: isDone ? "#4D5E8A" : "#EEF2FF",
+              textDecoration: isDone ? "line-through" : undefined,
+            }}
+          >
+            {task.title}
+          </div>
+          {(task.participants?.length ?? 0) > 1 ? (
+            <span
+              aria-label="Tarefa compartilhada"
+              title={(task.participants ?? []).join(", ")}
+            >
+              <Users
+                className="h-3 w-3 shrink-0"
+                style={{ color: isDone ? "#4D5E8A" : "#7B8FFF" }}
+              />
+            </span>
+          ) : null}
         </div>
         <div
           className="flex items-center gap-1.5 text-[10px]"
@@ -787,6 +801,11 @@ function TaskItem({ task, groupKey, isLast, onCheck, onOpen }: TaskItemProps) {
             "Sem data definida"
           )}
         </div>
+        {isDone && task.completed_by_email ? (
+          <div className="text-[10px] mt-0.5" style={{ color: "#4D5E8A" }}>
+            concluído por {task.completed_by_email}
+          </div>
+        ) : null}
       </div>
       {task.priority === "high" ? (
         <TagBadge kind="amber">Alta</TagBadge>
