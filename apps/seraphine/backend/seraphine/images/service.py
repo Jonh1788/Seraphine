@@ -22,10 +22,41 @@ _COSTS: dict[str, float] = {
     "fal-ai/flux/schnell": 0.003,
     "fal-ai/flux/dev": 0.025,
     "fal-ai/flux-pro/v1.1": 0.04,
-    # Replicate
+    # Replicate — FLUX
     "black-forest-labs/flux-schnell": 0.003,
     "black-forest-labs/flux-dev": 0.025,
     "black-forest-labs/flux-1.1-pro": 0.04,
+    "black-forest-labs/flux-1.1-pro-ultra": 0.06,
+    # Replicate — Google
+    "google/nano-banana": 0.039,
+    "google/nano-banana-2": 0.05,
+    "google/nano-banana-pro": 0.10,
+    "google/imagen-4": 0.04,
+    # Replicate — Specialists
+    "recraft-ai/recraft-v3": 0.04,
+    "ideogram-ai/ideogram-v2": 0.08,
+    # Replicate — OpenAI
+    "openai/gpt-image-2": 0.04,
+}
+
+# Catálogo de modelos friendly-name → Replicate path. A LLM escolhe pelo
+# nome amigável; o service traduz pro path real. Manter sincronizado com
+# o enum em `tools/image_gen.py`.
+_MODEL_CATALOG: dict[str, str] = {
+    # FLUX
+    "flux-schnell": "black-forest-labs/flux-schnell",
+    "flux-pro": "black-forest-labs/flux-1.1-pro",
+    "flux-pro-ultra": "black-forest-labs/flux-1.1-pro-ultra",
+    # Google
+    "nano-banana": "google/nano-banana",
+    "nano-banana-2": "google/nano-banana-2",
+    "nano-banana-pro": "google/nano-banana-pro",
+    "imagen-4": "google/imagen-4",
+    # Specialists
+    "recraft-v3": "recraft-ai/recraft-v3",
+    "ideogram-v2": "ideogram-ai/ideogram-v2",
+    # OpenAI
+    "gpt-image-2": "openai/gpt-image-2",
 }
 
 _STYLE_PREFIXES: dict[str, str] = {
@@ -75,7 +106,12 @@ class ImageGenService:
         return await asyncio.to_thread(_work)
 
     async def generate(
-        self, prompt: str, *, style: str | None = None, quality: str = "fast",
+        self,
+        prompt: str,
+        *,
+        style: str | None = None,
+        quality: str = "fast",
+        model: str | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
             raise RuntimeError(
@@ -84,8 +120,14 @@ class ImageGenService:
             )
 
         spent = await self.cost_today()
-        model = self.model_pro if quality == "high" else self.model_schnell
-        est_cost = _COSTS.get(model, 0.01)
+        # Friendly-name override wins over quality (only on Replicate; on
+        # Fal we still honor quality since the catalog is Replicate-only).
+        if model and self.provider == "replicate" and model in _MODEL_CATALOG:
+            chosen = _MODEL_CATALOG[model]
+        else:
+            chosen = self.model_pro if quality == "high" else self.model_schnell
+        est_cost = _COSTS.get(chosen, 0.01)
+        model = chosen  # rebind for the rest of the function
         if spent + est_cost > self.daily_budget_usd:
             raise RuntimeError(
                 f"daily image budget exceeded (${spent:.2f} + ${est_cost:.3f} "
