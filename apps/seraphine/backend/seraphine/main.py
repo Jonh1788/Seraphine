@@ -522,6 +522,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         mcp_event_listener.start()
 
+    app.state.settings = settings
     app.state.store = store
     app.state.stt = stt
     app.state.llm = llm
@@ -818,6 +819,12 @@ def create_app() -> FastAPI:
         from seraphine.whatsapp.routes import router as whatsapp_router
 
         app.include_router(whatsapp_router)
+
+    # Unified WhatsApp Manager (covers Aura's bridge too via seraphine-net).
+    if settings.whatsapp_bridge_url or settings.whatsapp_aura_bridge_url:
+        from seraphine.wa_manager.routes import router as wa_manager_router
+
+        app.include_router(wa_manager_router)
 
     logger.info("Seraphine app initialized (model=%s)", settings.llm_model)
     return app

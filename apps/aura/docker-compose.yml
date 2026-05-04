@@ -150,7 +150,11 @@ services:
       - aura-whatsapp-cache:/app/.wwebjs_cache
     shm_size: "512m"
     networks:
+      # aura-net: reachable by aura backend
+      # seraphine-net: reachable by the unified WhatsApp Manager UI
+      #   running in the seraphine backend (sera.jonhdev.io/wa)
       - aura-net
+      - seraphine-net
     expose:
       - "3001"
 
@@ -165,3 +169,9 @@ volumes:
 networks:
   aura-net:
     driver: bridge
+  # External network created by the seraphine compose stack. Used so
+  # the unified WhatsApp Manager UI (seraphine backend) can reach
+  # aura-whatsapp-bridge directly without a host-port hop.
+  seraphine-net:
+    external: true
+    name: seraphine_seraphine-net

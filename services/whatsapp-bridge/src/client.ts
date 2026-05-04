@@ -18,6 +18,25 @@ let startedAt: number | null = null;
 
 const QR_EXPIRY_S = 20;
 
+// Bounded ring buffer of recent inbound messages — exposed via
+// /api/recent for the unified Manager UI. Process-local; resets on
+// container restart (acceptable — webhook log is the durable store).
+const RECENT_MAX = 50;
+export interface RecentMessage {
+  chatId: string;
+  chatName: string;
+  author: string;
+  body: string;
+  timestamp: number;
+  fromMe: boolean;
+}
+const recent: RecentMessage[] = [];
+
+export function getRecent(limit = 20): RecentMessage[] {
+  const n = Math.max(1, Math.min(RECENT_MAX, limit));
+  return recent.slice(-n).reverse();
+}
+
 export function getClient(): Client {
   return client;
 }
@@ -103,6 +122,19 @@ export function initClient(config: Config): Client {
     const chat = await msg.getChat();
     const contact = await msg.getContact();
 
+    const author = contact.pushname ?? contact.name ?? contact.number;
+
+    // Push to bounded ring buffer for the Manager UI feed.
+    recent.push({
+      chatId: chat.id._serialized,
+      chatName: chat.name,
+      author,
+      body: msg.body,
+      timestamp: msg.timestamp,
+      fromMe: msg.fromMe,
+    });
+    if (recent.length > RECENT_MAX) recent.splice(0, recent.length - RECENT_MAX);
+
     const payload = {
       event: "message" as const,
       chatId: chat.id._serialized,
@@ -112,7 +144,7 @@ export function initClient(config: Config): Client {
         body: msg.body,
         timestamp: msg.timestamp,
         fromMe: msg.fromMe,
-        author: contact.pushname ?? contact.name ?? contact.number,
+        author,
         type: msg.type,
       },
     };

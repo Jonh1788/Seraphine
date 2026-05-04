@@ -93,6 +93,9 @@ class Settings(BaseSettings):
 
     # WhatsApp bridge — leave url empty to disable entirely
     whatsapp_bridge_url: str = ""
+    # Aura's bridge (joins seraphine-net so the unified Manager UI
+    # at /wa can list both side-by-side). Empty hides the second card.
+    whatsapp_aura_bridge_url: str = "http://aura-whatsapp-bridge:3001"
 
     # Browser automation — leave url empty to disable
     browser_agent_url: str = ""  # "http://localhost:3002"

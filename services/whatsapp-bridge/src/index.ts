@@ -11,6 +11,8 @@ import messagesRoute from "./routes/messages";
 import sendRoute from "./routes/send";
 import searchRoute from "./routes/search";
 import contactsRoute from "./routes/contacts";
+import recentRoute from "./routes/recent";
+import logoutRoute from "./routes/logout";
 
 const config = loadConfig();
 const app = express();
@@ -25,6 +27,8 @@ app.use("/api", messagesRoute);
 app.use("/api", sendRoute);
 app.use("/api", searchRoute);
 app.use("/api", contactsRoute);
+app.use("/api", recentRoute);
+app.use("/api", logoutRoute);
 
 // Health check
 app.get("/health", (_req, res) => {
