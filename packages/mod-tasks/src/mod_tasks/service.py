@@ -190,7 +190,15 @@ class TaskService:
                      payload_json, ts, ts, due_date, due_time, user_id,
                      tags_json, priority, remind),
                 )
-                return int(cur.lastrowid or 0)
+                new_id = int(cur.lastrowid or 0)
+                if user_id is not None and new_id > 0:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO task_participants"
+                        " (task_id, user_id, role, joined_at) VALUES"
+                        " (?, ?, 'owner', ?)",
+                        (new_id, user_id, ts),
+                    )
+                return new_id
 
         task_id = await asyncio.to_thread(_work)
         for hook in self._on_created:

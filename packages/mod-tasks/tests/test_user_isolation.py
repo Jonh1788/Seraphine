@@ -92,3 +92,30 @@ async def test_legacy_row_invisible_to_authenticated_users(store: Store) -> None
     assert await svc.get_task(legacy_id, user_id="user-a") is None
     # Single-tenant query still sees it.
     assert (await svc.get_task(legacy_id, user_id=None)) is not None
+
+
+async def test_create_task_inserts_owner_participant(store: Store) -> None:
+    svc = TaskService(store)
+    tid = await svc.create_task(
+        type="generic", title="solo", description="", source="chat",
+        payload={}, user_id="user-z",
+    )
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT user_id, role FROM task_participants WHERE task_id = ?",
+            (tid,),
+        ).fetchall()
+    assert rows == [("user-z", "owner")]
+
+
+async def test_create_task_seraphine_no_participant_row(store: Store) -> None:
+    svc = TaskService(store)
+    tid = await svc.create_task(
+        type="generic", title="legacy", description="", source="chat",
+        payload={}, user_id=None,
+    )
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT 1 FROM task_participants WHERE task_id = ?", (tid,),
+        ).fetchall()
+    assert rows == []
