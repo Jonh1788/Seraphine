@@ -125,6 +125,13 @@ def build_default_registry(
     # 068 image generation
     if store is not None:
         reg.register(GenerateImageTool(store))
+        # Visual self-identity (works alongside generate_image as_self=true)
+        from seraphine.tools.appearance import (
+            ForgetMyAppearanceTool,
+            RememberMyAppearanceTool,
+        )
+        reg.register(RememberMyAppearanceTool(store))
+        reg.register(ForgetMyAppearanceTool(store))
     # 073 background tasks
     if store is not None and llm is not None:
         reg.register(StartBackgroundTaskTool(store, llm, tool_registry=reg))

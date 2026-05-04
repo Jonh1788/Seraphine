@@ -112,6 +112,7 @@ class ImageGenService:
         style: str | None = None,
         quality: str = "fast",
         model: str | None = None,
+        reference_url: str | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
             raise RuntimeError(
@@ -139,7 +140,7 @@ class ImageGenService:
             full_prompt = _STYLE_PREFIXES[style] + prompt
 
         if self.provider == "replicate":
-            url = await self._call_replicate(model, full_prompt)
+            url = await self._call_replicate(model, full_prompt, reference_url=reference_url)
         else:
             url = await self._call_fal(model, full_prompt)
         if not url:
@@ -172,11 +173,22 @@ class ImageGenService:
             "cost_usd": est_cost,
         }
 
-    async def _call_replicate(self, model: str, prompt: str) -> str | None:
+    async def _call_replicate(
+        self,
+        model: str,
+        prompt: str,
+        *,
+        reference_url: str | None = None,
+    ) -> str | None:
         """Replicate sync inference. `Prefer: wait=60` blocks up to 60s
         for the result; faster than polling for the typical FLUX schnell
         2-5s case. Falls back to polling if the API returns early with
-        a still-running prediction."""
+        a still-running prediction.
+
+        `reference_url` is passed as the model-specific image-input
+        param when supported. Models without image input ignore it
+        silently (we just don't include the field).
+        """
         ssl_ctx = truststore.SSLContext(__import__("ssl").PROTOCOL_TLS_CLIENT)
         endpoint = f"https://api.replicate.com/v1/models/{model}/predictions"
         headers = {
@@ -184,7 +196,17 @@ class ImageGenService:
             "Content-Type": "application/json",
             "Prefer": "wait=60",
         }
-        body = {"input": {"prompt": prompt}}
+        input_payload: dict[str, Any] = {"prompt": prompt}
+        if reference_url:
+            # Per-model field name for image refs. Empirically:
+            #   nano-banana family: `image_input` (array of URLs)
+            #   gpt-image-2:        `input_images` (array of URLs)
+            # Other models silently skip — we just don't add the field.
+            if model.startswith("google/nano-banana"):
+                input_payload["image_input"] = [reference_url]
+            elif model == "openai/gpt-image-2":
+                input_payload["input_images"] = [reference_url]
+        body = {"input": input_payload}
         async with httpx.AsyncClient(verify=ssl_ctx, timeout=90.0) as client:
             resp = await client.post(endpoint, headers=headers, json=body)
             resp.raise_for_status()

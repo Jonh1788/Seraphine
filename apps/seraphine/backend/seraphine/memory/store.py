@@ -396,6 +396,22 @@ def _seraphine_reflect_cursor_migrator(conn: sqlite3.Connection) -> None:
     )
 
 
+def _seraphine_kv_migrator(conn: sqlite3.Connection) -> None:
+    """Generic key/value table for small persistent settings (assistant
+    appearance, integration prefs, anything single-row that doesn't
+    deserve its own table). Values are TEXT — callers JSON-encode if
+    they need structure."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS kv (
+          key        TEXT PRIMARY KEY,
+          value      TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+
 def _seraphine_episode_windows_migrator(conn: sqlite3.Connection) -> None:
     """Create episode_windows table for windowed episode indexing."""
     conn.executescript(
@@ -428,6 +444,36 @@ class MemoryStore(Store):
         self.register_migrator("seraphine_fts5", _seraphine_fts5_migrator)
         self.register_migrator("seraphine_reflect_cursor", _seraphine_reflect_cursor_migrator)
         self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
+        self.register_migrator("seraphine_kv", _seraphine_kv_migrator)
+
+    async def set_kv(self, key: str, value: str) -> None:
+        """Upsert a key/value pair. value is opaque text — caller JSON-
+        encodes if needed."""
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                    "updated_at=excluded.updated_at",
+                    (key, value, _now()),
+                )
+        await asyncio.to_thread(_work)
+
+    async def get_kv(self, key: str) -> str | None:
+        def _work() -> str | None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT value FROM kv WHERE key = ?", (key,),
+                ).fetchone()
+            return row[0] if row else None
+        return await asyncio.to_thread(_work)
+
+    async def delete_kv(self, key: str) -> bool:
+        def _work() -> bool:
+            with self._connect() as conn:
+                cur = conn.execute("DELETE FROM kv WHERE key = ?", (key,))
+                return cur.rowcount > 0
+        return await asyncio.to_thread(_work)
 
     async def create_conversation(self) -> str:
         conv_id = str(uuid.uuid4())

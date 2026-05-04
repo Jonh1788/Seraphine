@@ -6,6 +6,7 @@ from typing import Any
 
 from seraphine.config import settings
 from seraphine.images.service import ImageGenService
+from seraphine.tools.appearance import get_saved_appearance
 from seraphine.tools.base import Tool, ToolResult
 
 
@@ -54,6 +55,18 @@ class GenerateImageTool(Tool):
             },
             "style": {"type": "string", "enum": ["photo", "illustration", "icon", "abstract"]},
             "quality": {"type": "string", "enum": ["fast", "high"]},
+            "as_self": {
+                "type": "boolean",
+                "description": (
+                    "Set true when the user wants an image OF YOU "
+                    "(Seraphine). Pulls in your saved appearance "
+                    "description (and reference photo if available) so "
+                    "the result looks like you, not a random generation. "
+                    "Requires that you've previously called "
+                    "`remember_my_appearance` — if not, ask the user to "
+                    "send a photo so you can save it first."
+                ),
+            },
         },
         "required": ["prompt"],
     }
@@ -70,9 +83,29 @@ class GenerateImageTool(Tool):
         style = args.get("style")
         quality = str(args.get("quality") or "fast")
         model = args.get("model")
+        as_self = bool(args.get("as_self", False))
+        reference_url: str | None = None
+        if as_self:
+            saved = await get_saved_appearance(self.store)
+            if not saved:
+                return ToolResult(
+                    ok=False,
+                    error=(
+                        "no saved appearance — call `remember_my_appearance` "
+                        "first (ask the user to send a photo if needed)"
+                    ),
+                )
+            # Prefix the saved description so the model knows what 'you'
+            # looks like. Done at the prompt boundary, not inside style/
+                # quality, so the user-provided prompt still drives composition.
+            prompt = f"{saved['description']}. {prompt}"
+            reference_url = saved.get("reference_url")
         svc = ImageGenService(self.store, settings)
         try:
-            result = await svc.generate(prompt, style=style, quality=quality, model=model)
+            result = await svc.generate(
+                prompt, style=style, quality=quality,
+                model=model, reference_url=reference_url,
+            )
         except Exception as e:
             return ToolResult(ok=False, error=str(e))
         public_url = f"https://sera.jonhdev.io/images/{result['id']}"
