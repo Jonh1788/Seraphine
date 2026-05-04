@@ -45,7 +45,17 @@ async def get_image(image_id: str, request: Request) -> Any:
         raise HTTPException(status_code=404, detail="image not found")
     local = meta.get("local_path")
     if local and Path(local).is_file():
-        return FileResponse(local, media_type="image/png")
+        # Detect from extension — generated FLUX/Imagen are png, but
+        # user uploads can be jpg/webp/gif and Replicate / browsers
+        # need the right Content-Type.
+        ext = Path(local).suffix.lstrip(".").lower()
+        media = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+        }.get(ext, "image/png")
+        return FileResponse(local, media_type=media)
     # Fallback: redirect to original URL.
     if meta.get("url"):
         from fastapi.responses import RedirectResponse

@@ -50,6 +50,10 @@ class RememberMyAppearanceTool(Tool):
     }
     requires_confirmation = False
     category = "memory"
+    # Engine auto-fills reference_url from the user's most recent chat
+    # attachment when not explicitly provided. Means the user can just
+    # paste a photo + ask her to remember it; no public URL needed.
+    consumes_attached_image = True
 
     def __init__(self, store: Any) -> None:
         self.store = store

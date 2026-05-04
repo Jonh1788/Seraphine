@@ -29,6 +29,13 @@ class Tool(ABC):
     # the server. Used for Mac-local capabilities (screen, shell,
     # filesystem, clipboard) when backend lives on the VPS.
     proxy_to_client: bool = False
+    # When True, the engine auto-saves the most recent image attached
+    # to the current user_message turn, registers it under /images/{id},
+    # and injects the public URL into args["reference_url"] (only if the
+    # caller didn't already pass one). Lets tools like
+    # `remember_my_appearance` consume images pasted in chat without
+    # asking the user to host them externally.
+    consumes_attached_image: bool = False
 
     @abstractmethod
     async def execute(self, args: dict[str, Any]) -> ToolResult:

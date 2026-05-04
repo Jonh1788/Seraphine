@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Literal, Protocol, Union
 from zoneinfo import ZoneInfo
@@ -333,6 +334,15 @@ AUTO_NARRATIVE_EVERY_N_TURNS = 12
 
 
 _PROXY_TIMEOUT_SECONDS = 90.0
+
+# Per-turn images attached by the user (data URLs). Set at the start of
+# `handle_user_message` and consumed by tools that opt-in via
+# `consumes_attached_image=True`. ContextVar (not instance attr) so
+# concurrent turns from different conversations don't bleed images
+# into each other's tool calls.
+_current_user_images: ContextVar[list[str]] = ContextVar(
+    "_current_user_images", default=[],
+)
 
 
 async def _proxy_tool_via_client(
@@ -868,6 +878,11 @@ class ConversationEngine:
             msg_content = content
         messages.append(ChatMessage(role="user", content=msg_content))
 
+        # Expose the user's attached images to opt-in tools (e.g.
+        # `remember_my_appearance`) for the duration of this turn. Reset
+        # in `finally` so concurrent turns / future turns aren't poisoned.
+        _images_token = _current_user_images.set(list(images or []))
+
         user_turn = await self.store.add_turn(conversation_id, "user", content)
 
         turn_id = str(uuid.uuid4())
@@ -983,6 +998,34 @@ class ConversationEngine:
                         approved_int = None
 
                     if approved:
+                        # Auto-inject reference_url for tools that opt-in
+                        # via `consumes_attached_image=True` when the
+                        # current turn has a chat-attached image and the
+                        # caller didn't already pass a URL. The first
+                        # image wins (most recent paste / topmost upload).
+                        if (
+                            getattr(tool, "consumes_attached_image", False)
+                            and not tool_args.get("reference_url")
+                        ):
+                            attached = _current_user_images.get()
+                            if attached:
+                                try:
+                                    from seraphine.config import settings as _s
+                                    from seraphine.images.uploads import save_user_upload
+                                    saved = await save_user_upload(
+                                        self.store, _s, attached[0],
+                                        note=f"attached to {tool_name}",
+                                    )
+                                    if saved and saved.get("public_url"):
+                                        tool_args = {
+                                            **tool_args,
+                                            "reference_url": saved["public_url"],
+                                        }
+                                except Exception as e:
+                                    logger.warning(
+                                        "auto-inject reference_url for %s failed: %s",
+                                        tool_name, e,
+                                    )
                         try:
                             if (
                                 getattr(tool, "proxy_to_client", False)
@@ -1124,6 +1167,11 @@ class ConversationEngine:
             # hit our except clauses but DOES run finally on async generators.
             for rid in turn_requests:
                 self.pending_approvals.pop(rid, None)
+            try:
+                _current_user_images.reset(_images_token)
+            except (ValueError, LookupError):
+                # Token from a different context — safe to ignore.
+                pass
 
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)
