@@ -206,6 +206,82 @@ class TaskService:
             )
         return role
 
+    async def add_participant(
+        self, task_id: int, *, caller_id: str, target_email: str,
+    ) -> list[str]:
+        """Owner-only. Resolves email to user_id, inserts a member row,
+        fires a push notification. Returns the updated participant emails.
+
+        Raises:
+            PermissionError: caller is not the owner.
+            LookupError: email is not a registered Aura user.
+            ValueError: target is already a participant.
+        """
+        if self._email_to_user_id is None or self._user_id_to_email is None:
+            raise RuntimeError("user lookup not attached")
+
+        role = await self._authorize_participant(task_id, caller_id)
+        if role != "owner":
+            raise PermissionError("only the task owner can add participants")
+
+        target_uid = await self._email_to_user_id(target_email.strip().lower())
+        if target_uid is None:
+            raise LookupError("no aura user for that email")
+
+        ts = _now()
+
+        def _work() -> str:
+            with self._store._connect() as conn:
+                try:
+                    conn.execute(
+                        "INSERT INTO task_participants"
+                        " (task_id, user_id, role, joined_at) VALUES"
+                        " (?, ?, 'member', ?)",
+                        (task_id, target_uid, ts),
+                    )
+                except sqlite3.IntegrityError:
+                    raise ValueError("already a participant") from None
+            return target_uid
+
+        added_uid = await asyncio.to_thread(_work)
+
+        # Fire-and-forget push
+        if self._push is not None:
+            owner_email = await self._user_id_to_email(caller_id) or "alguém"
+            task = await self.get_task_raw(task_id)
+            title = task.title if task else "tarefa"
+            payload = {
+                "title": "Nova tarefa compartilhada",
+                "body": f"{owner_email}: {title}",
+                "url": f"/tasks?focus={task_id}",
+            }
+            asyncio.create_task(self._safe_push(added_uid, payload))
+
+        return await self.list_participants(task_id)
+
+    async def _safe_push(self, user_id: str, payload: dict[str, Any]) -> None:
+        """Internal: fire push and log failures, never raise."""
+        if self._push is None:
+            return
+        try:
+            await self._push.send_to_user(user_id, payload)
+        except Exception:
+            logger.exception("push send_to_user failed for %s", user_id)
+
+    async def get_task_raw(self, task_id: int) -> SeraphineTask | None:
+        """Like get_task but bypasses caller scoping. INTERNAL USE only —
+        callers must already have authorized."""
+
+        def _work() -> SeraphineTask | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    f"SELECT {_SELECT_COLS} FROM seraphine_tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+            return _row_to_task(row) if row else None
+
+        return await asyncio.to_thread(_work)
+
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------

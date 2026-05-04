@@ -46,3 +46,41 @@ async def test_list_participants_includes_owner(svc: TaskService) -> None:
 
 async def test_list_participants_returns_empty_for_unknown_task(svc: TaskService) -> None:
     assert await svc.list_participants(99999) == []
+
+
+async def test_add_participant_owner_succeeds(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    emails = await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    assert set(emails) == {"user-a@x.com", "user-b@x.com"}
+
+
+async def test_add_participant_member_forbidden(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    with pytest.raises(PermissionError):
+        await svc.add_participant(tid, caller_id="user-b", target_email="user-c@x.com")
+
+
+async def test_add_participant_unknown_email_raises(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    with pytest.raises(LookupError):
+        await svc.add_participant(tid, caller_id="user-a", target_email="ghost@nowhere.com")
+
+
+async def test_add_participant_already_member_raises(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    with pytest.raises(ValueError):
+        await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
