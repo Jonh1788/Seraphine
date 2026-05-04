@@ -81,3 +81,19 @@ class UsersService:
             return row[0] if row else None
 
         return await asyncio.to_thread(_work)
+
+    async def get_user_id_by_email(self, email: str) -> str | None:
+        """Return the user_id for a registered email, or None if not found.
+        Counterpart to ``get_email`` for participant invites."""
+        normalized = email.strip().lower()
+        if not normalized:
+            return None
+
+        def _work() -> str | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT id FROM users WHERE email = ?", (normalized,),
+                ).fetchone()
+            return row[0] if row else None
+
+        return await asyncio.to_thread(_work)
