@@ -155,6 +155,58 @@ class TaskService:
         self._push = push
 
     # ------------------------------------------------------------------
+    # Participants (Aura sharing)
+    # ------------------------------------------------------------------
+
+    async def list_participants(self, task_id: int) -> list[str]:
+        """Return participant emails for a task (owner first, then members
+        by joined_at). Empty list if task has no participants (Seraphine)
+        or doesn't exist."""
+        if self._user_id_to_email is None:
+            raise RuntimeError("user_id_to_email lookup not attached")
+
+        def _work() -> list[str]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM task_participants"
+                    " WHERE task_id = ?"
+                    " ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,"
+                    " joined_at ASC",
+                    (task_id,),
+                ).fetchall()
+            return [r[0] for r in rows]
+
+        user_ids = await asyncio.to_thread(_work)
+        emails: list[str] = []
+        for uid in user_ids:
+            email = await self._user_id_to_email(uid)
+            if email:
+                emails.append(email)
+        return emails
+
+    async def _authorize_participant(
+        self, task_id: int, caller_id: str,
+    ) -> str:
+        """Returns the caller's role ('owner'|'member') or raises
+        PermissionError if not a participant."""
+
+        def _work() -> str | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT role FROM task_participants"
+                    " WHERE task_id = ? AND user_id = ?",
+                    (task_id, caller_id),
+                ).fetchone()
+            return row[0] if row else None
+
+        role = await asyncio.to_thread(_work)
+        if role is None:
+            raise PermissionError(
+                f"user {caller_id} is not a participant of task {task_id}"
+            )
+        return role
+
+    # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
 
