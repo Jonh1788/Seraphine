@@ -70,19 +70,22 @@ class GenerateImageTool(Tool):
             "use_attached_image": {
                 "type": "boolean",
                 "description": (
-                    "Set true when the user attached a reference image "
-                    "to the current message and wants the generation to "
-                    "use it as visual input (e.g. 'gera uma versão do "
-                    "objeto nessa foto vista de cima', 'extrai o item X "
-                    "da imagem e mostra de frente'). Only takes effect "
-                    "with image-input models — pick `nano-banana-2`, "
-                    "`nano-banana-pro`, or `gpt-image-2`. For other "
-                    "models the flag is silently ignored. To produce "
-                    "multiple views (front/back/top/etc), call this "
-                    "tool MULTIPLE TIMES in the same turn — once per "
-                    "view — each with use_attached_image=true and a "
-                    "prompt describing that specific angle. Anthropic "
-                    "tool-use lets you parallelize them."
+                    "When the user attached a photo to the current "
+                    "message, it's automatically used as visual "
+                    "reference (DEFAULT BEHAVIOR — you don't need to "
+                    "pass this flag). Set explicitly to FALSE only when "
+                    "you want to generate from scratch IGNORING the "
+                    "attachment (rare — usually if the user said "
+                    "something like 'ignora essa foto, faz X do zero'). "
+                    "Reference only takes effect with image-input "
+                    "models — pick `nano-banana-2`, `nano-banana-pro`, "
+                    "or `gpt-image-2` for it to actually flow through. "
+                    "For other models the reference is silently "
+                    "ignored. To produce multiple views (front/back/"
+                    "top/etc), call this tool MULTIPLE TIMES in the "
+                    "same turn — once per view — each with a prompt "
+                    "describing that specific angle. The engine runs "
+                    "them in parallel."
                 ),
             },
         },
@@ -108,14 +111,21 @@ class GenerateImageTool(Tool):
         quality = str(args.get("quality") or "fast")
         model = args.get("model")
         as_self = bool(args.get("as_self", False))
-        use_attached = bool(args.get("use_attached_image", False))
+        # Default: USE the attached photo when present (most users who
+        # paste an image + ask for a generation want it referenced —
+        # extracting items, doing variations, multiviews). Sera can
+        # explicitly opt out with use_attached_image=false when she
+        # wants to generate from scratch ignoring the attachment.
+        use_attached_arg = args.get("use_attached_image")
+        if use_attached_arg is None:
+            use_attached = True  # default-on when reference is present
+        else:
+            use_attached = bool(use_attached_arg)
 
         # Reference URL precedence: use_attached (most specific, just
         # pasted) → as_self saved reference → none. Engine pre-fills
         # args["reference_url"] from the chat-attached photo whenever
-        # a tool with consumes_attached_image=True is called and there
-        # IS an attachment; we only honor that URL when use_attached
-        # is set, otherwise it's noise.
+        # a tool with consumes_attached_image=True is called.
         reference_url: str | None = None
         injected = args.get("reference_url")  # set by engine if attached
         if use_attached and injected:
