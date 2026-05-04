@@ -96,7 +96,9 @@ class Settings(BaseSettings):
     # because Evolution v2 + current Baileys can't complete the WA Web
     # handshake on this VPS.
     whatsapp_backend: str = "bridge"
-    whatsapp_bridge_url: str = "http://whatsapp-bridge:3001"
+    # Service name was renamed in compose to avoid DNS alias collision
+    # with seraphine's own bridge on the shared seraphine-net.
+    whatsapp_bridge_url: str = "http://aura-whatsapp-bridge:3001"
     whatsapp_admin_token: str = ""
 
     # --- WhatsApp (Evolution API — kept available behind the backend switch)

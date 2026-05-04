@@ -133,11 +133,18 @@ services:
   # /Baileys can't establish the WhatsApp Web handshake. Same image as
   # Seraphine's bridge, separate volume so the two stacks have
   # independent sessions.
-  whatsapp-bridge:
+  # IMPORTANT: service name MUST differ from seraphine's "whatsapp-bridge"
+  # because docker-compose registers the service name as a DNS alias on
+  # every connected network — having the same name on the shared
+  # seraphine-net causes DNS round-robin between the two bridges.
+  aura-whatsapp-bridge:
     build:
       context: ../../services/whatsapp-bridge
       dockerfile: Dockerfile
     image: aura-whatsapp-bridge:latest
+    # Pinned container name (the implicit `aura-aura-whatsapp-bridge-1`
+    # would otherwise leak the doubled project prefix).
+    container_name: aura-whatsapp-bridge-1
     restart: unless-stopped
     hostname: aura-whatsapp-bridge
     environment:
@@ -150,17 +157,11 @@ services:
       - aura-whatsapp-cache:/app/.wwebjs_cache
     shm_size: "512m"
     networks:
-      # aura-net: reachable by aura backend as `whatsapp-bridge`.
-      aura-net: {}
-      # seraphine-net: reachable by the unified WhatsApp Manager UI
-      #   running in the seraphine backend (sera.jonhdev.io/wa).
-      # IMPORTANT: override the default service-name alias so we do
-      # NOT register `whatsapp-bridge` on seraphine-net (collides
-      # with seraphine's own bridge service of the same name and
-      # makes DNS round-robin between the two).
-      seraphine-net:
-        aliases:
-          - aura-whatsapp-bridge
+      # aura-net: reachable by aura backend as `aura-whatsapp-bridge`.
+      # seraphine-net: same name → unified Manager UI on the seraphine
+      # backend (sera.jonhdev.io/wa) reaches it without a host hop.
+      - aura-net
+      - seraphine-net
     expose:
       - "3001"
 
