@@ -602,10 +602,16 @@ class TaskService:
                     )
                     cur = conn.execute(sql, (*params, task_id))
                 else:
+                    # Authorize via task_participants JOIN — any
+                    # participant can edit fields except status (handled
+                    # by update_status).
                     sql = (
                         "UPDATE seraphine_tasks SET "
                         + ", ".join(sets)
-                        + " WHERE id = ? AND user_id = ?"
+                        + " WHERE id = ? AND id IN ("
+                        "   SELECT task_id FROM task_participants"
+                        "   WHERE user_id = ?"
+                        " )"
                     )
                     cur = conn.execute(sql, (*params, task_id, user_id))
                 return cur.rowcount or 0

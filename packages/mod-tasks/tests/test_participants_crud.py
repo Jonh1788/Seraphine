@@ -144,3 +144,24 @@ async def test_remove_participant_owner_cannot_remove_self(svc: TaskService) -> 
     )
     with pytest.raises(ValueError):
         await svc.remove_participant(tid, caller_id="user-a", target_user_id="user-a")
+
+
+async def test_update_task_member_can_edit(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    await svc.add_participant(tid, caller_id="user-a", target_email="user-b@x.com")
+    affected = await svc.update_task(tid, user_id="user-b", title="t-edited")
+    assert affected == 1
+    task = await svc.get_task(tid, user_id="user-a")
+    assert task is not None and task.title == "t-edited"
+
+
+async def test_update_task_non_participant_returns_zero(svc: TaskService) -> None:
+    tid = await svc.create_task(
+        type="generic", title="t", description="", source="chat",
+        payload={}, user_id="user-a",
+    )
+    affected = await svc.update_task(tid, user_id="user-x", title="hax")
+    assert affected == 0
