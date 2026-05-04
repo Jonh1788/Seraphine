@@ -110,11 +110,15 @@ class Settings(BaseSettings):
     # weekly reflection, and stalled-task jobs when False.
     proactive_enabled: bool = True
 
-    # 068 — image generation (Fal.ai FLUX default).
+    # 068 — image generation. Switch provider via SERAPHINE_IMAGE_PROVIDER
+    # ("fal" | "replicate"); set the matching API key. The image_model_*
+    # defaults adapt to the provider in ImageGenService.__init__, so for
+    # the standard FLUX path you only need to set the provider + token.
     image_provider: str = "fal"
     fal_api_key: str = ""
-    image_model_fast: str = "fal-ai/flux/schnell"
-    image_model_hq: str = "fal-ai/flux-pro/v1.1"
+    replicate_api_token: str = ""
+    image_model_fast: str = ""  # provider-default if blank
+    image_model_hq: str = ""    # provider-default if blank
     image_daily_budget_usd: float = 5.0
     image_storage_dir: str = "~/.seraphine/images"
 
