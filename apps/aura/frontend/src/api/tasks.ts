@@ -1,6 +1,7 @@
 import { request } from "./client";
 import type {
   CreateTaskBody,
+  ParticipantsResponse,
   Task,
   TaskListResponse,
   TaskStatus,
@@ -44,4 +45,37 @@ export function updateTask(id: string, body: UpdateTaskBody): Promise<{ ok: bool
 
 export function deleteTask(id: string): Promise<{ ok: boolean }> {
   return request(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function listParticipants(taskId: string): Promise<string[]> {
+  const res = await request<ParticipantsResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/participants`,
+  );
+  return res.participants;
+}
+
+export async function addParticipant(
+  taskId: string, email: string,
+): Promise<string[]> {
+  const res = await request<ParticipantsResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/participants`,
+    { method: "POST", body: { email } },
+  );
+  return res.participants;
+}
+
+export function leaveTask(taskId: string): Promise<{ ok: boolean }> {
+  return request(
+    `/tasks/${encodeURIComponent(taskId)}/participants/me`,
+    { method: "DELETE" },
+  );
+}
+
+export function removeParticipant(
+  taskId: string, targetUserId: string,
+): Promise<{ ok: boolean }> {
+  return request(
+    `/tasks/${encodeURIComponent(taskId)}/participants/${encodeURIComponent(targetUserId)}`,
+    { method: "DELETE" },
+  );
 }
