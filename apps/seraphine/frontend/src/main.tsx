@@ -1,19 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
-import { WaManagerView } from './wa-manager/WaManagerView';
 import { ThemeProvider } from './theme';
 import { ConfirmProvider, ErrorBoundary } from './ui';
 import './styles.css';
-
-// Path-based shortcut: /wa renders the standalone WhatsApp Manager
-// (no dashboard chrome, no Realtime/audio/avatar setup). Anything
-// else → main App.
-function isWaManagerPath(): boolean {
-  if (typeof window === 'undefined') return false;
-  const p = window.location.pathname;
-  return p === '/wa' || p === '/wa/' || p.startsWith('/wa/');
-}
 
 // Apply persisted theme before first paint to avoid flash.
 try {
@@ -56,7 +46,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <ErrorBoundary>
       <ThemeProvider>
         <ConfirmProvider>
-          {isWaManagerPath() ? <WaManagerView /> : <App />}
+          <App />
         </ConfirmProvider>
       </ThemeProvider>
     </ErrorBoundary>

@@ -823,8 +823,11 @@ def create_app() -> FastAPI:
     # Unified WhatsApp Manager (covers Aura's bridge too via seraphine-net).
     if settings.whatsapp_bridge_url or settings.whatsapp_aura_bridge_url:
         from seraphine.wa_manager.routes import router as wa_manager_router
+        from seraphine.wa_manager.page import router as wa_manager_page_router
 
         app.include_router(wa_manager_router)
+        # Standalone HTML page at /wa (browser-accessible, no SPA needed).
+        app.include_router(wa_manager_page_router)
 
     logger.info("Seraphine app initialized (model=%s)", settings.llm_model)
     return app
