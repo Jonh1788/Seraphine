@@ -662,6 +662,54 @@ class ConversationEngine:
             messages.append(ChatMessage(role=role, content=content))  # type: ignore[arg-type]
         return messages
 
+    async def _exec_one_tool(
+        self,
+        tool: Any,
+        tool_name: str,
+        tool_args: dict[str, Any],
+    ) -> tuple[ToolResult, dict[str, Any]]:
+        """Execute one tool call (auto-inject reference_url from chat
+        attachment + dispatch to proxy or local execute). Returns
+        (result, possibly-mutated args). Used both in the sequential
+        approval-required path and inside parallel asyncio.gather for
+        non-approval calls."""
+        if (
+            getattr(tool, "consumes_attached_image", False)
+            and not tool_args.get("reference_url")
+        ):
+            attached = _current_user_images.get()
+            if attached:
+                try:
+                    from seraphine.config import settings as _s
+                    from seraphine.images.uploads import save_user_upload
+                    saved = await save_user_upload(
+                        self.store, _s, attached[0],
+                        note=f"attached to {tool_name}",
+                    )
+                    if saved and saved.get("public_url"):
+                        tool_args = {
+                            **tool_args,
+                            "reference_url": saved["public_url"],
+                        }
+                except Exception as e:
+                    logger.warning(
+                        "auto-inject reference_url for %s failed: %s",
+                        tool_name, e,
+                    )
+        try:
+            if (
+                getattr(tool, "proxy_to_client", False)
+                and self._app_state is not None
+            ):
+                result = await _proxy_tool_via_client(
+                    self._app_state, tool_name, tool_args,
+                )
+            else:
+                result = await tool.execute(tool_args)
+        except Exception as e:
+            result = ToolResult(ok=False, error=str(e))
+        return result, tool_args
+
     async def handle_user_message(
         self,
         conversation_id: str | None,
@@ -931,8 +979,33 @@ class ConversationEngine:
                 if pending_tool_calls is None or self.tools is None:
                     break
 
-                for tc in pending_tool_calls:
-                    _raise_if_cancelled()
+                # PARALLEL DISPATCH (Anthropic emits multiple tool_use
+                # blocks for batched calls, e.g. 4× generate_image for
+                # multiple views). Kick off non-approval, known tools
+                # immediately so they run concurrently. Approval-gated
+                # tools fall through to the per-iteration sequential
+                # path below — UX still serializes prompts, but
+                # everything else overlaps.
+                _parallel_tasks: dict[int, asyncio.Task[tuple[ToolResult, dict[str, Any]]]] = {}
+                for _idx, _tc in enumerate(pending_tool_calls):
+                    _tn, _ta = _parse_tool_call(_tc)
+                    _t = self.tools.get(_tn)
+                    if _t is not None and not _t.requires_confirmation:
+                        _parallel_tasks[_idx] = asyncio.create_task(
+                            self._exec_one_tool(_t, _tn, _ta)
+                        )
+
+                for _idx, tc in enumerate(pending_tool_calls):
+                    try:
+                        _raise_if_cancelled()
+                    except TurnCancelled:
+                        # Cancel any in-flight parallel tasks before
+                        # propagating — otherwise they leak past the
+                        # turn and might still try to write back.
+                        for _t in _parallel_tasks.values():
+                            if not _t.done():
+                                _t.cancel()
+                        raise
                     tool_name, tool_args = _parse_tool_call(tc)
                     request_id = str(uuid.uuid4())
                     turn_requests.append(request_id)
@@ -998,48 +1071,29 @@ class ConversationEngine:
                         approved_int = None
 
                     if approved:
-                        # Auto-inject reference_url for tools that opt-in
-                        # via `consumes_attached_image=True` when the
-                        # current turn has a chat-attached image and the
-                        # caller didn't already pass a URL. The first
-                        # image wins (most recent paste / topmost upload).
-                        if (
-                            getattr(tool, "consumes_attached_image", False)
-                            and not tool_args.get("reference_url")
-                        ):
-                            attached = _current_user_images.get()
-                            if attached:
-                                try:
-                                    from seraphine.config import settings as _s
-                                    from seraphine.images.uploads import save_user_upload
-                                    saved = await save_user_upload(
-                                        self.store, _s, attached[0],
-                                        note=f"attached to {tool_name}",
-                                    )
-                                    if saved and saved.get("public_url"):
-                                        tool_args = {
-                                            **tool_args,
-                                            "reference_url": saved["public_url"],
-                                        }
-                                except Exception as e:
-                                    logger.warning(
-                                        "auto-inject reference_url for %s failed: %s",
-                                        tool_name, e,
-                                    )
-                        try:
-                            if (
-                                getattr(tool, "proxy_to_client", False)
-                                and self._app_state is not None
-                            ):
-                                result = await _proxy_tool_via_client(
-                                    self._app_state, tool_name, tool_args,
-                                )
-                            else:
-                                result = await tool.execute(tool_args)
-                        except Exception as e:
-                            result = ToolResult(ok=False, error=str(e))
+                        if _idx in _parallel_tasks:
+                            # Already running concurrently — just await
+                            # the pre-dispatched task. tool_args were
+                            # captured at task-creation time (including
+                            # reference_url auto-injection inside
+                            # _exec_one_tool); we get them back so the
+                            # audit/payload below reflects what actually
+                            # ran.
+                            try:
+                                result, tool_args = await _parallel_tasks[_idx]
+                            except Exception as e:
+                                result = ToolResult(ok=False, error=str(e))
+                        else:
+                            # Approval-gated path: run inline now that
+                            # the user said yes.
+                            result, tool_args = await self._exec_one_tool(
+                                tool, tool_name, tool_args,
+                            )
                     else:
                         result = ToolResult(ok=False, error="rejected by user")
+                        # Approval was denied for an approval-gated
+                        # tool, so it never went into _parallel_tasks
+                        # — nothing to cancel here.
 
                     output_excerpt = (
                         result.output[:AUDIT_OUTPUT_EXCERPT] if result.output else None
