@@ -115,6 +115,7 @@ class Settings(BaseSettings):
 
     @property
     def alexa_configured(self) -> bool:
+        """True iff skill_id + OAuth client pair are set; issuer has a safe default."""
         return bool(
             self.alexa_skill_id
             and self.alexa_client_id
