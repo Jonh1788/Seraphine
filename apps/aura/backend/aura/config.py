@@ -107,6 +107,20 @@ class Settings(BaseSettings):
     evolution_instance: str = ""
     evolution_webhook_token: str = ""
 
+    # --- Alexa Custom Skill
+    alexa_skill_id: str = ""           # amzn1.ask.skill.<uuid> from Developer Console
+    alexa_client_id: str = ""          # OAuth client_id we issue to Amazon
+    alexa_client_secret: str = ""      # OAuth client_secret we issue to Amazon
+    alexa_oauth_issuer: str = "https://app.minha-aura.com"
+
+    @property
+    def alexa_configured(self) -> bool:
+        return bool(
+            self.alexa_skill_id
+            and self.alexa_client_id
+            and self.alexa_client_secret
+        )
+
     @property
     def whatsapp_configured(self) -> bool:
         """True iff the chosen WhatsApp backend has its required env set.
