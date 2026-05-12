@@ -231,16 +231,14 @@ async def lifespan(app: FastAPI):
             conn=alexa_conn,
             client_id=settings.alexa_client_id,
             client_secret=settings.alexa_client_secret,
-            allowed_redirects=(
-                # Three Amazon-published redirect URIs for Account Linking.
-                # Vendor ID slug is filled in at deploy via .env.prod-driven
-                # config (kept here as the documented Amazon hosts; the real
-                # vendor-specific paths come from the Developer Console after
-                # the skill is created — see plan Task 12.4).
-                "https://layla.amazon.com/api/skill/link/M2AO04EAJRY9HC",
-                "https://alexa.amazon.co.jp/api/skill/link/M2AO04EAJRY9HC",
-                "https://pitangui.amazon.com/api/skill/link/M2AO04EAJRY9HC",
-            ),
+            allowed_redirects=tuple(
+                f"https://{host}/api/skill/link/{settings.alexa_vendor_id}"
+                for host in (
+                    "layla.amazon.com",
+                    "alexa.amazon.co.jp",
+                    "pitangui.amazon.com",
+                )
+            ) if settings.alexa_vendor_id else (),
         )
 
         async def _run_alexa_agentic(*, uid, conversation_id, user_text):

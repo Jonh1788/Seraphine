@@ -112,14 +112,16 @@ class Settings(BaseSettings):
     alexa_client_id: str = ""          # OAuth client_id we issue to Amazon
     alexa_client_secret: str = ""      # OAuth client_secret we issue to Amazon
     alexa_oauth_issuer: str = "https://app.minha-aura.com"
+    alexa_vendor_id: str = ""          # Amazon vendor slug for Account Linking redirect URIs (post-skill-create)
 
     @property
     def alexa_configured(self) -> bool:
-        """True iff skill_id + OAuth client pair are set; issuer has a safe default."""
+        """True iff skill_id + OAuth client + vendor id are all set."""
         return bool(
             self.alexa_skill_id
             and self.alexa_client_id
             and self.alexa_client_secret
+            and self.alexa_vendor_id
         )
 
     @property
