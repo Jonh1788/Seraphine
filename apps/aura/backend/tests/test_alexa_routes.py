@@ -82,7 +82,20 @@ def test_authorize_redirects_to_login_when_anon(client):
         follow_redirects=False,
     )
     assert r.status_code in (302, 307)
-    assert "/login" in r.headers["location"]
+    loc = r.headers["location"]
+    parsed = urlparse(loc)
+    assert parsed.path == "/login"
+    qs = parse_qs(parsed.query)
+    # The whole next= value must round-trip cleanly; no leaked siblings.
+    assert list(qs.keys()) == ["next"]
+    next_url = qs["next"][0]
+    next_parsed = urlparse(next_url)
+    assert next_parsed.path == "/alexa/oauth/authorize"
+    next_qs = parse_qs(next_parsed.query)
+    assert next_qs["client_id"] == ["cid"]
+    assert next_qs["redirect_uri"] == ["https://layla.amazon.com/api/skill/link/v"]
+    assert next_qs["state"] == ["xyz"]
+    assert next_qs["response_type"] == ["code"]
 
 
 def test_authorize_issues_code_when_logged_in(client):
@@ -192,3 +205,69 @@ def test_disconnect_endpoint(client):
     r = client.post("/alexa/disconnect", headers={"X-Test-User": "u1"})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
+
+
+def test_token_endpoint_invalid_grant_on_unknown_code(client):
+    basic = base64.b64encode(b"cid:csecret").decode()
+    r = client.post(
+        "/alexa/oauth/token",
+        headers={"Authorization": f"Basic {basic}"},
+        data={
+            "grant_type": "authorization_code",
+            "code": "not-a-real-code",
+            "redirect_uri": "https://layla.amazon.com/api/skill/link/v",
+        },
+    )
+    assert r.status_code == 400
+    assert r.json() == {"error": "invalid_grant"}
+
+
+def test_token_endpoint_refresh_grant_rotates(client):
+    # Authorize → code → access+refresh tokens.
+    r1 = client.get(
+        "/alexa/oauth/authorize",
+        headers={"X-Test-User": "u1"},
+        params={"client_id": "cid", "redirect_uri": "https://layla.amazon.com/api/skill/link/v",
+                "state": "x", "response_type": "code"},
+        follow_redirects=False,
+    )
+    code = parse_qs(urlparse(r1.headers["location"]).query)["code"][0]
+    basic = base64.b64encode(b"cid:csecret").decode()
+    first = client.post(
+        "/alexa/oauth/token",
+        headers={"Authorization": f"Basic {basic}"},
+        data={"grant_type": "authorization_code", "code": code,
+              "redirect_uri": "https://layla.amazon.com/api/skill/link/v"},
+    ).json()
+    # Now refresh the access token.
+    second = client.post(
+        "/alexa/oauth/token",
+        headers={"Authorization": f"Basic {basic}"},
+        data={"grant_type": "refresh_token", "refresh_token": first["refresh_token"]},
+    )
+    assert second.status_code == 200
+    body = second.json()
+    assert body["access_token"]
+    assert body["access_token"] != first["access_token"]
+    assert body["refresh_token"] != first["refresh_token"]
+    # Old refresh now consumed.
+    replay = client.post(
+        "/alexa/oauth/token",
+        headers={"Authorization": f"Basic {basic}"},
+        data={"grant_type": "refresh_token", "refresh_token": first["refresh_token"]},
+    )
+    assert replay.status_code == 400
+    assert replay.json() == {"error": "invalid_grant"}
+
+
+def test_token_endpoint_missing_basic_auth(client):
+    r = client.post(
+        "/alexa/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": "anything",
+            "redirect_uri": "https://layla.amazon.com/api/skill/link/v",
+        },
+    )
+    assert r.status_code == 401
+    assert r.json() == {"error": "invalid_client"}

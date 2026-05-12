@@ -131,7 +131,7 @@ def build_router(
                 }
             )
             return RedirectResponse(
-                url=f"/login?next={next_url}",
+                url="/login?" + urlencode({"next": next_url}),
                 status_code=302,
             )
         try:
