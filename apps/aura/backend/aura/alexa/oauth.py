@@ -54,6 +54,13 @@ class AlexaOAuth:
         access_ttl_seconds: int = 3600,
         code_ttl_seconds: int = 600,
     ) -> None:
+        """Construct an OAuth provider bound to a SQLite connection.
+
+        The connection must permit cross-thread access (``check_same_thread=False``
+        or wrapped in a per-request factory) because FastAPI dispatches sync
+        handlers across a threadpool. Caller is responsible for that setup;
+        this class does not own connection lifecycle.
+        """
         self._conn = conn
         self._client_id = client_id
         self._client_secret = client_secret
@@ -103,13 +110,17 @@ class AlexaOAuth:
             raise InvalidGrantError("code unknown or already consumed")
         user_id, stored_redirect, expires_at = row
         # Always consume on lookup (single-use), even if the rest fails.
+        # Commit immediately so a downstream validation failure cannot
+        # leave the code re-usable.
         self._conn.execute("DELETE FROM aura_alexa_auth_codes WHERE code=?", (code,))
         self._conn.commit()
         if expires_at < _now_iso():
             raise InvalidGrantError("code expired")
         if not hmac.compare_digest(stored_redirect, redirect_uri):
             raise InvalidGrantError("redirect_uri mismatch")
-        return self._mint_tokens(user_id)
+        # Mint tokens atomically (single transaction: INSERT + commit).
+        with self._conn:
+            return self._mint_tokens(user_id)
 
     def refresh(
         self,
@@ -128,13 +139,14 @@ class AlexaOAuth:
         user_id, revoked_at = row
         if revoked_at is not None:
             raise InvalidGrantError("refresh revoked")
-        # Rotate: revoke this row, mint fresh pair.
-        self._conn.execute(
-            "UPDATE aura_alexa_tokens SET revoked_at=? WHERE refresh_token=?",
-            (_now_iso(), refresh_token),
-        )
-        self._conn.commit()
-        return self._mint_tokens(user_id)
+        # Rotate atomically: revoke old + mint new in a single transaction so
+        # a crash mid-flight cannot leave the user with no usable tokens.
+        with self._conn:
+            self._conn.execute(
+                "UPDATE aura_alexa_tokens SET revoked_at=? WHERE refresh_token=?",
+                (_now_iso(), refresh_token),
+            )
+            return self._mint_tokens(user_id)
 
     # ----- introspection -------------------------------------------------
 
@@ -164,12 +176,23 @@ class AlexaOAuth:
     # ----- internals -----------------------------------------------------
 
     def _check_client(self, client_id: str, client_secret: str) -> None:
-        if not hmac.compare_digest(client_id, self._client_id):
-            raise InvalidClientError("client_id mismatch")
-        if not hmac.compare_digest(client_secret, self._client_secret):
-            raise InvalidClientError("client_secret mismatch")
+        # Why: a single generic message prevents an attacker from probing
+        # valid client_ids by diffing the response between a wrong id and
+        # a wrong secret. ``hmac.compare_digest`` keeps both comparisons
+        # constant-time; we AND them together so neither short-circuits.
+        if not (
+            hmac.compare_digest(client_id, self._client_id)
+            and hmac.compare_digest(client_secret, self._client_secret)
+        ):
+            raise InvalidClientError("invalid client credentials")
 
     def _mint_tokens(self, user_id: str) -> dict[str, object]:
+        """Insert a fresh access/refresh pair.
+
+        Caller MUST wrap the call in ``with self._conn:`` so the INSERT
+        commits (or rolls back) atomically with any surrounding statements
+        in the same transaction.
+        """
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(48)
         expires = _iso(datetime.now(UTC) + timedelta(seconds=self._access_ttl))
@@ -180,7 +203,6 @@ class AlexaOAuth:
             " VALUES (?,?,?,?,?)",
             (refresh, access, user_id, expires, now),
         )
-        self._conn.commit()
         return {
             "access_token": access,
             "refresh_token": refresh,
