@@ -15,8 +15,18 @@ let currentStatus: ClientStatus = "disconnected";
 let currentQr: string | null = null;
 let qrTimestamp: number | null = null;
 let startedAt: number | null = null;
+let heartbeatTimer: NodeJS.Timeout | null = null;
 
 const QR_EXPIRY_S = 20;
+// Heartbeat: while "ready", poll WhatsApp Web's reported state. The
+// `ready` + `disconnected` events do NOT always fire when WA Web enters
+// a zombie state (e.g. company-side device kick, anti-abuse cooldown,
+// page silently logged out). Without this, the bridge can sit at
+// "ready" while no messages are delivered for days — exactly the case
+// that prompted this code. On N consecutive non-CONNECTED reads we
+// hard-exit so docker `restart: unless-stopped` re-initializes us.
+const HEARTBEAT_INTERVAL_MS = 60_000;
+const HEARTBEAT_FAIL_BUDGET = 3;
 
 // Bounded ring buffer of recent inbound messages — exposed via
 // /api/recent for the unified Manager UI. Process-local; resets on
@@ -60,6 +70,45 @@ export function getCurrentQr(): { qr: string | null; expiresInS: number } {
 export function getUptime(): number {
   if (!startedAt) return 0;
   return Math.round((Date.now() - startedAt) / 1000);
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat();
+  let consecutiveFailures = 0;
+  heartbeatTimer = setInterval(async () => {
+    let state: string | null = null;
+    try {
+      // getState() reaches into the live WA Web page; on a zombie page
+      // it either rejects or returns a non-CONNECTED state.
+      state = (await client.getState()) ?? null;
+    } catch (err) {
+      console.warn("[whatsapp-bridge] heartbeat: getState() threw:", (err as Error).message);
+    }
+    if (state === "CONNECTED") {
+      if (consecutiveFailures > 0) {
+        console.log(`[whatsapp-bridge] heartbeat: recovered after ${consecutiveFailures} miss(es)`);
+      }
+      consecutiveFailures = 0;
+      return;
+    }
+    consecutiveFailures += 1;
+    console.warn(
+      `[whatsapp-bridge] heartbeat: state=${state ?? "null"} ` +
+      `(${consecutiveFailures}/${HEARTBEAT_FAIL_BUDGET})`
+    );
+    if (consecutiveFailures >= HEARTBEAT_FAIL_BUDGET) {
+      console.error("[whatsapp-bridge] heartbeat: exhausted budget — exiting for restart");
+      stopHeartbeat();
+      process.exit(1);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 }
 
 export function initClient(config: Config): Client {
@@ -108,12 +157,18 @@ export function initClient(config: Config): Client {
       `[whatsapp-bridge] ready as ${info?.pushname ?? "?"} (${info?.wid?.user ?? "?"})`
     );
     console.log(`[whatsapp-bridge] webhook target: ${config.webhookUrl}`);
+    startHeartbeat();
   });
 
   client.on("disconnected", (reason: string) => {
     currentStatus = "disconnected";
     startedAt = null;
+    stopHeartbeat();
     console.log("[whatsapp-bridge] disconnected:", reason);
+    // Hard exit so docker restart_policy reinitializes a fresh client.
+    // The previous behavior (just log + stay alive) left the container
+    // in a permanent disconnected state with no recovery path.
+    process.exit(1);
   });
 
   client.on("message", async (msg) => {
