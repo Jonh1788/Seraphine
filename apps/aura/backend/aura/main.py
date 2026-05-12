@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from core_auth import jwt_dep
@@ -71,6 +71,11 @@ from aura.whatsapp.bridge_client import BridgeClient
 from aura.whatsapp.client import EvolutionClient
 from aura.whatsapp.routes import router as whatsapp_router
 from aura.whatsapp.service import WhatsAppService
+from aura.alexa import schema as alexa_schema
+from aura.alexa.oauth import AlexaOAuth
+from aura.alexa.routes import build_router as build_alexa_router
+from aura.alexa.service import AlexaService
+from aura.alexa.signature import verify_signature as verify_alexa_signature
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,6 +100,7 @@ async def lifespan(app: FastAPI):
     store.register_migrator("aura_goals", goals_schema.migrate)
     store.register_migrator("aura_push", push_schema.migrate)
     store.register_migrator("aura_whatsapp", whatsapp_schema.migrate)
+    store.register_migrator("aura_alexa", alexa_schema.migrate)
     await store.ensure_schema()
 
     # ---- LLM (optional — Aura still boots without it for offline dev)
@@ -217,6 +223,78 @@ async def lifespan(app: FastAPI):
             "WhatsApp not configured — /whatsapp/* will return 503"
         )
 
+    # ---- Alexa Custom Skill (Beta distribution)
+    alexa_service: AlexaService | None = None
+    if settings.alexa_configured:
+        alexa_conn = store._connect()
+        alexa_oauth = AlexaOAuth(
+            conn=alexa_conn,
+            client_id=settings.alexa_client_id,
+            client_secret=settings.alexa_client_secret,
+            allowed_redirects=(
+                # Three Amazon-published redirect URIs for Account Linking.
+                # Vendor ID slug is filled in at deploy via .env.prod-driven
+                # config (kept here as the documented Amazon hosts; the real
+                # vendor-specific paths come from the Developer Console after
+                # the skill is created — see plan Task 12.4).
+                "https://layla.amazon.com/api/skill/link/M2AO04EAJRY9HC",
+                "https://alexa.amazon.co.jp/api/skill/link/M2AO04EAJRY9HC",
+                "https://pitangui.amazon.com/api/skill/link/M2AO04EAJRY9HC",
+            ),
+        )
+
+        async def _run_alexa_agentic(*, uid, conversation_id, user_text):
+            # Thin adapter so AlexaService can call the chat agentic loop
+            # without dragging every service into its constructor. All
+            # singletons live on app.state by the time a request arrives.
+            from aura.chat.routes import _run_agentic_collect
+            return await _run_agentic_collect(
+                llm=app.state.llm,
+                finance=app.state.finance_service,
+                tasks_svc=app.state.task_service,
+                recurring_svc=app.state.recurring_service,
+                projects_svc=getattr(app.state, "projects_service", None),
+                habits_svc=getattr(app.state, "habits_service", None),
+                knowledge_svc=getattr(app.state, "knowledge_service", None),
+                goals_svc=getattr(app.state, "goals_service", None),
+                svc=app.state.conversations_service,
+                uid=uid,
+                conversation_id=conversation_id,
+                user_text=user_text,
+                msgs=[],
+                is_first_exchange=False,
+            )
+
+        alexa_service = AlexaService(
+            conn=alexa_conn,
+            run_agentic=_run_alexa_agentic,
+            timeout_seconds=7.0,
+        )
+
+        _alexa_jwt_resolver = jwt_dep(settings.jwt_secret)
+
+        async def _alexa_user(request):
+            try:
+                return _alexa_jwt_resolver(
+                    authorization=request.headers.get("authorization")
+                )
+            except HTTPException:
+                return None
+
+        app.include_router(
+            build_alexa_router(
+                oauth=alexa_oauth,
+                service=alexa_service,
+                skill_id=settings.alexa_skill_id,
+                verify_signature=verify_alexa_signature,
+                get_current_user_id=_alexa_user,
+            )
+        )
+    else:
+        logger.info(
+            "alexa: not configured (AURA_ALEXA_* envs missing); skill routes disabled"
+        )
+
     app.state.store = store
     app.state.llm = llm
     app.state.users_service = users_service
@@ -236,6 +314,7 @@ async def lifespan(app: FastAPI):
     app.state.whatsapp_service = whatsapp_service
     app.state.whatsapp_webhook_token = settings.evolution_webhook_token
     app.state.whatsapp_admin_token = settings.whatsapp_admin_token
+    app.state.alexa_service = alexa_service
 
     # Background materialize loop — every 10 minutes, create today's
     # occurrences for any active rule that is due and hasn't fired yet.
