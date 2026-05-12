@@ -18,6 +18,8 @@ import * as googleApi from "../api/google";
 import type { GoogleOAuthStatus } from "../api/google";
 import * as waApi from "../api/whatsapp";
 import type { WhatsAppStatus } from "../api/whatsapp";
+import * as alexaApi from "../api/alexa";
+import type { AlexaStatus } from "../api/alexa";
 import { WhatsAppConnectModal } from "../components/WhatsAppConnectModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
@@ -47,6 +49,9 @@ export function PerfilPage() {
   const [waModalOpen, setWaModalOpen] = useState(false);
   const [waDisconnectOpen, setWaDisconnectOpen] = useState(false);
   const [waBusy, setWaBusy] = useState(false);
+  const [alexa, setAlexa] = useState<AlexaStatus | null>(null);
+  const [alexaDisconnectOpen, setAlexaDisconnectOpen] = useState(false);
+  const [alexaBusy, setAlexaBusy] = useState(false);
 
   const refreshWhatsapp = async () => {
     try {
@@ -70,6 +75,14 @@ export function PerfilPage() {
     void refreshGoogle();
   }, []);
   useEffect(() => { void refreshWhatsapp(); }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    alexaApi.getStatus()
+      .then(s => { if (!cancelled) setAlexa(s); })
+      .catch(() => { if (!cancelled) setAlexa({ linked: false, amazon_email_masked: null }); });
+    return () => { cancelled = true; };
+  }, []);
 
   const onGoogleConnect = async () => {
     setGoogleBusy(true);
@@ -287,6 +300,37 @@ export function PerfilPage() {
           }
         />
         <Row
+          iconBg="#00CAFF"
+          icon={<AlexaIcon />}
+          label="Alexa"
+          valueNode={
+            alexa === null ? (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>Verificando…</span>
+            ) : alexa.linked ? (
+              <span className="text-[12px] truncate block" style={{ color: "#2DD4BF" }}>
+                ● Conta vinculada {alexa.amazon_email_masked ?? ""}
+              </span>
+            ) : (
+              <span className="text-[12px]" style={{ color: "#8B9CC8" }}>
+                Ative a skill Aura no app Alexa pra falar com ela do Echo
+              </span>
+            )
+          }
+          right={
+            alexa === null || !alexa.linked ? null : (
+              <button
+                type="button"
+                onClick={() => setAlexaDisconnectOpen(true)}
+                disabled={alexaBusy}
+                className="text-[11px] px-2.5 py-1 rounded-md disabled:opacity-50"
+                style={{ background: "rgba(255,255,255,0.05)", color: "#8B9CC8" }}
+              >
+                Sair
+              </button>
+            )
+          }
+        />
+        <Row
           iconBg="#7DA4FF"
           icon={push.status === "on" ? <Bell className="h-4 w-4" strokeWidth={2.2} /> : <Bell className="h-4 w-4" strokeWidth={2.2} />}
           label="Notificações push"
@@ -383,6 +427,25 @@ export function PerfilPage() {
             await refreshWhatsapp();
           } finally {
             setWaBusy(false);
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={alexaDisconnectOpen}
+        tone="danger"
+        title="Desvincular Alexa"
+        description="Você precisará vincular de novo no app Alexa pra usar a skill. Os tokens atuais serão revogados."
+        confirmLabel="Desvincular"
+        cancelLabel="Cancelar"
+        onCancel={() => setAlexaDisconnectOpen(false)}
+        onConfirm={async () => {
+          setAlexaBusy(true);
+          try {
+            await alexaApi.disconnect();
+            setAlexaDisconnectOpen(false);
+            setAlexa({ linked: false, amazon_email_masked: null });
+          } finally {
+            setAlexaBusy(false);
           }
         }}
       />
@@ -529,6 +592,14 @@ function GcalIcon() {
       <text x="12" y="18" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#1A73E8" textAnchor="middle">
         {new Date().getDate()}
       </text>
+    </svg>
+  );
+}
+function AlexaIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4.5" />
     </svg>
   );
 }
