@@ -96,9 +96,16 @@ def _adapt_evolution_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
 def _adapt_bridge_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Map the whatsapp-web.js bridge payload to the routing shape.
 
-    Bridge sends ``{event:"message", chatId, chatName, message:
+    Bridge sends ``{event:"message", chatId, chatName, phone?, message:
     {id, body, timestamp, fromMe, author, type}}``. We accept only
     text-shaped events from non-self senders.
+
+    Phone resolution priority:
+    1. Explicit ``phone`` from the bridge (resolved via Contact.number —
+       required since WhatsApp's Lid rollout: ``chat.id._serialized`` is
+       opaque ``<id>@lid`` for many chats and is NOT the sender's phone).
+    2. ``chatId.split('@')`` fallback — only meaningful for legacy
+       ``@c.us`` 1:1 JIDs, kept so old captures still adapt.
     """
     if (raw.get("event") or "").lower() != "message":
         return None
@@ -109,8 +116,12 @@ def _adapt_bridge_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     if not chat_id:
         return None
     is_group = chat_id.endswith("@g.us")
-    bare = chat_id.split("@", 1)[0]
-    phone = ("+" + bare) if bare.isdigit() else None
+    explicit = raw.get("phone")
+    if isinstance(explicit, str) and explicit:
+        phone: str | None = explicit
+    else:
+        bare = chat_id.split("@", 1)[0]
+        phone = ("+" + bare) if bare.isdigit() and not chat_id.endswith("@lid") else None
     text = (msg.get("body") or "").strip()
     if not text:
         return None

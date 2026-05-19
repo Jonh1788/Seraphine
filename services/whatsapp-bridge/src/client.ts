@@ -179,6 +179,14 @@ export function initClient(config: Config): Client {
 
     const author = contact.pushname ?? contact.name ?? contact.number;
 
+    // WhatsApp's "Lid" rollout means chat.id._serialized is now an
+    // opaque `<id>@lid` string for new chats — splitting on '@' no
+    // longer yields the sender's phone. The Contact object still
+    // resolves to the real number for non-privacy senders; surface
+    // it explicitly so the backend doesn't have to LID-detect or
+    // parse the display-formatted chat.name.
+    const phone = contact.number ? `+${contact.number}` : null;
+
     // Push to bounded ring buffer for the Manager UI feed.
     recent.push({
       chatId: chat.id._serialized,
@@ -194,6 +202,7 @@ export function initClient(config: Config): Client {
       event: "message" as const,
       chatId: chat.id._serialized,
       chatName: chat.name,
+      phone,
       message: {
         id: msg.id._serialized,
         body: msg.body,
