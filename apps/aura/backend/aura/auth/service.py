@@ -27,7 +27,9 @@ class UsersService:
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    async def register(self, email: str, password: str) -> str:
+    async def register(
+        self, email: str, password: str, name: str | None = None,
+    ) -> str:
         """Create a user. Returns the new user id. Raises
         ``UserAlreadyExists`` if email is taken."""
         normalized = email.strip().lower()
@@ -36,14 +38,15 @@ class UsersService:
         user_id = str(uuid.uuid4())
         password_hash = hash_password(password)
         ts = _now()
+        clean_name = (name or "").strip() or None
 
         def _work() -> str:
             with self._store._connect() as conn:
                 try:
                     conn.execute(
-                        "INSERT INTO users (id, email, password_hash, created_at)"
-                        " VALUES (?, ?, ?, ?)",
-                        (user_id, normalized, password_hash, ts),
+                        "INSERT INTO users (id, email, password_hash, name, created_at)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (user_id, normalized, password_hash, clean_name, ts),
                     )
                 except sqlite3.IntegrityError:
                     raise UserAlreadyExists(email) from None
@@ -79,6 +82,16 @@ class UsersService:
                     "SELECT email FROM users WHERE id = ?", (user_id,),
                 ).fetchone()
             return row[0] if row else None
+
+        return await asyncio.to_thread(_work)
+
+    async def get_name(self, user_id: str) -> str | None:
+        def _work() -> str | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT name FROM users WHERE id = ?", (user_id,),
+                ).fetchone()
+            return row[0] if row and row[0] else None
 
         return await asyncio.to_thread(_work)
 

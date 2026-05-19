@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 class RegisterBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=1, max_length=64)
 
 
 class LoginBody(BaseModel):
@@ -37,6 +38,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: str
     email: str
+    name: str | None = None
 
 
 def _service_or_503(request: Request) -> UsersService:
@@ -50,7 +52,9 @@ def _service_or_503(request: Request) -> UsersService:
 async def register(request: Request, body: RegisterBody) -> TokenResponse:
     svc = _service_or_503(request)
     try:
-        user_id = await svc.register(str(body.email), body.password)
+        user_id = await svc.register(
+            str(body.email), body.password, body.name,
+        )
     except UserAlreadyExists:
         raise HTTPException(status_code=409, detail="email já cadastrado")
     except InvalidCredentials as exc:
@@ -60,7 +64,9 @@ async def register(request: Request, body: RegisterBody) -> TokenResponse:
         expires_in_seconds=settings.jwt_expires_seconds,
     )
     return TokenResponse(
-        access_token=token, user_id=user_id, email=str(body.email).strip().lower(),
+        access_token=token, user_id=user_id,
+        email=str(body.email).strip().lower(),
+        name=body.name.strip() or None,
     )
 
 
@@ -71,12 +77,14 @@ async def login(request: Request, body: LoginBody) -> TokenResponse:
         user_id = await svc.authenticate(str(body.email), body.password)
     except InvalidCredentials:
         raise HTTPException(status_code=401, detail="email ou senha inválidos")
+    name = await svc.get_name(user_id)
     token = issue(
         user_id, settings.jwt_secret,
         expires_in_seconds=settings.jwt_expires_seconds,
     )
     return TokenResponse(
-        access_token=token, user_id=user_id, email=str(body.email).strip().lower(),
+        access_token=token, user_id=user_id,
+        email=str(body.email).strip().lower(), name=name,
     )
 
 
@@ -92,4 +100,5 @@ async def me(
     email = await svc.get_email(user_id)
     if email is None:
         raise HTTPException(status_code=401, detail="user not found")
-    return {"id": user_id, "email": email}
+    name = await svc.get_name(user_id)
+    return {"id": user_id, "email": email, "name": name}

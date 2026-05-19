@@ -1,12 +1,14 @@
 export interface User {
   id: string;
   email: string;
+  name: string | null;
 }
 
 export interface AuthResponse {
   access_token: string;
   user_id: string;
   email: string;
+  name: string | null;
 }
 
 export type TaskStatus = "pending" | "approved" | "completed" | "rejected";

@@ -16,7 +16,7 @@ interface AuthState {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -61,11 +61,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenState(res.access_token);
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
-    const res = await authApi.register(email, password);
-    setToken(res.access_token);
-    setTokenState(res.access_token);
-  }, []);
+  const register = useCallback(
+    async (email: string, password: string, name: string) => {
+      const res = await authApi.register(email, password, name);
+      setToken(res.access_token);
+      setTokenState(res.access_token);
+    },
+    [],
+  );
 
   const logout = useCallback(() => {
     setToken(null);

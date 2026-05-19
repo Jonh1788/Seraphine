@@ -65,7 +65,10 @@ def client_unconfigured(tmp_path: Path, monkeypatch):
 
 
 def _register(c: TestClient, email: str = "oauth@x.io") -> dict:
-    r = c.post("/auth/register", json={"email": email, "password": "hunter2x"})
+    r = c.post(
+        "/auth/register",
+        json={"email": email, "password": "hunter2x", "name": "Test"},
+    )
     assert r.status_code == 200, r.text
     return r.json()
 

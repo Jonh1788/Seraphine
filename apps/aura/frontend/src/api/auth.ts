@@ -9,10 +9,12 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   });
 }
 
-export function register(email: string, password: string): Promise<AuthResponse> {
+export function register(
+  email: string, password: string, name: string,
+): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/register", {
     method: "POST",
-    body: { email, password },
+    body: { email, password, name },
     auth: false,
   });
 }

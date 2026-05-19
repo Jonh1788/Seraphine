@@ -236,8 +236,14 @@ def client(tmp_path: Path, monkeypatch):
 
 
 def test_http_recurring_crud_scoped(client):
-    a = client.post("/auth/register", json={"email": "a@x.io", "password": "hunter2x"}).json()
-    b = client.post("/auth/register", json={"email": "b@x.io", "password": "hunter2x"}).json()
+    a = client.post(
+        "/auth/register",
+        json={"email": "a@x.io", "password": "hunter2x", "name": "A"},
+    ).json()
+    b = client.post(
+        "/auth/register",
+        json={"email": "b@x.io", "password": "hunter2x", "name": "B"},
+    ).json()
     ha = {"Authorization": f"Bearer {a['access_token']}"}
     hb = {"Authorization": f"Bearer {b['access_token']}"}
 

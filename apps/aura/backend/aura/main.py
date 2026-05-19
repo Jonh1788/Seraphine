@@ -204,6 +204,7 @@ async def lifespan(app: FastAPI):
             goals=goals_service,
             conversations=conversations_service,
         )
+        whatsapp_service.attach_user_lookup(users_service.get_name)
         if not settings.whatsapp_admin_token:
             logger.warning(
                 "AURA_WHATSAPP_ADMIN_TOKEN unset — /whatsapp/admin/* "

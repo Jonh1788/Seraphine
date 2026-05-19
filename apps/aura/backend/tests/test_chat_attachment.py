@@ -34,7 +34,8 @@ def client(tmp_path: Path, monkeypatch):
 
 def _register_and_make_conversation(client: TestClient) -> tuple[dict, str]:
     r = client.post(
-        "/auth/register", json={"email": "att@x.io", "password": "hunter2x"},
+        "/auth/register",
+        json={"email": "att@x.io", "password": "hunter2x", "name": "Att"},
     )
     token = r.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

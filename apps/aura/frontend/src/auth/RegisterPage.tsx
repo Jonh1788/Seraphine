@@ -10,6 +10,7 @@ import { ApiError } from "../api/client";
 export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,13 +19,18 @@ export function RegisterPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Informe seu nome");
+      return;
+    }
     if (password.length < 8) {
       setError("Senha deve ter ao menos 8 caracteres");
       return;
     }
     setLoading(true);
     try {
-      await register(email, password);
+      await register(email, password, trimmedName);
       navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Falha ao criar conta");
@@ -45,6 +51,15 @@ export function RegisterPage() {
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <Input
+            label="Nome"
+            type="text"
+            autoComplete="name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Como devo te chamar"
+          />
           <Input
             label="E-mail"
             type="email"

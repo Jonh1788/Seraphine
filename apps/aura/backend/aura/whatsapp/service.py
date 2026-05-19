@@ -15,7 +15,7 @@ import secrets
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 from llm_adapters.types import ChatMessage
 
@@ -85,6 +85,9 @@ class WhatsAppService:
         self._knowledge: Any = None
         self._goals: Any = None
         self._conversations: Any = None
+        # Optional user-name lookup (wired by main.py from UsersService);
+        # used to personalize the agent's system prompt for inbound WA.
+        self._user_id_to_name: Callable[[str], Awaitable[str | None]] | None = None
         self._rate: dict[str, deque[datetime]] = {}
         # Latest QR base64 received via the qrcode.updated webhook
         # (Evolution v2 only delivers QRs through events, not via
@@ -395,6 +398,13 @@ class WhatsAppService:
         self._goals = goals
         self._conversations = conversations
 
+    def attach_user_lookup(
+        self, user_id_to_name: Callable[[str], Awaitable[str | None]],
+    ) -> None:
+        """Wire UsersService.get_name so process_user_message can address
+        the user by name in WhatsApp replies."""
+        self._user_id_to_name = user_id_to_name
+
     def _mark_user_send(self, user_id: str) -> None:
         q = self._rate.setdefault(user_id, deque())
         q.append(self._now())
@@ -456,10 +466,27 @@ class WhatsAppService:
         # Deferred import to avoid a chat <-> whatsapp import cycle.
         from aura.chat.routes import _build_system_prompt, _run_agentic_collect
 
+        # Best-effort name lookup; missing name just skips the personalization.
+        user_name: str | None = None
+        if self._user_id_to_name is not None:
+            try:
+                user_name = await self._user_id_to_name(user_id)
+            except Exception:
+                logger.exception("WA user name lookup failed user=%s", user_id)
+
         msgs: list[ChatMessage] = [
             ChatMessage(role="system", content=_build_system_prompt()),
-            ChatMessage(role="system", content=WA_SUFFIX),
         ]
+        if user_name:
+            msgs.append(ChatMessage(
+                role="system",
+                content=(
+                    f"Você está conversando com {user_name} via WhatsApp. "
+                    "Trate-o(a) pelo primeiro nome quando soar natural — "
+                    "não exagere e não force em toda mensagem."
+                ),
+            ))
+        msgs.append(ChatMessage(role="system", content=WA_SUFFIX))
         for m in history:
             msgs.append(ChatMessage(role=m["role"], content=m["content"]))
         is_first_exchange = len(history) == 1

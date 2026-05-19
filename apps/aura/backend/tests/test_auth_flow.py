@@ -35,33 +35,57 @@ def client(tmp_path: Path, monkeypatch):
 
 
 def test_register_login_me_roundtrip(client):
-    r = client.post("/auth/register", json={"email": "a@x.io", "password": "hunter2x"})
+    r = client.post(
+        "/auth/register",
+        json={"email": "a@x.io", "password": "hunter2x", "name": "Alice"},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     token = body["access_token"]
     user_id = body["user_id"]
     assert body["email"] == "a@x.io"
+    assert body["name"] == "Alice"
 
     r = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
-    assert r.json() == {"id": user_id, "email": "a@x.io"}
+    assert r.json() == {"id": user_id, "email": "a@x.io", "name": "Alice"}
 
-    # Login with the same creds returns a (new) valid token.
+    # Login with the same creds returns a (new) valid token and the name.
     r = client.post("/auth/login", json={"email": "a@x.io", "password": "hunter2x"})
     assert r.status_code == 200
-    assert r.json()["user_id"] == user_id
+    body = r.json()
+    assert body["user_id"] == user_id
+    assert body["name"] == "Alice"
 
 
 def test_duplicate_email_rejected(client):
-    client.post("/auth/register", json={"email": "dup@x.io", "password": "hunter2x"})
-    r = client.post("/auth/register", json={"email": "dup@x.io", "password": "different1"})
+    client.post(
+        "/auth/register",
+        json={"email": "dup@x.io", "password": "hunter2x", "name": "First"},
+    )
+    r = client.post(
+        "/auth/register",
+        json={"email": "dup@x.io", "password": "different1", "name": "Second"},
+    )
     assert r.status_code == 409
 
 
 def test_login_wrong_password(client):
-    client.post("/auth/register", json={"email": "wp@x.io", "password": "hunter2x"})
+    client.post(
+        "/auth/register",
+        json={"email": "wp@x.io", "password": "hunter2x", "name": "WP"},
+    )
     r = client.post("/auth/login", json={"email": "wp@x.io", "password": "wrong-one"})
     assert r.status_code == 401
+
+
+def test_register_requires_name(client):
+    """Schema enforces a non-empty name at register time."""
+    r = client.post(
+        "/auth/register",
+        json={"email": "noname@x.io", "password": "hunter2x"},
+    )
+    assert r.status_code == 422
 
 
 def test_unauthenticated_routes_reject_401(client):
@@ -75,8 +99,14 @@ def test_unauthenticated_routes_reject_401(client):
 
 def test_tasks_isolation_across_users(client):
     # Register two users.
-    a = client.post("/auth/register", json={"email": "alice@x.io", "password": "hunter2x"}).json()
-    b = client.post("/auth/register", json={"email": "bob@x.io", "password": "hunter2x"}).json()
+    a = client.post(
+        "/auth/register",
+        json={"email": "alice@x.io", "password": "hunter2x", "name": "Alice"},
+    ).json()
+    b = client.post(
+        "/auth/register",
+        json={"email": "bob@x.io", "password": "hunter2x", "name": "Bob"},
+    ).json()
     headers_a = {"Authorization": f"Bearer {a['access_token']}"}
     headers_b = {"Authorization": f"Bearer {b['access_token']}"}
 
@@ -117,8 +147,14 @@ def test_tasks_isolation_across_users(client):
 
 
 def test_finance_isolation_across_users(client):
-    a = client.post("/auth/register", json={"email": "fa@x.io", "password": "hunter2x"}).json()
-    b = client.post("/auth/register", json={"email": "fb@x.io", "password": "hunter2x"}).json()
+    a = client.post(
+        "/auth/register",
+        json={"email": "fa@x.io", "password": "hunter2x", "name": "FA"},
+    ).json()
+    b = client.post(
+        "/auth/register",
+        json={"email": "fb@x.io", "password": "hunter2x", "name": "FB"},
+    ).json()
     headers_a = {"Authorization": f"Bearer {a['access_token']}"}
     headers_b = {"Authorization": f"Bearer {b['access_token']}"}
 
