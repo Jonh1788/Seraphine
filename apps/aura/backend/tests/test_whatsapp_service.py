@@ -124,6 +124,20 @@ async def test_start_verification_persists_canonical_phone():
 
 
 @pytest.mark.asyncio
+async def test_start_verification_renormalizes_canonical_brazilian():
+    """WhatsApp sometimes returns BR mobile in the legacy 12-digit form
+    (no leading 9). The canonical persisted must still be the
+    post-2012 13-digit form so it matches inbound after route_inbound
+    runs normalize_e164 again."""
+    svc = _bridge_svc({"+5573988836445": "+557388836445"})
+    await svc.start_verification("u1", "+5573988836445")
+    row = svc._store._connect().execute(
+        "SELECT phone_e164 FROM aura_whatsapp_verification WHERE user_id='u1'"
+    ).fetchone()
+    assert row == ("+5573988836445",)
+
+
+@pytest.mark.asyncio
 async def test_start_verification_refuses_phone_not_on_whatsapp():
     """Bridge returns None → InvalidPhone (no OTP issued)."""
     from aura.whatsapp.phone import InvalidPhone

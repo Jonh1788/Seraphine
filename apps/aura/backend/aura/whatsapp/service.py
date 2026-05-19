@@ -155,7 +155,20 @@ class WhatsAppService:
                     raise InvalidPhone(
                         "número não encontrado no WhatsApp"
                     )
-                phone = canonical
+                # Re-normalize so the persisted phone matches what
+                # ``route_inbound`` will produce on subsequent inbound.
+                # WhatsApp sometimes exposes BR mobile numbers in the
+                # legacy 12-digit form (``557388836445``); normalize_e164
+                # reinserts the post-2012 mandatory leading 9 so DB
+                # lookup hits the canonical 13-digit shape.
+                try:
+                    phone = normalize_e164(canonical)
+                except InvalidPhone:
+                    logger.warning(
+                        "canonical phone from bridge failed normalize: %r — "
+                        "falling back to local form %r",
+                        canonical, phone,
+                    )
         ts = self._now()
         code = self._code()
 
