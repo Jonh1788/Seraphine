@@ -82,6 +82,74 @@ async def test_start_verification_rejects_invalid_phone(svc):
         await svc.start_verification("u1", "abc")
 
 
+class _FakeBridgeClient(_FakeClient):
+    """FakeClient that also implements ``lookup_phone`` like BridgeClient."""
+
+    def __init__(self, canonical_map: dict[str, str | None]) -> None:
+        super().__init__()
+        self._map = canonical_map
+        self.lookups: list[str] = []
+        self.lookup_raises = False
+
+    async def lookup_phone(self, phone_e164: str) -> str | None:
+        self.lookups.append(phone_e164)
+        if self.lookup_raises:
+            raise RuntimeError("bridge down")
+        return self._map.get(phone_e164, phone_e164)
+
+
+def _bridge_svc(canonical_map: dict[str, str | None]) -> WhatsAppService:
+    return WhatsAppService(
+        store=_FakeStore(),
+        client=_FakeBridgeClient(canonical_map),
+        code_factory=lambda: "482910",
+        now=lambda: datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_verification_persists_canonical_phone():
+    """Phone returned by the bridge replaces the user-input phone in the
+    verification row — guards against malformed inputs (e.g. missing
+    country code) surviving normalize_e164 and ending up as phantom rows
+    that never match inbound webhook traffic."""
+    svc = _bridge_svc({"+21976513455": "+5521976513455"})
+    await svc.start_verification("u1", "21976513455")
+    row = svc._store._connect().execute(
+        "SELECT phone_e164 FROM aura_whatsapp_verification WHERE user_id='u1'"
+    ).fetchone()
+    assert row == ("+5521976513455",)
+    # OTP went to the canonical phone, not the user-input one.
+    assert svc._client.sent[-1][0] == "+5521976513455"
+
+
+@pytest.mark.asyncio
+async def test_start_verification_refuses_phone_not_on_whatsapp():
+    """Bridge returns None → InvalidPhone (no OTP issued)."""
+    from aura.whatsapp.phone import InvalidPhone
+    svc = _bridge_svc({"+5511999999999": None})
+    with pytest.raises(InvalidPhone):
+        await svc.start_verification("u1", "+5511999999999")
+    # Nothing persisted, nothing sent.
+    rows = svc._store._connect().execute(
+        "SELECT COUNT(*) FROM aura_whatsapp_verification"
+    ).fetchone()
+    assert rows == (0,)
+    assert svc._client.sent == []
+
+
+@pytest.mark.asyncio
+async def test_start_verification_falls_back_on_bridge_error():
+    """Transient bridge failure must not block onboarding."""
+    svc = _bridge_svc({})
+    svc._client.lookup_raises = True
+    await svc.start_verification("u1", "+5511987654321")
+    row = svc._store._connect().execute(
+        "SELECT phone_e164 FROM aura_whatsapp_verification WHERE user_id='u1'"
+    ).fetchone()
+    assert row == ("+5511987654321",)
+
+
 @pytest.mark.asyncio
 async def test_verify_happy_path(svc):
     await svc.start_verification("u1", "+5511987654321")

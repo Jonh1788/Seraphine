@@ -13,6 +13,7 @@ import searchRoute from "./routes/search";
 import contactsRoute from "./routes/contacts";
 import recentRoute from "./routes/recent";
 import logoutRoute from "./routes/logout";
+import lookupRoute from "./routes/lookup";
 
 const config = loadConfig();
 const app = express();
@@ -29,6 +30,7 @@ app.use("/api", searchRoute);
 app.use("/api", contactsRoute);
 app.use("/api", recentRoute);
 app.use("/api", logoutRoute);
+app.use("/api", lookupRoute);
 
 // Health check
 app.get("/health", (_req, res) => {

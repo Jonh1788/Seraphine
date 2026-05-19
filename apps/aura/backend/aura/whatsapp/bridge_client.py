@@ -101,6 +101,33 @@ class BridgeClient:
         return resp
 
     # ------------------------------------------------------------------
+    # Phone canonicalization
+    # ------------------------------------------------------------------
+
+    async def lookup_phone(self, phone_e164: str) -> str | None:
+        """Return the WhatsApp-canonical E.164 for ``phone_e164``.
+
+        The bridge calls ``Client.getNumberId(digits)`` which asks
+        WhatsApp for the canonical JID — for ordinary contacts that's
+        ``<phone>@c.us`` and the user portion is the authoritative phone.
+        Returns ``None`` when WhatsApp says the number isn't on the
+        network or when the contact only resolves to an opaque Lid JID
+        (no recoverable phone). Raises ``BridgeError`` on transport /
+        server faults so the caller can distinguish "not on WhatsApp"
+        from "lookup failed".
+        """
+        digits = phone_e164.lstrip("+")
+        try:
+            resp = await self._request("GET", f"/api/lookup?phone={digits}")
+        except BridgeError as e:
+            if e.status_code in (404, 409):
+                return None
+            raise
+        data = resp.json() or {}
+        canonical = data.get("phone") if isinstance(data, dict) else None
+        return str(canonical) if isinstance(canonical, str) and canonical else None
+
+    # ------------------------------------------------------------------
     # Send
     # ------------------------------------------------------------------
 

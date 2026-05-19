@@ -123,8 +123,39 @@ class WhatsAppService:
 
         Enforces a 60-second cooldown per user; replaces any existing
         in-flight code so the user always sees the latest one.
+
+        After the local E.164 normalization we ask WhatsApp (via the
+        bridge) for the canonical phone. This guards against malformed
+        inputs that still pass ``normalize_e164`` — most notably a
+        Brazilian number entered without the ``55`` country code (e.g.
+        ``"21976513455"`` → ``"+21976513455"``), which the regex
+        accepts as a generic E.164. Without canonicalization the
+        verification row would store the bogus phone, the OTP would
+        still arrive (the bridge re-resolves at send time), and inbound
+        messages would never match — exactly the failure mode we saw
+        in prod on 2026-05-19.
         """
         phone = normalize_e164(phone_raw)
+        lookup = getattr(self._client, "lookup_phone", None)
+        if callable(lookup):
+            try:
+                canonical = await lookup(phone)
+            except Exception:
+                # Bridge unreachable / transport failure — fall back to
+                # the locally-normalized phone so a transient outage
+                # doesn't block onboarding. The OTP delivery itself
+                # will surface a clearer error if the bridge is truly
+                # down.
+                logger.exception(
+                    "phone canonicalization failed; falling back phone=%s",
+                    phone,
+                )
+            else:
+                if canonical is None:
+                    raise InvalidPhone(
+                        "número não encontrado no WhatsApp"
+                    )
+                phone = canonical
         ts = self._now()
         code = self._code()
 
