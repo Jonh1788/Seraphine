@@ -45,6 +45,7 @@ def test_user_whatsapp_phone_unique():
 def test_dispatch_composite_pk_rejects_duplicate():
     conn = sqlite3.connect(":memory:")
     migrate(conn)
+    # Default offset_minutes = 0 lets the legacy 2-col INSERT keep working.
     conn.execute(
         "INSERT INTO aura_whatsapp_dispatches (task_id, user_id, sent_at)"
         " VALUES (1, 'u1', 't')"
@@ -58,3 +59,63 @@ def test_dispatch_composite_pk_rejects_duplicate():
         "INSERT INTO aura_whatsapp_dispatches (task_id, user_id, sent_at)"
         " VALUES (1, 'u2', 't')"
     )
+
+
+def test_dispatch_pk_allows_multiple_offsets_per_task():
+    conn = sqlite3.connect(":memory:")
+    migrate(conn)
+    conn.execute(
+        "INSERT INTO aura_whatsapp_dispatches"
+        " (task_id, user_id, offset_minutes, sent_at)"
+        " VALUES (1, 'u1', 0, 't')"
+    )
+    conn.execute(
+        "INSERT INTO aura_whatsapp_dispatches"
+        " (task_id, user_id, offset_minutes, sent_at)"
+        " VALUES (1, 'u1', 15, 't')"
+    )
+    conn.execute(
+        "INSERT INTO aura_whatsapp_dispatches"
+        " (task_id, user_id, offset_minutes, sent_at)"
+        " VALUES (1, 'u1', 60, 't')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        # Same offset → PK collision.
+        conn.execute(
+            "INSERT INTO aura_whatsapp_dispatches"
+            " (task_id, user_id, offset_minutes, sent_at)"
+            " VALUES (1, 'u1', 15, 't2')"
+        )
+
+
+def test_legacy_dispatch_table_migrates_to_offset_pk():
+    """A pre-existing two-column PK table must be rebuilt with offset
+    column + 3-col PK, preserving rows as offset_minutes=0."""
+    conn = sqlite3.connect(":memory:")
+    # Simulate the old schema.
+    conn.executescript(
+        """
+        CREATE TABLE aura_whatsapp_dispatches (
+          task_id    INTEGER NOT NULL,
+          user_id    TEXT NOT NULL,
+          sent_at    TEXT NOT NULL,
+          PRIMARY KEY (task_id, user_id)
+        );
+        INSERT INTO aura_whatsapp_dispatches (task_id, user_id, sent_at)
+          VALUES (1, 'u1', '2026-05-01');
+        INSERT INTO aura_whatsapp_dispatches (task_id, user_id, sent_at)
+          VALUES (2, 'u1', '2026-05-02');
+        """
+    )
+    migrate(conn)
+    rows = conn.execute(
+        "SELECT task_id, user_id, offset_minutes, sent_at"
+        " FROM aura_whatsapp_dispatches ORDER BY task_id"
+    ).fetchall()
+    assert rows == [(1, "u1", 0, "2026-05-01"), (2, "u1", 0, "2026-05-02")]
+    # Migrate again → idempotent.
+    migrate(conn)
+    rows2 = conn.execute(
+        "SELECT COUNT(*) FROM aura_whatsapp_dispatches"
+    ).fetchone()
+    assert rows2 == (2,)

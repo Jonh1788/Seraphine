@@ -22,6 +22,7 @@ import * as tasksApi from "../api/tasks";
 import type { Task, TaskStatus } from "../types/api";
 import { Sheet } from "../components/Sheet";
 import { TaskEditorModal } from "../components/TaskEditorModal";
+import { RemindersPicker } from "../components/RemindersPicker";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
 
@@ -843,6 +844,7 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("");
   const [priority, setPriority] = useState<"low" | "med" | "high">("low");
+  const [reminderOffsets, setReminderOffsets] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -860,6 +862,8 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
         due_date: dueDate || null,
         due_time: dueTime || null,
         priority,
+        reminder_offsets:
+          dueTime && reminderOffsets.length > 0 ? reminderOffsets : undefined,
       });
       await onCreated();
     } catch {
@@ -931,6 +935,18 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
           ))}
         </div>
       </div>
+
+      {dueTime ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-[0.14em] font-bold" style={{ color: "#4D5E8A" }}>
+            Lembretes extras
+          </span>
+          <RemindersPicker
+            value={reminderOffsets}
+            onChange={setReminderOffsets}
+          />
+        </div>
+      ) : null}
 
       {err ? (
         <div className="text-[12px]" style={{ color: "#FF5B72" }}>{err}</div>

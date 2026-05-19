@@ -32,6 +32,9 @@ export interface Task {
   participants?: string[];
   completed_by_email?: string | null;
   is_owner?: boolean;
+  // Multi-offset reminders. Minutes before due_time. Always sorted asc.
+  // 0 = at due time. Empty array means no reminders even if due_time set.
+  reminder_offsets?: number[];
 }
 
 export interface ParticipantsResponse {
@@ -52,6 +55,7 @@ export interface CreateTaskBody {
   due_time?: string | null;
   priority?: TaskPriority | null;
   tags?: string[];
+  reminder_offsets?: number[];
 }
 
 export interface UpdateTaskBody {
@@ -63,6 +67,7 @@ export interface UpdateTaskBody {
   due_time?: string | null;
   priority?: TaskPriority | "" | null;
   tags?: string[];
+  reminder_offsets?: number[];
 }
 
 export type EntryType = "income" | "expense";

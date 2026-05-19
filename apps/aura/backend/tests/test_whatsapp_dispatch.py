@@ -47,6 +47,7 @@ async def test_dispatcher_calls_both_channels_for_verified_user():
     push._dispatch_push.assert_awaited_once()
     wa.send_reminder.assert_awaited_once_with(
         user_id="u1", task_id="42", title="Dentista", due_time="14:00",
+        offset_minutes=0,
     )
     # Both channels reported success → 2.
     assert sent == 2

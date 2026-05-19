@@ -19,7 +19,9 @@ import {
   Check,
   Loader2,
   Users,
+  Bell,
 } from "lucide-react";
+import { RemindersPicker } from "./RemindersPicker";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -334,6 +336,10 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
     setTask((prev) => (prev ? { ...prev, tags: next } : prev));
     queuePatch({ tags: next });
   };
+  const onRemindersChange = (next: number[]) => {
+    setTask((prev) => (prev ? { ...prev, reminder_offsets: next } : prev));
+    queuePatch({ reminder_offsets: next });
+  };
 
   // -------- delete -------------------------------------------------------
   const doDelete = async () => {
@@ -582,6 +588,20 @@ export function TaskEditorModal({ taskId, onClose, onSaved, onDeleted }: Props) 
                 onBlur={commitTagDraft}
                 placeholder={(task?.tags?.length ?? 0) === 0 ? "adicionar tag…" : ""}
                 className="flex-1 min-w-[120px] bg-transparent text-ink-primary placeholder:text-ink-faint text-sm focus:outline-none py-1"
+              />
+            </div>
+          </div>
+
+          {/* Reminders (multi-offset) */}
+          <div className="flex items-start gap-3 py-2 text-sm">
+            <div className="flex items-center gap-2 w-28 text-ink-dim pt-1">
+              <Bell className="h-4 w-4" />
+              <span>Lembretes</span>
+            </div>
+            <div className="flex-1">
+              <RemindersPicker
+                value={task?.reminder_offsets ?? []}
+                onChange={onRemindersChange}
               />
             </div>
           </div>

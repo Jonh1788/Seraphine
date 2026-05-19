@@ -23,6 +23,7 @@ import * as tasksApi from "../api/tasks";
 import * as pushApi from "../api/push";
 import type { Task, TaskStatus } from "../types/api";
 import { Sheet } from "../components/Sheet";
+import { RemindersPicker } from "../components/RemindersPicker";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
 import { usePushSubscription } from "../pwa/usePushSubscription";
@@ -704,6 +705,7 @@ function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
   const [dueDate, setDueDate] = useState(() => isoLocal(new Date()));
   const [dueTime, setDueTime] = useState("09:00");
   const [tag, setTag] = useState("");
+  const [reminderOffsets, setReminderOffsets] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -721,6 +723,8 @@ function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
         due_date: dueDate || null,
         due_time: dueTime || null,
         tags: tag.trim() ? [tag.trim()] : undefined,
+        // Backend always adds 0 (on-time); we only send the extras.
+        reminder_offsets: reminderOffsets.length > 0 ? reminderOffsets : undefined,
       });
       await onCreated();
     } catch {
@@ -792,6 +796,16 @@ function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
           style={inputStyle}
         />
       </label>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] uppercase tracking-[0.14em] font-bold" style={{ color: "#4D5E8A" }}>
+          Lembretes extras
+        </span>
+        <RemindersPicker
+          value={reminderOffsets}
+          onChange={setReminderOffsets}
+        />
+      </div>
 
       {err ? (
         <div className="text-[12px]" style={{ color: "#FF5B72" }}>{err}</div>

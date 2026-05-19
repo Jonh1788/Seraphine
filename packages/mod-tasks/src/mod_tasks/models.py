@@ -24,8 +24,12 @@ class SeraphineTask:
     user_id: str | None = None  # NULL for single-tenant (Seraphine), set for Aura
     priority: str | None = None  # low / med / high (optional)
     tags: list[str] = field(default_factory=list)  # free-form short labels
-    remind: str | None = None  # at_time / 1h_before / 1d_before
+    remind: str | None = None  # at_time / 1h_before / 1d_before (legacy single-choice)
     completed_by: str | None = None                  # stored: user_id
     participants: list[str] = field(default_factory=list)  # computed: emails
     is_owner: bool = False                           # computed for caller
     completed_by_email: str | None = None            # computed
+    # Computed: minutes-before-due offsets, sorted ascending. 0 = at due
+    # time. Loaded by list_tasks / get_task; not stored on the task row
+    # itself — see task_reminder_offsets.
+    reminder_offsets: list[int] = field(default_factory=list)

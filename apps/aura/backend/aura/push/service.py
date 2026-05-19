@@ -275,61 +275,76 @@ class PushService:
     # ------------------------------------------------------------------
 
     async def dispatch_due_reminders(self, *, lookback_minutes: int = 2) -> int:
-        """Find pending reminders whose due_date+due_time fell in the
-        last `lookback_minutes` and haven't been dispatched yet. Send a
-        push for each and mark dispatched. Returns count dispatched.
+        """Find pending reminder rows (one per task × offset) whose
+        ``due - offset`` already fired and haven't been dispatched. Send
+        per-offset and mark dispatched. Returns count dispatched.
 
         Note: due_date/due_time are stored as local-date strings; we
         treat them as the user's local time. Multi-timezone users would
         need a per-user tz column — out of scope for v1."""
         now = datetime.now()
-        window_start = now - timedelta(minutes=lookback_minutes)
+        # lookback_minutes currently unused — we fire stale offsets too,
+        # to avoid silently swallowing a reminder if the worker was down.
+        del lookback_minutes
 
-        def _candidates() -> list[tuple[str, str, str, str | None, str | None]]:
-            # (id, user_id, title, due_date, due_time). The task table
-            # is `seraphine_tasks` — that name is shared by Seraphine and
-            # Aura via the mod-tasks package and predates the Aura split.
+        def _candidates() -> list[tuple[str, str, str, str | None, str | None, int]]:
+            # (id, user_id, title, due_date, due_time, offset_minutes).
+            # JOIN against task_reminder_offsets so the same task can
+            # surface once per offset; LEFT JOIN push_dispatches with
+            # offset_minutes in the key dedupes already-fired offsets.
             with self._store._connect() as conn:
                 rows = conn.execute(
-                    "SELECT t.id, t.user_id, t.title, t.due_date, t.due_time"
+                    "SELECT t.id, t.user_id, t.title, t.due_date, t.due_time,"
+                    " o.offset_minutes"
                     " FROM seraphine_tasks t"
+                    " JOIN task_reminder_offsets o"
+                    "   ON o.task_id = CAST(t.id AS TEXT)"
+                    "   AND o.user_id = COALESCE(t.user_id, '')"
                     " LEFT JOIN push_dispatches d"
-                    "   ON d.task_id = t.id AND d.user_id = t.user_id"
+                    "   ON d.task_id = CAST(t.id AS TEXT)"
+                    "   AND d.user_id = t.user_id"
+                    "   AND d.offset_minutes = o.offset_minutes"
                     " WHERE t.type = 'reminder'"
                     "   AND t.status = 'pending'"
                     "   AND t.due_date IS NOT NULL"
                     "   AND d.task_id IS NULL",
                 ).fetchall()
-            return [(str(r[0]), r[1], r[2], r[3], r[4]) for r in rows]
+            return [
+                (str(r[0]), r[1], r[2], r[3], r[4], int(r[5])) for r in rows
+            ]
 
         try:
             rows = await asyncio.to_thread(_candidates)
         except Exception:
-            # Tasks table may not yet exist — bail without spamming logs.
+            # Tasks / offsets table may not yet exist — bail without
+            # spamming logs.
             logger.debug("dispatch_due_reminders: candidate query failed", exc_info=True)
             return 0
 
         dispatched = 0
-        for task_id, user_id, title, due_date, due_time in rows:
+        for task_id, user_id, title, due_date, due_time, offset in rows:
             try:
                 fire_at = _parse_due(due_date, due_time)
                 if fire_at is None:
                     continue
+                fire_at = fire_at - timedelta(minutes=offset)
                 if fire_at > now:
                     continue
-                # fire_at < window_start: still fire (don't silently swallow stale).
                 task = SimpleNamespace(
                     id=task_id,
                     user_id=user_id,
                     title=title,
                     due_date=due_date,
                     due_time=due_time,
+                    offset_minutes=offset,
                 )
                 channels = await self._deliver_reminder(user_id, task)
                 if channels > 0:
                     dispatched += 1
             except Exception:
-                logger.exception("dispatch failed for task=%s", task_id)
+                logger.exception(
+                    "dispatch failed for task=%s offset=%s", task_id, offset,
+                )
 
         return dispatched
 
@@ -337,15 +352,18 @@ class PushService:
         """Send the web-push payload for a reminder + write the
         push_dispatches idempotency row. Returns count of subscriptions
         reached (0 = no live subs)."""
+        offset = int(getattr(task, "offset_minutes", 0) or 0)
         payload = {
             "title": task.title,
-            "body": _format_when(task.due_date, task.due_time),
-            "tag": f"reminder-{task.id}",
+            "body": _format_offset_when(task.due_date, task.due_time, offset),
+            # Per-offset tag so iOS doesn't collapse the 0/15/60-min
+            # notifications into one row.
+            "tag": f"reminder-{task.id}-{offset}",
             "data": {"task_id": task.id, "url": "/mais/lembretes"},
         }
         sent = await self.send_to_user(user_id, payload)
         if sent > 0:
-            await self._mark_dispatched(task.id, user_id)
+            await self._mark_dispatched(task.id, user_id, offset)
         return sent
 
     async def _deliver_reminder(self, user_id: str, task: Any) -> int:
@@ -372,6 +390,9 @@ class PushService:
                         task_id=task.id,
                         title=task.title,
                         due_time=task.due_time,
+                        offset_minutes=int(
+                            getattr(task, "offset_minutes", 0) or 0,
+                        ),
                     )
                 )
         results = await asyncio.gather(*coros, return_exceptions=True)
@@ -387,13 +408,16 @@ class PushService:
                 sent += 1
         return sent
 
-    async def _mark_dispatched(self, task_id: str, user_id: str) -> None:
+    async def _mark_dispatched(
+        self, task_id: str, user_id: str, offset_minutes: int = 0,
+    ) -> None:
         def _work() -> None:
             with self._store._connect() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO push_dispatches"
-                    " (task_id, user_id, dispatched_at) VALUES (?, ?, ?)",
-                    (task_id, user_id, _now_iso()),
+                    " (task_id, user_id, offset_minutes, dispatched_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (task_id, user_id, int(offset_minutes), _now_iso()),
                 )
 
         await asyncio.to_thread(_work)
@@ -453,6 +477,31 @@ def _format_when(due_date: str | None, due_time: str | None) -> str:
     if due_time:
         return f"Hoje · {due_time}" if due_date == date.today().isoformat() else f"{due_date} · {due_time}"
     return f"{due_date}"
+
+
+def _format_offset_when(
+    due_date: str | None, due_time: str | None, offset_minutes: int,
+) -> str:
+    """Variant of _format_when that carries the offset prefix.
+
+    offset_minutes == 0 → reuse the existing "às HH:MM hoje" / date wording.
+    Non-zero → "em X min/h/d — <when>".
+    """
+    if offset_minutes <= 0:
+        return _format_when(due_date, due_time)
+    prefix = _humanize_offset(offset_minutes)
+    return f"{prefix} — {_format_when(due_date, due_time)}"
+
+
+def _humanize_offset(offset_minutes: int) -> str:
+    """"15 min antes" / "1 h antes" / "1 dia antes" wording."""
+    if offset_minutes >= 60 * 24 and offset_minutes % (60 * 24) == 0:
+        d = offset_minutes // (60 * 24)
+        return "em 1 dia" if d == 1 else f"em {d} dias"
+    if offset_minutes >= 60 and offset_minutes % 60 == 0:
+        h = offset_minutes // 60
+        return "em 1 h" if h == 1 else f"em {h} h"
+    return f"em {offset_minutes} min"
 
 
 # Convenience for env var derivation: read VAPID config from env without

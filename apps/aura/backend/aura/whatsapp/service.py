@@ -575,13 +575,14 @@ class WhatsAppService:
         task_id: int,
         title: str,
         due_time: str | None,
+        offset_minutes: int = 0,
     ) -> bool:
         """Send a reminder push via WhatsApp; True only when actually sent.
 
         Idempotent via aura_whatsapp_dispatches: ``ON CONFLICT DO NOTHING``
-        on the (task_id, user_id) PK means a duplicate INSERT silently
-        no-ops and ``rowcount == 0`` flags it as already dispatched.
-        Other IntegrityErrors (e.g. FK violations under
+        on the (task_id, user_id, offset_minutes) PK means a duplicate
+        INSERT silently no-ops and ``rowcount == 0`` flags it as already
+        dispatched. Other IntegrityErrors (e.g. FK violations under
         ``PRAGMA foreign_keys = ON``) surface so the dispatcher can
         retry / alert instead of swallowing them as "done." On Evolution
         failure we delete the claim row so the next dispatcher cycle
@@ -592,15 +593,17 @@ class WhatsAppService:
             return False
 
         ts_iso = _iso(self._now())
+        offset = int(offset_minutes or 0)
 
         def _claim() -> bool:
             conn = self._store._connect()
             with conn:
                 cur = conn.execute(
                     "INSERT INTO aura_whatsapp_dispatches"
-                    " (task_id, user_id, sent_at) VALUES (?, ?, ?)"
-                    " ON CONFLICT(task_id, user_id) DO NOTHING",
-                    (task_id, user_id, ts_iso),
+                    " (task_id, user_id, offset_minutes, sent_at)"
+                    " VALUES (?, ?, ?, ?)"
+                    " ON CONFLICT(task_id, user_id, offset_minutes) DO NOTHING",
+                    (task_id, user_id, offset, ts_iso),
                 )
             return (cur.rowcount or 0) == 1
 
@@ -608,14 +611,14 @@ class WhatsAppService:
         if not claimed:
             return False
 
-        text = f"*{title}* às {due_time}" if due_time else f"*{title}* hoje"
+        text = _reminder_text(title, due_time, offset)
         try:
             await self._client.send_text(phone, text)
             return True
         except EvolutionError:
             logger.exception(
-                "WA reminder send failed user=%s task=%s — rolling back claim",
-                user_id, task_id,
+                "WA reminder send failed user=%s task=%s offset=%s — rolling back claim",
+                user_id, task_id, offset,
             )
 
             def _rollback() -> None:
@@ -623,14 +626,33 @@ class WhatsAppService:
                 with conn:
                     conn.execute(
                         "DELETE FROM aura_whatsapp_dispatches"
-                        " WHERE task_id = ? AND user_id = ?",
-                        (task_id, user_id),
+                        " WHERE task_id = ? AND user_id = ?"
+                        " AND offset_minutes = ?",
+                        (task_id, user_id, offset),
                     )
 
             try:
                 await asyncio.to_thread(_rollback)
             except Exception:
                 logger.exception(
-                    "WA reminder rollback failed user=%s task=%s", user_id, task_id,
+                    "WA reminder rollback failed user=%s task=%s offset=%s",
+                    user_id, task_id, offset,
                 )
             return False
+
+
+def _reminder_text(title: str, due_time: str | None, offset_minutes: int) -> str:
+    """Reminder body. Mirrors push.service._format_offset_when wording
+    but adapted to WhatsApp's short, single-line style."""
+    if offset_minutes <= 0:
+        return f"*{title}* às {due_time}" if due_time else f"*{title}* hoje"
+    if offset_minutes >= 60 * 24 and offset_minutes % (60 * 24) == 0:
+        d = offset_minutes // (60 * 24)
+        prefix = "em 1 dia" if d == 1 else f"em {d} dias"
+    elif offset_minutes >= 60 and offset_minutes % 60 == 0:
+        h = offset_minutes // 60
+        prefix = "em 1 h" if h == 1 else f"em {h} h"
+    else:
+        prefix = f"em {offset_minutes} min"
+    when = f"às {due_time}" if due_time else "hoje"
+    return f"*{title}* — {prefix} ({when})"

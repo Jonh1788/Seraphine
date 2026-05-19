@@ -48,6 +48,51 @@ def _service_or_503(request: Request) -> TaskService:
 # ------------------------------------------------------------------
 
 REMIND_VALUES = {"at_time", "1h_before", "1d_before"}
+# 30 days in minutes — anything larger is almost certainly a unit mistake.
+MAX_OFFSET_MINUTES = 60 * 24 * 30
+
+
+def _validate_offsets(raw: list[int] | None) -> list[int] | None:
+    """Validate user-supplied offsets. Returns None if input is None.
+    Raises 422 on negative / out-of-range values."""
+    if raw is None:
+        return None
+    cleaned: list[int] = []
+    for o in raw:
+        if not isinstance(o, int) or isinstance(o, bool):
+            raise HTTPException(
+                status_code=422,
+                detail="reminder_offsets must be integers (minutes)",
+            )
+        if o < 0 or o > MAX_OFFSET_MINUTES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"reminder_offsets must be 0..{MAX_OFFSET_MINUTES}"
+                    f" (got {o})"
+                ),
+            )
+        cleaned.append(o)
+    return cleaned
+
+
+def _materialize_offsets(
+    user_offsets: list[int] | None, due_time: str | None,
+) -> list[int] | None:
+    """Apply the spec's decision rule.
+
+    - user_offsets provided → ``sorted(set([0] + offsets))`` (always
+      include 0 = at-due).
+    - user_offsets None and due_time set → ``[0]`` (default on-time).
+    - user_offsets None and due_time None → None (store nothing).
+    - user_offsets == [] (explicit empty) → [] (caller wants no reminders
+      at all).
+    """
+    if user_offsets is None:
+        return [0] if due_time else None
+    if not user_offsets:
+        return []
+    return sorted({0, *user_offsets})
 
 
 class TaskCreate(BaseModel):
@@ -60,7 +105,8 @@ class TaskCreate(BaseModel):
     due_time: str | None = None  # HH:MM (24h)
     priority: str | None = None  # low / med / high
     tags: list[str] | None = None
-    remind: str | None = None  # at_time / 1h_before / 1d_before
+    remind: str | None = None  # at_time / 1h_before / 1d_before (legacy)
+    reminder_offsets: list[int] | None = None  # minutes before due_time
 
 
 class TaskPatch(BaseModel):
@@ -75,6 +121,7 @@ class TaskPatch(BaseModel):
     priority: str | None = None
     tags: list[str] | None = None
     remind: str | None = None  # at_time / 1h_before / 1d_before / "" to clear
+    reminder_offsets: list[int] | None = None  # None = leave as-is
 
 
 class TaskExecute(BaseModel):
@@ -152,6 +199,7 @@ async def create_task(
             status_code=422,
             detail=f"remind must be one of {sorted(REMIND_VALUES)}",
         )
+    validated_offsets = _validate_offsets(body.reminder_offsets)
     try:
         task_id = await svc.create_task(
             type=body.type,
@@ -166,7 +214,14 @@ async def create_task(
             tags=body.tags,
             remind=body.remind,
         )
+        materialized = _materialize_offsets(validated_offsets, body.due_time)
+        if materialized is not None:
+            await svc.set_reminder_offsets(
+                str(task_id), user_id or "", materialized,
+            )
         return {"id": task_id, "ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("task create failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -247,30 +302,57 @@ async def update_task(
                 detail=f"remind must be one of {sorted(REMIND_VALUES)}",
             )
 
-    try:
-        affected = await svc.update_task(
-            task_id,
-            user_id=user_id,
-            title=data.get("title") if "title" in data else None,
-            description=(
-                data.get("description") if "description" in data else None
-            ),
-            status=data.get("status") if "status" in data else None,
-            due_date=due_date_val,
-            due_time=due_time_val,
-            priority=priority_val,
-            tags=data.get("tags") if "tags" in data else None,
-            remind=remind_val,
-            unset_due_date=unset_due_date,
-            unset_due_time=unset_due_time,
-            unset_priority=unset_priority,
-            unset_remind=unset_remind,
+    # reminder_offsets: explicit None = leave as-is, [] = clear, list = replace.
+    offsets_provided = "reminder_offsets" in data
+    offsets_val: list[int] | None = None
+    if offsets_provided:
+        offsets_val = _validate_offsets(data.get("reminder_offsets"))
+
+    # If the patch only touches reminder_offsets, there's nothing for
+    # update_task to write — skip it and authorize via a get_task lookup.
+    only_offsets = offsets_provided and set(data.keys()) == {"reminder_offsets"}
+
+    if only_offsets:
+        existing = await svc.get_task(task_id, user_id=user_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        new_due_time = existing.due_time
+    else:
+        try:
+            affected = await svc.update_task(
+                task_id,
+                user_id=user_id,
+                title=data.get("title") if "title" in data else None,
+                description=(
+                    data.get("description") if "description" in data else None
+                ),
+                status=data.get("status") if "status" in data else None,
+                due_date=due_date_val,
+                due_time=due_time_val,
+                priority=priority_val,
+                tags=data.get("tags") if "tags" in data else None,
+                remind=remind_val,
+                unset_due_date=unset_due_date,
+                unset_due_time=unset_due_time,
+                unset_priority=unset_priority,
+                unset_remind=unset_remind,
+            )
+        except Exception as e:
+            logger.exception("task update failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        if not affected:
+            raise HTTPException(status_code=404, detail="task not found")
+        new_due_time = due_time_val
+        if not new_due_time and not unset_due_time:
+            persisted = await svc.get_task(task_id, user_id=user_id)
+            new_due_time = persisted.due_time if persisted else None
+    if offsets_provided:
+        materialized = _materialize_offsets(offsets_val, new_due_time)
+        if materialized is None:
+            materialized = []
+        await svc.set_reminder_offsets(
+            str(task_id), user_id or "", materialized,
         )
-    except Exception as e:
-        logger.exception("task update failed")
-        raise HTTPException(status_code=500, detail=str(e))
-    if not affected:
-        raise HTTPException(status_code=404, detail="task not found")
     return {"ok": True}
 
 

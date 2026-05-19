@@ -96,3 +96,31 @@ def migrate(conn: sqlite3.Connection) -> None:
         " SELECT id, user_id, 'owner', created_at FROM seraphine_tasks"
         " WHERE user_id IS NOT NULL"
     )
+    # Step 4: per-task reminder offsets. One row per (task, offset_minutes).
+    # offset_minutes = minutes BEFORE due_time (0 = at due_time). Backfill
+    # every existing task with a due_time so the current "fire at due" UX
+    # is preserved after this schema rev rolls out.
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS task_reminder_offsets (
+          task_id        TEXT NOT NULL,
+          user_id        TEXT NOT NULL,
+          offset_minutes INTEGER NOT NULL CHECK (offset_minutes >= 0),
+          created_at     TEXT NOT NULL,
+          PRIMARY KEY (task_id, offset_minutes)
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_reminder_offsets_user
+          ON task_reminder_offsets(user_id);
+        """
+    )
+    # Backfill offset=0 for any pre-existing task with a due_time. user_id
+    # NULL in single-tenant Seraphine: we store empty string so the PK
+    # still works and the (rarely-used) Seraphine push path stays
+    # consistent. Aura tasks always have a real user_id.
+    conn.execute(
+        "INSERT OR IGNORE INTO task_reminder_offsets"
+        " (task_id, user_id, offset_minutes, created_at)"
+        " SELECT CAST(id AS TEXT), COALESCE(user_id, ''), 0, created_at"
+        " FROM seraphine_tasks"
+        " WHERE due_time IS NOT NULL AND due_date IS NOT NULL"
+    )

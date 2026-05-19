@@ -280,7 +280,12 @@ class TaskService:
                 ).fetchone()
             return _row_to_task(row) if row else None
 
-        return await asyncio.to_thread(_work)
+        task = await asyncio.to_thread(_work)
+        if task is not None and task.id is not None:
+            task.reminder_offsets = await self.get_reminder_offsets(
+                str(task.id), "",
+            )
+        return task
 
     async def leave_task(self, task_id: int, *, caller_id: str) -> None:
         """Any non-owner participant leaves. Owner gets PermissionError
@@ -344,6 +349,107 @@ class TaskService:
         await self.remove_participant(
             task_id, caller_id=caller_id, target_user_id=target_uid,
         )
+
+    # ------------------------------------------------------------------
+    # Reminder offsets (multi-offset push fan-out)
+    # ------------------------------------------------------------------
+
+    async def set_reminder_offsets(
+        self, task_id: str, user_id: str, offsets: list[int],
+    ) -> list[int]:
+        """Replace the offsets for a task. Returns the persisted set
+        (deduped, sorted). Wipes push/WA dispatch rows tied to offsets
+        that were removed so a reschedule can re-fire them.
+
+        ``user_id`` is required even in single-tenant mode (pass "" if
+        no user — matches the schema backfill convention)."""
+        clean = sorted({int(o) for o in offsets if int(o) >= 0})
+        ts = _now()
+
+        def _work() -> list[int]:
+            with self._store._connect() as conn:
+                existing = {
+                    int(r[0]) for r in conn.execute(
+                        "SELECT offset_minutes FROM task_reminder_offsets"
+                        " WHERE task_id = ?",
+                        (str(task_id),),
+                    ).fetchall()
+                }
+                target = set(clean)
+                to_remove = existing - target
+                to_add = target - existing
+                for off in to_remove:
+                    conn.execute(
+                        "DELETE FROM task_reminder_offsets"
+                        " WHERE task_id = ? AND offset_minutes = ?",
+                        (str(task_id), off),
+                    )
+                    # Also wipe dispatch ledger rows so a future reschedule
+                    # can re-fire. Tables may not exist in Seraphine — best
+                    # effort.
+                    for tbl in ("push_dispatches", "aura_whatsapp_dispatches"):
+                        try:
+                            conn.execute(
+                                f"DELETE FROM {tbl}"
+                                " WHERE task_id = ? AND offset_minutes = ?",
+                                (str(task_id), off),
+                            )
+                        except sqlite3.OperationalError:
+                            pass
+                for off in to_add:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO task_reminder_offsets"
+                        " (task_id, user_id, offset_minutes, created_at)"
+                        " VALUES (?, ?, ?, ?)",
+                        (str(task_id), user_id, off, ts),
+                    )
+            return clean
+
+        return await asyncio.to_thread(_work)
+
+    async def get_reminder_offsets(
+        self, task_id: str, user_id: str,
+    ) -> list[int]:
+        """Return the sorted offsets for a task. user_id is reserved for
+        future authorization filtering — currently unused, but kept on the
+        signature so callers don't need to refactor later."""
+        del user_id  # reserved
+
+        def _work() -> list[int]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT offset_minutes FROM task_reminder_offsets"
+                    " WHERE task_id = ? ORDER BY offset_minutes ASC",
+                    (str(task_id),),
+                ).fetchall()
+            return [int(r[0]) for r in rows]
+
+        return await asyncio.to_thread(_work)
+
+    async def _load_offsets_bulk(
+        self, task_ids: list[Any],
+    ) -> dict[str, list[int]]:
+        """Single query to load offsets for many tasks at once. Returns
+        ``{task_id_as_str: [offsets...]}``."""
+        if not task_ids:
+            return {}
+        ids = [str(t) for t in task_ids]
+
+        def _work() -> dict[str, list[int]]:
+            placeholders = ",".join("?" for _ in ids)
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    f"SELECT task_id, offset_minutes FROM task_reminder_offsets"
+                    f" WHERE task_id IN ({placeholders})"
+                    " ORDER BY task_id, offset_minutes ASC",
+                    ids,
+                ).fetchall()
+            out: dict[str, list[int]] = {}
+            for tid, off in rows:
+                out.setdefault(str(tid), []).append(int(off))
+            return out
+
+        return await asyncio.to_thread(_work)
 
     # ------------------------------------------------------------------
     # CRUD
@@ -450,6 +556,12 @@ class TaskService:
 
         rows = await asyncio.to_thread(_work)
         tasks = [_row_to_task(r) for r in rows]
+        # Bulk-load reminder offsets (one SELECT, not N).
+        ids = [t.id for t in tasks if t.id is not None]
+        offsets_map = await self._load_offsets_bulk(ids)
+        for t in tasks:
+            if t.id is not None:
+                t.reminder_offsets = offsets_map.get(str(t.id), [])
         # Populate computed fields
         for t in tasks:
             await self._populate_computed(t, caller_id=user_id)
@@ -513,6 +625,10 @@ class TaskService:
         if row is None:
             return None
         task = _row_to_task(row)
+        if task.id is not None:
+            task.reminder_offsets = await self.get_reminder_offsets(
+                str(task.id), user_id or "",
+            )
         await self._populate_computed(task, caller_id=user_id)
         return task
 
@@ -721,7 +837,14 @@ class TaskService:
                         " )",
                         (task_id, user_id),
                     )
-                return cur.rowcount or 0, payload
+                affected = cur.rowcount or 0
+                if affected:
+                    # Cascade-like cleanup for offsets (no FK).
+                    conn.execute(
+                        "DELETE FROM task_reminder_offsets WHERE task_id = ?",
+                        (str(task_id),),
+                    )
+                return affected, payload
 
         affected, payload = await asyncio.to_thread(_work)
         if affected:

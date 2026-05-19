@@ -138,6 +138,12 @@ def _build_system_prompt() -> str:
         "source='chat'. Não pergunte confirmação; registre direto. "
         "Quando o usuário pedir um lembrete (ex: 'me lembra de tomar remédio "
         "às 8', 'lembrete pra ligar pro médico amanhã 14h'), use create_reminder. "
+        "Quando o usuário pedir 'me lembra 15 min antes', 'me avisa 1 hora antes', "
+        "'um dia antes', etc., passe os valores em reminder_offsets_minutes "
+        "(sempre minutos como inteiro). Ex.: '15 min antes' = [15], '1 hora "
+        "antes' = [60], '1 dia antes' = [1440], '15 min e 1 hora antes' = "
+        "[15, 60]. O sistema sempre adiciona o lembrete na hora exata além "
+        "dos offsets pedidos, então não precisa incluir 0 manualmente. "
         "Quando ele descrever uma iniciativa, projeto ou meta de longo prazo "
         "com escopo (ex: 'quero criar um projeto chamado X', 'iniciativa de Y'), "
         "use create_project. Quando descrever um hábito a manter (ex: 'quero "
@@ -245,6 +251,21 @@ _TOOLS: list[dict[str, Any]] = [
                 "due_time": {
                     "type": "string",
                     "description": "HH:MM 24h; opcional",
+                },
+                "reminder_offsets_minutes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 43200,
+                    },
+                    "description": (
+                        "Lista de minutos ANTES do due_time para disparar "
+                        "lembretes. Use [15, 60, 1440] para '15 min, 1 h, "
+                        "1 dia antes'. Omitir para usar default (apenas na "
+                        "hora). O sistema sempre inclui o lembrete na hora "
+                        "exata além dos offsets pedidos."
+                    ),
                 },
             },
             "required": ["title"],
@@ -373,6 +394,21 @@ _TOOLS: list[dict[str, Any]] = [
                 "tag": {
                     "type": "string",
                     "description": "Categoria curta opcional (ex.: Saúde, Pix)",
+                },
+                "reminder_offsets_minutes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 43200,
+                    },
+                    "description": (
+                        "Lista de minutos ANTES do due_time para disparar "
+                        "lembretes. Use [15, 60, 1440] para '15 min, 1 h, "
+                        "1 dia antes'. Omitir para usar default (apenas na "
+                        "hora). O sistema sempre inclui o lembrete na hora "
+                        "exata além dos offsets pedidos."
+                    ),
                 },
             },
             "required": ["title"],
@@ -701,6 +737,38 @@ def _task_to_inline(task: Any) -> dict[str, Any]:
     }
 
 
+async def _apply_reminder_offsets(
+    tasks: TaskService,
+    task_id: int,
+    user_id: str,
+    raw_offsets: Any,
+    due_time: str | None,
+) -> None:
+    """Validate + materialize reminder offsets from a chat tool call.
+
+    Mirrors the route layer's decision rule:
+    - raw_offsets None and due_time set → [0] (default on-time)
+    - raw_offsets None and due_time None → no-op
+    - raw_offsets list → sorted(set([0] + offsets)), clamped 0..30d
+    """
+    if raw_offsets is None:
+        if due_time:
+            await tasks.set_reminder_offsets(str(task_id), user_id, [0])
+        return
+    if not isinstance(raw_offsets, list):
+        return
+    cleaned: list[int] = []
+    for o in raw_offsets:
+        try:
+            v = int(o)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= v <= 60 * 24 * 30:
+            cleaned.append(v)
+    materialized = sorted({0, *cleaned}) if cleaned else [0]
+    await tasks.set_reminder_offsets(str(task_id), user_id, materialized)
+
+
 async def _exec_create_task(
     tasks: TaskService,
     user_id: str,
@@ -730,6 +798,9 @@ async def _exec_create_task(
         due_date=due_date,
         due_time=due_time,
         user_id=user_id,
+    )
+    await _apply_reminder_offsets(
+        tasks, task_id, user_id, args.get("reminder_offsets_minutes"), due_time,
     )
     persisted = await tasks.get_task(task_id, user_id=user_id)
     if persisted is None:
@@ -905,6 +976,10 @@ async def _exec_create_reminder(
             due_time=due_time,
             tags=[tag] if tag else None,
             user_id=user_id,
+        )
+        await _apply_reminder_offsets(
+            tasks, task_id, user_id,
+            args.get("reminder_offsets_minutes"), due_time,
         )
         persisted = await tasks.get_task(task_id, user_id=user_id)
     except Exception as exc:
