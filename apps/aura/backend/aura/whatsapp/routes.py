@@ -97,8 +97,9 @@ def _adapt_bridge_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Map the whatsapp-web.js bridge payload to the routing shape.
 
     Bridge sends ``{event:"message", chatId, chatName, phone?, message:
-    {id, body, timestamp, fromMe, author, type}}``. We accept only
-    text-shaped events from non-self senders.
+    {id, body, timestamp, fromMe, author, type, audio?}}``. Accepts
+    text-shaped events from non-self senders OR voice/audio messages
+    (which arrive with empty body + audio: {data, mimetype}).
 
     Phone resolution priority:
     1. Explicit ``phone`` from the bridge (resolved via Contact.number —
@@ -123,9 +124,17 @@ def _adapt_bridge_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
         bare = chat_id.split("@", 1)[0]
         phone = ("+" + bare) if bare.isdigit() and not chat_id.endswith("@lid") else None
     text = (msg.get("body") or "").strip()
-    if not text:
+    audio = msg.get("audio") if isinstance(msg.get("audio"), dict) else None
+    audio_b64 = audio.get("data") if audio else None
+    if not text and not audio_b64:
         return None
-    return {"phone_e164": phone, "text": text, "is_group": is_group}
+    return {
+        "phone_e164": phone,
+        "text": text,
+        "is_group": is_group,
+        "audio_b64": audio_b64 if isinstance(audio_b64, str) else None,
+        "audio_mime": (audio.get("mimetype") if audio else None),
+    }
 
 
 def _adapt_inbound(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -218,6 +227,42 @@ async def webhook(
         payload = _adapt_inbound(raw)
         if payload is None:
             return {"ok": True}
+
+        # Voice notes arrive with empty text + an audio blob. Transcribe
+        # via the configured STT service (Groq) so the rest of the
+        # pipeline doesn't have to know whether the user typed or spoke.
+        # Failure modes: STT unconfigured → drop silently; transcription
+        # error → log + drop. Better than 500ing the bridge's retry loop.
+        if not payload.get("text") and payload.get("audio_b64"):
+            import base64 as _b64
+            stt = getattr(request.app.state, "stt_service", None)
+            if stt is None:
+                logger.warning("wa inbound audio dropped — no STT wired")
+                return {"ok": True}
+            try:
+                audio_bytes = _b64.b64decode(payload["audio_b64"])
+            except Exception:
+                logger.exception("wa audio b64 decode failed")
+                return {"ok": True}
+            try:
+                transcribed = await stt.transcribe(audio_bytes, language="pt")
+            except Exception:
+                logger.exception("wa audio transcription failed")
+                return {"ok": True}
+            transcribed = (transcribed or "").strip()
+            if not transcribed:
+                logger.info("wa audio transcribed to empty text — dropping")
+                return {"ok": True}
+            logger.info(
+                "wa audio transcribed: bytes=%d chars=%d",
+                len(audio_bytes), len(transcribed),
+            )
+            payload["text"] = transcribed
+        # Strip audio bytes before downstream — route_inbound only needs
+        # phone/text/is_group and these blobs would just bloat logs.
+        payload.pop("audio_b64", None)
+        payload.pop("audio_mime", None)
+
         decision = await svc.route_inbound(payload)
         if decision is None:
             return {"ok": True}

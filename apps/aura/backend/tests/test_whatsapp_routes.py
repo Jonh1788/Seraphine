@@ -7,12 +7,13 @@ from aura.whatsapp.routes import router as wa_router
 from mod_tasks.routes import get_current_user_id
 
 
-def _build_app(svc, webhook_token="hooktoken"):
+def _build_app(svc, webhook_token="hooktoken", stt=None):
     app = FastAPI()
     app.dependency_overrides[get_current_user_id] = lambda: "u1"
     app.state.whatsapp_service = svc
     app.state.whatsapp_webhook_token = webhook_token
     app.state.whatsapp_admin_token = "admintoken"
+    app.state.stt_service = stt
     app.include_router(wa_router)
     return app
 
@@ -164,6 +165,121 @@ def test_connect_verify_returns_400_when_invalid():
             "/whatsapp/connect/verify", json={"code": "000000"},
         )
     assert resp.status_code == 400
+
+
+def test_webhook_transcribes_audio_then_routes():
+    """Voice notes arrive with empty body + audio:{data, mimetype}. The
+    webhook calls STT, fills payload['text'] with the transcription,
+    then routes as a normal text message."""
+    import base64 as _b64
+
+    svc = MagicMock()
+    svc.route_inbound = AsyncMock(return_value={
+        "user_id": "u1",
+        "conversation_id": "c1",
+        "text": "olá Aura",
+    })
+    svc.process_user_message = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="  olá Aura  ")
+
+    app = _build_app(svc, stt=stt)
+    raw_audio = b"\x00\x01\x02fake-opus"
+    with TestClient(app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            headers={"X-Evolution-Webhook-Token": "hooktoken"},
+            json={
+                "event": "message",
+                "chatId": "5573988836445@c.us",
+                "chatName": "+55 73 9883-6445",
+                "phone": "+5573988836445",
+                "message": {
+                    "id": "m1",
+                    "body": "",
+                    "timestamp": 0,
+                    "fromMe": False,
+                    "author": "Jonathan",
+                    "type": "ptt",
+                    "audio": {
+                        "data": _b64.b64encode(raw_audio).decode(),
+                        "mimetype": "audio/ogg; codecs=opus",
+                    },
+                },
+            },
+        )
+    assert resp.status_code == 200
+    stt.transcribe.assert_awaited_once()
+    audio_arg = stt.transcribe.await_args[0][0]
+    assert audio_arg == raw_audio
+    svc.route_inbound.assert_awaited_once()
+    routed = svc.route_inbound.await_args[0][0]
+    assert routed["text"] == "olá Aura"
+    # Bytes scrubbed before downstream.
+    assert "audio_b64" not in routed
+    assert "audio_mime" not in routed
+
+
+def test_webhook_audio_with_empty_transcription_is_dropped():
+    import base64 as _b64
+    svc = MagicMock()
+    svc.route_inbound = AsyncMock()
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="")
+
+    app = _build_app(svc, stt=stt)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            headers={"X-Evolution-Webhook-Token": "hooktoken"},
+            json={
+                "event": "message",
+                "chatId": "5573988836445@c.us",
+                "phone": "+5573988836445",
+                "message": {
+                    "id": "m2",
+                    "body": "",
+                    "fromMe": False,
+                    "type": "ptt",
+                    "audio": {
+                        "data": _b64.b64encode(b"silence").decode(),
+                        "mimetype": "audio/ogg",
+                    },
+                },
+            },
+        )
+    assert resp.status_code == 200
+    svc.route_inbound.assert_not_awaited()
+
+
+def test_webhook_audio_without_stt_wired_is_dropped():
+    import base64 as _b64
+    svc = MagicMock()
+    svc.route_inbound = AsyncMock()
+    app = _build_app(svc, stt=None)  # no STT wired
+    with TestClient(app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            headers={"X-Evolution-Webhook-Token": "hooktoken"},
+            json={
+                "event": "message",
+                "chatId": "5573988836445@c.us",
+                "phone": "+5573988836445",
+                "message": {
+                    "id": "m3",
+                    "body": "",
+                    "fromMe": False,
+                    "type": "ptt",
+                    "audio": {
+                        "data": _b64.b64encode(b"x").decode(),
+                        "mimetype": "audio/ogg",
+                    },
+                },
+            },
+        )
+    assert resp.status_code == 200
+    svc.route_inbound.assert_not_awaited()
 
 
 def test_webhook_drops_messages_with_empty_text_before_routing():

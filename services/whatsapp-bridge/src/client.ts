@@ -198,6 +198,31 @@ export function initClient(config: Config): Client {
     });
     if (recent.length > RECENT_MAX) recent.splice(0, recent.length - RECENT_MAX);
 
+    // Voice notes ("ptt") and forwarded audio attachments have an empty
+    // msg.body; the actual content is the audio file. Pull it down so
+    // the backend can transcribe it (PT-BR STT runs on Aura's stack).
+    // Skip silently on any download failure — better to drop one audio
+    // than to take down the whole inbound path.
+    let audio: { data: string; mimetype: string } | null = null;
+    const isAudioType = msg.type === "ptt" || msg.type === "audio";
+    if (isAudioType && msg.hasMedia) {
+      try {
+        const media = await msg.downloadMedia();
+        if (media?.data) {
+          audio = {
+            data: media.data,
+            mimetype: media.mimetype || "audio/ogg; codecs=opus",
+          };
+        }
+      } catch (err) {
+        console.warn(
+          "[whatsapp-bridge] audio download failed for %s: %s",
+          msg.id._serialized,
+          (err as Error).message,
+        );
+      }
+    }
+
     const payload = {
       event: "message" as const,
       chatId: chat.id._serialized,
@@ -210,6 +235,7 @@ export function initClient(config: Config): Client {
         fromMe: msg.fromMe,
         author,
         type: msg.type,
+        ...(audio ? { audio } : {}),
       },
     };
 
