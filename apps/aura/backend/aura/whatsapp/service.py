@@ -85,6 +85,7 @@ class WhatsAppService:
         self._knowledge: Any = None
         self._goals: Any = None
         self._conversations: Any = None
+        self._users: Any = None
         # Optional user-name lookup (wired by main.py from UsersService);
         # used to personalize the agent's system prompt for inbound WA.
         self._user_id_to_name: Callable[[str], Awaitable[str | None]] | None = None
@@ -430,8 +431,13 @@ class WhatsAppService:
         knowledge: Any,
         goals: Any,
         conversations: Any,
+        users: Any = None,
     ) -> None:
-        """Late-bind chat-side services. Called once on lifespan startup."""
+        """Late-bind chat-side services. Called once on lifespan startup.
+
+        ``users`` is optional — when present, the ``set_reminder_defaults``
+        chat tool can run from inbound WhatsApp (matches web parity).
+        """
         self._llm = llm
         self._finance = finance
         self._tasks = tasks
@@ -441,6 +447,7 @@ class WhatsAppService:
         self._knowledge = knowledge
         self._goals = goals
         self._conversations = conversations
+        self._users = users
 
     def attach_user_lookup(
         self, user_id_to_name: Callable[[str], Awaitable[str | None]],
@@ -554,6 +561,7 @@ class WhatsAppService:
                 user_text=text,
                 msgs=msgs,
                 is_first_exchange=is_first_exchange,
+                users_svc=self._users,
             )
         except Exception:
             logger.exception("WA agentic loop failed user=%s", user_id)

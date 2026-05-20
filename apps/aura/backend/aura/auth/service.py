@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 
 from core_auth import hash_password, verify_password
 from core_db import Store
+from mod_tasks.routes import MAX_OFFSET_MINUTES
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -110,3 +115,62 @@ class UsersService:
             return row[0] if row else None
 
         return await asyncio.to_thread(_work)
+
+    async def get_default_reminder_offsets(self, user_id: str) -> list[int]:
+        """Return the user's saved defaults, [] if NULL/missing/malformed."""
+
+        def _work() -> str | None:
+            with self._store._connect() as conn:
+                row = conn.execute(
+                    "SELECT default_reminder_offsets FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+            return row[0] if row else None
+
+        raw = await asyncio.to_thread(_work)
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if not isinstance(parsed, list):
+            return []
+        out: list[int] = []
+        for v in parsed:
+            if isinstance(v, bool) or not isinstance(v, int):
+                continue
+            if 0 <= v <= MAX_OFFSET_MINUTES:
+                out.append(v)
+        return sorted(set(out))
+
+    async def set_default_reminder_offsets(
+        self, user_id: str, offsets: list[int],
+    ) -> list[int]:
+        """Validate, dedupe, sort, persist as JSON. Returns the persisted
+        list. Raises ValueError on out-of-range / non-int values."""
+        clean: list[int] = []
+        for v in offsets:
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise ValueError("offsets must be integers (minutes)")
+            if v < 0 or v > MAX_OFFSET_MINUTES:
+                raise ValueError(
+                    f"offsets must be 0..{MAX_OFFSET_MINUTES} (got {v})"
+                )
+            clean.append(v)
+        clean = sorted(set(clean))
+        payload = json.dumps(clean)
+
+        def _work() -> int:
+            with self._store._connect() as conn:
+                cur = conn.execute(
+                    "UPDATE users SET default_reminder_offsets = ?"
+                    " WHERE id = ?",
+                    (payload, user_id),
+                )
+            return cur.rowcount or 0
+
+        affected = await asyncio.to_thread(_work)
+        if not affected:
+            raise LookupError(f"no user with id {user_id}")
+        return clean

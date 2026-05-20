@@ -27,6 +27,7 @@ import { RemindersPicker } from "../components/RemindersPicker";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
 import { usePushSubscription } from "../pwa/usePushSubscription";
+import { useAuth } from "../auth/AuthContext";
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
@@ -701,11 +702,24 @@ interface NewReminderFormProps {
 }
 
 function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
+  const { user } = useAuth();
+  const defaults = user?.default_reminder_offsets ?? [];
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState(() => isoLocal(new Date()));
   const [dueTime, setDueTime] = useState("09:00");
   const [tag, setTag] = useState("");
-  const [reminderOffsets, setReminderOffsets] = useState<number[]>([]);
+  // Seed with the user's defaults so they have visual confirmation that
+  // their per-profile defaults are about to fire. Once they touch the
+  // picker, switch to controlled mode.
+  const [touched, setTouched] = useState(false);
+  const [reminderOffsets, setReminderOffsets] = useState<number[]>(defaults);
+  const effectiveOffsets = touched ? reminderOffsets : defaults;
+
+  const handlePickerChange = (next: number[]) => {
+    setTouched(true);
+    setReminderOffsets(next);
+  };
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -723,8 +737,10 @@ function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
         due_date: dueDate || null,
         due_time: dueTime || null,
         tags: tag.trim() ? [tag.trim()] : undefined,
-        // Backend always adds 0 (on-time); we only send the extras.
-        reminder_offsets: reminderOffsets.length > 0 ? reminderOffsets : undefined,
+        // If the user didn't touch the picker, let the backend apply
+        // their defaults automatically (omit the field). Once they touch
+        // it, send whatever's selected (including empty = "no extras").
+        reminder_offsets: touched ? reminderOffsets : undefined,
       });
       await onCreated();
     } catch {
@@ -802,9 +818,14 @@ function NewReminderForm({ onCancel, onCreated }: NewReminderFormProps) {
           Lembretes extras
         </span>
         <RemindersPicker
-          value={reminderOffsets}
-          onChange={setReminderOffsets}
+          value={effectiveOffsets}
+          onChange={handlePickerChange}
         />
+        {!touched && defaults.length > 0 ? (
+          <span className="text-[10px]" style={{ color: "#4D5E8A" }}>
+            Pré-selecionados do seu perfil — toque para alterar.
+          </span>
+        ) : null}
       </div>
 
       {err ? (

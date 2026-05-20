@@ -22,3 +22,11 @@ export function register(
 export function me(): Promise<User> {
   return request<User>("/auth/me");
 }
+
+export interface UpdateMeBody {
+  default_reminder_offsets?: number[];
+}
+
+export function updateMe(body: UpdateMeBody): Promise<User> {
+  return request<User>("/auth/me", { method: "PATCH", body });
+}

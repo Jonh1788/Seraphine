@@ -18,6 +18,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
+  /** Replace the in-memory user (used after PATCH /auth/me etc.). */
+  setUser: (user: User) => void;
 }
 
 const AuthCtx = createContext<AuthState | null>(null);
@@ -77,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, login, register, logout }),
+    () => ({ user, token, loading, login, register, logout, setUser }),
     [user, token, loading, login, register, logout],
   );
 

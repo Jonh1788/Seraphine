@@ -2,6 +2,12 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
+  /**
+   * User-configurable default reminder offsets (minutes before due_time).
+   * Applied to new tasks with a due_time when the user doesn't pick
+   * explicit offsets. Empty array = no defaults set.
+   */
+  default_reminder_offsets?: number[];
 }
 
 export interface AuthResponse {

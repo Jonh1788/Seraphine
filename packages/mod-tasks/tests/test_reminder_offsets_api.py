@@ -153,7 +153,7 @@ def test_patch_replaces_offsets(app: FastAPI) -> None:
     assert g.json()["reminder_offsets"] == [0, 1440]
 
 
-def test_patch_empty_list_clears_offsets(app: FastAPI) -> None:
+def test_patch_empty_list_clears_extras_keeps_on_time(app: FastAPI) -> None:
     c = TestClient(app)
     r = c.post(
         "/tasks",
@@ -174,8 +174,9 @@ def test_patch_empty_list_clears_offsets(app: FastAPI) -> None:
     )
     assert p.status_code == 200
     g = c.get(f"/tasks/{tid}", headers={"X-User": "user-a"})
-    # Empty list = user wants no reminders → stored as empty.
-    assert g.json()["reminder_offsets"] == []
+    # Explicit empty + due_time → user is being intentional ("no extras"),
+    # so defaults are skipped and we keep just the on-time slot [0].
+    assert g.json()["reminder_offsets"] == [0]
 
 
 def test_list_tasks_includes_offsets(app: FastAPI) -> None:

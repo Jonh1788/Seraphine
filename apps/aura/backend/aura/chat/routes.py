@@ -17,7 +17,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from typing import Any, AsyncIterator, Literal, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -41,6 +41,13 @@ from aura.habits.service import HabitsService
 from aura.knowledge.service import KnowledgeService
 from aura.projects.service import ProjectsService
 from aura.recurring.service import RecurringService
+
+if TYPE_CHECKING:
+    # Importing aura.auth.service at module load time triggers
+    # aura.auth.__init__ → aura.auth.routes → aura.config, which captures
+    # a stale settings instance under the test fixture's importlib.reload.
+    # Keep it behind TYPE_CHECKING and pull it in via app.state at runtime.
+    from aura.auth.service import UsersService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -144,6 +151,11 @@ def _build_system_prompt() -> str:
         "antes' = [60], '1 dia antes' = [1440], '15 min e 1 hora antes' = "
         "[15, 60]. O sistema sempre adiciona o lembrete na hora exata além "
         "dos offsets pedidos, então não precisa incluir 0 manualmente. "
+        "Quando o usuário disser algo como 'sempre me lembra 15 min antes', "
+        "'configura como padrão 1 hora antes', 'queria ser avisado 1 dia antes "
+        "em toda reunião', use a tool set_reminder_defaults para salvar os "
+        "offsets padrão no perfil. Passe lista vazia para remover os defaults. "
+        "Não confunda com reminder_offsets_minutes (que é por-tarefa). "
         "Quando ele descrever uma iniciativa, projeto ou meta de longo prazo "
         "com escopo (ex: 'quero criar um projeto chamado X', 'iniciativa de Y'), "
         "use create_project. Quando descrever um hábito a manter (ex: 'quero "
@@ -415,6 +427,28 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "set_reminder_defaults",
+        "description": (
+            "Define os lembretes-padrão do usuário (em minutos antes do "
+            "horário). Aplica-se a novas tarefas com horário quando o usuário "
+            "não escolher offsets específicos. Passe lista vazia para remover."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "offsets_minutes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 43200,
+                    },
+                },
+            },
+            "required": ["offsets_minutes"],
+        },
+    },
+    {
         "name": "create_project",
         "description": (
             "Cria um projeto (iniciativa de longo prazo com escopo). Use "
@@ -588,6 +622,10 @@ def _knowledge_or_none(request: Request) -> Optional[KnowledgeService]:
 
 def _goals_or_none(request: Request) -> Optional[GoalsService]:
     return getattr(request.app.state, "goals_service", None)
+
+
+def _users_or_none(request: Request) -> Optional[UsersService]:
+    return getattr(request.app.state, "users_service", None)
 
 
 def _require_user(user_id: str | None) -> str:
@@ -841,6 +879,51 @@ async def _exec_complete_task(
     if updated is None:
         return {"ok": False, "error": "tarefa não encontrada após atualizar"}
     return {"ok": True, "task": _task_to_inline(updated)}
+
+
+def _fmt_offset_pt(mins: int) -> str:
+    if mins <= 0:
+        return "na hora"
+    if mins % 1440 == 0:
+        d = mins // 1440
+        return "1 dia antes" if d == 1 else f"{d} dias antes"
+    if mins % 60 == 0:
+        h = mins // 60
+        return "1 h antes" if h == 1 else f"{h} h antes"
+    return f"{mins} min antes"
+
+
+async def _exec_set_reminder_defaults(
+    users: Optional[UsersService],
+    user_id: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    if users is None:
+        return {"ok": False, "error": "users service não configurado"}
+    raw = args.get("offsets_minutes")
+    if not isinstance(raw, list):
+        return {"ok": False, "error": "offsets_minutes obrigatório (lista)"}
+    cleaned: list[int] = []
+    for v in raw:
+        try:
+            cleaned.append(int(v))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": f"offset inválido: {v!r}"}
+    try:
+        persisted = await users.set_default_reminder_offsets(user_id, cleaned)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except LookupError:
+        return {"ok": False, "error": "usuário não encontrado"}
+    summary = (
+        ", ".join(_fmt_offset_pt(o) for o in persisted)
+        if persisted else "nenhum (defaults removidos)"
+    )
+    return {
+        "ok": True,
+        "default_reminder_offsets": persisted,
+        "summary": summary,
+    }
 
 
 async def _exec_share_task(
@@ -1139,6 +1222,7 @@ async def _run_agentic_collect(
     habits_svc: Optional[HabitsService],
     knowledge_svc: Optional[KnowledgeService],
     goals_svc: Optional[GoalsService],
+    users_svc: Optional[UsersService] = None,
     svc: ConversationService,
     uid: str,
     conversation_id: str,
@@ -1207,6 +1291,10 @@ async def _run_agentic_collect(
                 result = await _exec_create_goal(goals_svc, uid, args)
             elif name == "share_task":
                 result = await _exec_share_task(tasks_svc, uid, args)
+            elif name == "set_reminder_defaults":
+                result = await _exec_set_reminder_defaults(
+                    users_svc, uid, args,
+                )
             else:
                 result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -1285,6 +1373,7 @@ def _run_agentic_stream(
     habits_svc: Optional[HabitsService],
     knowledge_svc: Optional[KnowledgeService],
     goals_svc: Optional[GoalsService],
+    users_svc: Optional[UsersService],
     svc: ConversationService,
     uid: str,
     conversation_id: str,
@@ -1350,6 +1439,10 @@ def _run_agentic_stream(
                         result = await _exec_create_goal(goals_svc, uid, args)
                     elif name == "share_task":
                         result = await _exec_share_task(tasks_svc, uid, args)
+                    elif name == "set_reminder_defaults":
+                        result = await _exec_set_reminder_defaults(
+                            users_svc, uid, args,
+                        )
                     else:
                         result = {"ok": False, "error": f"tool desconhecida: {name}"}
 
@@ -1481,6 +1574,7 @@ async def stream_message(
     habits_svc = _habits_or_none(request)
     knowledge_svc = _knowledge_or_none(request)
     goals_svc = _goals_or_none(request)
+    users_svc = _users_or_none(request)
 
     user_text = body.content.strip()
     if not user_text:
@@ -1503,7 +1597,7 @@ async def stream_message(
     return _sse_response(
         _run_agentic_stream(
             llm, finance, tasks_svc, recurring_svc,
-            projects_svc, habits_svc, knowledge_svc, goals_svc,
+            projects_svc, habits_svc, knowledge_svc, goals_svc, users_svc,
             svc, uid,
             conversation_id, user_text, msgs, is_first_exchange,
         )
@@ -1617,6 +1711,7 @@ async def stream_message_with_attachment(
     habits_svc = _habits_or_none(request)
     knowledge_svc = _knowledge_or_none(request)
     goals_svc = _goals_or_none(request)
+    users_svc = _users_or_none(request)
 
     ctype = request.headers.get("content-type", "")
     if "multipart/form-data" not in ctype.lower():
@@ -1765,7 +1860,7 @@ async def stream_message_with_attachment(
     return _sse_response(
         _run_agentic_stream(
             llm, finance, tasks_svc, recurring_svc,
-            projects_svc, habits_svc, knowledge_svc, goals_svc,
+            projects_svc, habits_svc, knowledge_svc, goals_svc, users_svc,
             svc, uid,
             conversation_id, title_seed, msgs, is_first_exchange,
         )

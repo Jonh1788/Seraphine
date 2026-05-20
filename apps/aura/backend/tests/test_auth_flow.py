@@ -48,7 +48,12 @@ def test_register_login_me_roundtrip(client):
 
     r = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
-    assert r.json() == {"id": user_id, "email": "a@x.io", "name": "Alice"}
+    assert r.json() == {
+        "id": user_id,
+        "email": "a@x.io",
+        "name": "Alice",
+        "default_reminder_offsets": [],
+    }
 
     # Login with the same creds returns a (new) valid token and the name.
     r = client.post("/auth/login", json={"email": "a@x.io", "password": "hunter2x"})
@@ -177,3 +182,121 @@ def test_finance_isolation_across_users(client):
     b_summary = client.get("/finance/summary?month=4&year=2026", headers=headers_b).json()
     assert a_summary["expenses"] == 42.5
     assert b_summary["expenses"] == 0
+
+
+def test_patch_me_persists_default_reminder_offsets(client):
+    r = client.post(
+        "/auth/register",
+        json={"email": "pref@x.io", "password": "hunter2x", "name": "Pref"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+
+    # Save defaults
+    p = client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [60, 15, 15]},
+    )
+    assert p.status_code == 200, p.text
+    # Service dedupes + sorts before persisting.
+    assert p.json()["default_reminder_offsets"] == [15, 60]
+
+    # /me reflects the persisted defaults
+    me = client.get("/auth/me", headers=h).json()
+    assert me["default_reminder_offsets"] == [15, 60]
+
+
+def test_patch_me_rejects_out_of_range_offsets(client):
+    r = client.post(
+        "/auth/register",
+        json={"email": "bad@x.io", "password": "hunter2x", "name": "Bad"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+    p = client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [60 * 24 * 365]},  # 1 year
+    )
+    assert p.status_code == 422
+
+
+def test_patch_me_rejects_negative_offsets(client):
+    r = client.post(
+        "/auth/register",
+        json={"email": "neg@x.io", "password": "hunter2x", "name": "Neg"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+    p = client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [-5]},
+    )
+    assert p.status_code == 422
+
+
+def test_patch_me_empty_list_clears_defaults(client):
+    r = client.post(
+        "/auth/register",
+        json={"email": "clr@x.io", "password": "hunter2x", "name": "Clr"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+    client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [15]},
+    )
+    p = client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": []},
+    )
+    assert p.status_code == 200
+    assert p.json()["default_reminder_offsets"] == []
+
+
+def test_user_defaults_apply_to_new_tasks(client):
+    """End-to-end: set defaults via PATCH /auth/me, then POST /tasks
+    without reminder_offsets and confirm they're layered in."""
+    r = client.post(
+        "/auth/register",
+        json={"email": "e2e@x.io", "password": "hunter2x", "name": "E2E"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+    client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [15, 60]},
+    )
+    t = client.post(
+        "/tasks", headers=h,
+        json={
+            "type": "generic",
+            "title": "Reunião",
+            "due_date": "2026-05-19",
+            "due_time": "10:00",
+        },
+    )
+    tid = t.json()["id"]
+    g = client.get(f"/tasks/{tid}", headers=h).json()
+    assert g["reminder_offsets"] == [0, 15, 60]
+
+
+def test_user_explicit_offsets_skip_defaults(client):
+    """If the user explicitly passes reminder_offsets on POST, defaults
+    must NOT be layered on top."""
+    r = client.post(
+        "/auth/register",
+        json={"email": "exp@x.io", "password": "hunter2x", "name": "Exp"},
+    ).json()
+    h = {"Authorization": f"Bearer {r['access_token']}"}
+    client.patch(
+        "/auth/me", headers=h,
+        json={"default_reminder_offsets": [15, 60]},
+    )
+    t = client.post(
+        "/tasks", headers=h,
+        json={
+            "type": "generic",
+            "title": "Reunião",
+            "due_date": "2026-05-19",
+            "due_time": "10:00",
+            "reminder_offsets": [1440],
+        },
+    )
+    tid = t.json()["id"]
+    g = client.get(f"/tasks/{tid}", headers=h).json()
+    assert g["reminder_offsets"] == [0, 1440]

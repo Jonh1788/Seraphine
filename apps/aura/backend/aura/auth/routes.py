@@ -88,6 +88,10 @@ async def login(request: Request, body: LoginBody) -> TokenResponse:
     )
 
 
+class UpdateMeBody(BaseModel):
+    default_reminder_offsets: list[int] | None = None
+
+
 @router.get("/me")
 async def me(
     request: Request,
@@ -101,4 +105,41 @@ async def me(
     if email is None:
         raise HTTPException(status_code=401, detail="user not found")
     name = await svc.get_name(user_id)
-    return {"id": user_id, "email": email, "name": name}
+    defaults = await svc.get_default_reminder_offsets(user_id)
+    return {
+        "id": user_id,
+        "email": email,
+        "name": name,
+        "default_reminder_offsets": defaults,
+    }
+
+
+@router.patch("/me")
+async def update_me(
+    request: Request,
+    body: UpdateMeBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="unauthenticated")
+    svc = _service_or_503(request)
+    email = await svc.get_email(user_id)
+    if email is None:
+        raise HTTPException(status_code=401, detail="user not found")
+    if body.default_reminder_offsets is not None:
+        try:
+            await svc.set_default_reminder_offsets(
+                user_id, body.default_reminder_offsets,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except LookupError:
+            raise HTTPException(status_code=404, detail="user not found")
+    name = await svc.get_name(user_id)
+    defaults = await svc.get_default_reminder_offsets(user_id)
+    return {
+        "id": user_id,
+        "email": email,
+        "name": name,
+        "default_reminder_offsets": defaults,
+    }

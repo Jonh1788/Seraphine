@@ -115,8 +115,15 @@ async def lifespan(app: FastAPI):
         )
 
     # ---- Domain services
+    # UsersService is constructed first so TaskService can borrow its
+    # default_reminder_offsets lookup for per-user materialization.
     users_service = UsersService(store)
-    task_service = TaskService(store, llm_client=llm, app_state=app.state)
+    task_service = TaskService(
+        store,
+        llm_client=llm,
+        app_state=app.state,
+        default_offsets_fetcher=users_service.get_default_reminder_offsets,
+    )
     finance_service = FinanceService(store)
     conversations_service = ConversationService(store)
     recurring_service = RecurringService(store, task_service)
@@ -203,6 +210,7 @@ async def lifespan(app: FastAPI):
             knowledge=knowledge_service,
             goals=goals_service,
             conversations=conversations_service,
+            users=users_service,
         )
         whatsapp_service.attach_user_lookup(users_service.get_name)
         if not settings.whatsapp_admin_token:

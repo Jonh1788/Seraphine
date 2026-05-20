@@ -25,6 +25,7 @@ import { TaskEditorModal } from "../components/TaskEditorModal";
 import { RemindersPicker } from "../components/RemindersPicker";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
+import { useAuth } from "../auth/AuthContext";
 
 const WEEKDAY_LABELS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
@@ -840,11 +841,22 @@ interface NewTaskFormProps {
 }
 
 function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
+  const { user } = useAuth();
+  const defaults = user?.default_reminder_offsets ?? [];
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("");
   const [priority, setPriority] = useState<"low" | "med" | "high">("low");
-  const [reminderOffsets, setReminderOffsets] = useState<number[]>([]);
+  // Seed the picker with the user's defaults until they touch it.
+  const [touched, setTouched] = useState(false);
+  const [reminderOffsets, setReminderOffsets] = useState<number[]>(defaults);
+  const effectiveOffsets = touched ? reminderOffsets : defaults;
+
+  const handlePickerChange = (next: number[]) => {
+    setTouched(true);
+    setReminderOffsets(next);
+  };
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -862,8 +874,11 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
         due_date: dueDate || null,
         due_time: dueTime || null,
         priority,
+        // If untouched: omit so backend applies the user's defaults.
+        // If touched: send what's selected (including [] = "no extras").
+        // No due_time → no reminders regardless.
         reminder_offsets:
-          dueTime && reminderOffsets.length > 0 ? reminderOffsets : undefined,
+          dueTime && touched ? reminderOffsets : undefined,
       });
       await onCreated();
     } catch {
@@ -942,9 +957,14 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
             Lembretes extras
           </span>
           <RemindersPicker
-            value={reminderOffsets}
-            onChange={setReminderOffsets}
+            value={effectiveOffsets}
+            onChange={handlePickerChange}
           />
+          {!touched && defaults.length > 0 ? (
+            <span className="text-[10px]" style={{ color: "#4D5E8A" }}>
+              Pré-selecionados do seu perfil — toque para alterar.
+            </span>
+          ) : null}
         </div>
       ) : null}
 

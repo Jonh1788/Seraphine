@@ -114,3 +114,58 @@ async def test_collect_recurring_with_materialized_task_appends_both(monkeypatch
     assert out["recurring"][0]["title"] == "Lixo segunda"
     # The materialized task MUST also land in the tasks accumulator
     assert any(t["id"] == 99 for t in out["tasks"])
+
+
+@pytest.mark.asyncio
+async def test_collect_set_reminder_defaults_calls_users_service(monkeypatch):
+    """The new set_reminder_defaults tool reaches the UsersService and
+    surfaces a confirmation in the tool result, even though the chip is
+    transient (not persisted to message metadata)."""
+    from aura.chat import routes as chat_routes
+
+    users_svc = AsyncMock()
+    users_svc.set_default_reminder_offsets = AsyncMock(return_value=[15, 60])
+
+    llm = MagicMock()
+    call_count = {"n": 0}
+
+    async def _stream(msgs, tools=None, think=False):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            yield _Token(
+                tool_calls=[{
+                    "function": {
+                        "name": "set_reminder_defaults",
+                        "arguments": '{"offsets_minutes":[15,60]}',
+                    },
+                }],
+                done=True,
+            )
+        else:
+            yield _Token(text="Defaults atualizados.", done=True)
+    llm.chat = _stream
+
+    svc = AsyncMock()
+    svc.add_message = AsyncMock(return_value="msg-id")
+
+    out = await chat_routes._run_agentic_collect(
+        llm=llm,
+        finance=AsyncMock(),
+        tasks_svc=AsyncMock(),
+        recurring_svc=AsyncMock(),
+        projects_svc=None,
+        habits_svc=None,
+        knowledge_svc=None,
+        goals_svc=None,
+        users_svc=users_svc,
+        svc=svc,
+        uid="u1",
+        conversation_id="c1",
+        user_text="sempre me lembra 15 min e 1 hora antes",
+        msgs=[],
+        is_first_exchange=False,
+    )
+    assert out["reply"] == "Defaults atualizados."
+    users_svc.set_default_reminder_offsets.assert_awaited_once_with(
+        "u1", [15, 60],
+    )

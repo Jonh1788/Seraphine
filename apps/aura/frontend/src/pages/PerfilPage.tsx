@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Bell,
@@ -18,6 +18,8 @@ import * as googleApi from "../api/google";
 import type { GoogleOAuthStatus } from "../api/google";
 import * as waApi from "../api/whatsapp";
 import type { WhatsAppStatus } from "../api/whatsapp";
+import * as authApi from "../api/auth";
+import { RemindersPicker } from "../components/RemindersPicker";
 import { WhatsAppConnectModal } from "../components/WhatsAppConnectModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
@@ -34,7 +36,7 @@ function shortName(email: string | undefined): string {
 }
 
 export function PerfilPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, setUser } = useAuth();
   const push = usePushSubscription();
 
   const [tz, setTz] = useState("Brasília · UTC−3");
@@ -188,8 +190,15 @@ export function PerfilPage() {
         />
       </Section>
 
+      {/* Lembretes padrão */}
+      <ReminderDefaultsSection
+        user={user}
+        onSaved={(updated) => setUser(updated)}
+        delayStyle={animDelay(3)}
+      />
+
       {/* Integrações */}
-      <Section title="Integrações" delayStyle={animDelay(3)}>
+      <Section title="Integrações" delayStyle={animDelay(4)}>
         <Row
           iconBg="#25D366"
           icon={<WppIcon />}
@@ -326,7 +335,7 @@ export function PerfilPage() {
       </Section>
 
       {/* Zona de Perigo */}
-      <Section title="Zona de Perigo" delayStyle={animDelay(4)} danger>
+      <Section title="Zona de Perigo" delayStyle={animDelay(5)} danger>
         <Row
           icon={<Lock className="h-4 w-4" strokeWidth={2.2} />}
           label="Redefinir senha"
@@ -347,7 +356,7 @@ export function PerfilPage() {
         onClick={onLogout}
         className="mx-4 mt-4 mb-4 w-[calc(100%-32px)] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-[14px] text-[13px] font-semibold screen-item"
         style={{
-          ...animDelay(5),
+          ...animDelay(6),
           background: "rgba(255,91,114,0.10)",
           border: "1px solid rgba(255,91,114,0.25)",
           color: "#FF5B72",
@@ -417,6 +426,97 @@ function Section({
         {title}
       </header>
       <div>{children}</div>
+    </section>
+  );
+}
+
+interface ReminderDefaultsSectionProps {
+  user: { default_reminder_offsets?: number[] } | null;
+  onSaved: (updated: import("../types/api").User) => void;
+  delayStyle: React.CSSProperties;
+}
+
+function ReminderDefaultsSection({
+  user, onSaved, delayStyle,
+}: ReminderDefaultsSectionProps) {
+  const initial = user?.default_reminder_offsets ?? [];
+  const [offsets, setOffsets] = useState<number[]>(initial);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const timerRef = useRef<number | null>(null);
+  const lastSentRef = useRef<string>(JSON.stringify(initial));
+  const inFlightRef = useRef<boolean>(false);
+
+  // Re-seed from server-side user when it changes (e.g. first hydrate).
+  useEffect(() => {
+    const next = user?.default_reminder_offsets ?? [];
+    setOffsets(next);
+    lastSentRef.current = JSON.stringify(next);
+  }, [user?.default_reminder_offsets]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const flush = async (next: number[]) => {
+    const serialized = JSON.stringify(next);
+    if (serialized === lastSentRef.current || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setSaveState("saving");
+    try {
+      const updated = await authApi.updateMe({ default_reminder_offsets: next });
+      lastSentRef.current = JSON.stringify(updated.default_reminder_offsets ?? []);
+      onSaved(updated);
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    } finally {
+      inFlightRef.current = false;
+    }
+  };
+
+  const onChange = (next: number[]) => {
+    setOffsets(next);
+    setSaveState("idle");
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => void flush(next), 600);
+  };
+
+  return (
+    <section
+      className="mx-4 mb-3.5 rounded-[18px] overflow-hidden screen-item"
+      style={{
+        ...delayStyle,
+        background: "#0C1228",
+        border: "1px solid rgba(99,130,255,0.10)",
+      }}
+    >
+      <header
+        className="px-4 pt-3.5 pb-2 text-[10px] font-bold tracking-[0.12em] uppercase flex items-center gap-2"
+        style={{ color: "#4D5E8A" }}
+      >
+        <span>Lembretes padrão</span>
+        {saveState === "saving" ? (
+          <span className="ml-auto normal-case tracking-normal" style={{ color: "#8B9CC8", fontSize: 10 }}>
+            Salvando…
+          </span>
+        ) : saveState === "saved" ? (
+          <span className="ml-auto normal-case tracking-normal" style={{ color: "#2DD4BF", fontSize: 10 }}>
+            Salvo
+          </span>
+        ) : saveState === "error" ? (
+          <span className="ml-auto normal-case tracking-normal" style={{ color: "#FF5B72", fontSize: 10 }}>
+            Erro ao salvar
+          </span>
+        ) : null}
+      </header>
+      <div className="px-4 pb-4">
+        <p className="text-[11px] mb-3" style={{ color: "#8B9CC8" }}>
+          Aplicados automaticamente a tarefas com horário (você pode sobrescrever por tarefa).
+        </p>
+        <RemindersPicker value={offsets} onChange={onChange} />
+      </div>
     </section>
   );
 }

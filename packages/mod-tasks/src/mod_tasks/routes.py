@@ -76,22 +76,32 @@ def _validate_offsets(raw: list[int] | None) -> list[int] | None:
     return cleaned
 
 
-def _materialize_offsets(
-    user_offsets: list[int] | None, due_time: str | None,
+async def _materialize_offsets(
+    user_offsets: list[int] | None,
+    due_time: str | None,
+    svc: TaskService,
+    user_id: str | None,
 ) -> list[int] | None:
-    """Apply the spec's decision rule.
+    """Apply the spec's decision rule, layering per-user defaults under
+    explicit picks.
 
-    - user_offsets provided → ``sorted(set([0] + offsets))`` (always
-      include 0 = at-due).
-    - user_offsets None and due_time set → ``[0]`` (default on-time).
+    - user_offsets None and due_time set → ``sorted(set([0] + defaults))``
+      (defaults are layered in; fetcher returns [] when not wired).
     - user_offsets None and due_time None → None (store nothing).
-    - user_offsets == [] (explicit empty) → [] (caller wants no reminders
-      at all).
+    - user_offsets == [] (explicit empty) → [] when no due_time, or [0]
+      when due_time is set — the user is being explicit about wanting
+      no extras, so defaults are NOT applied.
+    - user_offsets provided non-empty → ``sorted(set([0] + offsets))``
+      (always include 0 = at-due; defaults are NOT applied because the
+      user is being explicit).
     """
     if user_offsets is None:
-        return [0] if due_time else None
+        if not due_time:
+            return None
+        defaults = await svc.get_default_offsets(user_id)
+        return sorted({0, *defaults})
     if not user_offsets:
-        return []
+        return [0] if due_time else []
     return sorted({0, *user_offsets})
 
 
@@ -214,7 +224,9 @@ async def create_task(
             tags=body.tags,
             remind=body.remind,
         )
-        materialized = _materialize_offsets(validated_offsets, body.due_time)
+        materialized = await _materialize_offsets(
+            validated_offsets, body.due_time, svc, user_id,
+        )
         if materialized is not None:
             await svc.set_reminder_offsets(
                 str(task_id), user_id or "", materialized,
@@ -347,7 +359,9 @@ async def update_task(
             persisted = await svc.get_task(task_id, user_id=user_id)
             new_due_time = persisted.due_time if persisted else None
     if offsets_provided:
-        materialized = _materialize_offsets(offsets_val, new_due_time)
+        materialized = await _materialize_offsets(
+            offsets_val, new_due_time, svc, user_id,
+        )
         if materialized is None:
             materialized = []
         await svc.set_reminder_offsets(

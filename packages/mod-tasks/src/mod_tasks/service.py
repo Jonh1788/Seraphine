@@ -99,6 +99,9 @@ class TaskService:
         google_client: Any = None,
         llm_client: Any = None,
         app_state: Any = None,
+        default_offsets_fetcher: (
+            Callable[[str], Awaitable[list[int]]] | None
+        ) = None,
     ) -> None:
         self._store = store
         self._google = google_client
@@ -110,6 +113,25 @@ class TaskService:
         self._user_id_to_email: Callable[[str], Awaitable[str | None]] | None = None
         # Duck-typed: must expose `async send_to_user(user_id, payload) -> int`.
         self._push: Any | None = None
+        # Optional per-user default reminder offsets lookup. Seraphine
+        # (single-tenant) leaves this None and gets no defaults applied.
+        self._default_offsets_fetcher = default_offsets_fetcher
+
+    async def get_default_offsets(self, user_id: str | None) -> list[int]:
+        """Return the user's default reminder offsets via the injected
+        fetcher, or [] when no fetcher is wired or the call fails."""
+        if self._default_offsets_fetcher is None or not user_id:
+            return []
+        try:
+            result = await self._default_offsets_fetcher(user_id)
+        except Exception:
+            logger.exception(
+                "default_offsets_fetcher raised for user=%s", user_id,
+            )
+            return []
+        if not result:
+            return []
+        return [int(v) for v in result if isinstance(v, int) and not isinstance(v, bool)]
 
     async def aclose(self) -> None:  # pragma: no cover - trivial
         return None
