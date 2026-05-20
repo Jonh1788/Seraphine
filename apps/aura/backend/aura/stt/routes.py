@@ -97,4 +97,10 @@ async def transcribe(
             status_code=500, detail="falha ao transcrever áudio",
         )
 
+    # Why: temp diagnostic — investigating empty-text returns from Groq
+    # on short PT-BR clips. Remove after one round of confirmation.
+    logger.info(
+        "transcribe: audio_bytes=%d text_len=%d text=%r",
+        len(data), len(text), text[:200],
+    )
     return {"text": text}
