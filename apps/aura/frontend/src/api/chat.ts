@@ -32,6 +32,9 @@ export interface InlineRecurring {
   last_materialized_date?: string | null;
   created_at: string;
   updated_at: string;
+  // null = inherit from user defaults at materialize time; [] = explicit
+  // "no extras" (the occurrence still fires at the scheduled time).
+  reminder_offsets?: number[] | null;
 }
 
 export interface AttachmentMetadata {

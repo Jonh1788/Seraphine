@@ -48,32 +48,12 @@ def _service_or_503(request: Request) -> TaskService:
 # ------------------------------------------------------------------
 
 REMIND_VALUES = {"at_time", "1h_before", "1d_before"}
-# 30 days in minutes — anything larger is almost certainly a unit mistake.
-MAX_OFFSET_MINUTES = 60 * 24 * 30
 
+# Re-exported for back-compat: existing call sites import these names from
+# ``mod_tasks.routes``. New code should import from ``mod_tasks.offsets``.
+from mod_tasks.offsets import MAX_OFFSET_MINUTES, validate_offsets  # noqa: E402,F401
 
-def _validate_offsets(raw: list[int] | None) -> list[int] | None:
-    """Validate user-supplied offsets. Returns None if input is None.
-    Raises 422 on negative / out-of-range values."""
-    if raw is None:
-        return None
-    cleaned: list[int] = []
-    for o in raw:
-        if not isinstance(o, int) or isinstance(o, bool):
-            raise HTTPException(
-                status_code=422,
-                detail="reminder_offsets must be integers (minutes)",
-            )
-        if o < 0 or o > MAX_OFFSET_MINUTES:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"reminder_offsets must be 0..{MAX_OFFSET_MINUTES}"
-                    f" (got {o})"
-                ),
-            )
-        cleaned.append(o)
-    return cleaned
+_validate_offsets = validate_offsets  # legacy alias
 
 
 async def _materialize_offsets(

@@ -68,6 +68,34 @@ async def svc(tmp_path: Path):
     await store.aclose()
 
 
+@pytest.fixture
+async def svc_with_defaults(tmp_path: Path):
+    """Same as `svc` but the TaskService has a default_offsets fetcher
+    returning [60] for u-a and [] for u-b."""
+    store = Store(str(tmp_path / "rec.sqlite"))
+    store.register_migrator("aura_users", _migrate_users_table)
+    store.register_migrator("mod_tasks", tasks_schema.migrate)
+    store.register_migrator("aura_recurring", recurring_schema.migrate)
+    await store.ensure_schema()
+    with store._connect() as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, created_at)"
+            " VALUES ('u-a', 'a@x.io', 'x', '2026-04-01')"
+        )
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, created_at)"
+            " VALUES ('u-b', 'b@x.io', 'x', '2026-04-01')"
+        )
+
+    async def fetcher(uid: str) -> list[int]:
+        return [60] if uid == "u-a" else []
+
+    tasks = TaskService(store, default_offsets_fetcher=fetcher)
+    recurring = RecurringService(store, tasks)
+    yield recurring, tasks
+    await store.aclose()
+
+
 async def test_create_and_list_user_scoped(svc):
     recurring, _ = svc
     r_a = await recurring.create(
@@ -216,6 +244,119 @@ async def test_delete_scoped_by_user(svc):
 
 
 # ---------------------------------------------------------------------------
+# Multi-offset reminder propagation
+# ---------------------------------------------------------------------------
+
+
+async def test_create_persists_reminder_offsets(svc):
+    recurring, _ = svc
+    rule = await recurring.create(
+        user_id="u-a", title="x", frequency="daily", time="10:00",
+        reminder_offsets=[15, 60],
+    )
+    assert rule.reminder_offsets == [15, 60]
+
+    # Round-trip read.
+    got = await recurring.get(rule.id, "u-a")
+    assert got is not None
+    assert got.reminder_offsets == [15, 60]
+
+
+async def test_create_null_offsets_persists_null(svc):
+    recurring, _ = svc
+    rule = await recurring.create(
+        user_id="u-a", title="x", frequency="daily", time="10:00",
+    )
+    assert rule.reminder_offsets is None
+    got = await recurring.get(rule.id, "u-a")
+    assert got is not None
+    assert got.reminder_offsets is None
+
+
+async def test_materialize_applies_rule_offsets(svc):
+    """Rule offsets [15, 60] → materialized task gets [0, 15, 60]."""
+    recurring, tasks = svc
+    monday = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
+    rule = await recurring.create(
+        user_id="u-a", title="lixo", frequency="weekly", weekday=0,
+        time="10:00", reminder_offsets=[15, 60],
+    )
+    created = await recurring.materialize_due(monday)
+    assert len(created) == 1
+    task_id = created[0][1]
+    persisted = await tasks.get_reminder_offsets(str(task_id), "u-a")
+    assert persisted == [0, 15, 60]
+    del rule  # silence unused
+
+
+async def test_materialize_null_offsets_uses_user_defaults(svc_with_defaults):
+    """Rule with NULL offsets + user defaults [60] → task gets [0, 60]."""
+    recurring, tasks = svc_with_defaults
+    monday = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
+    await recurring.create(
+        user_id="u-a", title="x", frequency="weekly", weekday=0,
+        time="10:00",
+    )
+    created = await recurring.materialize_due(monday)
+    assert len(created) == 1
+    task_id = created[0][1]
+    assert await tasks.get_reminder_offsets(str(task_id), "u-a") == [0, 60]
+
+
+async def test_materialize_null_offsets_no_defaults_stays_zero(svc_with_defaults):
+    """Rule with NULL offsets + user with no defaults → task gets [0]
+    (preserves pre-feature 'at least fire at the time' UX)."""
+    recurring, tasks = svc_with_defaults
+    monday = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
+    await recurring.create(
+        user_id="u-b", title="x", frequency="weekly", weekday=0,
+        time="10:00",
+    )
+    created = await recurring.materialize_due(monday)
+    assert len(created) == 1
+    task_id = created[0][1]
+    assert await tasks.get_reminder_offsets(str(task_id), "u-b") == [0]
+
+
+async def test_materialize_empty_offsets_keeps_zero(svc_with_defaults):
+    """Rule with explicit [] (user said 'no extras') → task gets [0];
+    user defaults are NOT applied because the rule is being explicit."""
+    recurring, tasks = svc_with_defaults
+    monday = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
+    await recurring.create(
+        user_id="u-a", title="x", frequency="weekly", weekday=0,
+        time="10:00", reminder_offsets=[],
+    )
+    created = await recurring.materialize_due(monday)
+    assert len(created) == 1
+    task_id = created[0][1]
+    assert await tasks.get_reminder_offsets(str(task_id), "u-a") == [0]
+
+
+async def test_update_offsets_round_trip(svc):
+    recurring, _ = svc
+    rule = await recurring.create(
+        user_id="u-a", title="x", frequency="daily", time="10:00",
+    )
+    updated = await recurring.update(
+        rule.id, "u-a",
+        reminder_offsets=[15, 1440],
+        _reminder_offsets_provided=True,
+    )
+    assert updated is not None
+    assert updated.reminder_offsets == [15, 1440]
+
+    # Clear back to None (inherit defaults).
+    cleared = await recurring.update(
+        rule.id, "u-a",
+        reminder_offsets=None,
+        _reminder_offsets_provided=True,
+    )
+    assert cleared is not None
+    assert cleared.reminder_offsets is None
+
+
+# ---------------------------------------------------------------------------
 # HTTP roundtrip — full app, JWT-protected
 # ---------------------------------------------------------------------------
 
@@ -279,3 +420,63 @@ def test_http_recurring_crud_scoped(client):
 def test_http_unauth_rejected(client):
     assert client.get("/recurring").status_code == 401
     assert client.post("/recurring", json={"title": "x", "frequency": "daily"}).status_code == 401
+
+
+def test_http_recurring_offsets_round_trip(client):
+    a = client.post(
+        "/auth/register",
+        json={"email": "a@x.io", "password": "hunter2x", "name": "A"},
+    ).json()
+    ha = {"Authorization": f"Bearer {a['access_token']}"}
+
+    r = client.post(
+        "/recurring", headers=ha,
+        json={
+            "title": "lixo", "frequency": "daily", "time": "10:00",
+            "reminder_offsets": [15, 60],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()["recurring"]
+    assert body["reminder_offsets"] == [15, 60]
+
+    # GET surfaces the field.
+    listed = client.get("/recurring", headers=ha).json()["recurring"]
+    assert listed[0]["reminder_offsets"] == [15, 60]
+
+    # PATCH can clear it.
+    rid = body["id"]
+    r2 = client.patch(
+        f"/recurring/{rid}", headers=ha,
+        json={"reminder_offsets": None},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["recurring"]["reminder_offsets"] is None
+
+
+def test_http_recurring_offsets_out_of_range_422(client):
+    a = client.post(
+        "/auth/register",
+        json={"email": "a@x.io", "password": "hunter2x", "name": "A"},
+    ).json()
+    ha = {"Authorization": f"Bearer {a['access_token']}"}
+
+    # Negative.
+    r = client.post(
+        "/recurring", headers=ha,
+        json={
+            "title": "x", "frequency": "daily", "time": "10:00",
+            "reminder_offsets": [-5],
+        },
+    )
+    assert r.status_code == 422
+
+    # > 30 days in minutes (43200).
+    r = client.post(
+        "/recurring", headers=ha,
+        json={
+            "title": "x", "frequency": "daily", "time": "10:00",
+            "reminder_offsets": [43201],
+        },
+    )
+    assert r.status_code == 422

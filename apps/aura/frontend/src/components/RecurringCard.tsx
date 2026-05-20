@@ -1,4 +1,4 @@
-import { RefreshCw, Clock } from "lucide-react";
+import { RefreshCw, Clock, Bell } from "lucide-react";
 import type { InlineRecurring } from "../api/chat";
 
 interface Props {
@@ -55,7 +55,24 @@ export function RecurringBlock({ rules }: Props) {
   );
 }
 
+function fmtOffset(mins: number): string {
+  if (mins <= 0) return "Na hora";
+  if (mins % 1440 === 0) {
+    const d = mins / 1440;
+    return d === 1 ? "1 dia antes" : `${d} dias antes`;
+  }
+  if (mins % 60 === 0) {
+    const h = mins / 60;
+    return h === 1 ? "1 h antes" : `${h} h antes`;
+  }
+  return `${mins} min antes`;
+}
+
 function RuleCard({ rule }: { rule: InlineRecurring }) {
+  const offsets = rule.reminder_offsets;
+  // Display only per-rule overrides; null/[] = "no extras" or "user defaults"
+  // which we don't render here to keep the card terse.
+  const extras = offsets && offsets.length > 0 ? offsets.filter((o) => o > 0) : [];
   return (
     <div className="flex items-start gap-3 rounded-lg bg-white/[0.03] border border-white/5 p-3">
       <RefreshCw className="h-5 w-5 mt-0.5 shrink-0 text-accent-purple" />
@@ -67,6 +84,12 @@ function RuleCard({ rule }: { rule: InlineRecurring }) {
           <Clock className="h-3 w-3" />
           {prettySchedule(rule)}
         </div>
+        {extras.length > 0 ? (
+          <div className="flex items-center gap-1 mt-1 text-xs text-ink-faint flex-wrap">
+            <Bell className="h-3 w-3" />
+            {extras.map(fmtOffset).join(" · ")}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -30,3 +30,10 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON recurring_tasks(active, last_materialized_date);
         """
     )
+
+    # Idempotent: add reminder_offsets column to existing tables. Stored as
+    # JSON-encoded list[int]; NULL = "use the user's profile defaults at
+    # materialize time" (preserves pre-feature behavior).
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(recurring_tasks)").fetchall()}
+    if "reminder_offsets" not in cols:
+        conn.execute("ALTER TABLE recurring_tasks ADD COLUMN reminder_offsets TEXT")

@@ -9,12 +9,14 @@ the loop N times on the same day creates at most one task per rule.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
 from core_db import Store
+from mod_tasks.offsets import validate_offsets
 from mod_tasks.service import TaskService
 
 from aura.recurring.models import RecurringRule
@@ -24,12 +26,36 @@ logger = logging.getLogger(__name__)
 
 _SELECT_COLS = (
     "id, user_id, title, description, frequency, weekday, day_of_month,"
-    " time, active, last_materialized_date, created_at, updated_at"
+    " time, active, last_materialized_date, created_at, updated_at,"
+    " reminder_offsets"
 )
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_offsets(raw: str | None) -> list[int] | None:
+    if raw is None:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(decoded, list):
+        return None
+    out: list[int] = []
+    for v in decoded:
+        if isinstance(v, bool) or not isinstance(v, int):
+            continue
+        out.append(v)
+    return out
+
+
+def _encode_offsets(offsets: list[int] | None) -> str | None:
+    if offsets is None:
+        return None
+    return json.dumps(sorted({int(o) for o in offsets}))
 
 
 def _row_to_rule(row: tuple[Any, ...]) -> RecurringRule:
@@ -46,6 +72,7 @@ def _row_to_rule(row: tuple[Any, ...]) -> RecurringRule:
         last_materialized_date=row[9],
         created_at=row[10],
         updated_at=row[11],
+        reminder_offsets=_parse_offsets(row[12] if len(row) > 12 else None),
     )
 
 
@@ -91,6 +118,7 @@ class RecurringService:
         day_of_month: int | None = None,
         time: str | None = None,
         description: str | None = None,
+        reminder_offsets: list[int] | None = None,
     ) -> RecurringRule:
         if frequency not in ("daily", "weekly", "monthly"):
             raise ValueError(f"frequency inválida: {frequency!r}")
@@ -103,6 +131,11 @@ class RecurringService:
         if day_of_month is not None and not (1 <= day_of_month <= 31):
             raise ValueError("day_of_month deve estar entre 1..31")
 
+        # validate_offsets raises HTTPException(422) on bad inputs — routes
+        # surface that directly; programmatic callers (chat tool) catch it.
+        validated_offsets = validate_offsets(reminder_offsets)
+        offsets_blob = _encode_offsets(validated_offsets)
+
         rid = str(uuid.uuid4())
         ts = _now_iso()
 
@@ -112,11 +145,12 @@ class RecurringService:
                     "INSERT INTO recurring_tasks"
                     " (id, user_id, title, description, frequency, weekday,"
                     "  day_of_month, time, active, last_materialized_date,"
-                    "  created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)",
+                    "  created_at, updated_at, reminder_offsets)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?)",
                     (rid, user_id, title.strip(),
                      (description or "").strip() or None,
-                     frequency, weekday, day_of_month, time, ts, ts),
+                     frequency, weekday, day_of_month, time, ts, ts,
+                     offsets_blob),
                 )
                 row = conn.execute(
                     f"SELECT {_SELECT_COLS} FROM recurring_tasks WHERE id = ?",
@@ -173,10 +207,12 @@ class RecurringService:
         day_of_month: int | None = None,
         title: str | None = None,
         description: str | None = None,
+        reminder_offsets: list[int] | None = None,
         _time_provided: bool = False,
         _weekday_provided: bool = False,
         _day_of_month_provided: bool = False,
         _description_provided: bool = False,
+        _reminder_offsets_provided: bool = False,
     ) -> RecurringRule | None:
         """Patch-style update. Fields not mentioned stay untouched."""
         sets: list[str] = []
@@ -203,6 +239,10 @@ class RecurringService:
         if _description_provided:
             sets.append("description = ?")
             params.append((description or "").strip() or None)
+        if _reminder_offsets_provided:
+            validated = validate_offsets(reminder_offsets)
+            sets.append("reminder_offsets = ?")
+            params.append(_encode_offsets(validated))
 
         if not sets:
             return await self.get(rule_id, user_id)
@@ -271,6 +311,28 @@ class RecurringService:
                 )
         return created
 
+    async def _apply_reminder_offsets(
+        self, rule: RecurringRule, task_id: int,
+    ) -> None:
+        """Push the rule's offsets (or the user's profile defaults) onto
+        the freshly-materialized task. Always includes 0 so the occurrence
+        fires at the scheduled time — preserves today's UX for rules that
+        never had per-rule overrides set."""
+        if rule.reminder_offsets is not None:
+            base = rule.reminder_offsets
+        else:
+            base = await self._tasks.get_default_offsets(rule.user_id)
+        final = sorted({0, *(int(o) for o in base)})
+        try:
+            await self._tasks.set_reminder_offsets(
+                str(task_id), rule.user_id, final,
+            )
+        except Exception:
+            logger.exception(
+                "set_reminder_offsets failed for task %s (rule %s)",
+                task_id, rule.id,
+            )
+
     async def _materialize_rule(
         self, rule: RecurringRule, today_iso: str,
     ) -> int | None:
@@ -306,6 +368,7 @@ class RecurringService:
             due_time=rule.time,
             user_id=rule.user_id,
         )
+        await self._apply_reminder_offsets(rule, task_id)
         return task_id
 
     async def materialize_for_rule_if_due(

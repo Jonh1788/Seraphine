@@ -23,6 +23,9 @@ class CreateRecurringBody(BaseModel):
     day_of_month: int | None = None
     time: str | None = None
     description: str | None = None
+    # None = use the user's profile defaults at materialize time.
+    # [] = explicit "no extras" (occurrence still fires at the time).
+    reminder_offsets: list[int] | None = None
 
 
 class PatchRecurringBody(BaseModel):
@@ -32,6 +35,7 @@ class PatchRecurringBody(BaseModel):
     day_of_month: int | None = None
     title: str | None = None
     description: str | None = None
+    reminder_offsets: list[int] | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -79,6 +83,7 @@ async def create_rule(
             day_of_month=body.day_of_month,
             time=body.time,
             description=body.description,
+            reminder_offsets=body.reminder_offsets,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -105,10 +110,12 @@ async def patch_rule(
             day_of_month=fields.get("day_of_month"),
             title=fields.get("title"),
             description=fields.get("description"),
+            reminder_offsets=fields.get("reminder_offsets"),
             _time_provided="time" in fields,
             _weekday_provided="weekday" in fields,
             _day_of_month_provided="day_of_month" in fields,
             _description_provided="description" in fields,
+            _reminder_offsets_provided="reminder_offsets" in fields,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

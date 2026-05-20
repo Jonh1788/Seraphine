@@ -138,6 +138,8 @@ def _build_system_prompt() -> str:
         "dia' use daily; 'toda segunda/terça/...' use weekly com weekday; "
         "'todo mês dia X' use monthly com day_of_month. Após criar, confirme "
         "com mensagem curta — o card da regra recorrente aparece visualmente. "
+        "Para tarefas recorrentes, reminder_offsets_minutes funciona igual "
+        "ao create_task: vale para CADA ocorrência materializada. "
         "Se o usuário anexou um arquivo (nota fiscal, recibo, fatura), "
         "interprete o conteúdo extraído e registre o TOTAL como uma transação "
         "única via register_transaction, com description = nome do "
@@ -352,6 +354,21 @@ _TOOLS: list[dict[str, Any]] = [
                     "description": "HH:MM 24h; opcional",
                 },
                 "description": {"type": "string"},
+                "reminder_offsets_minutes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 43200,
+                    },
+                    "description": (
+                        "Lista de minutos ANTES do horário aplicada a CADA "
+                        "ocorrência materializada. Use [15, 60, 1440] para "
+                        "'15 min, 1 h, 1 dia antes'. Omitir para usar os "
+                        "defaults do perfil. O sistema sempre inclui o "
+                        "lembrete na hora exata além dos offsets pedidos."
+                    ),
+                },
             },
             "required": ["title", "frequency"],
         },
@@ -980,6 +997,18 @@ async def _exec_create_recurring_task(
         time = None
     description = (args.get("description") or "").strip() or None
 
+    raw_offsets = args.get("reminder_offsets_minutes")
+    offsets: list[int] | None
+    if raw_offsets is None:
+        offsets = None
+    elif isinstance(raw_offsets, list):
+        try:
+            offsets = [int(v) for v in raw_offsets]
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "reminder_offsets_minutes inválido"}
+    else:
+        return {"ok": False, "error": "reminder_offsets_minutes inválido"}
+
     try:
         rule = await recurring.create(
             user_id=user_id,
@@ -989,7 +1018,10 @@ async def _exec_create_recurring_task(
             day_of_month=day_i,
             time=time,
             description=description,
+            reminder_offsets=offsets,
         )
+    except HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)}
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
