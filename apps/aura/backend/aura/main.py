@@ -65,6 +65,7 @@ from aura.recurring import schema as recurring_schema
 from aura.recurring.routes import router as recurring_router
 from aura.recurring.service import RecurringService
 from aura.stt.routes import router as stt_router
+from aura.stt.groq_service import GroqSTTService
 from aura.stt.service import STTService
 from aura.whatsapp import schema as whatsapp_schema
 from aura.whatsapp.bridge_client import BridgeClient
@@ -154,30 +155,52 @@ async def lifespan(app: FastAPI):
     # Google Calendar (no-op when the user hasn't connected Google).
     google_calendar_sync.register(task_service, google_auth_service)
 
-    # ---- STT (lazy model load on first /chat/transcribe call).
-    # mkdir is best-effort: in dev the default /data isn't writable;
-    # devs can override via AURA_WHISPER_CACHE_DIR. The transcribe call
-    # will surface a clear error if the cache dir really is unusable.
-    try:
-        settings.whisper_cache_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        logger.warning(
-            "STT cache dir %s not writable (%s) — set "
-            "AURA_WHISPER_CACHE_DIR if you intend to use /chat/transcribe",
-            settings.whisper_cache_dir, e,
+    # ---- STT — prefer Groq when key is present, fall back to local
+    # faster-whisper. Both classes expose the same async transcribe()
+    # so the chat route doesn't branch.
+    stt_service: Any
+    use_groq = (
+        settings.stt_provider == "groq" and bool(settings.groq_api_key.strip())
+    )
+    if use_groq:
+        stt_service = GroqSTTService(
+            api_key=settings.groq_api_key.strip(),
+            model=settings.groq_stt_model,
         )
-    stt_service = STTService(
-        model_name=settings.whisper_model,
-        compute_type=settings.whisper_compute_type,
-        cache_dir=settings.whisper_cache_dir,
-    )
-    logger.info(
-        "STT service wired (model=%s, compute=%s, cache=%s) — "
-        "first request will download ~500MB",
-        settings.whisper_model,
-        settings.whisper_compute_type,
-        settings.whisper_cache_dir,
-    )
+        logger.info(
+            "STT service wired (groq, model=%s)", settings.groq_stt_model,
+        )
+    else:
+        # Local model needs a writable cache dir; mkdir is best-effort
+        # so a missing /data only surfaces when transcribe is actually
+        # called.
+        try:
+            settings.whisper_cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(
+                "STT cache dir %s not writable (%s) — set "
+                "AURA_WHISPER_CACHE_DIR if you intend to use /chat/transcribe",
+                settings.whisper_cache_dir, e,
+            )
+        stt_service = STTService(
+            model_name=settings.whisper_model,
+            compute_type=settings.whisper_compute_type,
+            cache_dir=settings.whisper_cache_dir,
+        )
+        if settings.stt_provider == "groq":
+            logger.warning(
+                "STT provider=groq but AURA_GROQ_API_KEY is empty — "
+                "falling back to local whisper (model=%s)",
+                settings.whisper_model,
+            )
+        else:
+            logger.info(
+                "STT service wired (local whisper, model=%s, compute=%s, "
+                "cache=%s) — first request will download ~500MB",
+                settings.whisper_model,
+                settings.whisper_compute_type,
+                settings.whisper_cache_dir,
+            )
 
     # ---- WhatsApp — backend chosen by settings.whatsapp_backend
     whatsapp_client: Any = None
@@ -313,6 +336,11 @@ async def lifespan(app: FastAPI):
                     await t
                 except (asyncio.CancelledError, Exception):
                     pass
+        if hasattr(stt_service, "aclose"):
+            try:
+                await stt_service.aclose()
+            except Exception:
+                logger.exception("stt aclose failed")
         if whatsapp_client is not None:
             try:
                 await whatsapp_client.aclose()

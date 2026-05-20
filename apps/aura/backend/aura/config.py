@@ -82,7 +82,15 @@ class Settings(BaseSettings):
     vapid_private_pem: str = ""
     vapid_public_b64: str = ""
 
-    # --- STT (speech-to-text) — faster-whisper
+    # --- STT (speech-to-text)
+    # Provider: "groq" (cloud whisper-large-v3-turbo, ~250 ms / 30 s) or
+    # "local" (faster-whisper on CPU). main.py picks Groq when the key is
+    # present and provider != "local"; otherwise it falls back to local.
+    stt_provider: str = "groq"
+    groq_api_key: str = ""
+    groq_stt_model: str = "whisper-large-v3-turbo"
+    # Local-backend knobs (used when stt_provider == "local" or when
+    # Groq is selected but no key is configured).
     # The model is lazy-loaded on the first /chat/transcribe call so
     # startup isn't blocked by a ~500MB download. Swap `whisper_model`
     # for "tiny" / "base" / "medium" / "large-v3" as capacity grows.
