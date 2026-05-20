@@ -304,8 +304,7 @@ class PushService:
                     "   ON d.task_id = CAST(t.id AS TEXT)"
                     "   AND d.user_id = t.user_id"
                     "   AND d.offset_minutes = o.offset_minutes"
-                    " WHERE t.type = 'reminder'"
-                    "   AND t.status = 'pending'"
+                    " WHERE t.status = 'pending'"
                     "   AND t.due_date IS NOT NULL"
                     "   AND d.task_id IS NULL",
                 ).fetchall()

@@ -80,6 +80,33 @@ async def test_three_offsets_fire_three_pushes_then_idempotent(store: Store) -> 
     assert push.send_to_user.await_count == 0
 
 
+async def test_generic_task_with_due_time_also_fires(store: Store) -> None:
+    """A type='generic' task with due_time + offsets must dispatch too.
+    Reason: in prod 2026-05-19 a generic task at 19h was created via the
+    chat agent (LLM picked create_task not create_reminder) and the user
+    never got a WhatsApp reminder because the dispatcher filtered
+    type='reminder'. The presence of a task_reminder_offsets row is now
+    the contract that says 'notify me'."""
+    tasks = TaskService(store)
+    fire_dt = datetime.now() - timedelta(minutes=2)
+    due_date = fire_dt.strftime("%Y-%m-%d")
+    due_time = fire_dt.strftime("%H:%M")
+    tid = await tasks.create_task(
+        type="generic", title="Melhorar Aura", description="",
+        source="chat", payload={},
+        due_date=due_date, due_time=due_time,
+        user_id="u1",
+    )
+    await tasks.set_reminder_offsets(str(tid), "u1", [0])
+
+    push = _make_push(store, tasks)
+    push.send_to_user = AsyncMock(return_value=1)  # type: ignore[method-assign]
+    count = await push.dispatch_due_reminders()
+    assert count == 1
+    tags = {call.args[1]["tag"] for call in push.send_to_user.await_args_list}
+    assert tags == {f"reminder-{tid}-0"}
+
+
 async def test_future_offsets_do_not_fire(store: Store) -> None:
     """A reminder due 10 minutes from now with offsets [0, 60] → only
     the 60-min-before offset has already fired (10 - 60 = past); the
