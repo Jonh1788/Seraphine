@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  Bell,
   Calendar,
   Check,
   ChevronDown,
@@ -15,6 +16,7 @@ import {
   BarChart3,
   Loader2,
   Plus,
+  RefreshCw,
   TrendingUp,
   Users,
 } from "lucide-react";
@@ -23,6 +25,13 @@ import type { Task, TaskStatus } from "../types/api";
 import { Sheet } from "../components/Sheet";
 import { TaskEditorModal } from "../components/TaskEditorModal";
 import { RemindersPicker } from "../components/RemindersPicker";
+import { NewRecurringForm } from "../components/NewRecurringForm";
+import { EditRecurringSheet } from "../components/EditRecurringSheet";
+import {
+  listRecurring,
+  updateRecurring,
+  type InlineRecurring,
+} from "../api/recurring";
 import { useRegisterPageRefresh } from "../layout/PageRefreshContext";
 import { useCountUp } from "../hooks/useCountUp";
 import { useAuth } from "../auth/AuthContext";
@@ -103,19 +112,37 @@ export function TasksPage() {
   });
   const [editing, setEditing] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [recurring, setRecurring] = useState<InlineRecurring[]>([]);
+  const [recurringLoading, setRecurringLoading] = useState(false);
+  const [editingRule, setEditingRule] = useState<string | null>(null);
+
+  const loadRecurring = useCallback(async () => {
+    setRecurringLoading(true);
+    try {
+      setRecurring(await listRecurring());
+    } catch {
+      // Non-fatal — the tasks list is the primary content. Surface via
+      // the existing error banner only if everything failed.
+    } finally {
+      setRecurringLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const ts = await tasksApi.listTasks({ limit: 300 });
+      const [ts] = await Promise.all([
+        tasksApi.listTasks({ limit: 300 }),
+        loadRecurring(),
+      ]);
       setTasks(ts);
     } catch {
       setError("Falha ao carregar tarefas");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadRecurring]);
 
   useEffect(() => {
     void load();
@@ -126,8 +153,9 @@ export function TasksPage() {
   const todayIso = isoLocal(today);
 
   const filtered = useMemo(() => {
+    // The "Recorrentes" tab now renders rule rows from `recurring`, not
+    // tasks. Keep `filtered` for the stats/groups path (Todas/Normais).
     if (filter === "all") return tasks;
-    if (filter === "recurring") return tasks.filter((t) => t.type === "recurring");
     return tasks.filter((t) => t.type !== "recurring");
   }, [tasks, filter]);
 
@@ -404,6 +432,22 @@ export function TasksPage() {
         <div className="grid place-items-center py-10" style={{ color: "#4D5E8A" }}>
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
+      ) : filter === "recurring" ? (
+        <RecurringList
+          rules={recurring}
+          loading={recurringLoading}
+          onOpen={(id) => setEditingRule(id)}
+          onToggleActive={async (rule) => {
+            const next = !rule.active;
+            // Optimistic
+            setRecurring((prev) => prev.map((r) => (r.id === rule.id ? { ...r, active: next } : r)));
+            try {
+              await updateRecurring(rule.id, { active: next });
+            } catch {
+              await loadRecurring();
+            }
+          }}
+        />
       ) : (
         <div className="px-4 flex flex-col gap-3">
           {groups
@@ -443,14 +487,29 @@ export function TasksPage() {
         <Plus className="h-[22px] w-[22px]" strokeWidth={2.5} />
       </button>
 
-      <Sheet open={newOpen} onClose={() => setNewOpen(false)} title="Nova tarefa" maxWidth="max-w-md">
-        <NewTaskForm
-          onCancel={() => setNewOpen(false)}
-          onCreated={async () => {
-            setNewOpen(false);
-            await load();
-          }}
-        />
+      <Sheet
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        title={filter === "recurring" ? "Nova regra" : "Nova tarefa"}
+        maxWidth="max-w-md"
+      >
+        {filter === "recurring" ? (
+          <NewRecurringForm
+            onCancel={() => setNewOpen(false)}
+            onCreated={async () => {
+              setNewOpen(false);
+              await loadRecurring();
+            }}
+          />
+        ) : (
+          <NewTaskForm
+            onCancel={() => setNewOpen(false)}
+            onCreated={async () => {
+              setNewOpen(false);
+              await load();
+            }}
+          />
+        )}
       </Sheet>
 
       {editing ? (
@@ -467,6 +526,16 @@ export function TasksPage() {
           }}
         />
       ) : null}
+
+      <EditRecurringSheet
+        ruleId={editingRule}
+        onClose={() => setEditingRule(null)}
+        onChanged={loadRecurring}
+        onDeleted={async () => {
+          setEditingRule(null);
+          await loadRecurring();
+        }}
+      />
     </div>
   );
 }
@@ -991,5 +1060,167 @@ function NewTaskForm({ onCancel, onCreated }: NewTaskFormProps) {
         </button>
       </div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recurring rules list (Recorrentes tab)
+// ---------------------------------------------------------------------------
+
+interface RecurringListProps {
+  rules: InlineRecurring[];
+  loading: boolean;
+  onOpen: (id: string) => void;
+  onToggleActive: (rule: InlineRecurring) => void;
+}
+
+function prettySchedule(r: InlineRecurring): string {
+  const time = r.time ? ` · ${r.time}` : "";
+  if (r.frequency === "daily") return `Diário${time}`;
+  if (r.frequency === "weekly") {
+    const w =
+      r.weekday !== null && r.weekday !== undefined
+        ? WEEKDAY_LABELS_PT[r.weekday] ?? "?"
+        : "?";
+    return `${w}${time}`;
+  }
+  if (r.frequency === "monthly") {
+    const d =
+      r.day_of_month !== null && r.day_of_month !== undefined
+        ? `dia ${r.day_of_month}`
+        : "mensal";
+    return `Mensal · ${d}${time}`;
+  }
+  return r.frequency;
+}
+
+function fmtOffset(mins: number): string {
+  if (mins <= 0) return "Na hora";
+  if (mins % 1440 === 0) {
+    const d = mins / 1440;
+    return d === 1 ? "1 dia antes" : `${d} dias antes`;
+  }
+  if (mins % 60 === 0) {
+    const h = mins / 60;
+    return h === 1 ? "1 h antes" : `${h} h antes`;
+  }
+  return `${mins} min antes`;
+}
+
+function RecurringList({ rules, loading, onOpen, onToggleActive }: RecurringListProps) {
+  if (loading && rules.length === 0) {
+    return (
+      <div className="grid place-items-center py-10" style={{ color: "#4D5E8A" }}>
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+  if (rules.length === 0) {
+    return (
+      <div
+        className="mx-4 mt-2 rounded-[16px] px-5 py-8 text-center"
+        style={{ background: "#0C1228", border: "1px solid rgba(99,130,255,0.10)", color: "#4D5E8A" }}
+      >
+        <RefreshCw className="h-5 w-5 mx-auto mb-2.5" style={{ color: "#4D5E8A" }} />
+        <div className="text-[13px]" style={{ color: "#8B9CC8" }}>
+          Nenhuma regra recorrente.
+        </div>
+        <div className="text-[11px] mt-1">
+          Crie uma com o + ou diga pra Aura no chat.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="px-4">
+      <div
+        className="rounded-[16px] overflow-hidden bg-[#0C1228] border border-[rgba(99,130,255,0.10)]"
+      >
+        {rules.map((r, i) => (
+          <RecurringRow
+            key={r.id}
+            rule={r}
+            isLast={i === rules.length - 1}
+            onOpen={() => onOpen(r.id)}
+            onToggleActive={() => onToggleActive(r)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface RecurringRowProps {
+  rule: InlineRecurring;
+  isLast: boolean;
+  onOpen: () => void;
+  onToggleActive: () => void;
+}
+
+function RecurringRow({ rule, isLast, onOpen, onToggleActive }: RecurringRowProps) {
+  const offsets = rule.reminder_offsets;
+  const extras = offsets && offsets.length > 0 ? offsets.filter((o) => o > 0) : [];
+  const dim = !rule.active;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      className="flex items-start gap-3 px-3.5 py-3 cursor-pointer transition-colors hover:bg-[#111B38]"
+      style={!isLast ? { borderBottom: "1px solid rgba(99,130,255,0.10)" } : undefined}
+    >
+      <div
+        className="grid place-items-center shrink-0 rounded-lg"
+        style={{
+          width: 36,
+          height: 36,
+          background: dim ? "#162040" : "rgba(123,143,255,0.15)",
+          color: dim ? "#4D5E8A" : "#7B8FFF",
+        }}
+      >
+        <RefreshCw className="h-4 w-4" strokeWidth={2.2} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div
+          className="text-[14px] font-medium truncate"
+          style={{ color: dim ? "#4D5E8A" : "#EEF2FF" }}
+        >
+          {rule.title}
+        </div>
+        <div
+          className="flex items-center gap-1.5 mt-0.5 text-[11px]"
+          style={{ color: "#4D5E8A" }}
+        >
+          <Clock className="h-2.5 w-2.5" strokeWidth={2.2} />
+          {prettySchedule(rule)}
+        </div>
+        {extras.length > 0 ? (
+          <div
+            className="flex items-center gap-1.5 mt-0.5 text-[11px] flex-wrap"
+            style={{ color: "#4D5E8A" }}
+          >
+            <Bell className="h-2.5 w-2.5" strokeWidth={2.2} />
+            {extras.map(fmtOffset).join(" · ")}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggleActive(); }}
+        aria-pressed={rule.active}
+        aria-label={rule.active ? "Desativar regra" : "Ativar regra"}
+        className="relative h-6 w-11 rounded-full shrink-0 transition-colors"
+        style={{
+          background: rule.active ? "#4F7EFF" : "#162040",
+          border: "1px solid rgba(99,130,255,0.20)",
+        }}
+      >
+        <span
+          className="absolute top-[2px] h-[18px] w-[18px] rounded-full bg-white transition-transform"
+          style={{ transform: rule.active ? "translateX(22px)" : "translateX(2px)" }}
+        />
+      </button>
+    </div>
   );
 }
