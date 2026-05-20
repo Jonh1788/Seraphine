@@ -74,6 +74,12 @@ export function ChatPage() {
   const recordStreamRef = useRef<MediaStream | null>(null);
   const recordTimerRef = useRef<number | null>(null);
   const recordAutoStopRef = useRef<number | null>(null);
+  // When submit() creates a conversation, it bumps the URL via
+  // setSearchParams. That state-change re-runs the history-load effect
+  // below, which would otherwise blow away the optimistic user message
+  // (and races the streaming reply into oblivion). Mark the id we just
+  // created so the effect skips exactly one reload for it.
+  const skipHistoryReloadFor = useRef<string | null>(null);
   const MAX_RECORD_SECONDS = 120;
 
   // Typewriter state — server pushes deltas into bufferRef as fast as
@@ -134,6 +140,14 @@ export function ChatPage() {
     if (!conversationId) {
       setMessages([]);
       setWelcomeMode(false);
+      return;
+    }
+    // Submit just created this conversation and inserted the optimistic
+    // user message; skip exactly one reload so the in-flight stream
+    // isn't clobbered. The guard clears itself so navigating away and
+    // back still reloads from the server.
+    if (skipHistoryReloadFor.current === conversationId) {
+      skipHistoryReloadFor.current = null;
       return;
     }
     let cancelled = false;
@@ -447,6 +461,7 @@ export function ChatPage() {
     if (!cid) {
       try {
         cid = await createConversation();
+        skipHistoryReloadFor.current = cid;
         setSearchParams({ c: cid }, { replace: true });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Falha ao criar conversa");
