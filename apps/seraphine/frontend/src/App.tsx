@@ -30,6 +30,7 @@ import { NotesView } from './notes';
 import { ImagesView } from './images/ImagesView';
 import { FlashcardsView } from './flashcards/FlashcardsView';
 import { DashboardView } from './dashboard';
+import { JobsTab } from './cv-triage/JobsTab';
 import {
   ChatIcon,
   CalendarIcon,
@@ -39,6 +40,7 @@ import {
   SettingsIcon,
   FlaskIcon,
   BrainIcon,
+  BriefcaseIcon,
   FlashcardIcon,
   ImagesIcon,
   TasksIcon,
@@ -62,7 +64,7 @@ interface BadgingNavigator {
   clearAppBadge?: () => Promise<void>;
 }
 
-type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards' | 'trabalhos';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -114,6 +116,10 @@ export function App(): JSX.Element {
   const [whatsappMessages, setWhatsappMessages] = useState<WhatsAppMessage[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [initialNoteId, setInitialNoteId] = useState<string | null>(null);
+  // Task 19 — deep-link target for the Trabalhos tab. Set when the
+  // ActiveJobsPanel's "→" button asks to open a specific job; cleared
+  // after JobsTab mounts and consumes it.
+  const [initialJobId, setInitialJobId] = useState<number | null>(null);
   const [tasksPendingCount, setTasksPendingCount] = useState<number>(0);
   const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'subscribed' | 'error' | 'denied' | 'unsupported'>('idle');
   const [pushMsg, setPushMsg] = useState<string | null>(null);
@@ -249,7 +255,8 @@ export function App(): JSX.Element {
       view === 'tasks' ||
       view === 'habits' ||
       view === 'insights' ||
-      view === 'notes'
+      view === 'notes' ||
+      view === 'trabalhos'
     ) {
       setActiveView(view);
       // Deep-link to a specific task card.
@@ -286,6 +293,14 @@ export function App(): JSX.Element {
     url.searchParams.set('view', 'tasks');
     url.searchParams.set('focus', taskId);
     window.history.replaceState({}, '', url.pathname + url.search);
+  }, []);
+
+  // Task 19 — switch to the Trabalhos tab and auto-open the given job.
+  // Wired from ChatView's <ActiveJobsPanel> when the user taps the "→"
+  // on a progress card.
+  const handleNavigateToJob = useCallback((jobId: number) => {
+    setInitialJobId(jobId);
+    setActiveView('trabalhos');
   }, []);
 
   // PWA: re-register an existing push subscription at startup (no prompt).
@@ -1173,6 +1188,14 @@ export function App(): JSX.Element {
       active: activeView === 'notes',
     },
     {
+      id: 'trabalhos',
+      icon: <BriefcaseIcon size={22} />,
+      label: 'Trabalhos',
+      onClick: () =>
+        setActiveView(activeView === 'trabalhos' ? 'chat' : 'trabalhos'),
+      active: activeView === 'trabalhos',
+    },
+    {
       id: 'calendar',
       icon: <CalendarIcon size={22} />,
       label: 'Calendario',
@@ -1370,6 +1393,7 @@ export function App(): JSX.Element {
                 onTalkEnd={handleTalkEnd}
                 onTalkCancel={handleTalkCancel}
                 avatarController={avatarCtrlRef}
+                onNavigateToJob={handleNavigateToJob}
                 initialText={pendingComposerText}
                 initialAutoSend={pendingComposerAutoSend}
                 onInitialTextConsumed={() => {
@@ -1453,6 +1477,12 @@ export function App(): JSX.Element {
                 )}
                 {activeView === 'flashcards' && (
                   <FlashcardsView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'trabalhos' && (
+                  <JobsTab
+                    initialJobId={initialJobId}
+                    onInitialJobConsumed={() => setInitialJobId(null)}
+                  />
                 )}
               </ViewTransition>
             )}

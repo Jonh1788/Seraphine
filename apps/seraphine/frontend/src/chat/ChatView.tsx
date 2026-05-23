@@ -311,6 +311,12 @@ interface ChatViewProps {
   initialText?: string | null;
   initialAutoSend?: boolean;
   onInitialTextConsumed?: () => void;
+  /**
+   * Task 19 — open the Trabalhos tab focused on the given job. Wired
+   * from App.tsx so the ActiveJobsPanel progress card's "→" arrow can
+   * deep-link into the historical / detail surface.
+   */
+  onNavigateToJob?: (jobId: number) => void;
 }
 
 /** Threshold (px) the user must drag upward to lock recording */
@@ -340,6 +346,7 @@ export function ChatView({
   initialText,
   initialAutoSend,
   onInitialTextConsumed,
+  onNavigateToJob,
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
@@ -1346,9 +1353,10 @@ export function ChatView({
       <ActiveJobsPanel
         subscribeWS={subscribeTriageWS}
         onNavigate={(jobId) => {
-          // TODO Task 19: route to /jobs/:id once the Trabalhos tab lands.
-          // eslint-disable-next-line no-console
-          console.log('[cv-triage] navigate to job', jobId);
+          // Task 19 — switch to Trabalhos tab and auto-open this job.
+          // App.tsx owns the activeView state; if no handler is wired
+          // (e.g., older parent / tests) we silently no-op.
+          onNavigateToJob?.(jobId);
         }}
       />
 
