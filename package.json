@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "description": "Monorepo root — Seraphine + Aura + shared packages. See specs/monorepo-modularization-sdd.md.",
+  "packageManager": "pnpm@10.33.0",
   "workspaces": [
     "apps/seraphine/frontend",
-    "apps/aura/frontend"
+    "apps/aura/frontend",
+    "services/whatsapp-bridge"
   ],
   "pnpm": {
     "onlyBuiltDependencies": [
