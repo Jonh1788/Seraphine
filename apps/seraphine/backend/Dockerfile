@@ -48,7 +48,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     HOME=/home/seraphine
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
+ && apt-get install -y --no-install-recommends ca-certificates ffmpeg poppler-utils tesseract-ocr tesseract-ocr-por \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 1001 --gid 0 --home /home/seraphine --create-home seraphine \
  && mkdir -p /data \

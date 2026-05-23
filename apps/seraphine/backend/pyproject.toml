@@ -24,6 +24,8 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "sqlalchemy>=2.0",
     "pdfplumber>=0.10",
+    "pdf2image>=1.17",
+    "pytesseract>=0.3.13",
     "pywebpush>=2",
     "llm-adapters",
     "core-db",
