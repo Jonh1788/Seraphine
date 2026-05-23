@@ -304,6 +304,44 @@ class AnthropicClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def transcribe_pdf_pages(self, image_blocks: list[dict]) -> str:
+        """Send PDF page images to Claude and request a literal transcription.
+
+        Used by the CV triage extraction cascade as a last-resort fallback
+        when both ``pdfplumber`` and Tesseract fail to produce usable text.
+        ``image_blocks`` is a list of Anthropic-shaped image content blocks
+        (``{"type": "image", "source": {...}}``) — typically 1-2 pages
+        rendered as base64 PNGs by ``pdf2image``.
+
+        Returns the concatenated text content of Claude's response. Errors
+        propagate up (the caller logs and falls through to a NONE source).
+        """
+        prompt = (
+            "Transcreva literalmente todo o conteúdo destas páginas de currículo. "
+            "Preserve a ordem original, quebras de linha e seções. "
+            "Não resuma, não interprete, não traduza — apenas transcreva o texto "
+            "exatamente como aparece nas imagens."
+        )
+        body: dict[str, Any] = {
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 4000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [*image_blocks, {"type": "text", "text": prompt}],
+                }
+            ],
+            "stream": False,
+        }
+        resp = await self._client.post("/v1/messages", json=body, timeout=180.0)
+        resp.raise_for_status()
+        data = resp.json()
+        parts: list[str] = []
+        for block in data.get("content", []) or []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", "") or "")
+        return "".join(parts)
+
     async def warmup(self, system_prompt: str = "") -> None:
         """Warmup the connection and prime Anthropic's prompt cache for the
         system prefix. Errors are swallowed — startup must not hinge on this."""
