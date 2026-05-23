@@ -1,4 +1,12 @@
-"""DAO functions for cv_triage jobs and results (raw sqlite3, transactional)."""
+"""Raw-sqlite3 DAO for CV triage jobs/results.
+
+Unlike sibling modules (recurring, habits, notes) which expose a Service
+class over core_db.Store, this module keeps free functions over a
+sqlite3.Connection. The worker (Task 11) needs to interleave job +
+result writes inside the same async loop without taking on async-DB
+plumbing; raw sqlite3 keeps that simple. The REST routes (Task 12) call
+these DAO functions through the existing app.state.db connection.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +20,14 @@ from .models import (
     ResultStatus,
     TextSource,
     WhatsAppStatus,
+)
+
+
+ACTIVE_STATUSES: tuple[JobStatus, ...] = (
+    JobStatus.QUEUED,
+    JobStatus.EXTRACTING,
+    JobStatus.RANKING,
+    JobStatus.SENDING,
 )
 
 
@@ -130,12 +146,14 @@ def set_total_cvs(conn: sqlite3.Connection, job_id: int, total: int) -> None:
 def mark_active_jobs_failed_on_startup(
     conn: sqlite3.Connection, reason: str
 ) -> int:
+    placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+    values = [s.value for s in ACTIVE_STATUSES]
     with conn:
         cur = conn.execute(
-            """UPDATE cv_triage_jobs
-               SET status='failed', error=?, finished_at=datetime('now')
-               WHERE status IN ('queued','extracting','ranking','sending')""",
-            (reason,),
+            f"""UPDATE cv_triage_jobs
+                SET status='failed', error=?, finished_at=datetime('now')
+                WHERE status IN ({placeholders})""",
+            (reason, *values),
         )
     return cur.rowcount
 
@@ -149,7 +167,7 @@ def upsert_result(
     *,
     job_id: int,
     filename: str,
-    text_source: str,
+    text_source: TextSource | str,
     text_chars: int = 0,
     candidate_name: str | None = None,
     score: float | None = None,
@@ -157,10 +175,14 @@ def upsert_result(
     justification: str | None = None,
     strengths: list[str] | None = None,
     gaps: list[str] | None = None,
-    status: str = "pending",
+    status: ResultStatus | str = ResultStatus.PENDING,
     error: str | None = None,
     ranked_at: str | None = None,
 ) -> None:
+    text_source_v = (
+        text_source.value if isinstance(text_source, TextSource) else text_source
+    )
+    status_v = status.value if isinstance(status, ResultStatus) else status
     with conn:
         conn.execute(
             """INSERT INTO cv_triage_results
@@ -183,14 +205,14 @@ def upsert_result(
                 job_id,
                 filename,
                 candidate_name,
-                text_source,
+                text_source_v,
                 text_chars,
                 score,
                 match_pct,
                 justification,
                 json.dumps(strengths or []),
                 json.dumps(gaps or []),
-                status,
+                status_v,
                 error,
                 ranked_at,
             ),
