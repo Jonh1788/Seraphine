@@ -25,6 +25,7 @@ import { MusicChatBlock } from './MusicChatBlock';
 import type { MusicCardData } from './MusicChatBlock';
 import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
+import { TriageWizard } from '../cv-triage/TriageWizard';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -391,6 +392,8 @@ export function ChatView({
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, McpAction>>(new Map());
   /** Task being edited from a chat task card. */
   const [editingChatTaskId, setEditingChatTaskId] = useState<number | null>(null);
+  /** CV Triage wizard open state (Task 17). */
+  const [triageOpen, setTriageOpen] = useState(false);
   const CONV_KEY = 'seraphine_conversation_id';
   const conversationIdRef = useRef<string | undefined>(
     localStorage.getItem(CONV_KEY) || undefined
@@ -1367,6 +1370,18 @@ export function ChatView({
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
+            <button
+              type="button"
+              className="btn-attach btn-triage"
+              aria-label="Iniciar triagem de currículos"
+              title="Triagem de CV"
+              disabled={!connected || isStreaming}
+              onClick={() => setTriageOpen(true)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="btn-attach__icon">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
             <input
               ref={chatInputRef}
               type="text"
@@ -1467,6 +1482,15 @@ export function ChatView({
           onClose={() => setEditingChatTaskId(null)}
           onDeleted={() => setEditingChatTaskId(null)}
           onUpdated={() => { /* stays open, auto-saves */ }}
+        />
+      )}
+
+      {/* CV Triage wizard (Task 17) — backend broadcasts the new turn via WS,
+          so there's nothing extra to do in onCreated. */}
+      {triageOpen && (
+        <TriageWizard
+          onClose={() => setTriageOpen(false)}
+          onCreated={() => { /* WS turn arrives separately */ }}
         />
       )}
     </div>

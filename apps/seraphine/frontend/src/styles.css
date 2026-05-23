@@ -13199,6 +13199,189 @@ html[data-shell="tablet"] .layout {
   color: #64748b;
 }
 
+/* ---------- CV Triage Wizard (Task 17) ----------
+   Reuses the `password-modal-backdrop` overlay primitive plus the
+   `te__*` header pattern from TaskEditorModal so the wizard slots into
+   the existing modal aesthetic. `cvt-*` classes are self-contained for
+   the wizard body. */
+.cvt-card {
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  background: rgba(17, 17, 26, 0.96);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    var(--accent-glow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cvt-section {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+}
+
+.cvt-help {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.cvt-meta {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.cvt-path {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 11px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.cvt-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warning, #fbbf24);
+}
+
+.cvt-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger, #ef4444);
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--r-sm, 6px);
+}
+
+.cvt-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 140px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm, 6px);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+  transition: border-color 120ms;
+}
+.cvt-textarea:focus {
+  border-color: var(--accent, #6366f1);
+}
+
+.cvt-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm, 6px);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms;
+}
+.cvt-search:focus {
+  border-color: var(--accent, #6366f1);
+}
+
+.cvt-chats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm, 6px);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.cvt-chats__loading,
+.cvt-chats__empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.cvt-chat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 100ms;
+}
+.cvt-chat:last-child { border-bottom: none; }
+.cvt-chat:hover { background: rgba(255, 255, 255, 0.04); }
+.cvt-chat--selected {
+  background: rgba(99, 102, 241, 0.15);
+}
+.cvt-chat--selected:hover {
+  background: rgba(99, 102, 241, 0.22);
+}
+
+.cvt-chat__type {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.cvt-chat__type--group {
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+}
+
+.cvt-chat__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cvt-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Chat composer trigger button — inherits .btn-attach sizing so it
+   matches the existing icon button next to the text input. */
+.btn-triage { /* nothing extra — variant marker for future styling. */ }
+
 /* Global reduced-motion override — keep animations instant for users
    who prefer reduced motion. Must be the last rule in the file so it
    wins the cascade for everything above. */
