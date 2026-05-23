@@ -27,18 +27,22 @@ def test_rejects_path_traversal(tmp_path):
     data = _make_zip({"../../etc/passwd.pdf": b"%PDF"})
     with pytest.raises(ZipExtractionError, match="unsafe path"):
         extract_pdfs_safely(data, tmp_path)
+    assert list(tmp_path.iterdir()) == []
 
 def test_rejects_absolute_path(tmp_path):
     data = _make_zip({"/etc/foo.pdf": b"%PDF"})
     with pytest.raises(ZipExtractionError, match="unsafe path"):
         extract_pdfs_safely(data, tmp_path)
+    assert list(tmp_path.iterdir()) == []
 
 def test_rejects_oversized_uncompressed(tmp_path):
     payload = b"%PDF" + b"\x00" * (101 * 1024 * 1024)
     data = _make_zip({"big.pdf": payload})
     with pytest.raises(ZipExtractionError, match="too large"):
         extract_pdfs_safely(data, tmp_path, max_uncompressed_bytes=100 * 1024 * 1024)
+    assert list(tmp_path.iterdir()) == []
 
 def test_rejects_not_a_zip(tmp_path):
     with pytest.raises(ZipExtractionError, match="not a zip"):
         extract_pdfs_safely(b"hello world", tmp_path)
+    assert list(tmp_path.iterdir()) == []

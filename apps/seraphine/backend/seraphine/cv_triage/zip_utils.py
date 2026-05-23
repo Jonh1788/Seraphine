@@ -4,6 +4,13 @@ Extracts only `.pdf` files into a target directory, with guards against:
   - Path traversal (`..`, absolute paths, NUL bytes)
   - Zip bombs (cap on total uncompressed bytes)
   - Non-zip payloads
+
+Filenames are flattened via `os.path.basename` — nested directories inside
+the zip are NOT preserved. If two entries share a basename (e.g.
+`folder1/cv.pdf` and `folder2/cv.pdf`), the later one silently overwrites
+the earlier. The Mac client (Task 15 wizard) zips a single flat folder of
+PDFs, so collisions are not expected in practice; downstream code treats
+the returned list as the canonical set of files on disk.
 """
 
 import io
