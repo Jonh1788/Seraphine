@@ -43,6 +43,9 @@ from seraphine.notes.routes import router as notes_router
 from seraphine.notes.service import NoteService
 from seraphine.music.routes import router as music_router
 from seraphine.music.service import FocusMusicService
+from seraphine.cv_triage import schema as cv_triage_schema
+from seraphine.cv_triage import storage as cv_triage_storage
+from seraphine.cv_triage.routes import router as cv_triage_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -254,6 +257,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Health service wired")
     except Exception as e:
         logger.warning("Health service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # CV Triage — always enabled (SQLite-backed). Worker dispatched
+    # from the REST routes; nothing to instantiate up-front.
+    # ------------------------------------------------------------------
+    try:
+        store.register_migrator("seraphine_cv_triage", cv_triage_schema.migrate)
+        await store.ensure_schema()  # idempotent
+
+        import sqlite3 as _sqlite3
+
+        def _cv_triage_reap() -> int:
+            _conn = store._connect()
+            _conn.row_factory = _sqlite3.Row
+            return cv_triage_storage.mark_active_jobs_failed_on_startup(
+                _conn, "interrupted_by_restart",
+            )
+
+        _interrupted = await asyncio.to_thread(_cv_triage_reap)
+        if _interrupted:
+            logger.info(
+                "cv_triage: marked %d active jobs as failed (interrupted by restart)",
+                _interrupted,
+            )
+    except Exception as e:
+        logger.warning("CV triage init failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Notes — always enabled (SQLite-backed)
@@ -542,6 +571,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mcp_event_listener = mcp_event_listener
     app.state.google_client = google_client
     app.state.whatsapp_client = whatsapp_client
+    app.state.whatsapp_bridge_url = settings.whatsapp_bridge_url
     app.state.browser_client = browser_client
     app.state.wise_client = wise_client
     app.state.finance_service = finance_service
@@ -697,6 +727,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("proactive scheduler failed to start")
 
+    # 075 Task 14 — daily TTL cleanup of cv_triage staging dirs.
+    # Piggybacks on the proactive AsyncIOScheduler so we don't spin up a
+    # second scheduler just for one cron tick.
+    try:
+        if proactive_scheduler is not None and proactive_scheduler.enabled:
+            import sqlite3 as _sqlite3
+            from pathlib import Path as _Path
+            from seraphine.cv_triage.housekeeping import cleanup as _cv_triage_cleanup
+
+            _cv_base_dir = _Path(settings.sqlite_path).parent / "cv_triage"
+
+            def _cv_triage_housekeeping_tick() -> int:
+                _conn = store._connect()
+                _conn.row_factory = _sqlite3.Row
+                return _cv_triage_cleanup(
+                    _conn,
+                    base_dir=_cv_base_dir,
+                    done_ttl_h=24,
+                    failed_ttl_h=24 * 7,
+                )
+
+            proactive_scheduler._sched.add_job(
+                _cv_triage_housekeeping_tick,
+                "cron", hour=4, minute=15,
+                id="cv_triage_housekeeping",
+                name="cv_triage_housekeeping",
+            )
+            logger.info("cv_triage housekeeping cron registered (04:15 daily)")
+    except Exception:
+        logger.exception("cv_triage housekeeping registration failed")
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
@@ -809,6 +870,7 @@ def create_app() -> FastAPI:
     app.include_router(insights_router)
     app.include_router(notes_router)
     app.include_router(music_router)
+    app.include_router(cv_triage_router)
 
     from seraphine.reminders.routes import router as reminders_router
 

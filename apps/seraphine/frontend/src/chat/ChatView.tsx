@@ -25,6 +25,8 @@ import { MusicChatBlock } from './MusicChatBlock';
 import type { MusicCardData } from './MusicChatBlock';
 import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
+import { TriageWizard } from '../cv-triage/TriageWizard';
+import { ActiveJobsPanel } from '../cv-triage/ActiveJobsPanel';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -309,6 +311,12 @@ interface ChatViewProps {
   initialText?: string | null;
   initialAutoSend?: boolean;
   onInitialTextConsumed?: () => void;
+  /**
+   * Task 19 — open the Trabalhos tab focused on the given job. Wired
+   * from App.tsx so the ActiveJobsPanel progress card's "→" arrow can
+   * deep-link into the historical / detail surface.
+   */
+  onNavigateToJob?: (jobId: number) => void;
 }
 
 /** Threshold (px) the user must drag upward to lock recording */
@@ -338,6 +346,7 @@ export function ChatView({
   initialText,
   initialAutoSend,
   onInitialTextConsumed,
+  onNavigateToJob,
 }: ChatViewProps): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
@@ -391,6 +400,8 @@ export function ChatView({
   const [mcpDecisions, setMcpDecisions] = useState<Map<string, McpAction>>(new Map());
   /** Task being edited from a chat task card. */
   const [editingChatTaskId, setEditingChatTaskId] = useState<number | null>(null);
+  /** CV Triage wizard open state (Task 17). */
+  const [triageOpen, setTriageOpen] = useState(false);
   const CONV_KEY = 'seraphine_conversation_id';
   const conversationIdRef = useRef<string | undefined>(
     localStorage.getItem(CONV_KEY) || undefined
@@ -1073,6 +1084,23 @@ export function ChatView({
 
   const connected = status === 'connected';
 
+  /**
+   * Task 18 — WS subscription adapter for CV-triage progress cards.
+   * The cards expect a `subscribe(handler) => unsubscribe` shape; our
+   * SeraphineWS exposes `onMessage` with the same shape but typed with
+   * `ServerMessage | ArrayBuffer`. We strip binary frames and forward
+   * the JSON objects untyped — the card narrows to cv_triage_* itself.
+   */
+  const subscribeTriageWS = useCallback(
+    (handler: (msg: unknown) => void) => {
+      return ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
+        if (msg instanceof ArrayBuffer) return;
+        handler(msg);
+      });
+    },
+    [ws],
+  );
+
   const handleNewConversation = () => {
     localStorage.removeItem(CONV_KEY);
     conversationIdRef.current = undefined;
@@ -1318,6 +1346,20 @@ export function ChatView({
         </div>
       )}
 
+      {/* Task 18 — live CV-triage progress cards. Sits directly above
+          the composer so an in-flight job is always visible. The panel
+          renders nothing when there are no active or recently-finished
+          jobs. */}
+      <ActiveJobsPanel
+        subscribeWS={subscribeTriageWS}
+        onNavigate={(jobId) => {
+          // Task 19 — switch to Trabalhos tab and auto-open this job.
+          // App.tsx owns the activeView state; if no handler is wired
+          // (e.g., older parent / tests) we silently no-op.
+          onNavigateToJob?.(jobId);
+        }}
+      />
+
       <div className="chat__composer">
         {talking ? (
           /* While recording, replace the input with recording controls */
@@ -1365,6 +1407,18 @@ export function ChatView({
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="btn-attach__icon">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="btn-attach btn-triage"
+              aria-label="Iniciar triagem de currículos"
+              title="Triagem de CV"
+              disabled={!connected || isStreaming}
+              onClick={() => setTriageOpen(true)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="btn-attach__icon">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
             </button>
             <input
@@ -1467,6 +1521,15 @@ export function ChatView({
           onClose={() => setEditingChatTaskId(null)}
           onDeleted={() => setEditingChatTaskId(null)}
           onUpdated={() => { /* stays open, auto-saves */ }}
+        />
+      )}
+
+      {/* CV Triage wizard (Task 17) — backend broadcasts the new turn via WS,
+          so there's nothing extra to do in onCreated. */}
+      {triageOpen && (
+        <TriageWizard
+          onClose={() => setTriageOpen(false)}
+          onCreated={() => { /* WS turn arrives separately */ }}
         />
       )}
     </div>

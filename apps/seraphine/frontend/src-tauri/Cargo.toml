@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["devtools", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
@@ -34,6 +35,13 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 whisper-rs = { version = "0.14", features = ["metal"] }
 dirs = "5"
 base64 = "0.22"
+# CV Triage — zip a folder of PDFs in memory for upload to the Seraphine
+# backend (see Task 15). Default features (bzip2, zstd, time) are disabled
+# because we only need deflate.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 # Desktop-only dependencies — mic capture (cpal for the legacy PTT path;
 # VoiceProcessingIO for realtime with AEC), clipboard, shortcuts, tray.

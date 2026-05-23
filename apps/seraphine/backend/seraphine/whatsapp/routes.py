@@ -12,6 +12,7 @@ import re
 import uuid
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from seraphine.whatsapp.client import WhatsAppBridgeClient, WhatsAppBridgeError
@@ -93,6 +94,35 @@ async def whatsapp_qr(request: Request) -> dict[str, Any]:
         return await client.qr()
     except WhatsAppBridgeError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"bridge unreachable: {e}")
+
+
+@router.get("/whatsapp/chats")
+async def whatsapp_chats(request: Request) -> Any:
+    """Proxy to bridge GET /api/chats.
+
+    Used by the cv_triage Mac wizard (Task 17) to populate the
+    destination dropdown. Passes the bridge response through verbatim.
+    """
+    base = getattr(request.app.state, "whatsapp_bridge_url", None)
+    if not base:
+        # Fallback to live settings when lifespan hasn't populated app.state
+        # (e.g. TestClient used without ``with``-block context manager).
+        from seraphine.config import settings as _settings
+        base = _settings.whatsapp_bridge_url
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="whatsapp integration not configured (set SERAPHINE_WHATSAPP_BRIDGE_URL)",
+        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(f"{base.rstrip('/')}/api/chats")
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"bridge GET /api/chats failed: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"bridge unreachable: {e}")
 
