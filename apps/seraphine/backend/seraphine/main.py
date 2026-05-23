@@ -727,6 +727,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("proactive scheduler failed to start")
 
+    # 075 Task 14 — daily TTL cleanup of cv_triage staging dirs.
+    # Piggybacks on the proactive AsyncIOScheduler so we don't spin up a
+    # second scheduler just for one cron tick.
+    try:
+        if proactive_scheduler is not None and proactive_scheduler.enabled:
+            import sqlite3 as _sqlite3
+            from pathlib import Path as _Path
+            from seraphine.cv_triage.housekeeping import cleanup as _cv_triage_cleanup
+
+            _cv_base_dir = _Path(settings.sqlite_path).parent / "cv_triage"
+
+            def _cv_triage_housekeeping_tick() -> int:
+                _conn = store._connect()
+                _conn.row_factory = _sqlite3.Row
+                return _cv_triage_cleanup(
+                    _conn,
+                    base_dir=_cv_base_dir,
+                    done_ttl_h=24,
+                    failed_ttl_h=24 * 7,
+                )
+
+            proactive_scheduler._sched.add_job(
+                _cv_triage_housekeeping_tick,
+                "cron", hour=4, minute=15,
+                id="cv_triage_housekeeping",
+                name="cv_triage_housekeeping",
+            )
+            logger.info("cv_triage housekeeping cron registered (04:15 daily)")
+    except Exception:
+        logger.exception("cv_triage housekeeping registration failed")
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
