@@ -244,3 +244,62 @@ async def test_anthropic_5xx_one_cv_still_succeeds(db, tmp_path):
     assert statuses == ["failed", "ranked", "ranked"]
     top = storage.get_top_n(db, job_id, 5)
     assert len(top) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_cancel_during_ranking(db, tmp_path):
+    """Cancel during the ranking phase should stop dispatching new rank calls
+    without burning through all queued items."""
+    staging = tmp_path / "s"
+    staging.mkdir()
+    for n in [f"cv_{i}.pdf" for i in range(6)]:
+        (staging / n).write_bytes(b"%PDF")
+    job_id = storage.create_job(
+        db,
+        conversation_id=1,
+        turn_id=1,
+        rubric="x" * 40,
+        target_chat_id="g@g.us",
+        target_label="A",
+        staging_dir=str(staging),
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    from seraphine.cv_triage.worker import request_cancel
+    from seraphine.cv_triage.extraction import ExtractionResult
+    from seraphine.cv_triage.models import TextSource
+    from seraphine.cv_triage.ranking import ScoreResult
+
+    rank_call_count = {"n": 0}
+
+    async def counting_rank(client, *, rubric, cv_text, model):
+        rank_call_count["n"] += 1
+        # After the second rank call lands, request cancel — queued tasks
+        # in the same gather() should fast-fail.
+        if rank_call_count["n"] == 2:
+            request_cancel(job_id)
+        return ScoreResult("X", 50.0, 50.0, [], [], "ok")
+
+    deps = WorkerDeps(
+        db=db,
+        bridge_url="http://bridge",
+        llm_client=AsyncMock(),
+        vision_client=None,
+        extract_fn=AsyncMock(
+            side_effect=lambda p, *, vision_client=None: ExtractionResult(
+                "ok " * 100, TextSource.PDFPLUMBER
+            )
+        ),
+        rank_fn=AsyncMock(side_effect=counting_rank),
+        broadcast_fn=AsyncMock(),
+        rank_concurrency=1,  # serialize for deterministic counting
+        sleep_between_media=0.0,
+        sonnet_model="m",
+    )
+    await run_cv_triage(job_id, deps)
+    job = storage.get_job(db, job_id)
+    assert job.status == JobStatus.CANCELLED
+    # Without the fix: rank_call_count == 6 (all CVs processed before cancel takes effect)
+    # With the fix: should be ≤ 3 (the 2 that ran before cancel + at most 1 in-flight)
+    assert rank_call_count["n"] <= 3

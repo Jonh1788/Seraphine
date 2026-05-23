@@ -172,6 +172,8 @@ async def _run(job_id: int, deps: WorkerDeps) -> None:
 
     async def _rank_task(filename: str, text: str, source: TextSource) -> None:
         nonlocal ranked_count
+        if _is_cancelled(job_id):
+            return  # fast-fail before acquiring semaphore (avoid wasted Anthropic calls)
         async with sem:
             if _is_cancelled(job_id):
                 return
