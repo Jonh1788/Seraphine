@@ -341,6 +341,50 @@ class AnthropicClient:
                 parts.append(block.get("text", "") or "")
         return "".join(parts)
 
+    async def tool_call_json(
+        self,
+        *,
+        system: str,
+        user: str,
+        tool: dict[str, Any],
+        cache_system: bool = False,
+        max_tokens: int = 1024,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Force a single tool call and return the parsed ``input`` dict.
+
+        ``cache_system=True`` attaches a ``cache_control: ephemeral`` breakpoint
+        to the system block so repeated calls with the same system prompt
+        (e.g. a rubric across many CVs) hit Anthropic's prompt cache. The
+        ``tool_choice`` is forced to the supplied tool's name, so the model
+        cannot answer with free text. Raises ``RuntimeError`` if no matching
+        ``tool_use`` block is present in the response.
+        """
+        system_blocks: list[dict[str, Any]] = [{"type": "text", "text": system}]
+        if cache_system:
+            system_blocks[0]["cache_control"] = {"type": "ephemeral"}
+        body: dict[str, Any] = {
+            "model": model or self.model,
+            "system": system_blocks,
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": user}]}
+            ],
+            "tools": [tool],
+            "tool_choice": {"type": "tool", "name": tool["name"]},
+            "max_tokens": max_tokens,
+        }
+        resp = await self._client.post("/v1/messages", json=body, timeout=180.0)
+        resp.raise_for_status()
+        data = resp.json()
+        for block in data.get("content", []) or []:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("name") == tool["name"]
+            ):
+                return dict(block.get("input") or {})
+        raise RuntimeError(f"model did not call tool {tool['name']!r}")
+
     async def warmup(self, system_prompt: str = "") -> None:
         """Warmup the connection and prime Anthropic's prompt cache for the
         system prefix. Errors are swallowed — startup must not hinge on this."""
