@@ -22,37 +22,45 @@ router.get("/chats", async (req: Request, res: Response) => {
 
     chats = chats.slice(0, limit);
 
+    // Per-chat enrichment is best-effort: a single broken chat (puppeteer
+    // state desync, group eviction, etc.) used to take down the whole list
+    // via Promise.all rejection. Isolate failures so the listing always
+    // returns the basics (id/name/isGroup/unreadCount) for every chat.
     const result = await Promise.all(
       chats.map(async (chat) => {
-        const msgs = await chat.fetchMessages({ limit: 1 });
-        const last = msgs[0] ?? null;
+        const base = {
+          id: chat.id._serialized,
+          name: chat.name,
+          isGroup: chat.isGroup,
+          unreadCount: chat.unreadCount,
+          lastMessage: null as null | { body: string; timestamp: number; fromMe: boolean; author?: string },
+          profilePicUrl: null as null | string,
+        };
 
-        let profilePicUrl: string | null = null;
         try {
-          profilePicUrl = await chat.getContact().then((c) => c.getProfilePicUrl()) ?? null;
-        } catch {
-          // no profile pic available
-        }
-
-        const lastMessage = last
-          ? {
+          const msgs = await chat.fetchMessages({ limit: 1 });
+          const last = msgs[0] ?? null;
+          if (last) {
+            base.lastMessage = {
               body: last.body,
               timestamp: last.timestamp,
               fromMe: last.fromMe,
               ...(chat.isGroup && !last.fromMe
                 ? { author: (await last.getContact()).pushname ?? (await last.getContact()).name ?? (await last.getContact()).number }
                 : {}),
-            }
-          : null;
+            };
+          }
+        } catch (err) {
+          console.warn(`[whatsapp-bridge] fetchMessages failed for ${base.name}:`, (err as Error).message);
+        }
 
-        return {
-          id: chat.id._serialized,
-          name: chat.name,
-          isGroup: chat.isGroup,
-          unreadCount: chat.unreadCount,
-          lastMessage,
-          profilePicUrl,
-        };
+        try {
+          base.profilePicUrl = (await chat.getContact().then((c) => c.getProfilePicUrl())) ?? null;
+        } catch {
+          // no profile pic available
+        }
+
+        return base;
       })
     );
 

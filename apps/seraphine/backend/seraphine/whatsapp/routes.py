@@ -118,13 +118,22 @@ async def whatsapp_chats(request: Request) -> Any:
         )
     try:
         async with httpx.AsyncClient(timeout=10) as http:
-            r = await http.get(f"{base.rstrip('/')}/api/chats")
+            # ``limit=50`` is the bridge's hard cap; ask for it so the wizard
+            # sees as many destination chats as possible.
+            r = await http.get(f"{base.rstrip('/')}/api/chats", params={"limit": 50})
             r.raise_for_status()
-            return r.json()
+            data = r.json()
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=502, detail=f"bridge GET /api/chats failed: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"bridge unreachable: {e}")
+
+    # The bridge returns ``{"chats": [...]}``; the cv_triage frontend (and
+    # any other future consumer) expects a flat ``Chat[]``. Unwrap here so
+    # the wire shape matches the TypeScript ``Chat[]`` type.
+    if isinstance(data, dict) and isinstance(data.get("chats"), list):
+        return data["chats"]
+    return data
 
 
 # ----------------------------------------------------------------------
