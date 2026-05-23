@@ -304,17 +304,16 @@ class AnthropicClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def transcribe_pdf_pages(self, image_blocks: list[dict]) -> str:
-        """Send PDF page images to Claude and request a literal transcription.
+    async def transcribe_image_pages(self, image_blocks: list[dict]) -> str:
+        """Send a sequence of image content blocks to Claude and return literal
+        transcription concatenated from text response blocks.
 
-        Used by the CV triage extraction cascade as a last-resort fallback
-        when both ``pdfplumber`` and Tesseract fail to produce usable text.
         ``image_blocks`` is a list of Anthropic-shaped image content blocks
-        (``{"type": "image", "source": {...}}``) — typically 1-2 pages
-        rendered as base64 PNGs by ``pdf2image``.
+        (``{"type": "image", "source": {...}}``). The caller is responsible
+        for rendering the source pages/frames to base64 images.
 
         Returns the concatenated text content of Claude's response. Errors
-        propagate up (the caller logs and falls through to a NONE source).
+        propagate up (the caller logs and decides how to handle failures).
         """
         prompt = (
             "Transcreva literalmente todo o conteúdo destas páginas de currículo. "
@@ -323,7 +322,7 @@ class AnthropicClient:
             "exatamente como aparece nas imagens."
         )
         body: dict[str, Any] = {
-            "model": "claude-sonnet-4-5",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 4000,
             "messages": [
                 {

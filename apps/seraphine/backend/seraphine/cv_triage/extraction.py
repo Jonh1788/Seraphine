@@ -47,7 +47,7 @@ def extract_with_fallback(
 ) -> ExtractionResult:
     """Run the three-stage cascade and return the first usable result.
 
-    ``vision_client`` is expected to expose ``async transcribe_pdf_pages``
+    ``vision_client`` is expected to expose ``async transcribe_image_pages``
     (see :class:`llm_adapters.anthropic.AnthropicClient`). Pass ``None`` to
     disable the vision stage entirely — useful when no API key is configured.
     """
@@ -117,7 +117,7 @@ def _tesseract_extract(pdf_path: Path) -> str:
 def _vision_extract(pdf_path: Path, vision_client: Any) -> str:
     """Render the first N pages as base64 PNG and ask Claude to transcribe them.
 
-    The adapter's ``transcribe_pdf_pages`` is async; we bridge here with
+    The adapter's ``transcribe_image_pages`` is async; we bridge here with
     ``asyncio.run`` so the cascade stays synchronous. The worker that calls
     ``extract_with_fallback`` must therefore run it off the event loop
     (``asyncio.to_thread``) — that's the standard pattern for blocking I/O.
@@ -145,4 +145,4 @@ def _vision_extract(pdf_path: Path, vision_client: Any) -> str:
                 },
             }
         )
-    return asyncio.run(vision_client.transcribe_pdf_pages(image_blocks))
+    return asyncio.run(vision_client.transcribe_image_pages(image_blocks))
