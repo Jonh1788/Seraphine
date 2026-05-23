@@ -84,3 +84,6 @@ Gemini_Generated_Image*.png
 Semana-compromissos*.png
 Calendário-Mês*.png
 filtros-de-oquemostrar*.png
+
+# Local git worktrees (per-feature isolation)
+.worktrees/
