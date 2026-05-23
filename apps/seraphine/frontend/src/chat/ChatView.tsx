@@ -26,6 +26,7 @@ import type { MusicCardData } from './MusicChatBlock';
 import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
 import { TriageWizard } from '../cv-triage/TriageWizard';
+import { ActiveJobsPanel } from '../cv-triage/ActiveJobsPanel';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -1076,6 +1077,23 @@ export function ChatView({
 
   const connected = status === 'connected';
 
+  /**
+   * Task 18 — WS subscription adapter for CV-triage progress cards.
+   * The cards expect a `subscribe(handler) => unsubscribe` shape; our
+   * SeraphineWS exposes `onMessage` with the same shape but typed with
+   * `ServerMessage | ArrayBuffer`. We strip binary frames and forward
+   * the JSON objects untyped — the card narrows to cv_triage_* itself.
+   */
+  const subscribeTriageWS = useCallback(
+    (handler: (msg: unknown) => void) => {
+      return ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
+        if (msg instanceof ArrayBuffer) return;
+        handler(msg);
+      });
+    },
+    [ws],
+  );
+
   const handleNewConversation = () => {
     localStorage.removeItem(CONV_KEY);
     conversationIdRef.current = undefined;
@@ -1320,6 +1338,19 @@ export function ChatView({
           </div>
         </div>
       )}
+
+      {/* Task 18 — live CV-triage progress cards. Sits directly above
+          the composer so an in-flight job is always visible. The panel
+          renders nothing when there are no active or recently-finished
+          jobs. */}
+      <ActiveJobsPanel
+        subscribeWS={subscribeTriageWS}
+        onNavigate={(jobId) => {
+          // TODO Task 19: route to /jobs/:id once the Trabalhos tab lands.
+          // eslint-disable-next-line no-console
+          console.log('[cv-triage] navigate to job', jobId);
+        }}
+      />
 
       <div className="chat__composer">
         {talking ? (
