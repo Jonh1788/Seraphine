@@ -17,6 +17,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod clipboard;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod cv_triage_zip;
 mod health;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mac_tools;
@@ -156,6 +158,8 @@ fn run_desktop() {
             mac_tools::screen_key_local,
             // 042 active app
             mac_tools::active_app_local,
+            // CV Triage — Task 15: zip a folder of PDFs for upload.
+            cv_triage_zip::zip_folder_pdfs,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
