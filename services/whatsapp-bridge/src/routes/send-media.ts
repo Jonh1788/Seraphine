@@ -5,8 +5,14 @@ import { MessageMedia } from "whatsapp-web.js";
 import { getClient as defaultGetClient, getStatus as defaultGetStatus } from "../client";
 
 export interface SendMediaDeps {
-  getClient: typeof defaultGetClient | (() => { sendMessage: (chatId: string, media: MessageMedia, options?: { caption?: string }) => Promise<{ id: { _serialized: string } }> });
-  getStatus: typeof defaultGetStatus | (() => string);
+  getClient: () => {
+    sendMessage: (
+      chatId: string,
+      media: MessageMedia,
+      options?: { caption?: string },
+    ) => Promise<{ id: { _serialized: string } }>;
+  };
+  getStatus: () => string;
 }
 
 const upload = multer({ dest: "/tmp", limits: { fileSize: 25 * 1024 * 1024 } });
@@ -45,6 +51,7 @@ export function createSendMediaRouter(deps: SendMediaDeps): Router {
       );
       res.json({ ok: true, id: sent.id._serialized });
     } catch (err) {
+      console.error("[whatsapp-bridge] /api/send-media error:", err);
       res.status(500).json({ error: (err as Error).message });
     } finally {
       await fs.unlink(req.file.path).catch(() => {});
