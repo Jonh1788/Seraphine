@@ -26,8 +26,18 @@ SCORE_TOOL: dict[str, Any] = {
         ],
         "properties": {
             "candidate_name": {"type": "string", "maxLength": 120},
-            "score": {"type": "number", "minimum": 0, "maximum": 100},
-            "match_pct": {"type": "number", "minimum": 0, "maximum": 100},
+            "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Qualidade geral do candidato 0-100 (técnica, experiência, fit cultural).",
+            },
+            "match_pct": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Percentual dos requisitos explícitos da vaga atendidos pelo candidato 0-100.",
+            },
             "strengths": {
                 "type": "array",
                 "items": {"type": "string"},

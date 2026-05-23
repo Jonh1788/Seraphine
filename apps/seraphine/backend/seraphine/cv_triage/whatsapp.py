@@ -74,7 +74,7 @@ async def dispatch_to_whatsapp(
             result.error = f"send text failed: {e}"
             return result
 
-        for pdf in payload.pdfs:
+        for i, pdf in enumerate(payload.pdfs):
             caption = f"Top {pdf.rank} · {pdf.candidate_name} · score {pdf.score:.0f}"
             sent = False
             last_err: Optional[str] = None
@@ -99,5 +99,6 @@ async def dispatch_to_whatsapp(
                 result.failed_ranks.append(pdf.rank)
                 if not result.error:
                     result.error = f"media failed: {last_err}"
-            await asyncio.sleep(sleep_between)
+            if i < len(payload.pdfs) - 1:
+                await asyncio.sleep(sleep_between)
     return result

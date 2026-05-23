@@ -26,6 +26,9 @@ def test_tool_schema_contract() -> None:
     ):
         assert k in props
     assert SCORE_TOOL["input_schema"]["properties"]["score"]["maximum"] == 100
+    assert SCORE_TOOL["input_schema"]["properties"]["match_pct"]["maximum"] == 100
+    assert SCORE_TOOL["input_schema"]["properties"]["match_pct"]["minimum"] == 0
+    assert SCORE_TOOL["input_schema"]["properties"]["strengths"]["maxItems"] == 5
 
 
 @pytest.mark.asyncio
@@ -47,6 +50,8 @@ async def test_rank_one_parses_tool_use() -> None:
     assert res.score == 87.5
     assert res.strengths == ["Python", "FastAPI", "fintech"]
     client.tool_call_json.assert_awaited_once()
+    call_kwargs = client.tool_call_json.call_args.kwargs
+    assert call_kwargs["cache_system"] is True
 
 
 @pytest.mark.asyncio

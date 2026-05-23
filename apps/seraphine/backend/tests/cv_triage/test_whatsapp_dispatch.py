@@ -47,11 +47,15 @@ async def test_dispatches_text_then_media_in_order(tmp_path):
 @respx.mock
 async def test_text_fails_short_circuits():
     respx.post("http://bridge/api/send").mock(return_value=httpx.Response(503))
+    media_route = respx.post("http://bridge/api/send-media").mock(
+        return_value=httpx.Response(200)
+    )
     payload = DispatchPayload(chat_id="g@g.us", summary="x", pdfs=[])
     result = await dispatch_to_whatsapp(payload, bridge_url="http://bridge", sleep_between=0.0)
     assert result.text_sent is False
     assert result.media_sent == 0
     assert result.error and "send" in result.error.lower()
+    assert not media_route.called
 
 
 @pytest.mark.asyncio

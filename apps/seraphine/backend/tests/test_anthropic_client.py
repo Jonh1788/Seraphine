@@ -377,3 +377,68 @@ async def test_anthropic_connection_error_raises_llm_unavailable() -> None:
                 pass
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tool_call_json_forces_tool_and_caches_system() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        body = {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "score_candidate",
+                    "input": {"candidate_name": "João", "score": 87},
+                }
+            ]
+        }
+        return httpx.Response(200, json=body)
+
+    tool = {
+        "name": "score_candidate",
+        "description": "score a candidate",
+        "input_schema": {"type": "object", "properties": {}},
+    }
+
+    client = _make_client(handler)
+    try:
+        out = await client.tool_call_json(
+            system="rubric",
+            user="cv text",
+            tool=tool,
+            cache_system=True,
+        )
+    finally:
+        await client.aclose()
+
+    assert out == {"candidate_name": "João", "score": 87}
+    body = captured["body"]
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert body["tool_choice"] == {"type": "tool", "name": "score_candidate"}
+
+
+@pytest.mark.asyncio
+async def test_tool_call_json_raises_when_no_tool_use_block() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "content": [
+                {"type": "text", "text": "I refuse to use the tool."},
+            ]
+        }
+        return httpx.Response(200, json=body)
+
+    tool = {
+        "name": "score_candidate",
+        "description": "score a candidate",
+        "input_schema": {"type": "object", "properties": {}},
+    }
+
+    client = _make_client(handler)
+    try:
+        with pytest.raises(RuntimeError, match="score_candidate"):
+            await client.tool_call_json(system="r", user="u", tool=tool)
+    finally:
+        await client.aclose()
