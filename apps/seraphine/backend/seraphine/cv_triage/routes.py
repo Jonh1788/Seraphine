@@ -270,8 +270,26 @@ async def create_job(
     # Dispatch the worker. Use vision_client + llm + ws_clients from
     # app.state when present; otherwise pass safe stubs (the route never
     # awaits the task — failures land in the DB).
-    llm_client = getattr(request.app.state, "llm", None)
-    vision_client = llm_client  # AnthropicClient exposes transcribe_image_pages
+    shared_client = getattr(request.app.state, "llm", None)
+    vision_client = shared_client  # AnthropicClient exposes transcribe_image_pages
+
+    # Ranking runs 80+ calls per job and the default ``shared_client``
+    # points at cliproxy (Claude Max), which hard-rate-limits batch
+    # workloads. If the operator provided a direct Anthropic key via
+    # ``SERAPHINE_CV_TRIAGE_ANTHROPIC_API_KEY``, build a dedicated client
+    # for the ranking phase that talks to api.anthropic.com directly.
+    triage_key = os.environ.get("SERAPHINE_CV_TRIAGE_ANTHROPIC_API_KEY")
+    if triage_key:
+        from llm_adapters.anthropic import AnthropicClient
+        from seraphine.config import settings as _settings
+        llm_client = AnthropicClient(
+            api_key=triage_key,
+            base_url="https://api.anthropic.com",
+            model=_settings.anthropic_smart_model or "claude-sonnet-4-6",
+        )
+    else:
+        llm_client = shared_client  # fallback to whatever the app is wired with
+
     ws_clients = getattr(request.app.state, "ws_clients", set())
     bridge_url = _bridge_url(request)
 
