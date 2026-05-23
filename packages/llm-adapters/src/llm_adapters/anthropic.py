@@ -373,7 +373,28 @@ class AnthropicClient:
             "tool_choice": {"type": "tool", "name": tool["name"]},
             "max_tokens": max_tokens,
         }
-        resp = await self._client.post("/v1/messages", json=body, timeout=180.0)
+        # 429 retry: cliproxy (Claude Max) has tight RPM limits, and a
+        # job ranking 80+ CVs will hammer them. Honor ``retry-after`` when
+        # present; cap waits at 30s. After 5 attempts give up — the caller
+        # marks the CV as failed and moves on.
+        attempt = 0
+        max_attempts = 5
+        while True:
+            resp = await self._client.post("/v1/messages", json=body, timeout=180.0)
+            if resp.status_code != 429 or attempt >= max_attempts - 1:
+                break
+            attempt += 1
+            retry_after = resp.headers.get("retry-after")
+            try:
+                wait_s = float(retry_after) if retry_after else 2.0 ** attempt
+            except ValueError:
+                wait_s = 2.0 ** attempt
+            wait_s = min(max(wait_s, 0.5), 30.0)
+            logger.info(
+                "Anthropic tool_call_json 429 — retrying in %.1fs (attempt %d/%d)",
+                wait_s, attempt, max_attempts,
+            )
+            await asyncio.sleep(wait_s)
         resp.raise_for_status()
         data = resp.json()
         for block in data.get("content", []) or []:

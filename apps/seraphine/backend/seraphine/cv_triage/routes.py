@@ -304,10 +304,13 @@ async def create_job(
 
 
 @router.get("/jobs")
-async def list_jobs(request: Request) -> dict[str, Any]:
+async def list_jobs(request: Request) -> list[dict[str, Any]]:
+    """Return a flat ``JobSummary[]`` — matches the frontend's TypeScript
+    contract and mirrors how ``GET /jobs/{id}`` returns the job dict
+    directly (no wrapping envelope)."""
     conn = _get_conn(request)
     jobs = storage.list_jobs(conn)
-    return {"jobs": [_job_to_dict(j) for j in jobs]}
+    return [_job_to_dict(j) for j in jobs]
 
 
 # ---------------------------------------------------------------------------

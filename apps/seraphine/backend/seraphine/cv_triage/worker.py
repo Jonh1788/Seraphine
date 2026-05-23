@@ -42,7 +42,10 @@ class WorkerDeps:
     extract_fn: ExtractFn
     rank_fn: RankFn
     broadcast_fn: BroadcastFn
-    rank_concurrency: int = 5
+    # Concurrency=1 by default — production runs through cliproxy (Claude Max
+    # subscription), which has a tight RPM budget. Raise when using direct
+    # Anthropic API keys with higher tier.
+    rank_concurrency: int = 1
     sleep_between_media: float = 1.5
     sonnet_model: str = "claude-sonnet-4-6"
 
