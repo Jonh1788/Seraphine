@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # --- LLM
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-5"
+    anthropic_model: str = "claude-sonnet-4-6"
     anthropic_base_url: str = "https://api.anthropic.com"
 
     # --- Google OAuth (multi-tenant, web redirect flow)
