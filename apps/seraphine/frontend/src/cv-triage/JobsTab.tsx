@@ -394,7 +394,7 @@ export function JobsTab({
           <div className="work-summary-grid">
             <div className="work-summary-card">
               <span>Trabalho aberto</span>
-              <strong>{briefingTasks.length}</strong>
+              <strong>{openTasks.length}</strong>
               <small>{overdueTasks.length} atrasado{overdueTasks.length === 1 ? '' : 's'}</small>
             </div>
             <div className="work-summary-card">
