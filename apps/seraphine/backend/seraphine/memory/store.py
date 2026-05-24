@@ -827,25 +827,38 @@ class MemoryStore(Store):
         return await asyncio.to_thread(_work)
 
     async def list_facts(
-        self, *, limit: int = 50, include_superseded: bool = False
+        self,
+        *,
+        limit: int = 50,
+        include_superseded: bool = False,
+        fresh_only: bool = False,
     ) -> list[Fact]:
         def _work() -> list[Fact]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if not include_superseded:
+                clauses.append("superseded_by IS NULL")
+            if fresh_only:
+                # seraphine.memory and seraphine.freshness are siblings
+                # — the import is layering-safe.
+                from seraphine.freshness import DEFAULT_POLICY
+
+                fragment, fragment_params = DEFAULT_POLICY.sql_fresh_filter(
+                    created_col="created_at",
+                    now=_freshness_policy_now(),
+                )
+                clauses.append(fragment)
+                params.extend(fragment_params)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
             with self._connect() as conn:
-                if include_superseded:
-                    rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at,"
-                        " superseded_by, last_used_at"
-                        " FROM facts ORDER BY created_at DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at,"
-                        " superseded_by, last_used_at"
-                        " FROM facts WHERE superseded_by IS NULL"
-                        " ORDER BY created_at DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
+                sql = (
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at"
+                    " FROM facts"
+                    f"{where} ORDER BY created_at DESC LIMIT ?"
+                )
+                rows = conn.execute(sql, params).fetchall()
             return [
                 Fact(
                     id=r[0],
