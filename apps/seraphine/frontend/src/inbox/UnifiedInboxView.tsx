@@ -23,6 +23,10 @@ interface InboxItem {
   decision?: boolean;
   actionLabel: string;
   action?: () => void | Promise<void>;
+  secondaryActions?: Array<{
+    label: string;
+    action: () => void | Promise<void>;
+  }>;
 }
 
 interface UnifiedInboxViewProps {
@@ -73,6 +77,28 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
     setError(null);
     try {
       const res = await fetch(`${API_BASE}${path}`, init);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setItems((prev) => prev.filter((item) => item.id !== itemId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActingId(null);
+    }
+  }, []);
+
+  const resolveAutopilot = useCallback(async (
+    itemId: string,
+    suggestionId: string,
+    action: 'apply' | 'dismiss' | 'snooze',
+  ): Promise<void> => {
+    setActingId(itemId);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/work/autopilot/${encodeURIComponent(suggestionId)}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: action === 'snooze' ? JSON.stringify({ hours: 24 }) : undefined,
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setItems((prev) => prev.filter((item) => item.id !== itemId));
     } catch (e) {
@@ -204,15 +230,20 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
 
     const autopilot = settle[6].status === 'fulfilled' ? settle[6].value : { suggestions: [] };
     for (const suggestion of (autopilot.suggestions || []).slice(0, 8)) {
+      const itemId = `decision-${suggestion.id}`;
       next.push({
-        id: `decision-${suggestion.id}`,
+        id: itemId,
         kind: 'work',
         title: suggestion.title || 'Decisao de trabalho',
         detail: suggestion.detail || 'Autopilot de trabalho',
         urgency: suggestion.severity === 'high' ? 'high' : suggestion.severity === 'medium' ? 'medium' : 'low',
         decision: true,
-        actionLabel: suggestion.action_label || 'Abrir',
-        action: () => onNavigate('trabalhos'),
+        actionLabel: suggestion.action_label || 'Aplicar',
+        action: () => resolveAutopilot(itemId, suggestion.id, 'apply'),
+        secondaryActions: [
+          { label: 'Adiar', action: () => resolveAutopilot(itemId, suggestion.id, 'snooze') },
+          { label: 'Dispensar', action: () => resolveAutopilot(itemId, suggestion.id, 'dismiss') },
+        ],
       });
     }
 
@@ -221,7 +252,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
     }
     setItems(next);
     setLoading(false);
-  }, [resolveItem]);
+  }, [onNavigate, resolveAutopilot, resolveItem]);
 
   useEffect(() => {
     void refresh();
@@ -317,6 +348,16 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
               <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : item.kind === 'work' ? 'trabalhos' : 'tasks')}>
                 Abrir
               </button>
+              {item.secondaryActions?.map((secondary) => (
+                <button
+                  key={secondary.label}
+                  type="button"
+                  onClick={() => void secondary.action()}
+                  disabled={actingId === item.id}
+                >
+                  {secondary.label}
+                </button>
+              ))}
             </div>
           </div>
         ))}

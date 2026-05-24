@@ -62,6 +62,19 @@ interface WorkSuggestion {
   severity: 'high' | 'medium' | 'low';
 }
 
+interface WorkToday {
+  top_project?: WorkProject | null;
+  risk_project?: WorkProject | null;
+  next_task?: { title?: string; due_date?: string | null; priority?: string | null } | null;
+  next_decision?: WorkSuggestion | null;
+  counts: {
+    projects: number;
+    open_tasks: number;
+    active_triages: number;
+    decisions: number;
+  };
+}
+
 interface DashboardViewProps {
   onNavigate: (view: string) => void;
   connected: boolean;
@@ -110,6 +123,7 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
     due_projects: WorkProject[];
   } | null>(null);
   const [workSuggestions, setWorkSuggestions] = useState<WorkSuggestion[]>([]);
+  const [workToday, setWorkToday] = useState<WorkToday | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -139,13 +153,15 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
   useEffect(() => {
     let cancelled = false;
     const fetchWork = async (): Promise<void> => {
-      const [briefing, autopilot] = await Promise.allSettled([
+      const [briefing, autopilot, today] = await Promise.allSettled([
         fetch(`${API_BASE}/work/briefing`).then((r) => r.ok ? r.json() : null),
         fetch(`${API_BASE}/work/autopilot`).then((r) => r.ok ? r.json() : { suggestions: [] }),
+        fetch(`${API_BASE}/work/today`).then((r) => r.ok ? r.json() : null),
       ]);
       if (cancelled) return;
       if (briefing.status === 'fulfilled') setWorkBriefing(briefing.value);
       if (autopilot.status === 'fulfilled') setWorkSuggestions(autopilot.value?.suggestions || []);
+      if (today.status === 'fulfilled') setWorkToday(today.value);
     };
     void fetchWork();
     const id = setInterval(fetchWork, 60_000);
@@ -399,16 +415,25 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
         >
           <div className="dashboard__work-card-top">
             <div>
-              <span>Trabalho</span>
-              <strong>{workBriefing.projects[0]?.name || 'Sem projeto principal'}</strong>
+              <span>Missao de hoje</span>
+              <strong>{workToday?.top_project?.name || workBriefing.projects[0]?.name || 'Sem projeto principal'}</strong>
             </div>
-            <span>{workBriefing.due_projects.length} prazo(s)</span>
+            <span>{workToday?.counts.decisions ?? workSuggestions.length} decisao(oes)</span>
           </div>
           <p>
-            {topWorkSuggestion
+            {workToday?.next_decision
+              ? `${workToday.next_decision.title}: ${workToday.next_decision.detail}`
+              : workToday?.next_task?.title
+                ? `Proxima tarefa: ${workToday.next_task.title}`
+                : topWorkSuggestion
               ? `${topWorkSuggestion.title}: ${topWorkSuggestion.detail}`
               : 'Nenhuma decisao de trabalho pendente agora.'}
           </p>
+          {workToday?.risk_project && (
+            <small className="dashboard__work-risk">
+              Risco: {workToday.risk_project.name}
+            </small>
+          )}
         </button>
       )}
 

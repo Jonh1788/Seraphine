@@ -8,6 +8,12 @@ interface QuickCaptureProps {
 
 type Priority = 'baixa' | 'media' | 'alta';
 
+const PRIORITY_MAP: Record<Priority, 'low' | 'med' | 'high'> = {
+  baixa: 'low',
+  media: 'med',
+  alta: 'high',
+};
+
 export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element | null {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -40,16 +46,19 @@ export function QuickCapture({ open, onClose }: QuickCaptureProps): JSX.Element 
     const trimmed = title.trim();
     if (!trimmed) return;
 
-    const body: Record<string, unknown> = { title: trimmed };
+    const body: Record<string, unknown> = { text: trimmed };
     if (dueDate) {
-      body.due_date = dueTime ? `${dueDate}T${dueTime}` : dueDate;
+      body.due_date = dueDate;
+    }
+    if (dueTime) {
+      body.due_time = dueTime;
     }
     if (priority) {
-      body.priority = priority;
+      body.priority = PRIORITY_MAP[priority];
     }
 
     try {
-      await fetch(`${API_BASE}/tasks`, {
+      await fetch(`${API_BASE}/work/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

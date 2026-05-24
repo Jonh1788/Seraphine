@@ -41,5 +41,14 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON work_project_links(project_id, created_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_work_project_links_unique_target
           ON work_project_links(project_id, target_type, target_id);
+
+        CREATE TABLE IF NOT EXISTS work_autopilot_actions (
+          suggestion_id TEXT PRIMARY KEY,
+          action        TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          snooze_until  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_work_autopilot_actions_snooze
+          ON work_autopilot_actions(snooze_until);
         """
     )

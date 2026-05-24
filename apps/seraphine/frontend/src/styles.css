@@ -9153,6 +9153,13 @@ button:disabled {
   line-height: 1.45;
 }
 
+.dashboard__work-risk {
+  display: block;
+  margin-top: 8px;
+  color: #fca5a5;
+  font-size: 11px;
+}
+
 .dashboard__module {
   display: flex;
   align-items: center;

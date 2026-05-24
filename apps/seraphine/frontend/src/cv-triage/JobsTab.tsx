@@ -62,6 +62,12 @@ interface WorkProjectLink {
 interface WorkProjectDetail {
   project: WorkProject;
   links: WorkProjectLink[];
+  items?: Array<{
+    target_type: string;
+    target_id: string;
+    title: string;
+    data?: Record<string, unknown> | null;
+  }>;
   summary: {
     linked_tasks: number;
     linked_triages: number;
@@ -267,14 +273,19 @@ export function JobsTab({
                 <h3>Itens vinculados</h3>
                 <span>{projectDetail.links.length}</span>
               </div>
-              {projectDetail.links.length === 0 && (
+              {(projectDetail.items || projectDetail.links).length === 0 && (
                 <p className="cvt-empty">Nenhum item vinculado ainda. Use o chat para ligar tarefas, notas ou triagens a este projeto.</p>
               )}
-              {projectDetail.links.map((link) => (
-                <div key={link.id} className="work-task-row">
+              {(projectDetail.items || projectDetail.links.map((link) => ({
+                target_type: link.target_type,
+                target_id: link.target_id,
+                title: link.title,
+                data: null,
+              }))).map((item) => (
+                <div key={`${item.target_type}-${item.target_id}`} className="work-task-row">
                   <span className="work-task-row__main">
-                    <strong>{link.title || link.target_id}</strong>
-                    <small>{link.target_type} · {new Date(link.created_at).toLocaleString()}</small>
+                    <strong>{projectItemTitle(item)}</strong>
+                    <small>{projectItemDetail(item)}</small>
                   </span>
                 </div>
               ))}
@@ -569,6 +580,24 @@ export function JobsTab({
       )}
     </div>
   );
+}
+
+function projectItemTitle(item: { title: string; target_id: string; data?: Record<string, unknown> | null }): string {
+  return String(item.data?.title || item.data?.target_label || item.title || item.target_id);
+}
+
+function projectItemDetail(item: { target_type: string; data?: Record<string, unknown> | null }): string {
+  const data = item.data || {};
+  if (item.target_type === 'task') {
+    return `tarefa · ${String(data.status || 'sem status')}${data.due_date ? ` · ${String(data.due_date)}` : ''}`;
+  }
+  if (item.target_type === 'cv_triage') {
+    return `triagem · ${String(data.status || 'sem status')}${data.total_cvs ? ` · ${String(data.total_cvs)} CVs` : ''}`;
+  }
+  if (item.target_type === 'note') {
+    return 'nota';
+  }
+  return item.target_type;
 }
 
 function groupByDay(

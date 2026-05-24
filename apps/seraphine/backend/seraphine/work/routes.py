@@ -44,6 +44,21 @@ class LinkBody(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class SnoozeBody(BaseModel):
+    hours: int = 24
+
+    model_config = {"extra": "forbid"}
+
+
+class CaptureBody(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+    due_date: str | None = None
+    due_time: str | None = None
+    priority: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
 def _service_or_503(request: Request) -> WorkProjectService:
     svc: Optional[WorkProjectService] = getattr(
         request.app.state, "work_service", None,
@@ -152,6 +167,13 @@ async def remove_project_link(
     return {"ok": True}
 
 
+@router.get("/today")
+async def work_today(request: Request) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    cv_jobs = await _read_cv_jobs(request)
+    return await svc.today(cv_jobs=cv_jobs)
+
+
 @router.get("/briefing")
 async def work_briefing(request: Request) -> dict[str, Any]:
     svc = _service_or_503(request)
@@ -164,6 +186,57 @@ async def work_autopilot(request: Request) -> dict[str, Any]:
     svc = _service_or_503(request)
     cv_jobs = await _read_cv_jobs(request)
     return await svc.autopilot(cv_jobs=cv_jobs)
+
+
+@router.post("/autopilot/{suggestion_id}/apply")
+async def apply_autopilot_suggestion(
+    request: Request,
+    suggestion_id: str,
+) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    try:
+        return await svc.apply_suggestion(suggestion_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/autopilot/{suggestion_id}/dismiss")
+async def dismiss_autopilot_suggestion(
+    request: Request,
+    suggestion_id: str,
+) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    return await svc.dismiss_suggestion(suggestion_id)
+
+
+@router.post("/autopilot/{suggestion_id}/snooze")
+async def snooze_autopilot_suggestion(
+    request: Request,
+    suggestion_id: str,
+    body: SnoozeBody | None = None,
+) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    return await svc.snooze_suggestion(
+        suggestion_id,
+        hours=(body.hours if body else 24),
+    )
+
+
+@router.post("/capture")
+async def smart_capture(
+    request: Request,
+    body: CaptureBody,
+) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    try:
+        return await svc.capture(
+            body.text,
+            due_date=body.due_date,
+            due_time=body.due_time,
+            priority=body.priority,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 async def _read_cv_jobs(request: Request) -> list[Any]:
