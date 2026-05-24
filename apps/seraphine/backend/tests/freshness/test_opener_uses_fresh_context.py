@@ -232,3 +232,100 @@ async def test_opener_omits_empty_tasks_section(
     assert section == ""
     assert "tarefas em aberto" not in section
     assert "nenhuma" not in section.lower()
+
+
+# ---------------------------------------------------------------------------
+# 5. day_review (proactive scheduler) — separate LLM path, own prompt
+# ---------------------------------------------------------------------------
+#
+# `_tick_day_review` (21:00 daily) builds its context bundle from
+# ``store.get_recent_turns`` filtered to *today* only — by construction
+# that source is intrinsically fresh, so there is no ``list_tasks`` /
+# ``list_open_loops`` / ``list_facts`` call site to thread ``fresh_only=True``
+# through. What CAN still produce confabulation is the prompt template:
+# if today's turn excerpt is sparse the model is otherwise nudged to
+# invent "o que ele fez hoje" content from stale priors.  So the
+# equivalent of the opener's softened rule #5 applies here.
+#
+# Spec ref: docs/superpowers/specs/2026-05-23-seraphine-freshness-design.md
+# §"Day-review broadcast" — "rule do prompt também ganha versão
+# suavizada equivalente à do opener (regra #5)".
+
+
+def test_day_review_prompt_softens_invention_rule() -> None:
+    """``_DAY_REVIEW_PROMPT`` must explicitly forbid inventing content
+    when today's chat excerpt is sparse — mirrors the opener's rule #5
+    softening from Task 7."""
+    from seraphine.proactive.scheduler import _DAY_REVIEW_PROMPT
+
+    lower = _DAY_REVIEW_PROMPT.lower()
+    assert any(
+        phrase in lower
+        for phrase in (
+            "se não houver",
+            "não invente",
+            "sem inventar",
+            "sem confabular",
+        )
+    ), (
+        "Day-review prompt still allows confabulation when today's chat "
+        "is sparse. Template:\n"
+        f"{_DAY_REVIEW_PROMPT}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_day_review_does_not_call_stale_dao_paths() -> None:
+    """Regression: if a future refactor adds ``list_tasks`` /
+    ``list_open_loops`` / ``list_facts`` to the day-review context
+    bundle, those calls MUST pass ``fresh_only=True``. Today the bundle
+    only reads ``get_recent_turns`` (today's chat, intrinsically fresh),
+    so we assert the absence of stale DAO calls."""
+    from datetime import datetime as _dt
+
+    from seraphine.proactive.scheduler import (
+        TZ as _TZ,
+        ProactiveScheduler,
+    )
+
+    # Today's date so get_recent_turns rows match the today-filter.
+    today_iso = _dt.now(_TZ).date().isoformat()
+
+    fake_turn = MagicMock()
+    fake_turn.role = "user"
+    fake_turn.content = "oi, terminei o relatório hoje"
+    fake_turn.created_at = f"{today_iso}T10:00:00"
+
+    store = MagicMock()
+    store.get_recent_turns = AsyncMock(return_value=[fake_turn] * 5)
+    store.list_tasks = AsyncMock(return_value=[])
+    store.list_open_loops = AsyncMock(return_value=[])
+    store.list_facts = AsyncMock(return_value=[])
+    store.add_event = AsyncMock()
+
+    async def _fake_chat(*_a, **_kw):
+        # Empty async iterator — _llm_quick will produce empty text and bail.
+        if False:
+            yield None
+        return
+
+    llm = MagicMock()
+    llm.chat = _fake_chat
+
+    app_state = MagicMock()
+    app_state.store = store
+    app_state.llm = llm
+    app_state.ws_clients = set()
+
+    sched = ProactiveScheduler(app_state, enabled=False)
+    await sched._tick_day_review()
+
+    # Either zero calls (current shape) OR if a future refactor adds
+    # them, every call must opt into fresh_only.
+    for dao_name in ("list_tasks", "list_open_loops", "list_facts"):
+        dao = getattr(store, dao_name)
+        for call in dao.call_args_list:
+            assert call.kwargs.get("fresh_only") is True, (
+                f"day_review called store.{dao_name} without fresh_only=True: "
+                f"{call}"
+            )
