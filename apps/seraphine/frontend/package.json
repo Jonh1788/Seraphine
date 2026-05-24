@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:install": "bash scripts/tauri-install.sh"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.1.0",
