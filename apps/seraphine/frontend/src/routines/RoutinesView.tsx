@@ -54,28 +54,28 @@ const ROUTINES: Routine[] = [
     title: 'Planejar projeto',
     detail: 'Transforma uma ideia em escopo, riscos, marcos e proximas acoes.',
     icon: <TargetIcon size={20} />,
-    prompt: 'Vamos planejar um projeto de trabalho. Liste os projetos ativos, escolha o mais importante se eu nao especificar, e monte objetivo, escopo, riscos, marcos, proximas acoes e o primeiro bloco executavel.',
+    prompt: 'Vamos planejar um projeto de trabalho. Use list_work_projects; se nao existir o projeto certo, use create_work_project. Depois crie as primeiras tarefas com add_task e vincule ao projeto com link_work_project_item.',
   },
   {
     id: 'project-review',
     title: 'Revisar sprint',
     detail: 'Repassa projetos ativos, tarefas abertas, bloqueios e entregas.',
     icon: <CheckCircleIcon size={20} />,
-    prompt: 'Faz uma revisao de sprint dos meus trabalhos: projetos ativos, tarefas abertas, atrasos, bloqueios, decisoes pendentes e o plano das proximas 48 horas.',
+    prompt: 'Faz uma revisao de sprint dos meus trabalhos. Use list_work_projects e o briefing/autopilot de trabalho se disponivel. Liste bloqueios, decisoes pendentes e crie ou atualize tarefas reais quando eu aprovar.',
   },
   {
     id: 'project-close',
     title: 'Fechar entrega',
     detail: 'Confere pendencias, evidencias, comunicacao e aprendizado.',
     icon: <MoonIcon size={20} />,
-    prompt: 'Me ajuda a fechar uma entrega de trabalho: encontra o projeto certo, lista pendencias, evidencias, comunicacao necessaria, criterios de pronto e aprendizados para registrar.',
+    prompt: 'Me ajuda a fechar uma entrega de trabalho. Encontre o projeto com list_work_projects, confira pendencias vinculadas, gere checklist final, registre uma nota de aprendizado se fizer sentido e proponha marcar o projeto como done.',
   },
   {
     id: 'project-meeting',
     title: 'Reuniao de projeto',
     detail: 'Prepara contexto, status, riscos e perguntas para alinhamento.',
     icon: <CalendarIcon size={20} />,
-    prompt: 'Prepara uma reuniao de projeto: identifica o projeto relevante, resume status, tarefas abertas, decisoes, riscos, perguntas e proximas acoes para sair da reuniao.',
+    prompt: 'Prepara uma reuniao de projeto. Use list_work_projects para identificar o contexto, traga status, tarefas abertas, decisoes, riscos, perguntas e proximas acoes; crie tarefas de follow-up se eu confirmar.',
   },
 ];
 

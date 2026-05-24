@@ -155,6 +155,18 @@ async def remove_project_link(
 @router.get("/briefing")
 async def work_briefing(request: Request) -> dict[str, Any]:
     svc = _service_or_503(request)
+    cv_jobs = await _read_cv_jobs(request)
+    return await svc.briefing(cv_jobs=cv_jobs)
+
+
+@router.get("/autopilot")
+async def work_autopilot(request: Request) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    cv_jobs = await _read_cv_jobs(request)
+    return await svc.autopilot(cv_jobs=cv_jobs)
+
+
+async def _read_cv_jobs(request: Request) -> list[Any]:
     cv_jobs: list[Any] = []
     store = getattr(request.app.state, "store", None)
     if store is not None:
@@ -180,4 +192,4 @@ async def work_briefing(request: Request) -> dict[str, Any]:
             cv_jobs = await asyncio.to_thread(_read_jobs)
         except Exception:
             cv_jobs = []
-    return await svc.briefing(cv_jobs=cv_jobs)
+    return cv_jobs

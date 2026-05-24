@@ -20,6 +20,7 @@ interface InboxItem {
   title: string;
   detail: string;
   urgency: 'high' | 'medium' | 'low';
+  decision?: boolean;
   actionLabel: string;
   action?: () => void | Promise<void>;
 }
@@ -61,6 +62,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
   const [actingId, setActingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | InboxKind>('all');
+  const [decisionFilter, setDecisionFilter] = useState(false);
 
   const resolveItem = useCallback(async (
     itemId: string,
@@ -92,6 +94,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       fetch(`${API_BASE}/insights`).then((r) => r.ok ? r.json() : { insights: [] }),
       fetch(`${API_BASE}/memory/notifications?limit=20`).then((r) => r.ok ? r.json() : []),
       fetch(`${API_BASE}/work/briefing`).then((r) => r.ok ? r.json() : { due_projects: [], projects: [] }),
+      fetch(`${API_BASE}/work/autopilot`).then((r) => r.ok ? r.json() : { suggestions: [] }),
     ]);
 
     const tasks = settle[0].status === 'fulfilled' ? (settle[0].value.tasks || []) : [];
@@ -136,6 +139,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
         title: entry.description || 'Lancamento pendente',
         detail: `${entry.type || 'entrada'} · R$ ${Number(entry.amount || 0).toLocaleString('pt-BR')}`,
         urgency: 'medium',
+        decision: true,
         actionLabel: 'Aprovar',
         action: () => resolveItem(`finance-${entry.id}`, `/finance/entries/${entry.id}/status`, {
           method: 'PATCH',
@@ -192,8 +196,23 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
         title: project.name || 'Projeto de trabalho',
         detail: `${project.area || 'Trabalho'}${project.due_date ? ` · prazo ${project.due_date}` : ''}`,
         urgency: project.due_date && project.due_date < todayISO() ? 'high' : project.priority === 'high' ? 'medium' : 'low',
+        decision: true,
         actionLabel: 'Abrir',
-        action: () => onNavigate('jobs'),
+        action: () => onNavigate('trabalhos'),
+      });
+    }
+
+    const autopilot = settle[6].status === 'fulfilled' ? settle[6].value : { suggestions: [] };
+    for (const suggestion of (autopilot.suggestions || []).slice(0, 8)) {
+      next.push({
+        id: `decision-${suggestion.id}`,
+        kind: 'work',
+        title: suggestion.title || 'Decisao de trabalho',
+        detail: suggestion.detail || 'Autopilot de trabalho',
+        urgency: suggestion.severity === 'high' ? 'high' : suggestion.severity === 'medium' ? 'medium' : 'low',
+        decision: true,
+        actionLabel: suggestion.action_label || 'Abrir',
+        action: () => onNavigate('trabalhos'),
       });
     }
 
@@ -209,8 +228,11 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
   }, [refresh]);
 
   const filtered = useMemo(
-    () => filter === 'all' ? items : items.filter((item) => item.kind === filter),
-    [filter, items],
+    () => {
+      const base = decisionFilter ? items.filter((item) => item.decision) : items;
+      return filter === 'all' ? base : base.filter((item) => item.kind === filter);
+    },
+    [decisionFilter, filter, items],
   );
 
   const counts = useMemo(() => ({
@@ -244,6 +266,14 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       </div>
 
       <div className="inbox-filter">
+        <button
+          type="button"
+          className={decisionFilter ? 'is-active' : ''}
+          onClick={() => setDecisionFilter((value) => !value)}
+        >
+          Decisoes
+          <span>{items.filter((item) => item.decision).length}</span>
+        </button>
         {(['all', 'task', 'email', 'finance', 'insight', 'memory', 'work'] as const).map((key) => (
           <button
             key={key}
@@ -284,7 +314,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
               >
                 {actingId === item.id ? '...' : item.actionLabel}
               </button>
-              <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : item.kind === 'work' ? 'jobs' : 'tasks')}>
+              <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : item.kind === 'work' ? 'trabalhos' : 'tasks')}>
                 Abrir
               </button>
             </div>

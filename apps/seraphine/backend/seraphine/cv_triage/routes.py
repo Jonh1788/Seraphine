@@ -313,6 +313,19 @@ async def create_job(
     )
     asyncio.create_task(run_cv_triage(job_id, deps))
 
+    work_service = getattr(request.app.state, "work_service", None)
+    if work_service is not None:
+        try:
+            await work_service.auto_link_item(
+                target_type="cv_triage",
+                target_id=str(job_id),
+                title=f"Triagem: {target_label}",
+                text=rubric,
+                metadata={"source": "cv_triage"},
+            )
+        except Exception:
+            logger.debug("work auto-link failed for cv triage %s", job_id, exc_info=True)
+
     return {"job_id": job_id, "turn_id": job_id}
 
 

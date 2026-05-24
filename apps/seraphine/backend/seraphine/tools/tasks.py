@@ -254,9 +254,15 @@ class CreateTaskTool(Tool):
     requires_confirmation = False
     category = "meta"
 
-    def __init__(self, task_service: Any, scheduler: Any = None) -> None:
+    def __init__(
+        self,
+        task_service: Any,
+        scheduler: Any = None,
+        work_service: Any = None,
+    ) -> None:
         self._svc = task_service
         self._scheduler = scheduler
+        self._work = work_service
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         title = str(args.get("title", "")).strip()
@@ -291,6 +297,19 @@ class CreateTaskTool(Tool):
                 self._scheduler, task_id, title, due_date, due_time, remind,
             )
 
+        work_link = None
+        if self._work is not None:
+            try:
+                work_link = await self._work.auto_link_item(
+                    target_type="task",
+                    target_id=str(task_id),
+                    title=title,
+                    text=description,
+                    metadata={"source": "add_task"},
+                )
+            except Exception:
+                logger.debug("work auto-link failed for task %s", task_id, exc_info=True)
+
         card_html = _build_task_card(
             title=title,
             task_id=task_id,
@@ -323,6 +342,7 @@ class CreateTaskTool(Tool):
                     "description": description,
                     "remind": remind,
                 },
+                "work_link": work_link.to_dict() if work_link else None,
                 "html_card": card_html,
             },
         )

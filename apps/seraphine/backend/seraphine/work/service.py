@@ -279,6 +279,115 @@ class WorkProjectService:
 
         return await asyncio.to_thread(_work) > 0
 
+    async def auto_link_item(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        title: str,
+        text: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkProjectLink | None:
+        """Best-effort link of a new item to the most likely active project."""
+        haystack = f"{title} {text}".lower()
+        if not haystack.strip():
+            return None
+        projects = await self.list(status="active", limit=100)
+        scored: list[tuple[int, WorkProject]] = []
+        for project in projects:
+            terms = [project.name, project.area, *project.tags]
+            score = 0
+            for term in terms:
+                clean = str(term or "").strip().lower()
+                if len(clean) < 3:
+                    continue
+                if clean in haystack:
+                    score += 3 if clean == project.name.lower() else 1
+                else:
+                    for part in clean.replace("-", " ").replace("_", " ").split():
+                        if len(part) >= 4 and part in haystack:
+                            score += 1
+            if score > 0:
+                scored.append((score, project))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: item[0], reverse=True)
+        project = scored[0][1]
+        return await self.add_link(
+            project.id,
+            target_type=target_type,
+            target_id=target_id,
+            title=title,
+            metadata={**(metadata or {}), "auto_linked": True, "score": scored[0][0]},
+        )
+
+    async def autopilot(
+        self,
+        *,
+        cv_jobs: Iterable[Any] | None = None,
+    ) -> dict[str, Any]:
+        projects = await self.list(include_archived=False, limit=100)
+        today = _today_iso()
+        suggestions: list[dict[str, Any]] = []
+        for project in projects:
+            if project.status != "active":
+                continue
+            links = await self.links(project.id)
+            task_links = [link for link in links if link.target_type == "task"]
+            if not task_links:
+                suggestions.append({
+                    "id": f"project-no-task-{project.id}",
+                    "kind": "project_next_action",
+                    "severity": "high" if project.priority == "high" else "medium",
+                    "project_id": project.id,
+                    "title": f"Definir proxima acao para {project.name}",
+                    "detail": "Projeto ativo sem tarefa vinculada.",
+                    "action_label": "Criar tarefa",
+                })
+            if project.due_date and project.due_date < today:
+                suggestions.append({
+                    "id": f"project-overdue-{project.id}",
+                    "kind": "project_overdue",
+                    "severity": "high",
+                    "project_id": project.id,
+                    "title": f"Revisar prazo de {project.name}",
+                    "detail": f"Prazo venceu em {project.due_date}.",
+                    "action_label": "Replanejar",
+                })
+            if project.priority == "high" and not project.due_date:
+                suggestions.append({
+                    "id": f"project-high-no-date-{project.id}",
+                    "kind": "project_missing_due_date",
+                    "severity": "medium",
+                    "project_id": project.id,
+                    "title": f"Dar prazo para {project.name}",
+                    "detail": "Projeto de alta prioridade sem prazo definido.",
+                    "action_label": "Definir prazo",
+                })
+
+        linked_triages = await self._linked_target_ids("cv_triage")
+        for job in list(cv_jobs or []):
+            data = job if isinstance(job, dict) else getattr(job, "to_dict", lambda: {})()
+            job_id = str(data.get("id") or "")
+            if not job_id or job_id in linked_triages:
+                continue
+            if data.get("status") in {"done", "failed", "cancelled"}:
+                continue
+            suggestions.append({
+                "id": f"triage-unlinked-{job_id}",
+                "kind": "triage_unlinked",
+                "severity": "medium",
+                "target_type": "cv_triage",
+                "target_id": job_id,
+                "title": f"Vincular triagem {data.get('target_label') or job_id}",
+                "detail": "Triagem em andamento ainda nao esta ligada a um projeto.",
+                "action_label": "Vincular",
+            })
+
+        order = {"high": 0, "medium": 1, "low": 2}
+        suggestions.sort(key=lambda item: order.get(str(item.get("severity")), 9))
+        return {"suggestions": suggestions[:30]}
+
     async def detail(self, project_id: str) -> dict[str, Any] | None:
         project = await self.get(project_id)
         if project is None:
@@ -321,6 +430,17 @@ class WorkProjectService:
             "active_triages": active_triages[:20],
             "due_projects": [p.to_dict() for p in due],
         }
+
+    async def _linked_target_ids(self, target_type: str) -> set[str]:
+        def _work() -> set[str]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT target_id FROM work_project_links WHERE target_type = ?",
+                    (target_type,),
+                ).fetchall()
+            return {str(row[0]) for row in rows}
+
+        return await asyncio.to_thread(_work)
 
     async def _open_tasks(self) -> list[dict[str, Any]]:
         if self._task_service is None:

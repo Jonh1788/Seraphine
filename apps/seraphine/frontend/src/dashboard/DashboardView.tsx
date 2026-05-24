@@ -47,6 +47,21 @@ interface DashboardSummary {
   };
 }
 
+interface WorkProject {
+  id: string;
+  name: string;
+  area?: string;
+  priority?: string;
+  due_date?: string | null;
+}
+
+interface WorkSuggestion {
+  id: string;
+  title: string;
+  detail: string;
+  severity: 'high' | 'medium' | 'low';
+}
+
 interface DashboardViewProps {
   onNavigate: (view: string) => void;
   connected: boolean;
@@ -89,6 +104,12 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   });
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
+  const [workBriefing, setWorkBriefing] = useState<{
+    projects: WorkProject[];
+    active_triages: unknown[];
+    due_projects: WorkProject[];
+  } | null>(null);
+  const [workSuggestions, setWorkSuggestions] = useState<WorkSuggestion[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -112,6 +133,25 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
     return () => {
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchWork = async (): Promise<void> => {
+      const [briefing, autopilot] = await Promise.allSettled([
+        fetch(`${API_BASE}/work/briefing`).then((r) => r.ok ? r.json() : null),
+        fetch(`${API_BASE}/work/autopilot`).then((r) => r.ok ? r.json() : { suggestions: [] }),
+      ]);
+      if (cancelled) return;
+      if (briefing.status === 'fulfilled') setWorkBriefing(briefing.value);
+      if (autopilot.status === 'fulfilled') setWorkSuggestions(autopilot.value?.suggestions || []);
+    };
+    void fetchWork();
+    const id = setInterval(fetchWork, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
     };
   }, []);
 
@@ -168,6 +208,7 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
 
   // Next event for the agenda module card
   const nextEvent = events.length > 0 ? events[0] : null;
+  const topWorkSuggestion = workSuggestions[0] || null;
 
   const modules: {
     key: string;
@@ -215,6 +256,17 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
       title: 'Resumo',
       detail: finance ? `Saldo: ${formatBRL(finance.balance)}` : 'Carregando...',
       view: 'finance',
+    },
+    {
+      key: 'work',
+      icon: <TasksIcon size={20} />,
+      color: '#f472b6',
+      title: 'Trabalho',
+      detail: workBriefing
+        ? `${workBriefing.projects.length} projetos` +
+          (workBriefing.active_triages.length > 0 ? ` · ${workBriefing.active_triages.length} triagens` : '')
+        : 'Carregando...',
+      view: 'trabalhos',
     },
   ];
 
@@ -338,6 +390,27 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
           </button>
         ))}
       </div>
+
+      {workBriefing && (
+        <button
+          type="button"
+          className="dashboard__work-card"
+          onClick={() => onNavigate('trabalhos')}
+        >
+          <div className="dashboard__work-card-top">
+            <div>
+              <span>Trabalho</span>
+              <strong>{workBriefing.projects[0]?.name || 'Sem projeto principal'}</strong>
+            </div>
+            <span>{workBriefing.due_projects.length} prazo(s)</span>
+          </div>
+          <p>
+            {topWorkSuggestion
+              ? `${topWorkSuggestion.title}: ${topWorkSuggestion.detail}`
+              : 'Nenhuma decisao de trabalho pendente agora.'}
+          </p>
+        </button>
+      )}
 
       {/* --- Water --- */}
       <WaterWidget />

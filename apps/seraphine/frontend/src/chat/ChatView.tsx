@@ -23,6 +23,8 @@ import { NoteChatBlock } from './NoteChatBlock';
 import type { NoteChatBlockData } from './NoteChatBlock';
 import { MusicChatBlock } from './MusicChatBlock';
 import type { MusicCardData } from './MusicChatBlock';
+import { WorkProjectChatBlock } from './WorkProjectChatBlock';
+import type { WorkProjectBlockData } from './WorkProjectChatBlock';
 import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
 import { TriageWizard } from '../cv-triage/TriageWizard';
@@ -79,6 +81,8 @@ interface Turn {
   notes?: NoteChatBlockData[];
   /** Structured music card data from tool_result metadata. */
   music?: MusicCardData[];
+  /** Structured work project data from tool_result metadata. */
+  projects?: WorkProjectBlockData[];
   /** Whether this turn is a daily briefing (special visual treatment). */
   briefing?: boolean;
 }
@@ -469,6 +473,15 @@ export function ChatView({
                 }
               } catch { /* ignore malformed */ }
             }
+            const projectDataRe = /<!--project-data:([\s\S]*?)-->/g;
+            while ((match = projectDataRe.exec(t.content)) !== null) {
+              try {
+                const parsed = JSON.parse(match[1]);
+                if (parsed && parsed.id && parsed.name) {
+                  turn.projects = [...(turn.projects || []), parsed as WorkProjectBlockData];
+                }
+              } catch { /* ignore malformed */ }
+            }
             return turn;
           }));
         }
@@ -681,8 +694,9 @@ export function ChatView({
           meta && typeof meta['music_card'] === 'object' && meta['music_card'] !== null
             ? (meta['music_card'] as Record<string, unknown>)
             : null;
+        const projectMeta = meta && typeof meta['project'] === 'object' ? meta['project'] as Record<string, unknown> : null;
 
-        if (tr.ok && (taskMeta || recurringMeta || reminderMeta || noteMeta || musicMeta)) {
+        if (tr.ok && (taskMeta || recurringMeta || reminderMeta || noteMeta || musicMeta || projectMeta)) {
           setTurns((prev) => {
             const streamIdx = prev.findIndex((t) => t.streaming);
             const idx = streamIdx !== -1 ? streamIdx : prev.length - 1;
@@ -755,6 +769,19 @@ export function ChatView({
               }
             }
 
+            if (projectMeta && projectMeta['id'] && projectMeta['name']) {
+              const project: WorkProjectBlockData = {
+                id: String(projectMeta['id'] ?? ''),
+                name: (projectMeta['name'] as string) ?? '',
+                description: projectMeta['description'] as string | undefined,
+                area: projectMeta['area'] as string | undefined,
+                status: projectMeta['status'] as string | undefined,
+                priority: projectMeta['priority'] as string | undefined,
+                due_date: projectMeta['due_date'] as string | null | undefined,
+              };
+              turn.projects = [...(turn.projects || []), project];
+            }
+
             next[idx] = turn;
             return next;
           });
@@ -764,7 +791,7 @@ export function ChatView({
         // into the chat without waiting for Claude to echo it.
         // Skip html_card when we already have structured task/recurring data.
         const htmlCard =
-          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta && !reminderMeta && !noteMeta && !musicMeta
+          meta && typeof meta['html_card'] === 'string' && !taskMeta && !recurringMeta && !reminderMeta && !noteMeta && !musicMeta && !projectMeta
             ? (meta['html_card'] as string)
             : null;
         if (tr.ok && htmlCard) {
@@ -1177,8 +1204,9 @@ export function ChatView({
                       raw = raw.replace(/<!--reminder-data:[\s\S]*?-->/g, '');
                       raw = raw.replace(/<!--note-data:[\s\S]*?-->/g, '');
                       raw = raw.replace(/<!--music-data:[\s\S]*?-->/g, '');
+                      raw = raw.replace(/<!--project-data:[\s\S]*?-->/g, '');
                       const cards: string[] = [];
-                      const hasReactTasks = (t.tasks && t.tasks.length > 0) || (t.recurring && t.recurring.length > 0) || (t.reminders && t.reminders.length > 0) || (t.notes && t.notes.length > 0) || (t.music && t.music.length > 0);
+                      const hasReactTasks = (t.tasks && t.tasks.length > 0) || (t.recurring && t.recurring.length > 0) || (t.reminders && t.reminders.length > 0) || (t.notes && t.notes.length > 0) || (t.music && t.music.length > 0) || (t.projects && t.projects.length > 0);
                       // Primary: explicit <!--card--> delimiters
                       raw = raw.replace(/<!--card-->([\s\S]*?)<!--\/card-->/g, (_: string, inner: string) => {
                         // Skip task/recurring HTML cards when we already have React components
@@ -1256,6 +1284,12 @@ export function ChatView({
                                   think,
                                 });
                               }}
+                            />
+                          ))}
+                          {t.projects && t.projects.map((project, pi) => (
+                            <WorkProjectChatBlock
+                              key={`project-${pi}`}
+                              project={project}
                             />
                           ))}
                         </>

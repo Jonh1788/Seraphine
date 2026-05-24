@@ -298,11 +298,13 @@ COMPACTION_KEEP_RECENT = 20
 #   <!--task-data:{...}-->                      (structured task JSON)
 #   <!--recurring-data:{...}-->
 #   <!--reminder-data:{...}-->
+#   <!--project-data:{...}-->
 _TOOL_MARKUP_PATTERNS = [
     re.compile(r"<!--card-->.*?<!--/card-->", re.DOTALL),
     re.compile(r"<!--task-data:\{.*?\}-->"),
     re.compile(r"<!--recurring-data:\{.*?\}-->"),
     re.compile(r"<!--reminder-data:\{.*?\}-->"),
+    re.compile(r"<!--project-data:\{.*?\}-->"),
 ]
 
 
@@ -1162,6 +1164,12 @@ class ConversationEngine:
                         accumulated.append(
                             "\n<!--reminder-data:"
                             + json.dumps(result.metadata["reminder"])
+                            + "-->"
+                        )
+                    if result.metadata and result.metadata.get("project"):
+                        accumulated.append(
+                            "\n<!--project-data:"
+                            + json.dumps(result.metadata["project"])
                             + "-->"
                         )
                     tool_payload: dict[str, Any] = {

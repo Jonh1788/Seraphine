@@ -61,8 +61,9 @@ class CreateNoteTool(Tool):
     requires_confirmation = False
     category = "other"
 
-    def __init__(self, note_service: NoteService) -> None:
+    def __init__(self, note_service: NoteService, work_service: Any = None) -> None:
         self._svc = note_service
+        self._work = work_service
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         title = str(args.get("title") or "").strip()
@@ -87,10 +88,25 @@ class CreateNoteTool(Tool):
             return ToolResult(ok=False, error=str(exc))
 
         note_dict = note.to_dict()
+        work_link = None
+        if self._work is not None:
+            try:
+                work_link = await self._work.auto_link_item(
+                    target_type="note",
+                    target_id=note.id,
+                    title=note.title,
+                    text=note.content,
+                    metadata={"source": "create_note"},
+                )
+            except Exception:
+                logger.debug("work auto-link failed for note %s", note.id, exc_info=True)
         return ToolResult(
             ok=True,
             output=f"Nota criada: {title}.",
-            metadata={"note": note_dict},
+            metadata={
+                "note": note_dict,
+                "work_link": work_link.to_dict() if work_link else None,
+            },
         )
 
 

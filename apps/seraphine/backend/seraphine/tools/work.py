@@ -6,9 +6,31 @@ import logging
 from typing import Any
 
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.svg_icons import CLIPBOARD
 from seraphine.work.service import WorkProjectService
 
 logger = logging.getLogger(__name__)
+
+
+def _project_card(project: dict[str, Any], subtitle: str = "Projeto de trabalho") -> str:
+    name = str(project.get("name") or "Projeto")
+    priority = str(project.get("priority") or "medium")
+    area = str(project.get("area") or "Trabalho")
+    due = str(project.get("due_date") or "sem prazo")
+    return (
+        '<!--card--><div class="rich-card rich-card--work work-chat-card">'
+        '<div class="rich-card__header">'
+        f'<div class="rich-card__icon rich-card__icon--work">{CLIPBOARD}</div>'
+        '<div>'
+        f'<div class="rich-card__title">{name}</div>'
+        f'<div class="rich-card__subtitle">{subtitle}</div>'
+        '</div></div>'
+        '<div class="rich-card__details">'
+        f'<div class="rich-card__detail"><span>Area</span><strong>{area}</strong></div>'
+        f'<div class="rich-card__detail"><span>Prioridade</span><strong>{priority}</strong></div>'
+        f'<div class="rich-card__detail"><span>Prazo</span><strong>{due}</strong></div>'
+        '</div></div><!--/card-->'
+    )
 
 
 class CreateWorkProjectTool(Tool):
@@ -54,7 +76,10 @@ class CreateWorkProjectTool(Tool):
         return ToolResult(
             ok=True,
             output=f"Projeto criado: {project.name}.",
-            metadata={"project": project.to_dict()},
+            metadata={
+                "project": project.to_dict(),
+                "html_card": _project_card(project.to_dict(), "Projeto criado"),
+            },
         )
 
 
@@ -92,7 +117,11 @@ class ListWorkProjectsTool(Tool):
         return ToolResult(
             ok=True,
             output=f"{len(projects)} projeto(s) encontrado(s).",
-            metadata={"projects": [project.to_dict() for project in projects]},
+            metadata={
+                "projects": [project.to_dict() for project in projects],
+                "project": projects[0].to_dict() if projects else None,
+                "html_card": _project_card(projects[0].to_dict(), "Projeto ativo") if projects else None,
+            },
         )
 
 
