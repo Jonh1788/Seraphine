@@ -14,6 +14,7 @@ import {
   SettingsIcon,
   TargetIcon,
   InboxIcon,
+  BriefcaseIcon,
 } from '../icons/Icons';
 
 interface Command {
@@ -34,6 +35,7 @@ const COMMANDS: Command[] = [
   { id: 'habits', label: 'Abrir Habitos', keywords: ['habito', 'rotina', 'streak'], shortcut: 'Cmd+7', icon: <FlameIcon size={18} /> },
   { id: 'insights', label: 'Abrir Insights', keywords: ['padroes', 'analise', 'dicas'], shortcut: 'Cmd+8', icon: <LightbulbIcon size={18} /> },
   { id: 'notes', label: 'Abrir Notas', keywords: ['anotacao', 'markdown', 'notas'], shortcut: 'Cmd+9', icon: <NotesIcon size={18} /> },
+  { id: 'trabalhos', label: 'Abrir Trabalhos', keywords: ['projetos', 'cv', 'triagem', 'operacao'], shortcut: '', icon: <BriefcaseIcon size={18} /> },
   { id: 'inbox', label: 'Abrir Inbox', keywords: ['pendencias', 'fila', 'urgente'], shortcut: '', icon: <InboxIcon size={18} /> },
   { id: 'routines', label: 'Abrir Rotinas', keywords: ['briefing', 'foco', 'revisao'], shortcut: '', icon: <TargetIcon size={18} /> },
   { id: 'system', label: 'Abrir Sistema', keywords: ['status', 'diagnostico', 'configuracao'], shortcut: '', icon: <SettingsIcon size={18} /> },

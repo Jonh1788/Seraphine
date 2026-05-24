@@ -1105,6 +1105,7 @@ export function App(): JSX.Element {
       habits: 'habits',
       insights: 'insights',
       notes: 'notes',
+      trabalhos: 'trabalhos',
       inbox: 'inbox',
       routines: 'routines',
       system: 'system',

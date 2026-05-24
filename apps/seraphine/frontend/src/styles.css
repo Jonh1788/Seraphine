@@ -13980,6 +13980,179 @@ html[data-shell="tablet"] .layout {
   color: var(--text);
 }
 
+.cvt-jobs-header p {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.work-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  margin: 12px 0 18px;
+}
+
+.work-tabs button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.work-tabs button.is-active {
+  background: var(--bg-3);
+  color: var(--accent);
+}
+
+.work-summary-grid,
+.work-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.work-summary-card,
+.work-section,
+.work-project-card,
+.work-triage-card {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.work-summary-card {
+  padding: 14px;
+}
+
+.work-summary-card span,
+.work-summary-card small {
+  display: block;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.work-summary-card strong {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--text);
+  font-size: 28px;
+}
+
+.work-section {
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.work-section__header,
+.work-project-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.work-section__header h3,
+.work-project-card__header h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.work-section__header button {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.work-task-row,
+.work-triage-card,
+.work-project-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.025);
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.work-triage-card {
+  cursor: pointer;
+}
+
+.work-task-row__main,
+.work-triage-card span,
+.work-project-task {
+  min-width: 0;
+}
+
+.work-task-row strong,
+.work-triage-card strong,
+.work-project-task strong {
+  display: block;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-task-row small,
+.work-triage-card small,
+.work-project-task small,
+.work-project-card p {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.work-priority {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  background: var(--bg-3);
+  color: var(--text-dim);
+}
+
+.work-priority--high {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.work-project-card {
+  padding: 14px;
+}
+
+.work-project-card__header span {
+  min-width: 28px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--bg-3);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.work-project-card__tasks {
+  margin-top: 12px;
+}
+
 .cvt-jobs-group {
   margin-bottom: 24px;
 }
