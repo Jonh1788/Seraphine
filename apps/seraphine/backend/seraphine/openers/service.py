@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from llm_adapters.types import ChatMessage
 
+from seraphine.freshness import DEFAULT_POLICY
 from seraphine.memory.store import MemoryStore
 
 logger = logging.getLogger("seraphine.openers")
@@ -29,6 +30,15 @@ _TZ = ZoneInfo("America/Sao_Paulo")
 
 _QUIET_WINDOW = timedelta(minutes=30)  # conversa precisa estar parada há ao menos isso
 _RATE_LIMIT = timedelta(minutes=60)    # e não abrimos mais que 1x/hora
+
+
+def _freshness_policy_now() -> datetime | None:
+    """Override hook used by tests to pin "now" for freshness filtering.
+
+    Returns ``None`` in production so the policy falls back to wall-clock.
+    Mirrors ``seraphine.memory.store._freshness_policy_now``.
+    """
+    return None
 
 _OPENER_PROMPT_TEMPLATE = """Você é Seraphine — a personalidade já tá
 definida no system prompt principal. AGORA, o Jonathan acabou de abrir
@@ -47,8 +57,12 @@ REGRAS:
 3. Pode usar [chuckles]/[sighs]/[giggles] se encaixar.
 4. NÃO fale como se tivesse acabado de chegar ("oi, voltei"). Fala como
    se tivesse te esperando do lado.
-5. NÃO faça pergunta genérica tipo "como posso ajudar?". Sempre um
-   gancho CONCRETO (tarefa, horário, coisa que ele disse antes, etc).
+5. Se houver contexto fresco abaixo (tarefa, loop, anomalia, descoberta,
+   email), abra com gancho CONCRETO referenciando-o. Se NÃO houver
+   contexto fresco, abra com cumprimento leve ("oi", "voltou", "bom
+   dia") e PARE — não invente hooks de coisas antigas, sem inventar,
+   sem confabular detalhes de memória estagnada. Genérico vazio
+   ("como posso ajudar?") continua proibido.
 6. Sem emojis.
 
 Exemplos do que funciona:
@@ -119,22 +133,38 @@ class OpenerService:
         return True, int(gap.total_seconds() // 60)
 
     async def _context_tasks_section(self) -> str:
-        """Show today's top open tasks, if any. Best-effort — silent on failure."""
+        """Show today's top open tasks, if any — filtered by recency.
+
+        Best-effort — silent on failure. Applies the freshness policy
+        inline (this path reads ``seraphine_tasks`` directly rather than
+        going through ``TaskService.list_tasks`` — see spec §6.1: stale
+        tasks must not leak into the opener context).
+        """
         try:
             store_conn = self.store
-            # Try the tasks table — schema ships via mod-tasks.
+            fresh_fragment, fresh_params = DEFAULT_POLICY.sql_fresh_filter(
+                created_col="created_at",
+                event_col="due_date",
+                now=_freshness_policy_now(),
+            )
+
             def _work() -> list[tuple[str, str | None]]:
                 with store_conn._connect() as conn:  # type: ignore[attr-defined]
                     return conn.execute(
                         "SELECT title, due_date FROM seraphine_tasks"
                         " WHERE status != 'done'"
-                        " ORDER BY due_date ASC NULLS LAST LIMIT 3"
+                        f" AND {fresh_fragment}"
+                        " ORDER BY due_date ASC NULLS LAST LIMIT 3",
+                        fresh_params,
                     ).fetchall()
             import asyncio as _aio
             rows = await _aio.to_thread(_work)
         except Exception:
             return ""
         if not rows:
+            # Empty section — caller concatenates with ``opener_extras``
+            # and the prompt simply omits the label, never rendering
+            # "tarefas em aberto: nenhuma".
             return ""
         lines = ["- tarefas em aberto:"]
         for title, due in rows[:3]:
@@ -143,7 +173,11 @@ class OpenerService:
         return "\n" + "\n".join(lines)
 
     async def _context_open_loops_section(self) -> str:
-        loops = await self.store.list_open_loops(only_open=True, limit=2)
+        # ``fresh_only=True`` drops loops older than recency_hours so the
+        # opener never resurrects a week-old "ainda quer fazer X?" hook.
+        loops = await self.store.list_open_loops(
+            only_open=True, limit=2, fresh_only=True,
+        )
         if not loops:
             return ""
         lines = ["- loops em aberto:"]
