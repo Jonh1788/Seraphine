@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -131,6 +131,7 @@ class ProactiveScheduler:
             self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR,
         )
         self._sched.start()
+        self._apply_persisted_pauses()
         logger.info("proactive scheduler started")
 
     def _on_job_event(self, event: Any) -> None:
@@ -168,8 +169,62 @@ class ProactiveScheduler:
                 "name": job.name,
                 "next_run_time": next_run.isoformat() if next_run else None,
                 "trigger": str(job.trigger),
+                "paused": next_run is None,
             })
         return out
+
+    def set_job_paused(self, name: str, paused: bool) -> bool:
+        """Pause/resume a job by name or id and persist that preference."""
+        for job in self._sched.get_jobs():
+            if job.id == name or job.name == name:
+                if paused:
+                    self._sched.pause_job(job.id)
+                else:
+                    self._sched.resume_job(job.id)
+                self._persist_job_pause(job.id, paused)
+                return True
+        return False
+
+    def _apply_persisted_pauses(self) -> None:
+        store = getattr(self.app_state, "store", None)
+        if store is None:
+            return
+        try:
+            with store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT job_id FROM seraphine_proactive_job_prefs "
+                    "WHERE paused = 1"
+                ).fetchall()
+            paused = {str(row[0]) for row in rows}
+        except Exception as e:
+            logger.warning("load proactive job prefs failed: %s", e)
+            return
+        for job_id in paused:
+            try:
+                self._sched.pause_job(job_id)
+            except Exception:
+                logger.debug("could not pause missing proactive job %s", job_id)
+
+    def _persist_job_pause(self, job_id: str, paused: bool) -> None:
+        store = getattr(self.app_state, "store", None)
+        if store is None:
+            return
+        try:
+            with store._connect() as conn:
+                if paused:
+                    conn.execute(
+                        "INSERT INTO seraphine_proactive_job_prefs(job_id, paused, updated_at) "
+                        "VALUES (?, 1, ?) "
+                        "ON CONFLICT(job_id) DO UPDATE SET paused = 1, updated_at = excluded.updated_at",
+                        (job_id, datetime.now(timezone.utc).isoformat()),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM seraphine_proactive_job_prefs WHERE job_id = ?",
+                        (job_id,),
+                    )
+        except Exception as e:
+            logger.warning("persist proactive job pref failed: %s", e)
 
     async def run_job_now(self, name: str) -> bool:
         """040 inspector: dispatch a job immediately (by name or id)."""

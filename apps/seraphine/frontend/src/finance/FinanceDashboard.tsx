@@ -65,7 +65,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   // Fetch pending entries (not month-filtered)
   useEffect(() => {
-    fetch('/finance/entries?status=pending_review')
+    fetch(`${API_BASE}/finance/entries?status=pending_review`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -76,7 +76,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   // Fetch pending tasks from task system (finance imports only)
   useEffect(() => {
-    fetch('/tasks?status=pending&type=finance_import')
+    fetch(`${API_BASE}/tasks?status=pending&type=finance_import`)
       .then((r) => (r.ok ? r.json() : { tasks: [] }))
       .then((res) => setPendingTasks(res.tasks || []))
       .catch(() => {});
@@ -84,7 +84,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
 
   // Fetch overall balance
   useEffect(() => {
-    fetch('/finance/balance')
+    fetch(`${API_BASE}/finance/balance`)
       .then((r) => (r.ok ? r.json() : null))
       .then((res) => { if (res) setOverallBalance(res.balance); })
       .catch(() => {});

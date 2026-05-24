@@ -31,6 +31,9 @@ import { ImagesView } from './images/ImagesView';
 import { FlashcardsView } from './flashcards/FlashcardsView';
 import { DashboardView } from './dashboard';
 import { JobsTab } from './cv-triage/JobsTab';
+import { UnifiedInboxView } from './inbox';
+import { RoutinesView } from './routines';
+import { SystemStatusView } from './system';
 import {
   ChatIcon,
   CalendarIcon,
@@ -49,6 +52,7 @@ import {
   FlameIcon,
   LightbulbIcon,
   NotesIcon,
+  TargetIcon,
 } from './icons/Icons';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
@@ -64,7 +68,7 @@ interface BadgingNavigator {
   clearAppBadge?: () => Promise<void>;
 }
 
-type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards' | 'trabalhos';
+type ActiveView = 'dashboard' | 'chat' | 'finance' | 'calendar' | 'whatsapp' | 'memory' | 'tasks' | 'habits' | 'insights' | 'notes' | 'images' | 'flashcards' | 'trabalhos' | 'inbox' | 'routines' | 'system';
 
 export function App(): JSX.Element {
   const [status, setStatus] = useState<'disconnected' | 'connected'>('disconnected');
@@ -256,6 +260,9 @@ export function App(): JSX.Element {
       view === 'habits' ||
       view === 'insights' ||
       view === 'notes' ||
+      view === 'inbox' ||
+      view === 'routines' ||
+      view === 'system' ||
       view === 'trabalhos'
     ) {
       setActiveView(view);
@@ -1098,6 +1105,9 @@ export function App(): JSX.Element {
       habits: 'habits',
       insights: 'insights',
       notes: 'notes',
+      inbox: 'inbox',
+      routines: 'routines',
+      system: 'system',
     };
     if (viewActions[action]) {
       setActiveView(viewActions[action]);
@@ -1122,7 +1132,7 @@ export function App(): JSX.Element {
       await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ type: 'generic', title, source: 'quick_capture' }),
       });
     } catch {
       // Silently fail — the task list will show it on next refresh
@@ -1181,6 +1191,21 @@ export function App(): JSX.Element {
       active: activeView === 'insights',
     },
     {
+      id: 'inbox',
+      icon: <InboxIcon size={22} />,
+      label: 'Inbox',
+      onClick: () => setActiveView(activeView === 'inbox' ? 'chat' : 'inbox'),
+      active: activeView === 'inbox',
+      badge: unreadCount > 0 || whatsappUnread > 0,
+    },
+    {
+      id: 'routines',
+      icon: <TargetIcon size={22} />,
+      label: 'Rotinas',
+      onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'),
+      active: activeView === 'routines',
+    },
+    {
       id: 'notes',
       icon: <NotesIcon size={22} />,
       label: 'Notas',
@@ -1201,13 +1226,6 @@ export function App(): JSX.Element {
       label: 'Calendario',
       onClick: () => setActiveView(activeView === 'calendar' ? 'chat' : 'calendar'),
       active: activeView === 'calendar',
-    },
-    {
-      id: 'inbox',
-      icon: <InboxIcon size={22} />,
-      label: 'Inbox',
-      onClick: () => setInboxOpen(true),
-      badge: unreadCount > 0,
     },
     {
       id: 'whatsapp',
@@ -1244,6 +1262,13 @@ export function App(): JSX.Element {
       label: 'Flashcards',
       onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'),
       active: activeView === 'flashcards',
+    },
+    {
+      id: 'system',
+      icon: <SettingsIcon size={22} />,
+      label: 'Sistema',
+      onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'),
+      active: activeView === 'system',
     },
   ];
 
@@ -1453,6 +1478,25 @@ export function App(): JSX.Element {
                 )}
                 {activeView === 'memory' && (
                   <MemoryView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'inbox' && (
+                  <UnifiedInboxView
+                    onBack={() => setActiveView('chat')}
+                    onNavigate={(view) => setActiveView(view as ActiveView)}
+                  />
+                )}
+                {activeView === 'routines' && (
+                  <RoutinesView
+                    onBack={() => setActiveView('chat')}
+                    onRun={(prompt) => {
+                      setPendingComposerText(prompt);
+                      setPendingComposerAutoSend(true);
+                      setActiveView('chat');
+                    }}
+                  />
+                )}
+                {activeView === 'system' && (
+                  <SystemStatusView onBack={() => setActiveView('chat')} />
                 )}
                 {activeView === 'tasks' && (
                   <TasksView

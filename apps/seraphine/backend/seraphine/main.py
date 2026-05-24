@@ -298,6 +298,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Freshness migrator failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Proactive preferences — persisted runtime controls for scheduler jobs.
+    # ------------------------------------------------------------------
+    try:
+        from seraphine.proactive.schema import migrate as proactive_migrate
+        store.register_migrator("seraphine_proactive", proactive_migrate)
+        await store.ensure_schema()
+        logger.info("Proactive preferences migrator registered")
+    except Exception as e:
+        logger.warning("Proactive preferences migrator failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Notes — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     note_service = None

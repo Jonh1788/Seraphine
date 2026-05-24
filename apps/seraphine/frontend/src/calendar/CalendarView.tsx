@@ -95,55 +95,6 @@ const WEEKDAY_LONG: string[] = [
 ];
 
 /* ------------------------------------------------------------------ */
-/*  Mock data (used when Google Calendar API is not available)          */
-/* ------------------------------------------------------------------ */
-
-const MOCK_EVENTS: CalendarEvent[] = [
-  {
-    id: 'mock-1',
-    summary: 'Reuniao de equipe',
-    start: { dateTime: '2026-04-14T10:00:00' },
-    end: { dateTime: '2026-04-14T11:30:00' },
-    calendarId: 'agenda',
-  },
-  {
-    id: 'mock-2',
-    summary: 'Almoco com cliente',
-    start: { dateTime: '2026-04-15T12:00:00' },
-    end: { dateTime: '2026-04-15T13:30:00' },
-    calendarId: 'agenda',
-  },
-  {
-    id: 'mock-3',
-    summary: 'Pagamento aluguel',
-    start: { date: '2026-04-10' },
-    end: { date: '2026-04-10' },
-    calendarId: 'financas',
-  },
-  {
-    id: 'mock-4',
-    summary: 'Salario',
-    start: { date: '2026-04-05' },
-    end: { date: '2026-04-05' },
-    calendarId: 'financas',
-  },
-  {
-    id: 'mock-5',
-    summary: 'Dentista',
-    start: { dateTime: '2026-04-18T14:00:00' },
-    end: { dateTime: '2026-04-18T15:00:00' },
-    calendarId: 'outros',
-  },
-  {
-    id: 'mock-6',
-    summary: 'Deploy v2.0',
-    start: { dateTime: '2026-04-12T09:00:00' },
-    end: { dateTime: '2026-04-12T10:00:00' },
-    calendarId: 'agenda',
-  },
-];
-
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -921,8 +872,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       const list = await listEvents(rangeStart, rangeEnd);
       setEvents(list);
     } catch {
-      // API unavailable — fall back to mock data
-      setEvents(MOCK_EVENTS);
+      setEvents([]);
     } finally {
       setLoading(false);
       setFirstLoaded(true);

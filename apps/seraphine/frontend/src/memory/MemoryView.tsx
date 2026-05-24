@@ -4,7 +4,7 @@ import { useConfirm } from '../ui';
 
 import { API_BASE } from '../api';
 
-const TAB_KEYS = ['Timeline', 'Perfil', 'Facts', 'Tudo'] as const;
+const TAB_KEYS = ['Timeline', 'Perfil', 'Facts', 'Auditoria', 'Tudo'] as const;
 type Tab = (typeof TAB_KEYS)[number];
 
 interface Fact {
@@ -40,6 +40,15 @@ interface Profile {
 
 interface MemoryViewProps {
   onBack: () => void;
+}
+
+interface MemoryHealth {
+  ok?: boolean;
+  ollama?: { reachable?: boolean; model_loaded?: boolean; latency_ms?: number | null };
+  chroma?: { reachable?: boolean; count?: number | null };
+  facts?: { active?: number; superseded?: number; total?: number };
+  last_reflect_at?: string | null;
+  warnings_24h?: number;
 }
 
 function timeAgo(isoDate: string): string {
@@ -157,7 +166,9 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState<string | null>(null);
   const [newFact, setNewFact] = useState('');
-  const loadedRef = useRef<Record<Tab, boolean>>({ Timeline: false, Perfil: false, Facts: false, Tudo: false });
+  const loadedRef = useRef<Record<Tab, boolean>>({ Timeline: false, Perfil: false, Facts: false, Auditoria: false, Tudo: false });
+  const [memoryHealth, setMemoryHealth] = useState<MemoryHealth | null>(null);
+  const [auditMessage, setAuditMessage] = useState<string | null>(null);
   // 038 — Memory browser state
   const [browserCounts, setBrowserCounts] = useState<Record<string, number>>({});
   const [browserTable, setBrowserTable] = useState<string>('facts');
@@ -243,6 +254,18 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     }
   }, []);
 
+  const fetchAudit = useCallback(async () => {
+    try {
+      const [healthRes] = await Promise.all([
+        fetch(`${API_BASE}/memory/health`),
+        fetchBrowserOverview(),
+      ]);
+      if (healthRes.ok) setMemoryHealth(await healthRes.json() as MemoryHealth);
+    } catch {
+      setMemoryHealth(null);
+    }
+  }, [fetchBrowserOverview]);
+
   const forgetRow = useCallback(async (table: string, id: string) => {
     const ok = await confirm({
       title: 'Remover item?',
@@ -269,12 +292,38 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     } else if (activeTab === 'Facts' && !loadedRef.current.Facts) {
       loadedRef.current.Facts = true;
       void fetchFacts();
+    } else if (activeTab === 'Auditoria' && !loadedRef.current.Auditoria) {
+      loadedRef.current.Auditoria = true;
+      void fetchAudit();
     } else if (activeTab === 'Tudo' && !loadedRef.current.Tudo) {
       loadedRef.current.Tudo = true;
       void fetchBrowserOverview();
       void fetchBrowserTable(browserTable);
     }
-  }, [activeTab, fetchTimeline, fetchProfile, fetchFacts]);
+  }, [activeTab, fetchTimeline, fetchProfile, fetchFacts, fetchAudit]);
+
+  const runMemoryAction = async (action: 'decay' | 'prune' | 'rebuild'): Promise<void> => {
+    setAuditMessage(null);
+    try {
+      let res: Response;
+      if (action === 'decay') {
+        res = await fetch(`${API_BASE}/memory/decay`, { method: 'POST' });
+      } else if (action === 'prune') {
+        res = await fetch(`${API_BASE}/memory/prune`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days: 180 }),
+        });
+      } else {
+        res = await fetch(`${API_BASE}/memory/profile/rebuild`, { method: 'POST' });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setAuditMessage(action === 'rebuild' ? 'Perfil reconstruido.' : 'Manutencao executada.');
+      await fetchAudit();
+    } catch (e) {
+      setAuditMessage(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const handleAddFact = async (): Promise<void> => {
     const text = newFact.trim();
@@ -467,6 +516,53 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === 'Auditoria' && (
+          <div className="memory-audit">
+            <div className="memory-audit__grid">
+              <div className="memory-audit-card">
+                <span>Status</span>
+                <strong>{memoryHealth?.ok ? 'Operacional' : 'Atencao'}</strong>
+                <p>{memoryHealth?.warnings_24h ?? 0} avisos nas ultimas 24h</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Fatos</span>
+                <strong>{memoryHealth?.facts?.active ?? 0} ativos</strong>
+                <p>{memoryHealth?.facts?.total ?? 0} totais · {memoryHealth?.facts?.superseded ?? 0} substituidos</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Vetores</span>
+                <strong>{memoryHealth?.chroma?.count ?? 0}</strong>
+                <p>{memoryHealth?.chroma?.reachable ? 'Chroma online' : 'Chroma indisponivel'}</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Embeddings</span>
+                <strong>{memoryHealth?.ollama?.reachable ? 'Online' : 'Offline'}</strong>
+                <p>{memoryHealth?.ollama?.latency_ms ? `${memoryHealth.ollama.latency_ms}ms` : 'sem latencia'}</p>
+              </div>
+            </div>
+
+            <div className="memory-audit-actions">
+              <button type="button" onClick={() => void fetchAudit()}>Atualizar</button>
+              <button type="button" onClick={() => void runMemoryAction('decay')}>Rodar decay</button>
+              <button type="button" onClick={() => void runMemoryAction('prune')}>Podar eventos 180d</button>
+              <button type="button" onClick={() => void runMemoryAction('rebuild')}>Reconstruir perfil</button>
+              <button type="button" onClick={() => window.open(`${API_BASE}/memory/export`, '_blank', 'noopener,noreferrer')}>
+                Exportar
+              </button>
+            </div>
+
+            <div className="memory-browser__sidebar memory-audit__tables">
+              {Object.entries(browserCounts).map(([name, count]) => (
+                <button key={name} type="button" onClick={() => { setActiveTab('Tudo'); setBrowserTable(name); void fetchBrowserTable(name); }}>
+                  <span>{name}</span>
+                  <span className="memory-browser__count">{count}</span>
+                </button>
+              ))}
+            </div>
+            {auditMessage && <div className="memory-audit__message">{auditMessage}</div>}
+          </div>
         )}
 
         {activeTab === 'Tudo' && (

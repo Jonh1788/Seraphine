@@ -48,3 +48,25 @@ async def run_job(name: str, request: Request) -> dict[str, Any]:
     if not ok:
         raise HTTPException(status_code=404, detail="job not found")
     return {"triggered": name}
+
+
+@router.post("/jobs/{name}/pause")
+async def pause_job(name: str, request: Request) -> dict[str, Any]:
+    sched = getattr(request.app.state, "proactive_scheduler", None)
+    if sched is None:
+        raise HTTPException(status_code=503, detail="scheduler not running")
+    ok = sched.set_job_paused(name, True)
+    if not ok:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"paused": name}
+
+
+@router.post("/jobs/{name}/resume")
+async def resume_job(name: str, request: Request) -> dict[str, Any]:
+    sched = getattr(request.app.state, "proactive_scheduler", None)
+    if sched is None:
+        raise HTTPException(status_code=503, detail="scheduler not running")
+    ok = sched.set_job_paused(name, False)
+    if not ok:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"resumed": name}
