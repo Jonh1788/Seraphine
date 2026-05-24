@@ -526,7 +526,11 @@ class ConversationEngine:
         if self.memory is None:
             return None
         try:
-            recalled = await self.memory.recall(content, k=5)
+            # Per-turn vector recall must opt into the freshness policy
+            # so months-old chat snippets cannot resurface mid-conversation.
+            # (Same rationale as the list_facts(fresh_only=True) call
+            # below — Task 10.)
+            recalled = await self.memory.recall(content, k=5, fresh_only=True)
         except Exception as e:  # pragma: no cover
             logger.warning("recall failed: %s", e)
             recalled = []

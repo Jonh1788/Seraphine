@@ -125,6 +125,39 @@ async def test_engine_recall_block_uses_fresh_only_facts(
     )
 
 
+@pytest.mark.asyncio
+async def test_engine_recall_block_uses_fresh_only_vector_recall(
+    tmp_path: Path,
+) -> None:
+    """The engine's recall_block must call ``memory.recall(..., fresh_only=
+    True)`` so the vector pipeline applies the recency cutoff (Task 10).
+    Without this, months-old chat snippets can resurface as "relevant
+    excerpts" in mid-conversation context."""
+    store = MemoryStore(tmp_path / "engine_recall_vec.sqlite")
+    await store.ensure_schema()
+
+    spy_recall = AsyncMock(return_value=[])
+    fake_memory = MagicMock()
+    fake_memory.recall = spy_recall
+    fake_memory.store = MagicMock()
+    fake_memory.store.list_facts = AsyncMock(return_value=[])
+
+    engine = ConversationEngine(
+        llm=_StubLLM(), store=store, memory=fake_memory,
+    )
+    await engine._build_recall_block("oi")
+
+    assert spy_recall.await_count >= 1, "memory.recall was not awaited"
+    fresh_call = any(
+        call.kwargs.get("fresh_only") is True
+        for call in spy_recall.call_args_list
+    )
+    assert fresh_call, (
+        "ConversationEngine._build_recall_block did not pass fresh_only=True "
+        f"to memory.recall. Calls: {spy_recall.call_args_list}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 3. UserProfile rebuilds — list_facts with fresh_only=True
 # ---------------------------------------------------------------------------

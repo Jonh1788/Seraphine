@@ -5,13 +5,14 @@ import logging
 import math
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Protocol
 
 from pydantic import BaseModel
 
 from llm_adapters.types import ChatMessage, Token
+from seraphine.freshness import DEFAULT_POLICY
 from seraphine.memory.embeddings import EmbeddingsClient
 from seraphine.memory.store import Fact, MemoryStore, Turn
 
@@ -49,6 +50,15 @@ class _LLMLike(Protocol):
         model: str | None = ...,
         temperature: float = ...,
     ) -> AsyncIterator[Token]: ...
+
+
+def _freshness_policy_now() -> datetime | None:
+    """Override hook used by tests to pin "now" for the recall freshness
+    cutoff. Returns ``None`` in production so callers fall back to
+    wall-clock. Mirrors ``seraphine.memory.store._freshness_policy_now``
+    and the matching helpers in openers/service.py.
+    """
+    return None
 
 
 def _build_chroma_where(
@@ -344,6 +354,7 @@ class MemoryManager:
         role: str | None = None,
         since: str | None = None,
         until: str | None = None,
+        fresh_only: bool = False,
     ) -> list[Memory]:
         if self._collection is None:
             return []
@@ -357,11 +368,22 @@ class MemoryManager:
             return []
         n_vector = max(k, 20)
 
+        # When ``fresh_only`` is on (engine per-turn path) and the caller
+        # did not pin a ``since`` explicitly, default it to the freshness
+        # policy's recency cutoff so months-old chat snippets cannot
+        # resurface mid-conversation. Explicit ``since`` always wins —
+        # the debug ``/memory/recall`` route may want full history.
+        effective_since = since
+        if fresh_only and effective_since is None:
+            now = _freshness_policy_now() or datetime.now(timezone.utc)
+            cutoff = now - timedelta(hours=DEFAULT_POLICY.recency_hours)
+            effective_since = cutoff.isoformat()
+
         # Build Chroma where-filter from optional kwargs.
         chroma_where = _build_chroma_where(
             conversation_id=conversation_id,
             role=role,
-            since=since,
+            since=effective_since,
             until=until,
         )
         query_kwargs: dict[str, Any] = {
@@ -383,6 +405,30 @@ class MemoryManager:
         vec_metas = (result.get("metadatas") or [[]])[0]
         vec_dists = (result.get("distances") or [[None] * len(vec_ids)])[0]
 
+        # Belt-and-suspenders post-filter: if Chroma silently ignored the
+        # ``where`` clause (e.g. metadata layout drift, or the unfiltered
+        # fallback above kicked in), drop stale rows here. Mirrors the
+        # SQL/Python freshness filters in the DAO layer.
+        if fresh_only and effective_since:
+            kept_ids: list[str] = []
+            kept_docs: list[str] = []
+            kept_metas: list[dict[str, Any]] = []
+            kept_dists: list[Any] = []
+            for i, vid in enumerate(vec_ids):
+                meta = (
+                    vec_metas[i] if i < len(vec_metas) and vec_metas[i] else {}
+                )
+                ca = meta.get("created_at") if isinstance(meta, dict) else None
+                if isinstance(ca, str) and ca < effective_since:
+                    continue
+                kept_ids.append(vid)
+                kept_docs.append(vec_docs[i] if i < len(vec_docs) else "")
+                kept_metas.append(meta or {})
+                kept_dists.append(vec_dists[i] if i < len(vec_dists) else None)
+            vec_ids, vec_docs, vec_metas, vec_dists = (
+                kept_ids, kept_docs, kept_metas, kept_dists,
+            )
+
         # Build per-id info map from vector results.
         info: dict[str, dict[str, Any]] = {}
         for i, vid in enumerate(vec_ids):
@@ -399,7 +445,7 @@ class MemoryManager:
                 query, k=max(k, 20),
                 conversation_id=conversation_id,
                 role=role,
-                since=since,
+                since=effective_since,
                 until=until,
             )
         except Exception:
@@ -457,7 +503,7 @@ class MemoryManager:
                     fact = await self.store.get_fact(fid)
                     if fact and fact.superseded_by is None:
                         # Apply time filters to facts (since/until on created_at).
-                        if since and fact.created_at < since:
+                        if effective_since and fact.created_at < effective_since:
                             rrf_scores.pop(fid, None)
                             continue
                         if until and fact.created_at > until:
