@@ -531,7 +531,10 @@ class ConversationEngine:
             logger.warning("recall failed: %s", e)
             recalled = []
         try:
-            facts = await self.memory.store.list_facts(limit=30)
+            # Per-turn recall must never surface stale priors — confabulating
+            # facts mid-conversation is exactly what freshness exists to
+            # prevent. The single-purpose helper hardcodes fresh_only=True.
+            facts = await self.memory.store.list_facts(limit=30, fresh_only=True)
         except Exception as e:  # pragma: no cover
             logger.warning("list_facts failed: %s", e)
             facts = []

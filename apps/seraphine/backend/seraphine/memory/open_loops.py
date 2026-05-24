@@ -192,8 +192,17 @@ class OpenLoopsService:
     async def prompt_block(self) -> str | None:
         """Return a system-message snippet listing up to N open loops.
         Also bumps their injection counter and expires loops that have
-        been nagged about too many times."""
-        loops = await self.store.list_open_loops(only_open=True, limit=20)
+        been nagged about too many times.
+
+        Per-turn injection uses ``fresh_only=True`` so loops that have
+        decayed past the freshness window never re-surface — the only
+        callers of this helper are the conversation engine's context
+        builder and the proactive nudge path, both of which want fresh
+        debts only.
+        """
+        loops = await self.store.list_open_loops(
+            only_open=True, limit=20, fresh_only=True,
+        )
         if not loops:
             return None
 
