@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -38,12 +39,17 @@ async def engine_with_memory(tmp_path: Path):
     mgr = MemoryManager(store, FakeEmbeddings(dim=8), tmp_path / "chroma")
     mgr.set_collection_for_tests(FakeCollection())
 
+    # Use a fresh timestamp — the engine's recall path now applies the
+    # freshness policy's recency cutoff (Task 10). A stale seed would
+    # be correctly filtered out, which is exactly the behavior change
+    # being asserted in tests/freshness/test_recall_since.py.
+    recent_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     seed = Turn(
         id="seed-1",
         conversation_id="c0",
         role="user",
         content="user is a software engineer",
-        created_at="2026-01-01T00:00:00+00:00",
+        created_at=recent_iso,
     )
     await mgr.remember_episode(seed)
     await mgr.learn_fact("user prefers PT-BR")

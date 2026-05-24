@@ -49,6 +49,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _freshness_policy_now() -> datetime | None:
+    """Override hook used by tests to pin "now" for freshness filtering.
+
+    Returns ``None`` in production so ``FreshnessPolicy.sql_fresh_filter``
+    falls back to its own wall-clock. Tests monkeypatch this symbol to
+    inject a fixed datetime — see tests/freshness/test_dao_fresh_filter_loops.py.
+    """
+    return None
+
+
 def _row_to_event(row: tuple[Any, ...]) -> dict[str, Any]:
     """Convert an event_timeline row into a dict, parsing metadata JSON."""
     raw_meta = row[4]
@@ -817,25 +827,38 @@ class MemoryStore(Store):
         return await asyncio.to_thread(_work)
 
     async def list_facts(
-        self, *, limit: int = 50, include_superseded: bool = False
+        self,
+        *,
+        limit: int = 50,
+        include_superseded: bool = False,
+        fresh_only: bool = False,
     ) -> list[Fact]:
         def _work() -> list[Fact]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if not include_superseded:
+                clauses.append("superseded_by IS NULL")
+            if fresh_only:
+                # seraphine.memory and seraphine.freshness are siblings
+                # — the import is layering-safe.
+                from seraphine.freshness import DEFAULT_POLICY
+
+                fragment, fragment_params = DEFAULT_POLICY.sql_fresh_filter(
+                    created_col="created_at",
+                    now=_freshness_policy_now(),
+                )
+                clauses.append(fragment)
+                params.extend(fragment_params)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
             with self._connect() as conn:
-                if include_superseded:
-                    rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at,"
-                        " superseded_by, last_used_at"
-                        " FROM facts ORDER BY created_at DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT id, text, source, confidence, created_at,"
-                        " superseded_by, last_used_at"
-                        " FROM facts WHERE superseded_by IS NULL"
-                        " ORDER BY created_at DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
+                sql = (
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at"
+                    " FROM facts"
+                    f"{where} ORDER BY created_at DESC LIMIT ?"
+                )
+                rows = conn.execute(sql, params).fetchall()
             return [
                 Fact(
                     id=r[0],
@@ -1266,17 +1289,38 @@ class MemoryStore(Store):
         await asyncio.to_thread(_work)
         return loop_id
 
-    async def list_open_loops(self, *, only_open: bool = True, limit: int = 10) -> list[dict[str, Any]]:
+    async def list_open_loops(
+        self,
+        *,
+        only_open: bool = True,
+        limit: int = 10,
+        fresh_only: bool = False,
+    ) -> list[dict[str, Any]]:
         def _work() -> list[dict[str, Any]]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if only_open:
+                clauses.append("resolved_at IS NULL")
+            if fresh_only:
+                # seraphine.memory and seraphine.freshness are siblings
+                # — the import is layering-safe.
+                from seraphine.freshness import DEFAULT_POLICY
+
+                fragment, fragment_params = DEFAULT_POLICY.sql_fresh_filter(
+                    created_col="created_at",
+                    now=_freshness_policy_now(),
+                )
+                clauses.append(fragment)
+                params.extend(fragment_params)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            params.append(limit)
             with self._connect() as conn:
                 sql = (
                     "SELECT id, text, owner, created_at, resolved_at,"
                     " resolution, injection_count FROM open_loops"
+                    f"{where} ORDER BY created_at DESC LIMIT ?"
                 )
-                if only_open:
-                    sql += " WHERE resolved_at IS NULL"
-                sql += " ORDER BY created_at DESC LIMIT ?"
-                rows = conn.execute(sql, (limit,)).fetchall()
+                rows = conn.execute(sql, params).fetchall()
             return [
                 {
                     "id": r[0], "text": r[1], "owner": r[2],

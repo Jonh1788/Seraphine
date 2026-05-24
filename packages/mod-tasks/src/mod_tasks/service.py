@@ -47,6 +47,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _freshness_policy_now() -> datetime | None:
+    """Override hook used by tests to pin "now" for freshness filtering.
+
+    Returns ``None`` in production so ``FreshnessPolicy.sql_fresh_filter``
+    falls back to its own wall-clock. Tests monkeypatch this symbol to
+    inject a fixed datetime — see tests/freshness/test_dao_fresh_filter_tasks.py.
+    """
+    return None
+
+
 def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
     """Map a 15-column SELECT row to a SeraphineTask."""
     raw_payload = row[6]
@@ -539,6 +549,7 @@ class TaskService:
         due_from: str | None = None,
         due_to: str | None = None,
         user_id: str | None = None,
+        fresh_only: bool = False,
     ) -> list[SeraphineTask]:
         def _work() -> list[tuple]:
             clauses: list[str] = []
@@ -565,6 +576,21 @@ class TaskService:
             if due_to is not None:
                 clauses.append("t.due_date IS NOT NULL AND t.due_date <= ?")
                 params.append(due_to)
+            if fresh_only:
+                # Lazy import: mod-tasks does not declare seraphine as a
+                # dependency (layering: app -> package, not reverse).
+                # The freshness module ships with the Seraphine backend;
+                # at runtime in any process that calls fresh_only=True it
+                # is guaranteed to be importable.
+                from seraphine.freshness import DEFAULT_POLICY
+
+                fragment, fragment_params = DEFAULT_POLICY.sql_fresh_filter(
+                    created_col="t.created_at",
+                    event_col="t.due_date",
+                    now=_freshness_policy_now(),
+                )
+                clauses.append(fragment)
+                params.extend(fragment_params)
             where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
             params.append(limit)
 

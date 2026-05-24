@@ -285,6 +285,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("CV triage init failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Freshness — schema migration (adds facts.archived_at and
+    # idx_tasks_status_due). Daily archive cron is registered below
+    # alongside the other proactive-scheduler crons.
+    # ------------------------------------------------------------------
+    try:
+        from seraphine.freshness import migrate as freshness_migrate
+        store.register_migrator("seraphine_freshness", freshness_migrate)
+        await store.ensure_schema()  # idempotent
+        logger.info("Freshness migrator registered")
+    except Exception as e:
+        logger.warning("Freshness migrator failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Notes — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     note_service = None
@@ -757,6 +770,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info("cv_triage housekeeping cron registered (04:15 daily)")
     except Exception:
         logger.exception("cv_triage housekeeping registration failed")
+
+    # Freshness — daily archive of stale facts/tasks/open_loops.
+    # Piggybacks on the proactive AsyncIOScheduler (same pattern as
+    # cv_triage_housekeeping above).
+    try:
+        if proactive_scheduler is not None and proactive_scheduler.enabled:
+            import sqlite3 as _sqlite3
+            from seraphine.freshness import archive_stale, DEFAULT_POLICY
+
+            def _freshness_archive_tick():
+                _conn = store._connect()
+                _conn.row_factory = _sqlite3.Row
+                return archive_stale(_conn, DEFAULT_POLICY)
+
+            proactive_scheduler._sched.add_job(
+                _freshness_archive_tick,
+                "cron", hour=4, minute=30,
+                id="freshness_archive",
+                name="freshness_archive",
+            )
+            logger.info("freshness archive cron registered (04:30 daily)")
+    except Exception:
+        logger.exception("freshness archive registration failed")
 
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:

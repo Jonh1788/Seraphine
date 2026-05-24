@@ -148,7 +148,10 @@ class UserProfile:
         if self._llm is None:
             return None
 
-        facts = await self._store.list_facts(limit=_MAX_FACTS)
+        # The classified profile is injected into the engine's per-turn
+        # context bundle (USER PROFILE block). Fresh-only ensures decayed
+        # facts cannot resurrect themselves through the cached summary.
+        facts = await self._store.list_facts(limit=_MAX_FACTS, fresh_only=True)
         if not facts:
             await self._store.set_user_profile({}, 0)
             return {}
@@ -183,7 +186,11 @@ class UserProfile:
         """
         if self._llm is None:
             return False
-        facts = await self._store.list_facts(limit=_MAX_FACTS)
+        # Use the same fresh window the rebuild itself will use — otherwise
+        # the cached fact_count would include facts the rebuild drops and
+        # the profile would appear permanently "fresh" relative to its
+        # own input.
+        facts = await self._store.list_facts(limit=_MAX_FACTS, fresh_only=True)
         cached = await self._store.get_user_profile()
         if cached and cached["fact_count"] == len(facts):
             return False
