@@ -102,7 +102,11 @@ async def lifespan(app: FastAPI):
     llm: AnthropicClient | None = None
     key = settings.anthropic_api_key.strip()
     if key:
-        llm = AnthropicClient(api_key=key, model=settings.anthropic_model)
+        llm = AnthropicClient(
+            api_key=key,
+            model=settings.anthropic_model,
+            base_url=settings.anthropic_base_url,
+        )
         logger.info(
             "Anthropic client wired (model=%s, key=%s...%s, len=%d)",
             settings.anthropic_model, key[:6], key[-4:], len(key),

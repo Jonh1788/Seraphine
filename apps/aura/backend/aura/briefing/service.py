@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 
 from llm_adapters import AnthropicClient
+from llm_adapters.types import ChatMessage
 from mod_finance.service import FinanceService
 from mod_tasks.service import TaskService
 
@@ -147,7 +148,7 @@ class BriefingService:
             return _build_result(text)
 
         prompt = _build_prompt(snap)
-        msgs = [{"role": "user", "content": prompt}]
+        msgs = [ChatMessage(role="user", content=prompt)]
         parts: list[str] = []
         try:
             async for token in self._llm.chat(msgs, think=False):
