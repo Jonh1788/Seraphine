@@ -1,14 +1,13 @@
-"""Freshness policy module.
-
-Exposes FreshnessPolicy and the schema migrator. Housekeeping lands
-in Task 3 — this file's __all__ grows then.
-"""
+"""Freshness policy module."""
 
 from .policy import FreshnessPolicy, DEFAULT_POLICY
+from .housekeeping import archive_stale, ArchiveReport
 from .schema import migrate
 
 __all__ = [
     "FreshnessPolicy",
     "DEFAULT_POLICY",
+    "archive_stale",
+    "ArchiveReport",
     "migrate",
 ]
