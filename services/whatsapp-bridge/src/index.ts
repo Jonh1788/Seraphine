@@ -51,7 +51,13 @@ function isRetriableError(err: unknown): boolean {
     msg.includes("Target closed") ||
     msg.includes("Session closed") ||
     msg.includes("browser is already running") ||
-    msg.includes("Navigation timeout")
+    msg.includes("Navigation timeout") ||
+    // Container-restart fallout: previous Chromium left stale lock files
+    // because docker SIGKILL'd it before it could clean up. After
+    // killOrphanChrome() removes them, the next attempt succeeds.
+    msg.includes("profile appears to be in use") ||
+    msg.includes("ProcessSingleton") ||
+    msg.includes("Failed to launch the browser process")
   );
 }
 
@@ -61,9 +67,21 @@ function killOrphanChrome(): void {
   } catch {
     // no orphans found
   }
-  // Remove stale lock file
-  const lockFile = path.join(AUTH_DIR, "session", "SingletonLock");
-  try { fs.unlinkSync(lockFile); } catch { /* noop */ }
+  // Remove ALL Singleton* lock files Chromium leaves behind when SIGKILL'd
+  // (SingletonLock, SingletonSocket, SingletonCookie). Only removing
+  // SingletonLock isn't enough — the others also cause "profile in use".
+  const sessionDir = path.join(AUTH_DIR, "session");
+  try {
+    for (const name of fs.readdirSync(sessionDir)) {
+      if (name.startsWith("Singleton")) {
+        try { fs.unlinkSync(path.join(sessionDir, name)); } catch { /* noop */ }
+      }
+    }
+  } catch { /* sessionDir doesn't exist yet — fine */ }
+  // Also clean /tmp/org.chromium.* leftovers
+  try {
+    execSync('rm -f /tmp/org.chromium.*/Singleton* 2>/dev/null', { stdio: "ignore" });
+  } catch { /* noop */ }
 }
 
 async function destroyClientSafe(client: import("whatsapp-web.js").Client): Promise<void> {
@@ -83,6 +101,12 @@ function deleteAuthDir(): void {
 }
 
 async function initializeWithRetry(): Promise<void> {
+  // Eager cleanup BEFORE the first attempt: a previous container
+  // (this same name, recreated by docker compose) was SIGKILL'd and
+  // left Singleton* lock files behind. Without this, attempt 1 fails
+  // with "profile appears to be in use" — wasting the retry budget.
+  killOrphanChrome();
+
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -141,14 +165,27 @@ console.log("[whatsapp-bridge] loading session from .wwebjs_auth/...");
 
 initializeWithRetry();
 
-// Watchdog: if no status change within 90s, log warning (increased for retries)
+// Watchdog: if we haven't reached `ready` within 120s, hard-exit so
+// docker `restart: unless-stopped` recreates the container with fresh
+// locks (killOrphanChrome runs eagerly on the next boot).
+//
+// Catches BOTH failure modes:
+//   - `disconnected` (puppeteer/Chromium never came up)
+//   - `authenticating` (came up, `authenticated` event fired, but the
+//     `ready` event never followed — WhatsApp Web hung mid-load)
+//
+// The post-`ready` heartbeat (in client.ts) handles the case where the
+// session goes bad LATER. This watchdog handles the BOOTSTRAP case.
 setTimeout(() => {
   const { getStatus } = require("./client");
   const st = getStatus();
-  if (st === "disconnected") {
-    console.warn("[whatsapp-bridge] WATCHDOG: still disconnected after 90s — WhatsApp Web may be unreachable");
+  if (st !== "ready") {
+    console.error(
+      `[whatsapp-bridge] WATCHDOG: status=${st} after 120s — exiting for docker to restart with clean locks`,
+    );
+    process.exit(1);
   }
-}, 90_000);
+}, 120_000);
 
 app.listen(config.port, () => {
   console.log(`[whatsapp-bridge] HTTP server listening on :${config.port}`);
