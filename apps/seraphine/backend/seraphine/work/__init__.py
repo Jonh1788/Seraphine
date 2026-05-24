@@ -1,0 +1,2 @@
+"""Work projects module."""
+

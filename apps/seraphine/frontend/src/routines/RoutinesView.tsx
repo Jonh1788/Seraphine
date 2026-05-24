@@ -49,6 +49,34 @@ const ROUTINES: Routine[] = [
     icon: <CheckCircleIcon size={20} />,
     prompt: 'Faz minha revisao semanal completa: tarefas criadas e concluidas, habitos, financas, saude, decisoes, open loops e sugestoes praticas para a proxima semana.',
   },
+  {
+    id: 'project-plan',
+    title: 'Planejar projeto',
+    detail: 'Transforma uma ideia em escopo, riscos, marcos e proximas acoes.',
+    icon: <TargetIcon size={20} />,
+    prompt: 'Vamos planejar um projeto de trabalho. Liste os projetos ativos, escolha o mais importante se eu nao especificar, e monte objetivo, escopo, riscos, marcos, proximas acoes e o primeiro bloco executavel.',
+  },
+  {
+    id: 'project-review',
+    title: 'Revisar sprint',
+    detail: 'Repassa projetos ativos, tarefas abertas, bloqueios e entregas.',
+    icon: <CheckCircleIcon size={20} />,
+    prompt: 'Faz uma revisao de sprint dos meus trabalhos: projetos ativos, tarefas abertas, atrasos, bloqueios, decisoes pendentes e o plano das proximas 48 horas.',
+  },
+  {
+    id: 'project-close',
+    title: 'Fechar entrega',
+    detail: 'Confere pendencias, evidencias, comunicacao e aprendizado.',
+    icon: <MoonIcon size={20} />,
+    prompt: 'Me ajuda a fechar uma entrega de trabalho: encontra o projeto certo, lista pendencias, evidencias, comunicacao necessaria, criterios de pronto e aprendizados para registrar.',
+  },
+  {
+    id: 'project-meeting',
+    title: 'Reuniao de projeto',
+    detail: 'Prepara contexto, status, riscos e perguntas para alinhamento.',
+    icon: <CalendarIcon size={20} />,
+    prompt: 'Prepara uma reuniao de projeto: identifica o projeto relevante, resume status, tarefas abertas, decisoes, riscos, perguntas e proximas acoes para sair da reuniao.',
+  },
 ];
 
 export function RoutinesView({ onBack, onRun }: RoutinesViewProps): JSX.Element {

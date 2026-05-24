@@ -8,10 +8,11 @@ import {
   InboxIcon,
   LightbulbIcon,
   RefreshIcon,
+  TargetIcon,
   TasksIcon,
 } from '../icons/Icons';
 
-type InboxKind = 'task' | 'email' | 'finance' | 'insight' | 'memory';
+type InboxKind = 'task' | 'email' | 'finance' | 'insight' | 'memory' | 'work';
 
 interface InboxItem {
   id: string;
@@ -50,6 +51,7 @@ function iconFor(kind: InboxKind): JSX.Element {
     case 'finance': return <FinanceIcon size={18} />;
     case 'insight': return <LightbulbIcon size={18} />;
     case 'memory': return <BrainIcon size={18} />;
+    case 'work': return <TargetIcon size={18} />;
   }
 }
 
@@ -89,6 +91,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       fetch(`${API_BASE}/finance/entries?status=pending_review`).then((r) => r.ok ? r.json() : { entries: [] }),
       fetch(`${API_BASE}/insights`).then((r) => r.ok ? r.json() : { insights: [] }),
       fetch(`${API_BASE}/memory/notifications?limit=20`).then((r) => r.ok ? r.json() : []),
+      fetch(`${API_BASE}/work/briefing`).then((r) => r.ok ? r.json() : { due_projects: [], projects: [] }),
     ]);
 
     const tasks = settle[0].status === 'fulfilled' ? (settle[0].value.tasks || []) : [];
@@ -174,6 +177,26 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       });
     }
 
+    const work = settle[5].status === 'fulfilled' ? settle[5].value : { due_projects: [], projects: [] };
+    const workProjects = [
+      ...(work.due_projects || []),
+      ...(work.projects || []).filter((project: { priority?: string; id?: string }) => project.priority === 'high'),
+    ];
+    const seenProjects = new Set<string>();
+    for (const project of workProjects) {
+      if (!project?.id || seenProjects.has(project.id)) continue;
+      seenProjects.add(project.id);
+      next.push({
+        id: `work-${project.id}`,
+        kind: 'work',
+        title: project.name || 'Projeto de trabalho',
+        detail: `${project.area || 'Trabalho'}${project.due_date ? ` · prazo ${project.due_date}` : ''}`,
+        urgency: project.due_date && project.due_date < todayISO() ? 'high' : project.priority === 'high' ? 'medium' : 'low',
+        actionLabel: 'Abrir',
+        action: () => onNavigate('jobs'),
+      });
+    }
+
     if (settle.every((r) => r.status === 'rejected')) {
       setError('Nao foi possivel carregar a inbox.');
     }
@@ -197,6 +220,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
     finance: items.filter((i) => i.kind === 'finance').length,
     insight: items.filter((i) => i.kind === 'insight').length,
     memory: items.filter((i) => i.kind === 'memory').length,
+    work: items.filter((i) => i.kind === 'work').length,
   }), [items]);
 
   return (
@@ -220,7 +244,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       </div>
 
       <div className="inbox-filter">
-        {(['all', 'task', 'email', 'finance', 'insight', 'memory'] as const).map((key) => (
+        {(['all', 'task', 'email', 'finance', 'insight', 'memory', 'work'] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -260,7 +284,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
               >
                 {actingId === item.id ? '...' : item.actionLabel}
               </button>
-              <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : 'tasks')}>
+              <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : item.kind === 'work' ? 'jobs' : 'tasks')}>
                 Abrir
               </button>
             </div>

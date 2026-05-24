@@ -38,6 +38,46 @@ interface WorkTask {
   tags?: string[];
 }
 
+interface WorkProject {
+  id: string;
+  name: string;
+  description: string;
+  area: string;
+  status: 'active' | 'paused' | 'done' | 'archived';
+  priority: 'low' | 'medium' | 'high';
+  tags: string[];
+  due_date?: string | null;
+  updated_at: string;
+}
+
+interface WorkProjectLink {
+  id: string;
+  project_id: string;
+  target_type: string;
+  target_id: string;
+  title: string;
+  created_at: string;
+}
+
+interface WorkProjectDetail {
+  project: WorkProject;
+  links: WorkProjectLink[];
+  summary: {
+    linked_tasks: number;
+    linked_triages: number;
+    linked_notes: number;
+    overdue: boolean;
+    attention: boolean;
+  };
+}
+
+interface WorkBriefing {
+  projects: WorkProject[];
+  open_tasks: WorkTask[];
+  active_triages: JobSummary[];
+  due_projects: WorkProject[];
+}
+
 interface ProjectGroup {
   key: string;
   label: string;
@@ -52,6 +92,19 @@ export function JobsTab({
 }: Props): JSX.Element {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [tasks, setTasks] = useState<WorkTask[]>([]);
+  const [projects, setProjects] = useState<WorkProject[]>([]);
+  const [briefing, setBriefing] = useState<WorkBriefing | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectDetail, setProjectDetail] = useState<WorkProjectDetail | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [projectForm, setProjectForm] = useState({
+    name: '',
+    area: '',
+    priority: 'medium',
+    due_date: '',
+    description: '',
+  });
   const [selectedId, setSelectedId] = useState<number | null>(
     initialJobId ?? null,
   );
@@ -78,8 +131,14 @@ export function JobsTab({
       fetch(`${API_BASE}/tasks?limit=120`).then((r) =>
         r.ok ? r.json() as Promise<{ tasks: WorkTask[] }> : { tasks: [] },
       ),
+      fetch(`${API_BASE}/work/projects`).then((r) =>
+        r.ok ? r.json() as Promise<{ projects: WorkProject[] }> : { projects: [] },
+      ),
+      fetch(`${API_BASE}/work/briefing`).then((r) =>
+        r.ok ? r.json() as Promise<WorkBriefing> : null,
+      ),
     ])
-      .then(([jobsResult, tasksResult]) => {
+      .then(([jobsResult, tasksResult, projectsResult, briefingResult]) => {
         if (cancelled) return;
         if (jobsResult.status === 'fulfilled') {
           setJobs(jobsResult.value);
@@ -88,6 +147,12 @@ export function JobsTab({
         }
         if (tasksResult.status === 'fulfilled') {
           setTasks(tasksResult.value.tasks || []);
+        }
+        if (projectsResult.status === 'fulfilled') {
+          setProjects(projectsResult.value.projects || []);
+        }
+        if (briefingResult.status === 'fulfilled') {
+          setBriefing(briefingResult.value);
         }
       })
       .catch((e) => {
@@ -101,9 +166,122 @@ export function JobsTab({
     };
   }, []);
 
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectDetail(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE}/work/projects/${selectedProjectId}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<WorkProjectDetail>;
+      })
+      .then((detail) => {
+        if (!cancelled) setProjectDetail(detail);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
+
+  async function createProject(): Promise<void> {
+    const name = projectForm.name.trim();
+    if (!name) return;
+    setCreatingProject(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/work/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          area: projectForm.area.trim(),
+          priority: projectForm.priority,
+          due_date: projectForm.due_date || null,
+          description: projectForm.description.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json() as { project: WorkProject };
+      setProjects((prev) => [payload.project, ...prev]);
+      setProjectForm({ name: '', area: '', priority: 'medium', due_date: '', description: '' });
+      setCreateOpen(false);
+      setSelectedProjectId(payload.project.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingProject(false);
+    }
+  }
+
   if (selectedId !== null) {
     return (
       <JobDetailPanel jobId={selectedId} onClose={() => setSelectedId(null)} />
+    );
+  }
+
+  if (selectedProjectId !== null) {
+    return (
+      <div className="cvt-jobs-tab">
+        <header className="cvt-jobs-header">
+          <button type="button" className="work-back-button" onClick={() => setSelectedProjectId(null)}>
+            Voltar
+          </button>
+          <div>
+            <h1>{projectDetail?.project.name || 'Projeto'}</h1>
+            <p>{projectDetail?.project.area || 'Trabalho'} · {projectDetail?.project.status || 'carregando'}</p>
+          </div>
+        </header>
+        {!projectDetail && <p className="cvt-empty">Carregando projeto…</p>}
+        {projectDetail && (
+          <>
+            <div className="work-summary-grid">
+              <div className="work-summary-card">
+                <span>Prioridade</span>
+                <strong>{projectDetail.project.priority}</strong>
+                <small>{projectDetail.project.due_date ? `prazo ${projectDetail.project.due_date}` : 'sem prazo'}</small>
+              </div>
+              <div className="work-summary-card">
+                <span>Vinculos</span>
+                <strong>{projectDetail.links.length}</strong>
+                <small>{projectDetail.summary.linked_tasks} tarefas · {projectDetail.summary.linked_triages} triagens</small>
+              </div>
+              <div className="work-summary-card">
+                <span>Atencao</span>
+                <strong>{projectDetail.summary.overdue ? 'atrasado' : projectDetail.summary.attention ? 'sim' : 'ok'}</strong>
+                <small>{projectDetail.project.updated_at ? `atualizado ${new Date(projectDetail.project.updated_at).toLocaleDateString()}` : ''}</small>
+              </div>
+            </div>
+            {projectDetail.project.description && (
+              <section className="work-section">
+                <h3>Briefing</h3>
+                <p className="work-detail-text">{projectDetail.project.description}</p>
+              </section>
+            )}
+            <section className="work-section">
+              <div className="work-section__header">
+                <h3>Itens vinculados</h3>
+                <span>{projectDetail.links.length}</span>
+              </div>
+              {projectDetail.links.length === 0 && (
+                <p className="cvt-empty">Nenhum item vinculado ainda. Use o chat para ligar tarefas, notas ou triagens a este projeto.</p>
+              )}
+              {projectDetail.links.map((link) => (
+                <div key={link.id} className="work-task-row">
+                  <span className="work-task-row__main">
+                    <strong>{link.title || link.target_id}</strong>
+                    <small>{link.target_type} · {new Date(link.created_at).toLocaleString()}</small>
+                  </span>
+                </div>
+              ))}
+            </section>
+          </>
+        )}
+      </div>
     );
   }
 
@@ -132,9 +310,12 @@ export function JobsTab({
   const grouped = groupByDay(jobs);
   const openTasks = tasks.filter(isOpenTask);
   const overdueTasks = openTasks.filter(isOverdue);
-  const projects = groupProjects(openTasks);
+  const suggestedProjects = groupProjects(openTasks);
   const activeTriages = jobs.filter((j) => !['done', 'failed', 'cancelled'].includes(j.status));
   const lastTriage = jobs[0] || null;
+  const briefingProjects = briefing?.projects || projects.filter((p) => p.status === 'active');
+  const briefingTasks = briefing?.open_tasks || openTasks;
+  const dueProjects = briefing?.due_projects || projects.filter((p) => p.due_date && p.due_date <= new Date().toISOString().slice(0, 10));
 
   return (
     <div className="cvt-jobs-tab">
@@ -143,7 +324,46 @@ export function JobsTab({
           <h1>Trabalhos</h1>
           <p>Projetos, pendencias e operacoes de triagem em um so lugar.</p>
         </div>
+        <button type="button" className="work-primary-button" onClick={() => setCreateOpen((v) => !v)}>
+          Novo projeto
+        </button>
       </header>
+
+      {createOpen && (
+        <form className="work-create-form" onSubmit={(e) => { e.preventDefault(); void createProject(); }}>
+          <input
+            value={projectForm.name}
+            onChange={(e) => setProjectForm((prev) => ({ ...prev, name: e.target.value }))}
+            placeholder="Nome do projeto"
+          />
+          <input
+            value={projectForm.area}
+            onChange={(e) => setProjectForm((prev) => ({ ...prev, area: e.target.value }))}
+            placeholder="Area"
+          />
+          <select
+            value={projectForm.priority}
+            onChange={(e) => setProjectForm((prev) => ({ ...prev, priority: e.target.value }))}
+          >
+            <option value="low">Baixa</option>
+            <option value="medium">Media</option>
+            <option value="high">Alta</option>
+          </select>
+          <input
+            type="date"
+            value={projectForm.due_date}
+            onChange={(e) => setProjectForm((prev) => ({ ...prev, due_date: e.target.value }))}
+          />
+          <textarea
+            value={projectForm.description}
+            onChange={(e) => setProjectForm((prev) => ({ ...prev, description: e.target.value }))}
+            placeholder="Briefing curto"
+          />
+          <button type="submit" disabled={creatingProject || !projectForm.name.trim()}>
+            {creatingProject ? 'Criando…' : 'Criar'}
+          </button>
+        </form>
+      )}
 
       <div className="work-tabs">
         <button
@@ -174,13 +394,13 @@ export function JobsTab({
           <div className="work-summary-grid">
             <div className="work-summary-card">
               <span>Trabalho aberto</span>
-              <strong>{openTasks.length}</strong>
+              <strong>{briefingTasks.length}</strong>
               <small>{overdueTasks.length} atrasado{overdueTasks.length === 1 ? '' : 's'}</small>
             </div>
             <div className="work-summary-card">
               <span>Projetos ativos</span>
-              <strong>{projects.length}</strong>
-              <small>{projects.filter((p) => p.high > 0).length} com alta prioridade</small>
+              <strong>{briefingProjects.length}</strong>
+              <small>{dueProjects.length} pedindo atencao</small>
             </div>
             <div className="work-summary-card">
               <span>Triagens em andamento</span>
@@ -199,7 +419,7 @@ export function JobsTab({
             {openTasks.length === 0 && (
               <p className="cvt-empty">Nenhuma tarefa de trabalho aberta.</p>
             )}
-            {openTasks.slice(0, 6).map((task) => (
+            {briefingTasks.slice(0, 6).map((task) => (
               <div key={task.id} className="work-task-row">
                 <span className="work-task-row__main">
                   <strong>{task.title}</strong>
@@ -256,29 +476,53 @@ export function JobsTab({
       {activeTab === 'projects' && (
         <>
           {projects.length === 0 && (
-            <p className="cvt-empty">Nenhum projeto ativo encontrado nas tarefas.</p>
+            <p className="cvt-empty">Nenhum projeto criado ainda. Crie um projeto ou use as sugestoes abaixo.</p>
           )}
           <div className="work-project-grid">
             {projects.map((project) => (
-              <section key={project.key} className="work-project-card">
+              <section
+                key={project.id}
+                className="work-project-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedProjectId(project.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedProjectId(project.id);
+                  }
+                }}
+              >
                 <div className="work-project-card__header">
-                  <h3>{project.label}</h3>
-                  <span>{project.tasks.length}</span>
+                  <h3>{project.name}</h3>
+                  <span>{project.priority}</span>
                 </div>
                 <p>
-                  {project.overdue} atrasada{project.overdue === 1 ? '' : 's'} · {project.high} alta prioridade
+                  {project.area || 'sem area'} · {project.due_date ? `prazo ${project.due_date}` : 'sem prazo'}
                 </p>
                 <div className="work-project-card__tasks">
-                  {project.tasks.slice(0, 4).map((task) => (
-                    <div key={task.id} className="work-project-task">
-                      <strong>{task.title}</strong>
-                      <small>{task.status}{task.due_date ? ` · ${task.due_date}` : ''}</small>
-                    </div>
-                  ))}
+                  {project.description && <div className="work-project-task"><strong>{project.description}</strong></div>}
+                  {project.tags.slice(0, 3).map((tag) => <small key={tag}>#{tag}</small>)}
                 </div>
               </section>
             ))}
           </div>
+          {suggestedProjects.length > 0 && (
+            <section className="work-section">
+              <div className="work-section__header">
+                <h3>Sugestoes por tarefas</h3>
+                <span>{suggestedProjects.length}</span>
+              </div>
+              {suggestedProjects.slice(0, 6).map((project) => (
+                <div key={project.key} className="work-task-row">
+                  <span className="work-task-row__main">
+                    <strong>{project.label}</strong>
+                    <small>{project.tasks.length} tarefas · {project.overdue} atrasadas · {project.high} alta prioridade</small>
+                  </span>
+                </div>
+              ))}
+            </section>
+          )}
         </>
       )}
 

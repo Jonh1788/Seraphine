@@ -41,6 +41,9 @@ from seraphine.insights.service import InsightEngine
 from seraphine.notes import schema as notes_schema
 from seraphine.notes.routes import router as notes_router
 from seraphine.notes.service import NoteService
+from seraphine.work import schema as work_schema
+from seraphine.work.routes import router as work_router
+from seraphine.work.service import WorkProjectService
 from seraphine.music.routes import router as music_router
 from seraphine.music.service import FocusMusicService
 from seraphine.cv_triage import schema as cv_triage_schema
@@ -321,6 +324,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Note service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Work projects — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    work_service = None
+    try:
+        store.register_migrator("seraphine_work", work_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        work_service = WorkProjectService(store=store, task_service=task_service)
+        logger.info("Work project service wired")
+    except Exception as e:
+        logger.warning("Work project service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Insights — always enabled (SQLite-backed); analysers fan out over
     # whichever of finance/tasks/habits happened to come up.
     # ------------------------------------------------------------------
@@ -423,6 +438,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         water_service=water_service,
         health_service=health_service,
         note_service=note_service,
+        work_service=work_service,
         llm=llm,
     )
     # ------------------------------------------------------------------
@@ -607,6 +623,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.water_service = water_service
     app.state.health_service = health_service
     app.state.note_service = note_service
+    app.state.work_service = work_service
     app.state.music_service = music_service
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
@@ -916,6 +933,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(insights_router)
     app.include_router(notes_router)
+    app.include_router(work_router)
     app.include_router(music_router)
     app.include_router(cv_triage_router)
 

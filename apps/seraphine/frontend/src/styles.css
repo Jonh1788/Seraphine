@@ -14075,6 +14075,69 @@ html[data-shell="tablet"] .layout {
   font-size: 12px;
 }
 
+.work-primary-button,
+.work-back-button {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.work-primary-button {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+.work-create-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(120px, 0.8fr) 120px 150px auto;
+  gap: 8px;
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.025);
+  margin-bottom: 14px;
+}
+
+.work-create-form input,
+.work-create-form select,
+.work-create-form textarea {
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.work-create-form textarea {
+  grid-column: 1 / -2;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.work-create-form button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.work-detail-text {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .work-task-row,
 .work-triage-card,
 .work-project-task {
@@ -14136,6 +14199,7 @@ html[data-shell="tablet"] .layout {
 
 .work-project-card {
   padding: 14px;
+  cursor: pointer;
 }
 
 .work-project-card__header span {
@@ -14151,6 +14215,23 @@ html[data-shell="tablet"] .layout {
 
 .work-project-card__tasks {
   margin-top: 12px;
+}
+
+.work-project-card__tasks small {
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .work-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .work-create-form textarea {
+    grid-column: auto;
+  }
 }
 
 .cvt-jobs-group {

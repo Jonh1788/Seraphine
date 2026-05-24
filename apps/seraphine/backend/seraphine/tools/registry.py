@@ -99,6 +99,7 @@ def build_default_registry(
     water_service: Any = None,
     health_service: Any = None,
     note_service: Any = None,
+    work_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -298,6 +299,16 @@ def build_default_registry(
         reg.register(DeleteNoteTool(note_service))
         reg.register(ListNotesTool(note_service))
         reg.register(SearchNotesTool(note_service))
+    if work_service is not None:
+        from seraphine.tools.work import (
+            CreateWorkProjectTool,
+            LinkWorkProjectTool,
+            ListWorkProjectsTool,
+        )
+
+        reg.register(CreateWorkProjectTool(work_service))
+        reg.register(ListWorkProjectsTool(work_service))
+        reg.register(LinkWorkProjectTool(work_service))
     # macOS screen tools — registered unconditionally because they're
     # `proxy_to_client = True`: the backend just ships the call over WS
     # and the Tauri client runs `screencapture` / `cliclick` locally.
