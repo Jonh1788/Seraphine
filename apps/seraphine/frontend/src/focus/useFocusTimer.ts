@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { notify } from '../utils/notify';
+import { logFocusSession, setFocusActive } from './api';
 
 export type FocusPhase = 'work' | 'break' | 'long_break' | 'idle';
 
@@ -32,6 +33,40 @@ interface StoredFocus {
   task?: string;
   running: boolean;
   savedAt: number; // Date.now()
+  /** ISO timestamp of when this phase started — used for backend logging. */
+  phaseStartedAt?: string;
+}
+
+/** Map internal phase names to the backend session type. */
+function sessionType(phase: FocusPhase): 'work' | 'short_break' | 'long_break' {
+  if (phase === 'break') return 'short_break';
+  if (phase === 'long_break') return 'long_break';
+  return 'work';
+}
+
+/** Fire-and-forget: persist a completed/cancelled focus phase to the backend.
+ *  Falls back silently on network errors — localStorage already has the data. */
+function persistSession(
+  phase: FocusPhase,
+  startedAt: string,
+  completed: boolean,
+  notes?: string,
+): void {
+  // Only log work sessions and breaks — idle is not a session.
+  if (phase === 'idle') return;
+  const endedAt = new Date().toISOString();
+  logFocusSession({
+    started_at: startedAt,
+    ended_at: endedAt,
+    type: sessionType(phase),
+    completed,
+    interruptions: 0,
+    notes,
+  }).catch(() => {
+    // Backend offline — session lost to the backend but the user can
+    // still see timer state in localStorage. Acceptable trade-off.
+    if (import.meta.env.DEV) console.warn('[focus] failed to persist session to backend');
+  });
 }
 
 function loadState(): FocusState {
@@ -56,10 +91,23 @@ function loadState(): FocusState {
   }
 }
 
-function saveState(state: FocusState): void {
+/** Read persisted phaseStartedAt from localStorage. */
+function loadPhaseStartedAt(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const stored: StoredFocus = JSON.parse(raw);
+    return stored.phaseStartedAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveState(state: FocusState, phaseStartedAt: string | null): void {
   const stored: StoredFocus = {
     ...state,
     savedAt: Date.now(),
+    phaseStartedAt: phaseStartedAt ?? undefined,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
 }
@@ -79,9 +127,12 @@ export function useFocusTimer(
   const onTransitionRef = useRef(onPhaseTransition);
   onTransitionRef.current = onPhaseTransition;
 
+  // Track when the current phase started (ISO string).
+  const phaseStartedAtRef = useRef<string | null>(loadPhaseStartedAt());
+
   // Persist on every state change
   useEffect(() => {
-    saveState(state);
+    saveState(state, phaseStartedAtRef.current);
   }, [state]);
 
   // Tick interval
@@ -94,8 +145,14 @@ export function useFocusTimer(
         const next = prev.remaining - 1;
         if (next > 0) return { ...prev, remaining: next };
 
-        // Phase transition
+        // Phase transition — the phase completed naturally
         const fromPhase = prev.phase;
+
+        // Persist the completed phase to the backend
+        if (phaseStartedAtRef.current) {
+          persistSession(fromPhase, phaseStartedAtRef.current, true, prev.task);
+        }
+
         let toPhase: FocusPhase;
         let toRemaining: number;
         let toCycle = prev.cycle;
@@ -114,6 +171,9 @@ export function useFocusTimer(
           toRemaining = WORK_SECS;
           toCycle = prev.cycle + 1;
         }
+
+        // Update phase start time for the new phase
+        phaseStartedAtRef.current = new Date().toISOString();
 
         // Notify
         const phaseLabels: Record<FocusPhase, string> = {
@@ -143,6 +203,7 @@ export function useFocusTimer(
   }, [state.running, state.phase]);
 
   const start = useCallback((task?: string) => {
+    phaseStartedAtRef.current = new Date().toISOString();
     const newState: FocusState = {
       phase: 'work',
       remaining: WORK_SECS,
@@ -152,6 +213,7 @@ export function useFocusTimer(
     };
     setState(newState);
     void notify('Seraphine - Foco', 'Trabalho - 25 minutos');
+    void setFocusActive(true).catch(() => {});
     onTransitionRef.current?.('idle', 'work');
   }, []);
 
@@ -167,6 +229,13 @@ export function useFocusTimer(
     setState((prev) => {
       if (prev.phase === 'idle') return prev;
       const fromPhase = prev.phase;
+
+      // Skipping a work phase = cancelled session. Skipping a break = completed break.
+      if (phaseStartedAtRef.current) {
+        const completed = fromPhase !== 'work';
+        persistSession(fromPhase, phaseStartedAtRef.current, completed, prev.task);
+      }
+
       let toPhase: FocusPhase;
       let toRemaining: number;
       let toCycle = prev.cycle;
@@ -185,6 +254,8 @@ export function useFocusTimer(
         toCycle = prev.cycle + 1;
       }
 
+      phaseStartedAtRef.current = new Date().toISOString();
+
       const phaseLabels: Record<FocusPhase, string> = {
         work: 'Trabalho',
         break: 'Pausa',
@@ -199,8 +270,15 @@ export function useFocusTimer(
   }, []);
 
   const reset = useCallback(() => {
+    // Log the current phase as cancelled when the user stops the timer
+    const cur = stateRef.current;
+    if (cur.phase !== 'idle' && phaseStartedAtRef.current) {
+      persistSession(cur.phase, phaseStartedAtRef.current, false, cur.task);
+    }
+    phaseStartedAtRef.current = null;
     setState(defaultState());
     localStorage.removeItem(STORAGE_KEY);
+    void setFocusActive(false).catch(() => {});
   }, []);
 
   return [state, { start, pause, resume, skip, reset }];

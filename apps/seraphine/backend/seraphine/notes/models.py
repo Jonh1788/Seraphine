@@ -8,6 +8,29 @@ from typing import Any
 
 
 @dataclass
+class NoteRef:
+    """Lightweight reference to a note (used for backlinks)."""
+
+    id: str
+    title: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"id": self.id, "title": self.title}
+
+
+@dataclass
+class TaskSummary:
+    """Lightweight reference to a synced inline task."""
+
+    id: int
+    title: str
+    status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "title": self.title, "status": self.status}
+
+
+@dataclass
 class Note:
     id: str  # UUID4
     title: str
@@ -15,6 +38,8 @@ class Note:
     tags: list[str] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
+    backlinks: list[NoteRef] = field(default_factory=list)
+    linked_tasks: list[TaskSummary] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -24,6 +49,8 @@ class Note:
             "tags": list(self.tags or []),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "backlinks": [b.to_dict() for b in self.backlinks],
+            "linked_tasks": [t.to_dict() for t in self.linked_tasks],
         }
 
     @classmethod

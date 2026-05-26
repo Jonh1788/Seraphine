@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { ThemeProvider } from './theme';
+import { ConfirmProvider } from './ui';
 import { App } from './App';
 
 vi.stubGlobal(
@@ -15,9 +17,18 @@ vi.stubGlobal(
   },
 );
 
+// Mock performance.now for latency tracking
+vi.stubGlobal('performance', { now: () => 0, mark: () => {}, measure: () => {} });
+
 describe('App', () => {
-  it('renders the Seraphine title', () => {
-    render(<App />);
-    expect(screen.getByRole('heading', { name: /seraphine/i })).toBeTruthy();
+  it('renders the Seraphine brand', () => {
+    render(
+      <ThemeProvider>
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('Seraphine')).toBeTruthy();
   });
 });

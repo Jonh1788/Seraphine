@@ -39,17 +39,31 @@ def _service_or_503(request: Request) -> NoteService:
     return svc
 
 
+# ------------------------------------------------------------------
+# Tag aggregation  (SDD-084)
+# NOTE: This route MUST be registered before /{note_id} so FastAPI
+# doesn't treat "tags" as a note_id path parameter.
+# ------------------------------------------------------------------
+
+@router.get("/tags")
+async def list_tags(request: Request) -> dict[str, Any]:
+    svc = _service_or_503(request)
+    tags = await svc.get_all_tags()
+    return {"tags": tags}
+
+
 @router.get("")
 async def list_notes(
     request: Request,
     q: str | None = None,
+    tag: str | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
     svc = _service_or_503(request)
     if q is not None and q.strip():
         items = await svc.search(q, limit=limit)
     else:
-        items = await svc.list(limit=limit)
+        items = await svc.list(limit=limit, tag=tag)
     return {"notes": [n.to_dict() for n in items]}
 
 

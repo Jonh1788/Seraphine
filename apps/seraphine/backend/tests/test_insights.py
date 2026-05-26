@@ -311,6 +311,7 @@ async def test_weekly_report_contains_expected_blocks(
     r = await get_or_generate_current_week(store, eng)
     d = r.to_dict()
     for key in ("week_start", "week_end", "tasks", "finance", "habits",
+                "goals", "mood", "focus", "journal",
                 "insights", "suggestion"):
         assert key in d
     assert d["suggestion"]

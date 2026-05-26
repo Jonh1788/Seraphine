@@ -1,28 +1,54 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import { TrashIcon, XIcon } from '../icons/Icons';
 import { useConfirm } from '../ui';
-import type { Note } from './types';
+import type { Note, NoteRef } from './types';
 
 interface NoteEditorProps {
   note: Note;
   busy?: boolean;
   onSave: (patch: { title: string; content: string; tags: string[] }) => void;
   onDelete: () => void;
+  /** Navigate to a note by title (for backlink / [[wiki]] clicks). */
+  onNavigate?: (noteId: string) => void;
+}
+
+/**
+ * Replace ``[[title]]`` in markdown content with a clickable HTML link
+ * so the preview renders them as navigable references.
+ */
+function renderWikiLinks(raw: string): string {
+  return raw.replace(
+    /\[\[([^\[\]]+?)\]\]/g,
+    (_match, title: string) =>
+      `<a class="note-editor__wikilink" data-wikilink="${title.trim()}">${title.trim()}</a>`,
+  );
 }
 
 /**
  * Split-pane Markdown editor: textarea on the left, rendered preview on
  * the right. Title + chip-based tag input at the top. "Salvar" is manual;
  * "Excluir" prompts a native confirm before firing.
+ *
+ * SDD-084 additions:
+ * - [[wiki]] links rendered as clickable links in the preview.
+ * - Backlinks section at the bottom.
+ * - Clickable checkboxes in preview toggle the markdown and save.
  */
-export function NoteEditor({ note, busy, onSave, onDelete }: NoteEditorProps): JSX.Element {
+export function NoteEditor({
+  note,
+  busy,
+  onSave,
+  onDelete,
+  onNavigate,
+}: NoteEditorProps): JSX.Element {
   const confirm = useConfirm();
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [tagDraft, setTagDraft] = useState('');
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // Reset local state whenever a different note is loaded.
   const noteIdRef = useRef(note.id);
@@ -88,13 +114,114 @@ export function NoteEditor({ note, busy, onSave, onDelete }: NoteEditorProps): J
     if (ok) onDelete();
   };
 
-  // Cmd/Ctrl+S — quick save
+  // Toggle a checkbox at line-level in the markdown content.
+  const toggleCheckbox = useCallback(
+    (lineIndex: number) => {
+      const lines = content.split('\n');
+      if (lineIndex < 0 || lineIndex >= lines.length) return;
+      const line = lines[lineIndex];
+      const unchecked = /^([ \t]*-\s+)\[ \](\s+.+)$/;
+      const checked = /^([ \t]*-\s+)\[[xX]\](\s+.+)$/;
+      if (unchecked.test(line)) {
+        lines[lineIndex] = line.replace(unchecked, '$1[x]$2');
+      } else if (checked.test(line)) {
+        lines[lineIndex] = line.replace(checked, '$1[ ]$2');
+      } else {
+        return;
+      }
+      const updated = lines.join('\n');
+      setContent(updated);
+      // Auto-save the toggle immediately.
+      const cleanTitle = title.trim();
+      if (cleanTitle) {
+        onSave({ title: cleanTitle, content: updated, tags });
+      }
+    },
+    [content, title, tags, onSave],
+  );
+
+  // Handle clicks in the preview area: wiki links and checkboxes.
+  const handlePreviewClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+      // Wiki link click.
+      if (target.classList.contains('note-editor__wikilink')) {
+        e.preventDefault();
+        const linkTitle = target.getAttribute('data-wikilink');
+        if (linkTitle) {
+          // Find matching backlink/note by title (case-insensitive).
+          const allRefs = [
+            ...(note.backlinks ?? []),
+          ];
+          // Also check linked references from the note content — we need
+          // to look through all known notes. For now, navigate via title
+          // by finding it in backlinks or a known note. If not found, the
+          // parent can handle it.
+          const match = allRefs.find(
+            (r) => r.title.toLowerCase() === linkTitle.toLowerCase(),
+          );
+          if (match && onNavigate) {
+            onNavigate(match.id);
+          }
+          // If not found in backlinks, the parent NotesView handles lookup.
+          else if (onNavigate) {
+            // Pass empty string as signal to search by title.
+            onNavigate(`title:${linkTitle}`);
+          }
+        }
+        return;
+      }
+      // Checkbox click in the rendered preview.
+      const input = target.closest('input[type="checkbox"]') as HTMLInputElement | null;
+      if (input) {
+        e.preventDefault();
+        // Find the line index from the data attribute.
+        const lineAttr = input.getAttribute('data-line');
+        if (lineAttr != null) {
+          toggleCheckbox(Number(lineAttr));
+        }
+      }
+    },
+    [note.backlinks, onNavigate, toggleCheckbox],
+  );
+
+  // Cmd/Ctrl+S -- quick save
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
       if (dirty && !busy) handleSave();
     }
   };
+
+  // Pre-process markdown for the preview: replace [[links]] and annotate checkboxes.
+  const processedContent = useMemo(() => {
+    if (!content.trim()) return '';
+    let md = renderWikiLinks(content);
+    // Annotate checkbox lines with data-line indices so clicks can toggle them.
+    let lineCounter = 0;
+    const originalLines = content.split('\n');
+    md = md.replace(
+      /^([ \t]*-\s+)\[([ xX])\](\s+.+)$/gm,
+      (_match, prefix: string, check: string, rest: string) => {
+        // Find the line index for this checkbox in the original content.
+        const fullLine = _match;
+        while (lineCounter < originalLines.length) {
+          const origWithLinks = renderWikiLinks(originalLines[lineCounter]);
+          if (origWithLinks.trim() === fullLine.trim()) {
+            break;
+          }
+          lineCounter++;
+        }
+        const idx = lineCounter;
+        lineCounter++;
+        const isChecked = check.toLowerCase() === 'x';
+        return `${prefix}<input type="checkbox" ${isChecked ? 'checked' : ''} data-line="${idx}" readonly />${rest}`;
+      },
+    );
+    return md;
+  }, [content]);
+
+  const backlinks: NoteRef[] = note.backlinks ?? [];
 
   return (
     <div className="note-editor" onKeyDown={handleKeyDown}>
@@ -165,13 +292,36 @@ export function NoteEditor({ note, busy, onSave, onDelete }: NoteEditorProps): J
           disabled={busy}
           spellCheck={false}
         />
-        <div className="note-editor__preview markdown-body">
-          {content.trim() ? (
-            <Markdown rehypePlugins={[rehypeRaw]}>{content}</Markdown>
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+        <div
+          className="note-editor__preview markdown-body"
+          ref={previewRef}
+          onClick={handlePreviewClick}
+        >
+          {processedContent ? (
+            <Markdown rehypePlugins={[rehypeRaw]}>{processedContent}</Markdown>
           ) : (
             <p className="note-editor__preview-empty">
               Preview do Markdown aparece aqui.
             </p>
+          )}
+
+          {backlinks.length > 0 && (
+            <div className="note-editor__backlinks">
+              <h4 className="note-editor__backlinks-title">Referenciada por</h4>
+              <div className="note-editor__backlinks-list">
+                {backlinks.map((bl) => (
+                  <button
+                    key={bl.id}
+                    type="button"
+                    className="note-editor__backlink"
+                    onClick={() => onNavigate?.(bl.id)}
+                  >
+                    {bl.title}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>

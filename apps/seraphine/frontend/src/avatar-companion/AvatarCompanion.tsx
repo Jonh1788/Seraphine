@@ -7,6 +7,7 @@ import { PCMPlayback } from '../audio/playback';
 import { MicCapture } from '../audio/micCapture';
 import { RealtimeController } from '../realtime';
 import { BubbleLayer, bubbles } from './BubbleLayer';
+import { ContextualPills } from '../contextual/ContextualPills';
 import { API_BASE } from '../api';
 
 const DEFAULT_AVATAR =
@@ -527,6 +528,7 @@ export function AvatarCompanion(): JSX.Element {
       }}
     >
       <BubbleLayer />
+      <ContextualPills ws={ws} conversationId={conversationIdRef.current} />
       <VrmAvatar
         avatarUrl={DEFAULT_AVATAR}
         width={size.w}

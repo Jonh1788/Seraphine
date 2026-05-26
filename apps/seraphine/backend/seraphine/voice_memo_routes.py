@@ -15,6 +15,52 @@ logger = logging.getLogger("seraphine.voice_memo_routes")
 router = APIRouter(prefix="/voice_memos", tags=["voice_memo"])
 
 
+async def _maybe_journal_from_diary(
+    request: Request,
+    transcript: str,
+    cls: dict[str, Any],
+    memo_id: str | None,
+) -> None:
+    """If classified as diary, also create a journal entry."""
+    if cls.get("type") != "diary":
+        return
+    journal_service = getattr(request.app.state, "journal_service", None)
+    if journal_service is None:
+        return
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+
+        # Attach today's mood if available
+        mood_label: str | None = None
+        mood_valence: float | None = None
+        mood_service = getattr(request.app.state, "mood_service", None)
+        if mood_service is not None:
+            try:
+                today_mood = await mood_service.get_today()
+                current = today_mood.get("current")
+                if current:
+                    mood_label = current.get("label")
+                    mood_valence = current.get("valence")
+            except Exception:
+                pass
+
+        await journal_service.create_entry(
+            date=today,
+            type="voice_memo",
+            title=cls.get("title", transcript[:60]),
+            content=cls.get("detail") or transcript,
+            mood_label=mood_label,
+            mood_valence=mood_valence,
+            source="voice",
+            source_id=memo_id,
+        )
+    except Exception as e:
+        logger.warning("journal from voice diary failed: %s", e)
+
+
 class VoiceMemoIn(BaseModel):
     transcript: str = Field(..., min_length=3, max_length=4000)
 
@@ -32,6 +78,9 @@ async def create_memo(payload: VoiceMemoIn, request: Request) -> dict[str, Any]:
     if cls is None:
         raise HTTPException(status_code=502, detail="classification failed")
     result = await svc.archive(payload.transcript, cls)
+    await _maybe_journal_from_diary(
+        request, payload.transcript, cls, result.get("memo_id"),
+    )
     return {"memo": result, "classification": cls}
 
 
@@ -68,6 +117,9 @@ async def create_memo_from_audio(
     if cls is None:
         raise HTTPException(status_code=502, detail="classification failed")
     memo = await svc.archive(transcript, cls)
+    await _maybe_journal_from_diary(
+        request, transcript, cls, memo.get("memo_id"),
+    )
     return {"transcript": transcript, "memo": memo, "classification": cls}
 
 

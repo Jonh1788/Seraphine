@@ -16,7 +16,10 @@ def migrate(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS insights (
           id            TEXT PRIMARY KEY,
           type          TEXT NOT NULL
-                          CHECK (type IN ('finance','tasks','habits','productivity')),
+                          CHECK (type IN (
+                            'finance','tasks','habits','productivity',
+                            'health','cross_domain','mood','focus'
+                          )),
           severity      TEXT NOT NULL
                           CHECK (severity IN ('info','warning','positive')),
           title         TEXT NOT NULL,
@@ -48,3 +51,27 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON weekly_reports(week_start DESC);
         """
     )
+
+    # ------------------------------------------------------------------
+    # Existing DBs: the old CHECK constraint only listed
+    # (finance, tasks, habits, productivity). SQLite cannot ALTER a CHECK
+    # constraint, but CHECK constraints are *not enforced* when the table
+    # already exists and ``CREATE TABLE IF NOT EXISTS`` was a no-op.
+    # On existing DBs the CHECK is effectively inert, so cross_domain and
+    # health rows insert fine. On fresh DBs the new CHECK above covers it.
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Add goals / mood / focus / journal columns to weekly_reports.
+    # ALTER TABLE ADD COLUMN is a no-op if the column already exists in
+    # SQLite >= 3.35; for older versions we catch the duplicate-column
+    # error silently.
+    # ------------------------------------------------------------------
+    for col in ("goals", "mood", "focus", "journal"):
+        try:
+            conn.execute(
+                f"ALTER TABLE weekly_reports ADD COLUMN {col}"
+                " TEXT NOT NULL DEFAULT '{}'",
+            )
+        except sqlite3.OperationalError:
+            pass  # column already exists

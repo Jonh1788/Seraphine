@@ -20,5 +20,18 @@ def migrate(conn: sqlite3.Connection) -> None:
           ON notes(updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_notes_title
           ON notes(title);
+
+        -- Bidirectional backlinks between notes (SDD-084).
+        CREATE TABLE IF NOT EXISTS note_links (
+          id          TEXT PRIMARY KEY,
+          source_id   TEXT NOT NULL,
+          target_id   TEXT NOT NULL,
+          created_at  TEXT NOT NULL,
+          UNIQUE(source_id, target_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_note_links_source
+          ON note_links(source_id);
+        CREATE INDEX IF NOT EXISTS idx_note_links_target
+          ON note_links(target_id);
         """
     )

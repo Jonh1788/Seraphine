@@ -333,6 +333,17 @@ async def maybe_emit_opener(ws: Any, app_state: Any) -> str | None:
         ok, minutes = await service.should_open()
         if not ok:
             return None
+
+        # 094: check notification intelligence gate
+        nsvc = getattr(app_state, "notification_service", None)
+        if nsvc is not None:
+            try:
+                if not await nsvc.should_deliver("opener"):
+                    logger.info("opener suppressed by notification intelligence")
+                    return None
+            except Exception:
+                pass  # fail-open
+
         opener = await service.generate(minutes, app_state=app_state)
         if not opener:
             return None

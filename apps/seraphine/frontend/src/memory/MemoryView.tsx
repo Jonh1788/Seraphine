@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeftIcon, BrainIcon } from '../icons/Icons';
 import { useConfirm } from '../ui';
+import type { SeraphineWS } from '../ws/client';
+import type { ServerMessage } from '../ws/types';
 
 import { API_BASE } from '../api';
 
@@ -40,6 +42,7 @@ interface Profile {
 
 interface MemoryViewProps {
   onBack: () => void;
+  ws?: SeraphineWS | null;
 }
 
 interface MemoryHealth {
@@ -49,6 +52,26 @@ interface MemoryHealth {
   facts?: { active?: number; superseded?: number; total?: number };
   last_reflect_at?: string | null;
   warnings_24h?: number;
+  orphan_count?: number;
+  low_confidence_count?: number;
+  stale_count?: number;
+}
+
+type ActionName = 'rebuild_embeddings' | 'purge_orphans' | 'force_reflection' | 'compact';
+type ActionState = 'idle' | 'running' | 'completed' | 'error';
+
+interface ActionStatus {
+  state: ActionState;
+  last_run?: string | null;
+  last_error?: string | null;
+  progress?: { done: number; total: number } | null;
+}
+
+interface ActionUIState {
+  state: ActionState;
+  error?: string | null;
+  successMessage?: string | null;
+  progress?: { done: number; total: number } | null;
 }
 
 function timeAgo(isoDate: string): string {
@@ -147,7 +170,7 @@ function ProfileCard({ title, data }: ProfileCardProps): JSX.Element | null {
   );
 }
 
-export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
+export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
   const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<Tab>('Timeline');
 
@@ -174,6 +197,16 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
   const [browserTable, setBrowserTable] = useState<string>('facts');
   const [browserRows, setBrowserRows] = useState<Array<Record<string, unknown>>>([]);
   const [browserLoading, setBrowserLoading] = useState(false);
+
+  // 086 — Memory health actions
+  const defaultActionUI: Record<ActionName, ActionUIState> = {
+    rebuild_embeddings: { state: 'idle' },
+    purge_orphans: { state: 'idle' },
+    force_reflection: { state: 'idle' },
+    compact: { state: 'idle' },
+  };
+  const [actionUI, setActionUI] = useState<Record<ActionName, ActionUIState>>(defaultActionUI);
+  const successTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const fetchTimeline = useCallback(async () => {
     setTimelineLoading(true);
@@ -281,6 +314,169 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     } catch { /* */ }
   }, [fetchBrowserTable, fetchBrowserOverview, confirm]);
 
+  // 086 — Fetch action statuses from backend
+  const fetchActionStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/memory/actions/status`);
+      if (!res.ok) return;
+      const data = await res.json() as { actions: Record<string, ActionStatus> };
+      if (!data.actions) return;
+      setActionUI((prev) => {
+        const next = { ...prev };
+        for (const [key, status] of Object.entries(data.actions)) {
+          const name = key as ActionName;
+          if (name in next) {
+            next[name] = {
+              ...next[name],
+              state: status.state === 'completed' ? 'idle' : status.state,
+              error: status.last_error ?? null,
+              progress: status.progress ?? null,
+            };
+          }
+        }
+        return next;
+      });
+    } catch { /* ignore */ }
+  }, []);
+
+  // 086 — Run a health action
+  const runHealthAction = useCallback(async (action: ActionName): Promise<void> => {
+    // Require confirmation for destructive actions
+    if (action === 'purge_orphans' || action === 'compact') {
+      const label = action === 'purge_orphans' ? 'Limpar Orfas' : 'Compactar Memoria';
+      const msg = action === 'purge_orphans'
+        ? 'Embeddings orfas serao removidas do ChromaDB. Essa acao nao pode ser desfeita.'
+        : 'Facts com confianca < 0.3 serao removidos e facts obsoletos arquivados. Essa acao nao pode ser desfeita.';
+      const ok = await confirm({
+        title: label,
+        message: msg,
+        confirmLabel: 'Executar',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
+
+    // Set running state
+    setActionUI((prev) => ({
+      ...prev,
+      [action]: { state: 'running' as const, error: null, successMessage: null, progress: null },
+    }));
+
+    const endpoint: Record<ActionName, string> = {
+      rebuild_embeddings: '/memory/actions/rebuild-embeddings',
+      purge_orphans: '/memory/actions/purge-orphans',
+      force_reflection: '/memory/actions/force-reflection',
+      compact: '/memory/actions/compact',
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}${endpoint[action]}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as Record<string, unknown>;
+
+      // For long-running actions (rebuild, compact) that return "started",
+      // keep running state — WS events or polling will finalize.
+      if (data.status === 'started' || data.status === 'already_running') {
+        if (data.status === 'already_running') {
+          setActionUI((prev) => ({
+            ...prev,
+            [action]: { ...prev[action], state: 'running' as const },
+          }));
+        }
+        return; // WS or poll will transition to completed
+      }
+
+      // Synchronous actions (purge_orphans, force_reflection) complete immediately
+      let successMsg = 'Concluido';
+      if (action === 'purge_orphans' && typeof data.orphans_removed === 'number') {
+        successMsg = `${data.orphans_removed} orfas removidas`;
+      } else if (action === 'force_reflection' && typeof data.facts_inserted === 'number') {
+        successMsg = `${data.facts_inserted} facts extraidos`;
+      }
+
+      setActionUI((prev) => ({
+        ...prev,
+        [action]: { state: 'completed' as const, error: null, successMessage: successMsg, progress: null },
+      }));
+
+      // Clear success after 5s
+      if (successTimers.current[action]) clearTimeout(successTimers.current[action]);
+      successTimers.current[action] = setTimeout(() => {
+        setActionUI((prev) => ({
+          ...prev,
+          [action]: { state: 'idle', error: null, successMessage: null, progress: null },
+        }));
+      }, 5000);
+
+      // Refresh health data
+      void fetchAudit();
+      void fetchActionStatus();
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      setActionUI((prev) => ({
+        ...prev,
+        [action]: { state: 'error' as const, error: errMsg, successMessage: null, progress: null },
+      }));
+    }
+  }, [confirm, fetchAudit, fetchActionStatus]);
+
+  // 086 — WS listener for memory_rebuild_progress & memory_compact_done
+  useEffect(() => {
+    if (!ws) return;
+    const off = ws.onMessage((msg: ServerMessage | ArrayBuffer) => {
+      if (msg instanceof ArrayBuffer) return;
+      const raw = msg as unknown as Record<string, unknown>;
+      if (raw.type === 'memory_rebuild_progress') {
+        const payload = raw.payload as { done: number; total: number } | undefined;
+        if (payload) {
+          setActionUI((prev) => ({
+            ...prev,
+            rebuild_embeddings: { ...prev.rebuild_embeddings, state: 'running', progress: payload },
+          }));
+          // When done === total, mark completed
+          if (payload.done >= payload.total) {
+            setActionUI((prev) => ({
+              ...prev,
+              rebuild_embeddings: { state: 'completed', error: null, successMessage: 'Concluido', progress: payload },
+            }));
+            if (successTimers.current.rebuild_embeddings) clearTimeout(successTimers.current.rebuild_embeddings);
+            successTimers.current.rebuild_embeddings = setTimeout(() => {
+              setActionUI((prev) => ({
+                ...prev,
+                rebuild_embeddings: { state: 'idle', error: null, successMessage: null, progress: null },
+              }));
+            }, 5000);
+            void fetchAudit();
+            void fetchActionStatus();
+          }
+        }
+      } else if (raw.type === 'memory_compact_done') {
+        setActionUI((prev) => ({
+          ...prev,
+          compact: { state: 'completed', error: null, successMessage: 'Concluido', progress: null },
+        }));
+        if (successTimers.current.compact) clearTimeout(successTimers.current.compact);
+        successTimers.current.compact = setTimeout(() => {
+          setActionUI((prev) => ({
+            ...prev,
+            compact: { state: 'idle', error: null, successMessage: null, progress: null },
+          }));
+        }, 5000);
+        void fetchAudit();
+        void fetchActionStatus();
+      }
+    });
+    return off;
+  }, [ws, fetchAudit, fetchActionStatus]);
+
+  // Cleanup success timers on unmount
+  useEffect(() => {
+    const timers = successTimers.current;
+    return () => {
+      for (const t of Object.values(timers)) clearTimeout(t);
+    };
+  }, []);
+
   // Load data lazily per tab, once.
   useEffect(() => {
     if (activeTab === 'Timeline' && !loadedRef.current.Timeline) {
@@ -295,6 +491,7 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
     } else if (activeTab === 'Auditoria' && !loadedRef.current.Auditoria) {
       loadedRef.current.Auditoria = true;
       void fetchAudit();
+      void fetchActionStatus();
     } else if (activeTab === 'Tudo' && !loadedRef.current.Tudo) {
       loadedRef.current.Tudo = true;
       void fetchBrowserOverview();
@@ -541,10 +738,75 @@ export function MemoryView({ onBack }: MemoryViewProps): JSX.Element {
                 <strong>{memoryHealth?.ollama?.reachable ? 'Online' : 'Offline'}</strong>
                 <p>{memoryHealth?.ollama?.latency_ms ? `${memoryHealth.ollama.latency_ms}ms` : 'sem latencia'}</p>
               </div>
+              <div className="memory-audit-card">
+                <span>Embeddings orfas</span>
+                <strong>{memoryHealth?.orphan_count ?? 0}</strong>
+                <p>sem fact correspondente</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Facts baixa confianca</span>
+                <strong>{memoryHealth?.low_confidence_count ?? 0}</strong>
+                <p>confianca &lt; 0.3</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Facts obsoletos</span>
+                <strong>{memoryHealth?.stale_count ?? 0}</strong>
+                <p>sem acesso ha 90+ dias</p>
+              </div>
+              <div className="memory-audit-card">
+                <span>Ultima reflexao</span>
+                <strong>{memoryHealth?.last_reflect_at ? timeAgo(memoryHealth.last_reflect_at) : 'nunca'}</strong>
+                <p>{memoryHealth?.last_reflect_at ? new Date(memoryHealth.last_reflect_at).toLocaleString('pt-BR') : ''}</p>
+              </div>
             </div>
 
+            {/* 086 — Health action buttons */}
+            <div className="memory-audit-actions memory-audit-actions--health">
+              {([
+                ['rebuild_embeddings', 'Reconstruir Embeddings'] as const,
+                ['purge_orphans', 'Limpar Orfas'] as const,
+                ['force_reflection', 'Forcar Reflexao'] as const,
+                ['compact', 'Compactar Memoria'] as const,
+              ]).map(([action, label]) => {
+                const ui = actionUI[action];
+                return (
+                  <div key={action} className="memory-action-btn-wrap">
+                    <button
+                      type="button"
+                      className={
+                        'memory-action-btn' +
+                        (ui.state === 'running' ? ' memory-action-btn--running' : '') +
+                        (ui.state === 'completed' ? ' memory-action-btn--success' : '') +
+                        (ui.state === 'error' ? ' memory-action-btn--error' : '')
+                      }
+                      disabled={ui.state === 'running'}
+                      onClick={() => void runHealthAction(action)}
+                    >
+                      {ui.state === 'running' && <span className="memory-action-spinner" />}
+                      {ui.state === 'completed' ? (ui.successMessage ?? 'Concluido') : label}
+                    </button>
+                    {ui.state === 'error' && ui.error && (
+                      <span className="memory-action-error">{ui.error}</span>
+                    )}
+                    {action === 'rebuild_embeddings' && ui.state === 'running' && ui.progress && (
+                      <div className="memory-action-progress">
+                        <div
+                          className="memory-action-progress__fill"
+                          style={{ width: `${ui.progress.total > 0 ? Math.round((ui.progress.done / ui.progress.total) * 100) : 0}%` }}
+                        />
+                        <span className="memory-action-progress__text">
+                          {ui.progress.done}/{ui.progress.total}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legacy maintenance actions */}
             <div className="memory-audit-actions">
-              <button type="button" onClick={() => void fetchAudit()}>Atualizar</button>
+              <button type="button" onClick={() => { void fetchAudit(); void fetchActionStatus(); }}>Atualizar</button>
               <button type="button" onClick={() => void runMemoryAction('decay')}>Rodar decay</button>
               <button type="button" onClick={() => void runMemoryAction('prune')}>Podar eventos 180d</button>
               <button type="button" onClick={() => void runMemoryAction('rebuild')}>Reconstruir perfil</button>

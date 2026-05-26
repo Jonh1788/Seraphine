@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listEvents } from '../google/api';
 import type { CalendarEvent } from '../google/types';
 import type { FinanceEntry, SeraphineTask } from '../finance/types';
@@ -26,7 +26,7 @@ interface CalendarViewProps {
   onNavigateToTask?: (taskId: string) => void;
 }
 
-type ViewMode = 'month' | 'week' | 'day';
+type ViewMode = 'month' | 'week' | 'day' | 'heatmap';
 type FilterKey = 'agenda' | 'financas' | 'outros' | 'tarefas' | 'lembretes';
 
 interface CalendarItem {
@@ -60,6 +60,49 @@ interface Reminder {
   fire_at: string | null;
   recurring: string | null;  // 'daily' | 'weekly' | 'hourly' | null
   next_run: string | null;
+}
+
+/* -- Aggregate types (SDD 083) -- */
+
+interface AggTaskSummary {
+  id: number;
+  title: string;
+  status: string;
+}
+
+interface AggHabitLog {
+  habit_id: string;
+  name: string;
+  completed: boolean;
+}
+
+interface AggHealth {
+  steps: number;
+  sleep_minutes: number | null;
+  sleep_hours: number | null;
+  calories: number;
+  resting_hr: number | null;
+}
+
+interface AggWater {
+  intake_ml: number;
+  goal_ml: number;
+}
+
+interface AggEvent {
+  title: string;
+  start: string;
+  end: string;
+}
+
+interface DayAggregate {
+  date: string;
+  tasks: AggTaskSummary[];
+  habits: AggHabitLog[];
+  health: AggHealth | null;
+  water: AggWater | null;
+  events: AggEvent[];
+  score: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -341,6 +384,30 @@ function expandReminder(rem: Reminder, rangeStart: Date, rangeEnd: Date): Calend
 }
 
 /* ------------------------------------------------------------------ */
+/*  Heatmap score colour mapping                                       */
+/* ------------------------------------------------------------------ */
+
+const HEATMAP_COLORS: Record<number, string> = {
+  0: '#2a2a3e',
+  1: 'rgba(167, 139, 250, 0.2)',
+  2: 'rgba(167, 139, 250, 0.35)',
+  3: 'rgba(167, 139, 250, 0.55)',
+  4: 'rgba(167, 139, 250, 0.75)',
+  5: '#a78bfa',
+};
+
+function heatmapBg(score: number): string {
+  return HEATMAP_COLORS[Math.min(Math.max(score, 0), 5)] ?? HEATMAP_COLORS[0];
+}
+
+function scoreLabel(score: number): string {
+  if (score === 0) return 'Sem atividade';
+  if (score <= 2) return 'Atividade leve';
+  if (score <= 4) return 'Atividade boa';
+  return 'Dia excelente';
+}
+
+/* ------------------------------------------------------------------ */
 /*  DayDetailPanel — sidebar showing selected day's items              */
 /* ------------------------------------------------------------------ */
 
@@ -450,6 +517,330 @@ function DayDetailPanel({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  HeatmapDetailPanel — aggregate day detail (SDD 083)                */
+/* ------------------------------------------------------------------ */
+
+function HeatmapDetailPanel({
+  selectedDay,
+  aggregate,
+  onTaskDragStart,
+  onNavigateToTask,
+}: {
+  selectedDay: Date | null;
+  aggregate: DayAggregate | null;
+  onTaskDragStart: (taskId: number, sourceDate: string) => void;
+  onNavigateToTask?: (taskId: string) => void;
+}): JSX.Element {
+  if (!selectedDay || !aggregate) {
+    return (
+      <div className="day-detail-panel glass-card">
+        <div className="day-detail-panel__empty">
+          <CalendarIcon size={32} className="day-detail-panel__empty-icon" />
+          <span className="day-detail-panel__empty-text">Selecione um dia</span>
+        </div>
+      </div>
+    );
+  }
+
+  const dateLabel = fmtDetailDate.format(selectedDay);
+  const weekdayLabel = fmtDetailWeekday.format(selectedDay);
+  const { tasks, habits, health, water, events, score } = aggregate;
+  const hasContent = tasks.length > 0 || habits.length > 0 || health || water || events.length > 0;
+
+  return (
+    <div className="day-detail-panel glass-card">
+      <div className="day-detail-panel__header">
+        <div className="day-detail-panel__date">{dateLabel}</div>
+        <div className="day-detail-panel__weekday">{weekdayLabel}</div>
+        <div className="heatmap-detail__score" style={{ backgroundColor: heatmapBg(score) }}>
+          {score}/5 - {scoreLabel(score)}
+        </div>
+      </div>
+      <div className="day-detail-panel__divider" />
+      <div className="day-detail-panel__content">
+        {!hasContent ? (
+          <div className="day-detail-panel__empty day-detail-panel__empty--inline">
+            <span className="day-detail-panel__empty-text">Nenhuma atividade neste dia</span>
+          </div>
+        ) : (
+          <>
+            {/* Google Calendar Events */}
+            {events.length > 0 && (
+              <div className="day-detail-panel__section">
+                <div className="day-detail-panel__section-label" style={{ color: CATEGORY_COLORS.agenda }}>
+                  Agenda
+                </div>
+                {events.map((ev, i) => (
+                  <div key={`ev-${i}`} className="day-detail-panel__item" style={{ borderLeftColor: CATEGORY_COLORS.agenda }}>
+                    <div className="day-detail-panel__item-title">{ev.title}</div>
+                    {ev.start && ev.start.length > 10 && (
+                      <div className="day-detail-panel__item-time">
+                        {fmtTime.format(new Date(ev.start))}
+                        {ev.end && ev.end.length > 10 && ` - ${fmtTime.format(new Date(ev.end))}`}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tasks (draggable) */}
+            {tasks.length > 0 && (
+              <div className="day-detail-panel__section">
+                <div className="day-detail-panel__section-label" style={{ color: CATEGORY_COLORS.tarefas }}>
+                  Tarefas
+                </div>
+                {tasks.map((t) => (
+                  <div
+                    key={`task-${t.id}`}
+                    className="day-detail-panel__item day-detail-panel__item--clickable heatmap-detail__task-drag"
+                    style={{ borderLeftColor: CATEGORY_COLORS.tarefas }}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', String(t.id));
+                      e.dataTransfer.effectAllowed = 'move';
+                      onTaskDragStart(t.id, aggregate.date);
+                    }}
+                    onClick={() => onNavigateToTask?.(String(t.id))}
+                  >
+                    <div className="day-detail-panel__item-title">{t.title}</div>
+                    <div className="day-detail-panel__item-status">
+                      {t.status === 'done' ? (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          <span style={{ color: '#4ade80' }}>Concluida</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                          </svg>
+                          <span style={{ color: '#f59e0b' }}>Pendente</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Habits */}
+            {habits.length > 0 && (
+              <div className="day-detail-panel__section">
+                <div className="day-detail-panel__section-label" style={{ color: '#22d3ee' }}>
+                  Habitos
+                </div>
+                {habits.map((h, i) => (
+                  <div key={`habit-${i}`} className="day-detail-panel__item" style={{ borderLeftColor: '#22d3ee' }}>
+                    <div className="day-detail-panel__item-title">{h.name}</div>
+                    <div className="day-detail-panel__item-status">
+                      {h.completed ? (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          <span style={{ color: '#4ade80' }}>Completo</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                          </svg>
+                          <span style={{ color: 'var(--text-faint)' }}>Pendente</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Health */}
+            {health && (
+              <div className="day-detail-panel__section">
+                <div className="day-detail-panel__section-label" style={{ color: '#f472b6' }}>
+                  Saude
+                </div>
+                <div className="heatmap-detail__health-grid">
+                  <div className="heatmap-detail__health-stat">
+                    <div className="heatmap-detail__health-value">{health.steps.toLocaleString('pt-BR')}</div>
+                    <div className="heatmap-detail__health-label">Passos</div>
+                  </div>
+                  {health.sleep_hours != null && (
+                    <div className="heatmap-detail__health-stat">
+                      <div className="heatmap-detail__health-value">{health.sleep_hours}h</div>
+                      <div className="heatmap-detail__health-label">Sono</div>
+                    </div>
+                  )}
+                  <div className="heatmap-detail__health-stat">
+                    <div className="heatmap-detail__health-value">{health.calories}</div>
+                    <div className="heatmap-detail__health-label">Calorias</div>
+                  </div>
+                  {health.resting_hr != null && (
+                    <div className="heatmap-detail__health-stat">
+                      <div className="heatmap-detail__health-value">{health.resting_hr} bpm</div>
+                      <div className="heatmap-detail__health-label">FC Repouso</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Water */}
+            {water && water.goal_ml > 0 && (
+              <div className="day-detail-panel__section">
+                <div className="day-detail-panel__section-label" style={{ color: '#60a5fa' }}>
+                  Agua
+                </div>
+                <div className="heatmap-detail__water">
+                  <div className="heatmap-detail__water-bar-bg">
+                    <div
+                      className="heatmap-detail__water-bar-fill"
+                      style={{ width: `${Math.min(100, Math.round((water.intake_ml / water.goal_ml) * 100))}%` }}
+                    />
+                  </div>
+                  <div className="heatmap-detail__water-text">
+                    {water.intake_ml} / {water.goal_ml} ml
+                    {water.intake_ml >= water.goal_ml && (
+                      <span className="heatmap-detail__water-check">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  HeatmapGrid — month grid coloured by aggregate score (SDD 083)     */
+/* ------------------------------------------------------------------ */
+
+function HeatmapGrid({
+  date,
+  aggregates,
+  selectedDay,
+  onDayClick,
+  onTaskDrop,
+  dragTaskId,
+}: {
+  date: Date;
+  aggregates: Map<string, DayAggregate>;
+  selectedDay: Date | null;
+  onDayClick: (day: Date) => void;
+  onTaskDrop: (taskId: number, targetDate: string) => void;
+  dragTaskId: number | null;
+}) {
+  const cells = useMemo(() => monthGrid(date), [date]);
+  const now = useMemo(() => new Date(), []);
+  const viewMonth = date.getMonth();
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div className="heatmap-grid glass-card">
+      {WEEKDAY_LABELS.map((label) => (
+        <div key={label} className="heatmap-grid__header">{label}</div>
+      ))}
+      {cells.map((cell) => {
+        const otherMonth = cell.getMonth() !== viewMonth;
+        const today = isSameDay(cell, now);
+        const selected = selectedDay ? isSameDay(cell, selectedDay) : false;
+        const iso = toIsoDate(cell);
+        const agg = aggregates.get(iso);
+        const score = agg?.score ?? 0;
+        const isDropTarget = dropTarget === iso;
+
+        const classes = ['heatmap-grid__day'];
+        if (otherMonth) classes.push('heatmap-grid__day--other');
+        if (today) classes.push('heatmap-grid__day--today');
+        if (selected) classes.push('heatmap-grid__day--selected');
+        if (isDropTarget) classes.push('heatmap-grid__day--drop-target');
+
+        return (
+          <div
+            key={cell.toISOString()}
+            className={classes.join(' ')}
+            style={{ backgroundColor: otherMonth ? undefined : heatmapBg(score) }}
+            onClick={() => onDayClick(cell)}
+            onMouseEnter={() => setHoverDate(iso)}
+            onMouseLeave={() => setHoverDate(null)}
+            onDragOver={(e) => {
+              if (dragTaskId !== null) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDropTarget(iso);
+              }
+            }}
+            onDragLeave={() => setDropTarget(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropTarget(null);
+              const taskIdStr = e.dataTransfer.getData('text/plain');
+              const taskId = Number(taskIdStr);
+              if (taskId && !Number.isNaN(taskId)) {
+                onTaskDrop(taskId, iso);
+              }
+            }}
+          >
+            <div className="heatmap-grid__day-num">
+              <span className={today ? 'month-grid-v2__today-ring' : undefined}>
+                {cell.getDate()}
+              </span>
+            </div>
+            {!otherMonth && agg && score > 0 && (
+              <div className="heatmap-grid__score-badge">{score}</div>
+            )}
+            {/* Tooltip on hover */}
+            {hoverDate === iso && agg && !otherMonth && (
+              <div className="heatmap-grid__tooltip" ref={tooltipRef}>
+                <div className="heatmap-grid__tooltip-score">{score}/5 - {scoreLabel(score)}</div>
+                {agg.tasks.length > 0 && (
+                  <div className="heatmap-grid__tooltip-row">
+                    Tarefas: {agg.tasks.filter(t => t.status === 'done').length}/{agg.tasks.length}
+                  </div>
+                )}
+                {agg.habits.length > 0 && (
+                  <div className="heatmap-grid__tooltip-row">
+                    Habitos: {agg.habits.filter(h => h.completed).length}/{agg.habits.length}
+                  </div>
+                )}
+                {agg.health && (
+                  <div className="heatmap-grid__tooltip-row">
+                    {agg.health.steps.toLocaleString('pt-BR')} passos
+                    {agg.health.sleep_hours != null && ` / ${agg.health.sleep_hours}h sono`}
+                  </div>
+                )}
+                {agg.water && agg.water.goal_ml > 0 && (
+                  <div className="heatmap-grid__tooltip-row">
+                    Agua: {Math.round((agg.water.intake_ml / agg.water.goal_ml) * 100)}%
+                  </div>
+                )}
+                {agg.events.length > 0 && (
+                  <div className="heatmap-grid__tooltip-row">
+                    {agg.events.length} evento{agg.events.length > 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -848,11 +1239,16 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     () => new Set(['agenda', 'financas', 'outros', 'tarefas', 'lembretes']),
   );
 
+  // Heatmap aggregate data (SDD 083)
+  const [aggregates, setAggregates] = useState<Map<string, DayAggregate>>(new Map());
+  const [aggLoading, setAggLoading] = useState(false);
+  const [dragTaskId, setDragTaskId] = useState<number | null>(null);
+
   const now = useMemo(() => new Date(), []);
 
   // Compute the visible date range based on view mode
   const { rangeStart, rangeEnd } = useMemo(() => {
-    if (viewMode === 'month') {
+    if (viewMode === 'month' || viewMode === 'heatmap') {
       const cells = monthGrid(currentDate);
       return { rangeStart: cells[0], rangeEnd: cells[cells.length - 1] };
     }
@@ -979,6 +1375,34 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     }
   }, [filters]);
 
+  // Fetch aggregate data for heatmap mode (SDD 083)
+  const fetchAggregate = useCallback(async () => {
+    if (viewMode !== 'heatmap') return;
+    setAggLoading(true);
+    try {
+      const params = new URLSearchParams({
+        start: toIsoDate(rangeStart),
+        end: toIsoDate(rangeEnd),
+      });
+      const res = await fetch(`${API_BASE}/calendar/aggregate?${params.toString()}`);
+      if (!res.ok) {
+        setAggregates(new Map());
+        return;
+      }
+      const data = await res.json();
+      const days: DayAggregate[] = Array.isArray(data.days) ? data.days : [];
+      const m = new Map<string, DayAggregate>();
+      for (const d of days) {
+        m.set(d.date, d);
+      }
+      setAggregates(m);
+    } catch {
+      setAggregates(new Map());
+    } finally {
+      setAggLoading(false);
+    }
+  }, [viewMode, rangeStart, rangeEnd]);
+
   useEffect(() => {
     void fetchRecurring();
   }, [fetchRecurring]);
@@ -999,12 +1423,26 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     void fetchTasks();
   }, [fetchTasks]);
 
+  useEffect(() => {
+    void fetchAggregate();
+  }, [fetchAggregate]);
+
   // Refresh when Google OAuth state changes
   useEffect(() => {
-    const handler = () => void fetchEvents();
+    const handler = () => {
+      void fetchEvents();
+      if (viewMode === 'heatmap') void fetchAggregate();
+    };
     window.addEventListener('google-authed', handler);
     return () => window.removeEventListener('google-authed', handler);
-  }, [fetchEvents]);
+  }, [fetchEvents, fetchAggregate, viewMode]);
+
+  // Clear drag state on dragend (window-level to catch drops outside)
+  useEffect(() => {
+    const handler = () => setDragTaskId(null);
+    window.addEventListener('dragend', handler);
+    return () => window.removeEventListener('dragend', handler);
+  }, []);
 
   // Unified list of CalendarItems (events + finance entries + tasks).
   const items: CalendarItem[] = useMemo(() => {
@@ -1032,7 +1470,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
 
   // Navigation
   const goPrev = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'month' || viewMode === 'heatmap') {
       setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
     } else if (viewMode === 'week') {
       setCurrentDate(addDays(currentDate, -7));
@@ -1042,7 +1480,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   };
 
   const goNext = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'month' || viewMode === 'heatmap') {
       setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
     } else if (viewMode === 'week') {
       setCurrentDate(addDays(currentDate, 7));
@@ -1052,7 +1490,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
   };
 
   const goToday = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'month' || viewMode === 'heatmap') {
       setCurrentDate(new Date(now.getFullYear(), now.getMonth(), 1));
     } else {
       setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
@@ -1078,12 +1516,42 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
     setSelectedDay((prev) => (prev && isSameDay(prev, day) ? null : day));
   };
 
+  // Drag-to-reschedule: PATCH /tasks/{id} with new due_date
+  const handleTaskDrop = useCallback(async (taskId: number, targetDate: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date: targetDate }),
+      });
+      if (res.ok) {
+        // Refresh aggregate data + tasks
+        void fetchAggregate();
+        void fetchTasks();
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setDragTaskId(null);
+    }
+  }, [fetchAggregate, fetchTasks]);
+
+  const handleTaskDragStart = useCallback((taskId: number, _sourceDate: string) => {
+    setDragTaskId(taskId);
+  }, []);
+
   const headerLabel =
     viewMode === 'day'
       ? fmtDayLong.format(currentDate)
       : fmtMonthYear.format(currentDate);
 
   const greetingLabel = fmtGreetingDate.format(now);
+
+  // Selected day's aggregate (for heatmap detail panel)
+  const selectedAggregate = useMemo<DayAggregate | null>(() => {
+    if (!selectedDay) return null;
+    return aggregates.get(toIsoDate(selectedDay)) ?? null;
+  }, [selectedDay, aggregates]);
 
   // Filter pill data
   const filterPills: { key: FilterKey; label: string; color: string; icon: JSX.Element | null }[] = [
@@ -1103,7 +1571,7 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
         </button>
         <div className="calendar-view__greeting-text">
           <span className="calendar-view__greeting-date">{greetingLabel}</span>
-          {loading && <span className="calendar-view__loading">atualizando...</span>}
+          {(loading || aggLoading) && <span className="calendar-view__loading">atualizando...</span>}
         </div>
       </div>
 
@@ -1113,27 +1581,29 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
           <h2 className="calendar-view__title">{headerLabel}</h2>
         </div>
 
-        <div className="calendar-view__filters">
-          {filterPills.map((pill) => {
-            const active = filters.has(pill.key);
-            return (
-              <button
-                key={pill.key}
-                type="button"
-                className={`calendar-filter${active ? ' calendar-filter--active' : ''}`}
-                style={active ? {
-                  backgroundColor: `${pill.color}1f`,
-                  borderColor: `${pill.color}4d`,
-                  color: pill.color,
-                } : undefined}
-                onClick={() => toggleFilter(pill.key)}
-              >
-                {pill.icon}
-                {pill.label}
-              </button>
-            );
-          })}
-        </div>
+        {viewMode !== 'heatmap' && (
+          <div className="calendar-view__filters">
+            {filterPills.map((pill) => {
+              const active = filters.has(pill.key);
+              return (
+                <button
+                  key={pill.key}
+                  type="button"
+                  className={`calendar-filter${active ? ' calendar-filter--active' : ''}`}
+                  style={active ? {
+                    backgroundColor: `${pill.color}1f`,
+                    borderColor: `${pill.color}4d`,
+                    color: pill.color,
+                  } : undefined}
+                  onClick={() => toggleFilter(pill.key)}
+                >
+                  {pill.icon}
+                  {pill.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="calendar-view__nav">
           <button
@@ -1164,6 +1634,16 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
 
       {/* View toggle */}
       <div className="calendar-view__toggle">
+        <button
+          type="button"
+          className={`calendar-view__toggle-btn${viewMode === 'heatmap' ? ' calendar-view__toggle-btn--active' : ''}`}
+          onClick={() => {
+            setViewMode('heatmap');
+            setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+          }}
+        >
+          Heatmap
+        </button>
         <button
           type="button"
           className={`calendar-view__toggle-btn${viewMode === 'month' ? ' calendar-view__toggle-btn--active' : ''}`}
@@ -1203,6 +1683,24 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
         </div>
       ) : (
         <>
+          {viewMode === 'heatmap' && (
+            <div className="calendar-view__month-layout">
+              <HeatmapGrid
+                date={currentDate}
+                aggregates={aggregates}
+                selectedDay={selectedDay}
+                onDayClick={handleDayClick}
+                onTaskDrop={handleTaskDrop}
+                dragTaskId={dragTaskId}
+              />
+              <HeatmapDetailPanel
+                selectedDay={selectedDay}
+                aggregate={selectedAggregate}
+                onTaskDragStart={handleTaskDragStart}
+                onNavigateToTask={onNavigateToTask}
+              />
+            </div>
+          )}
           {viewMode === 'month' && (
             <div className="calendar-view__month-layout">
               <MonthGrid

@@ -100,6 +100,12 @@ def build_default_registry(
     health_service: Any = None,
     note_service: Any = None,
     work_service: Any = None,
+    goal_service: Any = None,
+    reading_service: Any = None,
+    mood_service: Any = None,
+    focus_service: Any = None,
+    journal_service: Any = None,
+    planning_service: Any = None,
     tts: Any = None,
     llm: Any = None,
 ) -> ToolRegistry:
@@ -309,6 +315,42 @@ def build_default_registry(
         reg.register(CreateWorkProjectTool(work_service))
         reg.register(ListWorkProjectsTool(work_service))
         reg.register(LinkWorkProjectTool(work_service))
+    if goal_service is not None:
+        from seraphine.tools.goals import (
+            CreateGoalTool,
+            ListGoalsTool,
+            UpdateGoalProgressTool,
+        )
+
+        reg.register(CreateGoalTool(goal_service))
+        reg.register(ListGoalsTool(goal_service))
+        reg.register(UpdateGoalProgressTool(goal_service))
+    if reading_service is not None:
+        from seraphine.tools.reading import (
+            SaveReadingItemTool,
+            SearchReadingListTool,
+        )
+
+        reg.register(SaveReadingItemTool(reading_service))
+        reg.register(SearchReadingListTool(reading_service))
+    if mood_service is not None:
+        from seraphine.tools.mood import GetMoodTrendTool, LogMoodTool
+
+        reg.register(LogMoodTool(mood_service))
+        reg.register(GetMoodTrendTool(mood_service))
+    if focus_service is not None:
+        from seraphine.tools.focus import GetFocusStatsTool
+
+        reg.register(GetFocusStatsTool(focus_service))
+    if journal_service is not None:
+        from seraphine.tools.journal import CreateJournalEntryTool, SearchJournalTool
+
+        reg.register(CreateJournalEntryTool(journal_service))
+        reg.register(SearchJournalTool(journal_service))
+    if planning_service is not None:
+        from seraphine.tools.planning import GeneratePlanTool
+
+        reg.register(GeneratePlanTool(planning_service))
     # macOS screen tools — registered unconditionally because they're
     # `proxy_to_client = True`: the backend just ships the call over WS
     # and the Tauri client runs `screencapture` / `cliclick` locally.

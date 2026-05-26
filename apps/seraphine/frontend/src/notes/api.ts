@@ -5,6 +5,8 @@ import type {
   NoteListResponse,
   NoteResponse,
   NoteUpdateInput,
+  TagCount,
+  TagsResponse,
 } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
@@ -26,9 +28,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   return (await res.json()) as T;
 }
 
-export async function listNotes(q?: string, limit = 100): Promise<Note[]> {
+export async function listNotes(q?: string, limit = 100, tag?: string): Promise<Note[]> {
   const params = new URLSearchParams();
   if (q && q.trim()) params.set('q', q.trim());
+  if (tag) params.set('tag', tag);
   params.set('limit', String(limit));
   const data = await request<NoteListResponse>(`/notes?${params.toString()}`);
   return Array.isArray(data?.notes) ? data!.notes : [];
@@ -60,4 +63,9 @@ export async function updateNote(id: string, body: NoteUpdateInput): Promise<Not
 
 export async function deleteNote(id: string): Promise<void> {
   await request<void>(`/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function fetchTags(): Promise<TagCount[]> {
+  const data = await request<TagsResponse>('/notes/tags');
+  return Array.isArray(data?.tags) ? data!.tags : [];
 }

@@ -3,6 +3,17 @@
  * apps/seraphine/backend/.../notes.
  */
 
+export interface NoteRef {
+  id: string;
+  title: string;
+}
+
+export interface TaskSummary {
+  id: number;
+  title: string;
+  status: string;
+}
+
 export interface Note {
   id: string;
   title: string;
@@ -10,6 +21,8 @@ export interface Note {
   tags: string[];
   created_at: string;
   updated_at: string;
+  backlinks: NoteRef[];
+  linked_tasks: TaskSummary[];
 }
 
 export interface NoteCreateInput {
@@ -26,4 +39,13 @@ export interface NoteListResponse {
 
 export interface NoteResponse {
   note: Note;
+}
+
+export interface TagCount {
+  name: string;
+  count: number;
+}
+
+export interface TagsResponse {
+  tags: TagCount[];
 }

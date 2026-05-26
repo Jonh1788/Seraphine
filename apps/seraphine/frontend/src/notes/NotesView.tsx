@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeftIcon, NotesIcon, SearchIcon } from '../icons/Icons';
-import { createNote, deleteNote, listNotes, updateNote } from './api';
+import { createNote, deleteNote, fetchTags, getNote, listNotes, updateNote } from './api';
 import { NoteEditor } from './NoteEditor';
-import type { Note } from './types';
+import type { Note, TagCount } from './types';
 
 interface NotesViewProps {
   onBack: () => void;
@@ -45,12 +45,16 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
   const [busy, setBusy] = useState(false);
   const [initialApplied, setInitialApplied] = useState(false);
 
+  // Tag filter state (SDD-084).
+  const [allTags, setAllTags] = useState<TagCount[]>([]);
+  const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
+
   const refresh = useCallback(
-    async (q?: string): Promise<Note[]> => {
+    async (q?: string, tag?: string): Promise<Note[]> => {
       setLoading(true);
       setError(null);
       try {
-        const list = await listNotes(q);
+        const list = await listNotes(q, 100, tag);
         setNotes(list);
         return list;
       } catch (e) {
@@ -63,17 +67,30 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
     [],
   );
 
+  const refreshTags = useCallback(async () => {
+    try {
+      const tags = await fetchTags();
+      setAllTags(tags);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void refreshTags();
+  }, [refresh, refreshTags]);
 
   // Debounced search
   useEffect(() => {
     const handle = setTimeout(() => {
-      void refresh(query);
+      // When filtering by tag, pass the first active tag to the API.
+      // Multi-tag is handled client-side below.
+      const tagFilter = activeTags.size === 1 ? [...activeTags][0] : undefined;
+      void refresh(query, tagFilter);
     }, 200);
     return () => clearTimeout(handle);
-  }, [query, refresh]);
+  }, [query, activeTags, refresh]);
 
   // Apply deep-link ?note={id} once after the first list loads.
   useEffect(() => {
@@ -91,9 +108,18 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
     }
   }, [initialApplied, initialNoteId, notes]);
 
+  // Client-side multi-tag filter: when more than 1 tag is active,
+  // filter notes that contain ALL active tags.
+  const filteredNotes = useMemo(() => {
+    if (activeTags.size <= 1) return notes;
+    return notes.filter((n) =>
+      [...activeTags].every((t) => n.tags.includes(t)),
+    );
+  }, [notes, activeTags]);
+
   const selected = useMemo(
-    () => notes.find((n) => n.id === selectedId) ?? null,
-    [notes, selectedId],
+    () => filteredNotes.find((n) => n.id === selectedId) ?? null,
+    [filteredNotes, selectedId],
   );
 
   const handleNew = useCallback(async (): Promise<void> => {
@@ -101,6 +127,7 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
     try {
       const note = await createNote({ title: 'Sem titulo', content: '', tags: [] });
       setQuery('');
+      setActiveTags(new Set());
       const list = await refresh();
       setSelectedId(note.id);
       // If refresh raced, at least ensure the new note is in state.
@@ -125,13 +152,14 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
           return [updated, ...without];
         });
         setSelectedId(updated.id);
+        void refreshTags();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
     },
-    [selected],
+    [selected, refreshTags],
   );
 
   const handleDelete = useCallback(async (): Promise<void> => {
@@ -141,12 +169,77 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
       await deleteNote(selected.id);
       setSelectedId(null);
       await refresh(query);
+      void refreshTags();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [selected, refresh, query]);
+  }, [selected, refresh, query, refreshTags]);
+
+  const toggleTag = useCallback((tag: string) => {
+    setActiveTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) {
+        next.delete(tag);
+      } else {
+        next.add(tag);
+      }
+      return next;
+    });
+  }, []);
+
+  // Navigate to a note by ID or by title (title:XYZ pattern from wiki links).
+  const handleNavigate = useCallback(
+    async (target: string) => {
+      if (target.startsWith('title:')) {
+        const titleQuery = target.slice(6);
+        // Try to find in current note list first.
+        const match = notes.find(
+          (n) => n.title.toLowerCase() === titleQuery.toLowerCase(),
+        );
+        if (match) {
+          setSelectedId(match.id);
+          return;
+        }
+        // Otherwise search via API.
+        try {
+          const results = await listNotes(titleQuery, 5);
+          const exact = results.find(
+            (n) => n.title.toLowerCase() === titleQuery.toLowerCase(),
+          );
+          if (exact) {
+            // Ensure note is in local list and select it.
+            setNotes((prev) =>
+              prev.some((n) => n.id === exact.id)
+                ? prev
+                : [exact, ...prev],
+            );
+            setSelectedId(exact.id);
+          }
+        } catch {
+          // swallow
+        }
+      } else {
+        // Direct ID navigation.
+        if (notes.some((n) => n.id === target)) {
+          setSelectedId(target);
+        } else {
+          // Fetch the note and add to local list.
+          try {
+            const note = await getNote(target);
+            setNotes((prev) =>
+              prev.some((n) => n.id === note.id) ? prev : [note, ...prev],
+            );
+            setSelectedId(note.id);
+          } catch {
+            // swallow
+          }
+        }
+      }
+    },
+    [notes],
+  );
 
   return (
     <div className="tasks-view notes-view">
@@ -167,7 +260,7 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
           <div className="memory-view__header-text">
             <h2 className="memory-view__title">Notas</h2>
             <p className="memory-view__subtitle">
-              Anotacoes rapidas em Markdown com tags
+              Anotacoes rapidas em Markdown com tags e backlinks
             </p>
           </div>
         </div>
@@ -199,15 +292,31 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
             />
           </div>
 
+          {allTags.length > 0 && (
+            <div className="notes-view__tag-filter">
+              {allTags.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  className={`notes-view__tag-pill${activeTags.has(t.name) ? ' notes-view__tag-pill--active' : ''}`}
+                  onClick={() => toggleTag(t.name)}
+                >
+                  {t.name}
+                  <span className="notes-view__tag-pill-count">{t.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="notes-view__list" role="listbox">
-            {loading && notes.length === 0 ? (
+            {loading && filteredNotes.length === 0 ? (
               <div className="notes-view__empty-hint">Carregando...</div>
-            ) : notes.length === 0 ? (
+            ) : filteredNotes.length === 0 ? (
               <div className="notes-view__empty-hint">
-                {query.trim() ? 'Sem resultados.' : 'Sem notas. Crie a primeira.'}
+                {query.trim() || activeTags.size > 0 ? 'Sem resultados.' : 'Sem notas. Crie a primeira.'}
               </div>
             ) : (
-              notes.map((note) => {
+              filteredNotes.map((note) => {
                 const active = note.id === selectedId;
                 return (
                   <button
@@ -250,6 +359,7 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
               busy={busy}
               onSave={(patch) => void handleSave(patch)}
               onDelete={() => void handleDelete()}
+              onNavigate={(target) => void handleNavigate(target)}
             />
           ) : (
             <div className="notes-view__empty">
@@ -261,7 +371,7 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
               </p>
               <p className="notes-view__empty-hint">
                 Use Markdown no corpo da nota: cabecalhos, listas, negrito,
-                codigo. Tags ajudam na busca.
+                codigo. Tags ajudam na busca. Use [[titulo]] para criar backlinks.
               </p>
               <button
                 type="button"

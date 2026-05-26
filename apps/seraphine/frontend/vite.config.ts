@@ -145,6 +145,15 @@ export default defineConfig({
       '/lab': {
         target: 'http://127.0.0.1:8000',
       },
+      '/calendar': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/planning': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/notifications': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
   test: {

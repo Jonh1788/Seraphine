@@ -73,6 +73,8 @@ class ProactiveScheduler:
         day_review_hour: int = 21,
         stalled_hour: int = 20,
         weekly_hour: int = 21,
+        goal_service: Any | None = None,
+        mood_service: Any | None = None,
     ) -> None:
         self.app_state = app_state
         self.enabled = enabled
@@ -81,6 +83,9 @@ class ProactiveScheduler:
         self._stalled_hour = stalled_hour
         self._weekly_hour = weekly_hour
         self._last_day_review_date: str | None = None
+        self._goal_service = goal_service
+        self._mood_service = mood_service
+        self._last_mood_checkin_date: str | None = None
 
     def start(self) -> None:
         if not self.enabled:
@@ -119,6 +124,18 @@ class ProactiveScheduler:
             self._tick_anticipation,
             "cron", day_of_week="mon", hour=6, minute=0,
             name="anticipation",
+        )
+        # Goals auto-update: refresh key results from data sources daily.
+        self._sched.add_job(
+            self._tick_goals_auto_update,
+            "cron", hour=5, minute=0,
+            name="goals_auto_update",
+        )
+        # Mood check-in: ask user how they feel if no mood logged today.
+        self._sched.add_job(
+            self._tick_mood_checkin,
+            "cron", hour=14, minute=0,
+            name="mood_checkin",
         )
         # 028-C: aggregate meta-learning style prefs weekly.
         self._sched.add_job(
@@ -290,6 +307,9 @@ class ProactiveScheduler:
                 return
             await self._save_daily_reflection(today, text)
             await self._broadcast_opener(text)
+            await self._save_journal_entry(
+                today, text, entry_type="day_review",
+            )
             self._last_day_review_date = today
         except Exception as e:
             logger.warning("tick_day_review: %s", e)
@@ -345,6 +365,47 @@ class ProactiveScheduler:
         except Exception as e:
             logger.warning("tick_finance_ambient: %s", e)
 
+    async def _tick_goals_auto_update(self) -> None:
+        try:
+            goal_service = self._goal_service or getattr(
+                self.app_state, "goal_service", None,
+            )
+            store = getattr(self.app_state, "store", None)
+            if goal_service is None or store is None:
+                return
+            n = await goal_service.auto_update_key_results(store)
+            if n:
+                logger.info("goals auto-update tick: %d KRs updated", n)
+        except Exception as e:
+            logger.warning("tick_goals_auto_update: %s", e)
+
+    async def _tick_mood_checkin(self) -> None:
+        """Daily 14:00 — nudge user if no mood log exists today."""
+        today = datetime.now(TZ).date().isoformat()
+        if self._last_mood_checkin_date == today:
+            return  # already asked today
+        try:
+            mood_service = self._mood_service or getattr(
+                self.app_state, "mood_service", None,
+            )
+            if mood_service is None:
+                return
+            today_mood = await mood_service.get_today()
+            current = today_mood.get("current") if today_mood else None
+            if current:
+                return  # already logged — skip
+
+            text = "Como voce esta se sentindo hoje?"
+            await self._broadcast_opener(text)
+            await self._push_nudge(
+                title="Check-in de humor",
+                body=text,
+                key=f"mood_checkin:{today}",
+            )
+            self._last_mood_checkin_date = today
+        except Exception as e:
+            logger.warning("tick_mood_checkin: %s", e)
+
     async def _tick_weekly_reflection(self) -> None:
         try:
             store = getattr(self.app_state, "store", None)
@@ -360,15 +421,15 @@ class ProactiveScheduler:
             )
             if not text:
                 return
+            today = datetime.now(TZ).date().isoformat()
             await self._push_nudge(
                 title="Resumo da semana",
                 body=text[:120] + ("…" if len(text) > 120 else ""),
-                key=f"weekly:{datetime.now(TZ).date().isoformat()}",
+                key=f"weekly:{today}",
             )
-            await self._save_daily_reflection(
-                datetime.now(TZ).date().isoformat(),
-                text,
-                tag="weekly",
+            await self._save_daily_reflection(today, text, tag="weekly")
+            await self._save_journal_entry(
+                today, text, entry_type="weekly_reflection",
             )
         except Exception as e:
             logger.warning("tick_weekly_reflection: %s", e)
@@ -451,6 +512,18 @@ class ProactiveScheduler:
             logger.debug("save_daily_reflection failed: %s", e)
 
     async def _push_nudge(self, *, title: str, body: str, key: str) -> None:
+        # 094: check notification intelligence gate for non-urgent proactive nudges
+        nsvc = getattr(self.app_state, "notification_service", None)
+        if nsvc is not None:
+            ntype = "stalled_task" if "stalled" in key else "day_review"
+            try:
+                if not await nsvc.should_deliver(ntype):
+                    await nsvc.queue_notification(type=ntype, title=title, body=body)
+                    logger.info("proactive nudge queued by notification intelligence (%s)", key)
+                    return
+            except Exception:
+                pass  # fail-open
+
         push = getattr(self.app_state, "push_service", None)
         if push is None:
             return
@@ -462,8 +535,63 @@ class ProactiveScheduler:
         except Exception as e:
             logger.debug("push_nudge failed: %s", e)
 
+    async def _save_journal_entry(
+        self, date: str, text: str, *, entry_type: str,
+    ) -> None:
+        """Persist an auto-generated journal entry (idempotent)."""
+        journal_service = getattr(self.app_state, "journal_service", None)
+        if journal_service is None:
+            return
+        try:
+            if await journal_service.exists(date=date, type=entry_type):
+                return  # already created for this date+type
+
+            # Attach today's mood if available
+            mood_label: str | None = None
+            mood_valence: float | None = None
+            mood_service = getattr(self.app_state, "mood_service", None)
+            if mood_service is not None:
+                try:
+                    today_mood = await mood_service.get_today()
+                    current = today_mood.get("current")
+                    if current:
+                        mood_label = current.get("label")
+                        mood_valence = current.get("valence")
+                except Exception:
+                    pass
+
+            title_map = {
+                "day_review": f"Revisao do dia — {date}",
+                "weekly_reflection": f"Reflexao semanal — {date}",
+            }
+            await journal_service.create_entry(
+                date=date,
+                type=entry_type,
+                title=title_map.get(entry_type, entry_type),
+                content=text,
+                mood_label=mood_label,
+                mood_valence=mood_valence,
+                source="proactive",
+                source_id=f"{entry_type}:{date}",
+            )
+        except Exception as e:
+            logger.debug("save_journal_entry failed: %s", e)
+
     async def _broadcast_opener(self, text: str) -> None:
         """Send an `assistant_opener`-style frame to any connected WS."""
+        # 094: check notification intelligence gate
+        nsvc = getattr(self.app_state, "notification_service", None)
+        if nsvc is not None:
+            try:
+                if not await nsvc.should_deliver("day_review"):
+                    await nsvc.queue_notification(
+                        type="day_review", title="Day review", body=text[:200],
+                    )
+                    logger.info("day_review opener queued by notification intelligence")
+                    return
+            except Exception:
+                pass  # fail-open
+
         ws_clients = getattr(self.app_state, "ws_clients", None) or set()
         for ws in list(ws_clients):
             try:

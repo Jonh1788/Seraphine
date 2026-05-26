@@ -213,7 +213,15 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
               <FinanceIcon size={48} />
             </div>
             <strong>Sem conexao com o servidor</strong>
-            <p>Verifique se o backend esta rodando e tente novamente.</p>
+            <p>Verifique sua conexao e tente novamente.</p>
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ marginTop: 12 }}
+              onClick={refresh}
+            >
+              Tentar novamente
+            </button>
           </div>
         )}
 
@@ -222,8 +230,8 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
             <div className="finance-empty__icon">
               <FinanceIcon size={48} />
             </div>
-            <strong>Nenhum registro este mes</strong>
-            <p>Diga algo como &quot;Ganhei R$500 de freelance&quot; no chat e a Seraphine registra pra voce.</p>
+            <strong>Nenhuma transacao neste mes</strong>
+            <p>Adicione sua primeira transacao pelo chat ou importe um extrato PDF.</p>
           </div>
         )}
 

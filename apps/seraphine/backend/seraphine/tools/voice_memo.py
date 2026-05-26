@@ -28,7 +28,7 @@ Entrada: transcrição de voz em PT-BR (~30s).
 Saída: UM objeto JSON com as chaves:
 
 {
-  "type": "idea" | "worry" | "task" | "reminder" | "note",
+  "type": "idea" | "worry" | "task" | "reminder" | "diary" | "note",
   "title": "<3-8 palavras resumindo>",
   "detail": "<texto completo do memo, opcional>",
   "due_date": "YYYY-MM-DD",    // só em type=task/reminder
@@ -41,6 +41,7 @@ Rules:
 - type=reminder quando é apenas lembrete temporal ("me lembra de...")
 - type=idea quando é insight/criativo ("e se a gente fizesse X")
 - type=worry quando é preocupação/ansiedade/reflexão negativa
+- type=diary quando é relato pessoal, reflexão do dia, diário ("hoje foi um dia...", "diário:", "quero registrar...")
 - type=note é o default pra qualquer outra coisa
 - NÃO invente datas que não estão no texto
 - Omita campos opcionais que não têm valor certo
@@ -62,7 +63,7 @@ def _parse_classification(raw: str) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         return None
     t = data.get("type")
-    if t not in ("idea", "worry", "task", "reminder", "note"):
+    if t not in ("idea", "worry", "task", "reminder", "diary", "note"):
         return None
     title = (data.get("title") or "").strip()
     if not title:
@@ -106,7 +107,11 @@ class VoiceMemoService:
         archived_to = "notes"
         archived_id: str | None = None
 
-        if ctype in ("task", "reminder") and self.task_service is not None:
+        if ctype == "diary":
+            # Diary memos are archived as notes with tag=diary; the journal
+            # entry is created by the voice_memo_routes hook.
+            archived_id = await self._archive_note(title, detail, tag="diary")
+        elif ctype in ("task", "reminder") and self.task_service is not None:
             try:
                 task = await self._archive_task(classification, detail)
                 archived_to = "seraphine_tasks"

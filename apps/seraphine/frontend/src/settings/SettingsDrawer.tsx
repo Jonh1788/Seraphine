@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE } from '../api';
-import { BellIcon, CheckIcon, MicIcon, RefreshIcon, XIcon } from '../icons/Icons';
+import { CheckIcon, MicIcon, RefreshIcon, XIcon } from '../icons/Icons';
 import { useTheme } from '../theme';
 import type { ThemeDef, ThemeId } from '../theme';
+import { NotificationSettingsPanel } from './NotificationSettingsPanel';
 
 export interface SettingsDrawerProps {
   open: boolean;
@@ -210,16 +211,7 @@ export function SettingsDrawer({
             </div>
           </section>
 
-          <section className="settings-drawer__section">
-            <h3 className="settings-drawer__section-title">Notificacoes</h3>
-            <p className="settings-drawer__hint">
-              Use o sino da barra superior para ativar Web Push neste dispositivo.
-            </p>
-            <div className="settings-drawer__status">
-              <BellIcon size={16} />
-              Proatividade e lembretes respeitam os limites configurados no backend.
-            </div>
-          </section>
+          <NotificationSettingsPanel />
         </div>
       </aside>
     </>

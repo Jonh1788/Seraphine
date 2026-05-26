@@ -14,8 +14,12 @@ import {
   SettingsIcon,
   TargetIcon,
   InboxIcon,
+  BookIcon,
+  BookmarkIcon,
   BriefcaseIcon,
+  FlagIcon,
 } from '../icons/Icons';
+import { contextualStore, type ContextualState } from '../contextual/store';
 
 interface Command {
   id: string;
@@ -23,6 +27,8 @@ interface Command {
   keywords: string[];
   shortcut: string;
   icon: JSX.Element;
+  /** 095 — when set, this command is a contextual action for the active app. */
+  contextualApp?: string;
 }
 
 const COMMANDS: Command[] = [
@@ -33,8 +39,11 @@ const COMMANDS: Command[] = [
   { id: 'finance', label: 'Abrir Financas', keywords: ['dinheiro', 'gastos', 'receita'], shortcut: 'Cmd+5', icon: <FinanceIcon size={18} /> },
   { id: 'memory', label: 'Abrir Memorias', keywords: ['lembrar', 'fatos'], shortcut: 'Cmd+6', icon: <BrainIcon size={18} /> },
   { id: 'habits', label: 'Abrir Habitos', keywords: ['habito', 'rotina', 'streak'], shortcut: 'Cmd+7', icon: <FlameIcon size={18} /> },
+  { id: 'goals', label: 'Abrir Objetivos', keywords: ['meta', 'objetivo', 'okr', 'resultado'], shortcut: '', icon: <FlagIcon size={18} /> },
   { id: 'insights', label: 'Abrir Insights', keywords: ['padroes', 'analise', 'dicas'], shortcut: 'Cmd+8', icon: <LightbulbIcon size={18} /> },
   { id: 'notes', label: 'Abrir Notas', keywords: ['anotacao', 'markdown', 'notas'], shortcut: 'Cmd+9', icon: <NotesIcon size={18} /> },
+  { id: 'journal', label: 'Abrir Diario', keywords: ['diario', 'journal', 'revisao', 'reflexao'], shortcut: '', icon: <BookIcon size={18} /> },
+  { id: 'reading', label: 'Abrir Leituras', keywords: ['leitura', 'bookmark', 'artigo', 'url', 'reading'], shortcut: '', icon: <BookmarkIcon size={18} /> },
   { id: 'trabalhos', label: 'Abrir Trabalhos', keywords: ['projetos', 'cv', 'triagem', 'operacao'], shortcut: '', icon: <BriefcaseIcon size={18} /> },
   { id: 'inbox', label: 'Abrir Inbox', keywords: ['pendencias', 'fila', 'urgente'], shortcut: '', icon: <InboxIcon size={18} /> },
   { id: 'routines', label: 'Abrir Rotinas', keywords: ['briefing', 'foco', 'revisao'], shortcut: '', icon: <TargetIcon size={18} /> },
@@ -52,28 +61,49 @@ interface CommandPaletteProps {
 export function CommandPalette({ open, onClose, onAction }: CommandPaletteProps): JSX.Element | null {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [ctxState, setCtxState] = useState<ContextualState>(contextualStore.get());
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Subscribe to contextual store so palette reflects active app
+  useEffect(() => {
+    const off = contextualStore.subscribe(setCtxState);
+    return off;
+  }, []);
 
   // Reset state when opening
   useEffect(() => {
     if (open) {
       setQuery('');
       setSelectedIndex(0);
+      // Refresh contextual state on open
+      setCtxState(contextualStore.get());
       // Focus after the DOM renders
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
+  // Build contextual commands from active app actions
+  const ctxCommands: Command[] = ctxState.actions.map((a) => ({
+    id: `ctx:${a.id}`,
+    label: a.label,
+    keywords: [a.description.toLowerCase(), a.tool_name],
+    shortcut: '',
+    icon: <LightbulbIcon size={18} />,
+    contextualApp: ctxState.appName,
+  }));
+
+  // Merge: contextual commands first, then static commands
+  const allCommands = [...ctxCommands, ...COMMANDS];
+
   const filtered = query.trim()
-    ? COMMANDS.filter((cmd) => {
+    ? allCommands.filter((cmd) => {
         const q = query.toLowerCase();
-        return (
-          cmd.label.toLowerCase().includes(q) ||
-          cmd.keywords.some((kw) => kw.includes(q))
-        );
+        const matchesLabel = cmd.label.toLowerCase().includes(q);
+        const matchesKw = cmd.keywords.some((kw) => kw.includes(q));
+        return matchesLabel || matchesKw;
       })
-    : COMMANDS;
+    : allCommands;
 
   // Keep selectedIndex in bounds
   const safeIndex = Math.min(selectedIndex, Math.max(0, filtered.length - 1));
@@ -153,6 +183,22 @@ export function CommandPalette({ open, onClose, onAction }: CommandPaletteProps)
             >
               <span className="cmd-palette__icon">{cmd.icon}</span>
               <span className="cmd-palette__label">{cmd.label}</span>
+              {cmd.contextualApp && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 8,
+                    background: 'rgba(167, 139, 250, 0.2)',
+                    color: '#c4b5fd',
+                    marginLeft: 6,
+                    fontWeight: 500,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cmd.contextualApp}
+                </span>
+              )}
               {cmd.shortcut && (
                 <span className="cmd-palette__shortcut">{cmd.shortcut}</span>
               )}

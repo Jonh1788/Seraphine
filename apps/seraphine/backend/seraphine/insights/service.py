@@ -203,6 +203,24 @@ class InsightEngine:
             except Exception:
                 logger.exception("analyze_health failed")
 
+        # Mood trend analysis (direct SQL, no service dependency)
+        try:
+            all_insights.extend(await self.analyze_mood())
+        except Exception:
+            logger.exception("analyze_mood failed")
+
+        # Focus session analysis (direct SQL, no service dependency)
+        try:
+            all_insights.extend(await self.analyze_focus())
+        except Exception:
+            logger.exception("analyze_focus failed")
+
+        # Cross-domain correlations (sleep vs tasks, steps vs habits, etc.)
+        try:
+            all_insights.extend(await self.analyze_correlations())
+        except Exception:
+            logger.exception("analyze_correlations failed")
+
         if all_insights:
             try:
                 await self._persist(all_insights)
@@ -211,17 +229,35 @@ class InsightEngine:
 
         return all_insights
 
-    async def list_active(self, *, limit: int = 50) -> list[Insight]:
-        """Non-dismissed insights, newest first."""
+    async def list_active(
+        self,
+        *,
+        limit: int = 50,
+        type_filter: str | None = None,
+    ) -> list[Insight]:
+        """Non-dismissed insights, newest first.
+
+        When ``type_filter`` is given, only insights of that type are
+        returned (e.g. ``type_filter='cross_domain'``).
+        """
 
         def _work() -> list[Insight]:
-            with self._store._connect() as conn:
-                rows = conn.execute(
+            if type_filter:
+                sql = (
+                    f"SELECT {_INSIGHT_COLS} FROM insights"
+                    " WHERE dismissed = 0 AND type = ?"
+                    " ORDER BY created_at DESC LIMIT ?"
+                )
+                params: tuple[Any, ...] = (type_filter, int(limit))
+            else:
+                sql = (
                     f"SELECT {_INSIGHT_COLS} FROM insights"
                     " WHERE dismissed = 0"
-                    " ORDER BY created_at DESC LIMIT ?",
-                    (int(limit),),
-                ).fetchall()
+                    " ORDER BY created_at DESC LIMIT ?"
+                )
+                params = (int(limit),)
+            with self._store._connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
             return [_row_to_insight(r) for r in rows]
 
         return await asyncio.to_thread(_work)
@@ -552,6 +588,332 @@ class InsightEngine:
                 )
             )
 
+        return out
+
+    # ------------------------------------------------------------------
+    # Mood trend analyser (direct SQL -- no mood_service dependency)
+    # ------------------------------------------------------------------
+
+    async def analyze_mood(self) -> list[Insight]:
+        """Detect declining valence streaks and consecutive low-mood days.
+
+        Uses direct SQL on ``mood_logs`` so this works regardless of
+        whether MoodService was wired into the constructor.
+        """
+
+        today = _today_sp()
+        period = today.isoformat()
+        start = (today - timedelta(days=6)).isoformat()  # last 7 days
+
+        def _pull() -> list[tuple[str, float]]:
+            """Return [(YYYY-MM-DD, avg_valence), ...] ordered by date."""
+            with self._store._connect() as conn:
+                has_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master"
+                    " WHERE type='table' AND name='mood_logs'",
+                ).fetchone()
+                if not has_table:
+                    return []
+                rows = conn.execute(
+                    "SELECT date(timestamp) AS d, AVG(valence)"
+                    " FROM mood_logs"
+                    " WHERE date(timestamp) BETWEEN ? AND ?"
+                    " GROUP BY d ORDER BY d",
+                    (start, period),
+                ).fetchall()
+            return [(str(r[0]), float(r[1])) for r in rows if r[1] is not None]
+
+        daily = await asyncio.to_thread(_pull)
+        if not daily:
+            return []
+
+        out: list[Insight] = []
+
+        # -- Declining streak: 3+ consecutive days with avg valence going down
+        if len(daily) >= 3:
+            decline_streak = 1
+            for i in range(1, len(daily)):
+                if daily[i][1] < daily[i - 1][1]:
+                    decline_streak += 1
+                else:
+                    decline_streak = 1
+            if decline_streak >= 3:
+                severity = "warning" if decline_streak >= 5 else "info"
+                out.append(
+                    Insight(
+                        id=_hash_id("mood", "declining", period, decline_streak),
+                        type="mood",
+                        severity=severity,
+                        title=f"Humor em queda ha {decline_streak} dias",
+                        description=(
+                            f"Seu humor tem caido nos ultimos {decline_streak}"
+                            f" dias. Quer conversar sobre o que esta"
+                            f" acontecendo?"
+                        ),
+                        data={
+                            "decline_streak": decline_streak,
+                            "daily_valences": {d: round(v, 3) for d, v in daily},
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        # -- Two consecutive low-mood days (avg valence < -0.3)
+        if len(daily) >= 2:
+            today_val = daily[-1][1]
+            yesterday_val = daily[-2][1]
+            if today_val < -0.3 and yesterday_val < -0.3:
+                out.append(
+                    Insight(
+                        id=_hash_id("mood", "low-two-days", period),
+                        type="mood",
+                        severity="warning",
+                        title="Dois dias seguidos com humor mais baixo",
+                        description=(
+                            "Dois dias seguidos com humor mais baixo."
+                            " Que tal uma pausa ou exercicio?"
+                        ),
+                        data={
+                            "today_valence": round(today_val, 3),
+                            "yesterday_valence": round(yesterday_val, 3),
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        return out
+
+    # ------------------------------------------------------------------
+    # Focus session analyser (direct SQL -- no focus_service dependency)
+    # ------------------------------------------------------------------
+
+    async def analyze_focus(self) -> list[Insight]:
+        """Detect high interruption rates, focus-time drops, and broken streaks.
+
+        Uses direct SQL on ``focus_sessions`` so this works regardless of
+        whether FocusService was wired into the constructor.
+        """
+
+        today = _today_sp()
+        period = today.isoformat()
+
+        # Pull this week and last week work sessions
+        this_week_start = today - timedelta(days=6)
+        last_week_start = this_week_start - timedelta(days=7)
+        last_week_end = this_week_start - timedelta(days=1)
+
+        def _pull() -> dict[str, Any]:
+            with self._store._connect() as conn:
+                has_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master"
+                    " WHERE type='table' AND name='focus_sessions'",
+                ).fetchone()
+                if not has_table:
+                    return {}
+
+                # This week totals (work sessions only)
+                tw = conn.execute(
+                    "SELECT"
+                    "   COUNT(*) AS total,"
+                    "   SUM(CASE WHEN completed = 0 THEN 1 ELSE 0 END) AS interrupted,"
+                    "   SUM(duration_sec) / 60.0 AS focus_min"
+                    " FROM focus_sessions"
+                    " WHERE type = 'work'"
+                    "   AND date(started_at) BETWEEN ? AND ?",
+                    (this_week_start.isoformat(), period),
+                ).fetchone()
+
+                # Last week totals
+                lw = conn.execute(
+                    "SELECT"
+                    "   SUM(duration_sec) / 60.0 AS focus_min"
+                    " FROM focus_sessions"
+                    " WHERE type = 'work'"
+                    "   AND date(started_at) BETWEEN ? AND ?",
+                    (last_week_start.isoformat(), last_week_end.isoformat()),
+                ).fetchone()
+
+                # Streak detection: consecutive days with completed work
+                # sessions, counting backwards from yesterday.
+                rows = conn.execute(
+                    "SELECT DISTINCT date(started_at) AS d"
+                    " FROM focus_sessions"
+                    " WHERE completed = 1 AND type = 'work'"
+                    " ORDER BY d DESC",
+                ).fetchall()
+
+                # Did today have a completed work session?
+                today_done = conn.execute(
+                    "SELECT 1 FROM focus_sessions"
+                    " WHERE completed = 1 AND type = 'work'"
+                    "   AND date(started_at) = ?",
+                    (period,),
+                ).fetchone()
+
+            completed_dates = {str(r[0]) for r in rows}
+            return {
+                "tw_total": int(tw[0]) if tw and tw[0] else 0,
+                "tw_interrupted": int(tw[1]) if tw and tw[1] else 0,
+                "tw_focus_min": float(tw[2]) if tw and tw[2] else 0.0,
+                "lw_focus_min": float(lw[0]) if lw and lw[0] else 0.0,
+                "completed_dates": completed_dates,
+                "today_done": bool(today_done),
+            }
+
+        data = await asyncio.to_thread(_pull)
+        if not data:
+            return []
+
+        out: list[Insight] = []
+
+        tw_total = data["tw_total"]
+        tw_interrupted = data["tw_interrupted"]
+        tw_focus_min = data["tw_focus_min"]
+        lw_focus_min = data["lw_focus_min"]
+        completed_dates: set[str] = data["completed_dates"]
+        today_done: bool = data["today_done"]
+
+        # -- Interruption rate > 50%
+        if tw_total >= 4:
+            rate = tw_interrupted / tw_total
+            if rate > 0.5:
+                pct = int(round(rate * 100))
+                out.append(
+                    Insight(
+                        id=_hash_id("focus", "interruption-rate", period),
+                        type="focus",
+                        severity="warning",
+                        title=f"{pct}% das sessoes interrompidas",
+                        description=(
+                            "Mais da metade das suas sessoes de foco"
+                            " foram interrompidas esta semana."
+                        ),
+                        data={
+                            "total_sessions": tw_total,
+                            "interrupted": tw_interrupted,
+                            "rate": round(rate, 3),
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        # -- Focus time dropped >30% vs last week
+        if lw_focus_min > 0 and tw_focus_min >= 0:
+            delta = (tw_focus_min - lw_focus_min) / lw_focus_min
+            if delta <= -0.30:
+                pct = int(round(abs(delta) * 100))
+                out.append(
+                    Insight(
+                        id=_hash_id("focus", "focus-drop", period),
+                        type="focus",
+                        severity="info",
+                        title=f"Horas de foco cairam {pct}%",
+                        description=(
+                            f"Suas horas de foco cairam {pct}% comparado"
+                            f" com a semana passada."
+                        ),
+                        data={
+                            "this_week_min": round(tw_focus_min, 1),
+                            "last_week_min": round(lw_focus_min, 1),
+                            "delta_pct": round(delta, 4),
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        # -- Streak broken: yesterday had a completed session, today is
+        #    over (past 18h SP) and none today.
+        now_sp = datetime.now(_SP_TZ)
+        yesterday = (today - timedelta(days=1)).isoformat()
+        if (
+            not today_done
+            and now_sp.hour >= 18
+            and yesterday in completed_dates
+        ):
+            # Count the streak that ended yesterday
+            streak = 0
+            d = today - timedelta(days=1)
+            while d.isoformat() in completed_dates:
+                streak += 1
+                d -= timedelta(days=1)
+            if streak >= 2:
+                out.append(
+                    Insight(
+                        id=_hash_id("focus", "streak-broken", period, streak),
+                        type="focus",
+                        severity="info",
+                        title=f"Streak de foco de {streak} dias acabou",
+                        description=(
+                            f"Seu streak de foco de {streak} dias acabou"
+                            f" ontem."
+                        ),
+                        data={
+                            "streak_days": streak,
+                            "period": period,
+                        },
+                        created_at=_now_iso(),
+                    )
+                )
+
+        return out
+
+    # ------------------------------------------------------------------
+    # Cross-domain correlations
+    # ------------------------------------------------------------------
+
+    async def analyze_correlations(self) -> list[Insight]:
+        """Discover cross-domain statistical relationships.
+
+        Runs Pearson correlation across health/tasks/habits/water series
+        and returns Insight objects for pairs that pass the significance
+        thresholds (|r| > 0.4, p < 0.05).
+
+        Messages NEVER claim causality.
+        """
+        from seraphine.insights.correlations import compute_correlations
+
+        corrs = await compute_correlations(self._store, days=30)
+        if not corrs:
+            return []
+
+        today = _today_sp()
+        period = today.isoformat()
+        out: list[Insight] = []
+        for c in corrs:
+            severity = "positive" if c.r > 0 else "info"
+            title_direction = "positivamente" if c.r > 0 else "negativamente"
+            from seraphine.insights.correlations import _LABEL_PT
+            label_a = _LABEL_PT.get(c.series_a, c.series_a)
+            label_b = _LABEL_PT.get(c.series_b, c.series_b)
+            title = (
+                f"{label_a.capitalize()} e {label_b} "
+                f"correlacionados {title_direction}"
+            )
+            out.append(
+                Insight(
+                    id=_hash_id(
+                        "cross_domain", c.series_a, c.series_b, period,
+                    ),
+                    type="cross_domain",
+                    severity=severity,
+                    title=title,
+                    description=c.message,
+                    data={
+                        "series_a": c.series_a,
+                        "series_b": c.series_b,
+                        "r": round(c.r, 4),
+                        "p": round(c.p, 6),
+                        "n": c.n,
+                        "period": period,
+                        **c.data,
+                    },
+                    created_at=_now_iso(),
+                )
+            )
         return out
 
     # ------------------------------------------------------------------

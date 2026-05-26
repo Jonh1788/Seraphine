@@ -1192,6 +1192,15 @@ pub fn vpio_start(app: AppHandle, state: State<'_, VoiceIoState>) -> Result<(), 
         }
         log::info!("[vpio] AudioUnitInitialize succeeded");
 
+        // Disable system-wide audio ducking. VPIO by default tells macOS
+        // to reduce the volume of all other apps (same as a phone call).
+        // Property 3601 = kAudioUnitProperty_VoiceProcessingOtherAudioDucking
+        // (macOS 14+). Value 0 = no ducking.
+        const VPIO_OTHER_AUDIO_DUCKING: u32 = 3601;
+        if let Err(e) = set_u32(au, VPIO_OTHER_AUDIO_DUCKING, kAudioUnitScope_Global, 0, 0) {
+            log::warn!("[vpio] failed to disable other-audio ducking (macOS <14?): {e}");
+        }
+
         // Query the ACTUAL negotiated formats after init. VPIO may have
         // overridden our mono request to match the hardware.
         let mut negotiated_channels: u32 = 1;

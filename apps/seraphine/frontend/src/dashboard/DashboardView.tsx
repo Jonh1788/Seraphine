@@ -10,6 +10,10 @@ import {
 } from '../icons/Icons';
 import { WaterWidget } from '../water';
 import { HealthWidget } from '../health';
+import { MoodWidget } from '../mood';
+import { GoalsSummaryWidget } from '../goals';
+import { FocusSummaryWidget } from '../focus/FocusSummaryWidget';
+import { JournalRecentWidget } from '../journal';
 import {
   InsightsDashboardWidget,
   WeeklyReportCard,
@@ -383,6 +387,17 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
         </div>
       )}
 
+      {/* --- Planning CTA --- */}
+      <button
+        type="button"
+        className="dashboard__planning-btn"
+        onClick={() => onNavigate('planning')}
+      >
+        <CalendarIcon size={18} />
+        <span>Plano do dia</span>
+        <span className="dashboard__planning-arrow">&rarr;</span>
+      </button>
+
       {/* --- Modules Grid --- */}
       <div className="dashboard__grid">
         {modules.map((mod) => (
@@ -442,6 +457,16 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
 
       {/* --- Health (Apple HealthKit) --- */}
       <HealthWidget />
+
+      {/* --- Mood --- */}
+      <MoodWidget />
+
+      {/* --- Goals / Focus / Journal widgets --- */}
+      <div className="dashboard__widgets-row">
+        <GoalsSummaryWidget onNavigate={() => onNavigate('goals')} />
+        <FocusSummaryWidget onNavigate={() => onNavigate('focus')} />
+        <JournalRecentWidget onNavigate={() => onNavigate('journal')} />
+      </div>
 
       {/* --- Insights --- */}
       <InsightsDashboardWidget onNavigate={() => onNavigate('insights')} />

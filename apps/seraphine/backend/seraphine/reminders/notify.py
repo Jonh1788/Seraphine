@@ -50,6 +50,25 @@ async def notify_reminder(app_state: object, reminder_id: str, message: str) -> 
     fired_at = datetime.now(SP_TZ).isoformat()
     fired_at_human = datetime.now(SP_TZ).strftime("%H:%M")
 
+    # 094: check notification intelligence gate before firing
+    nsvc = getattr(app_state, "notification_service", None)
+    if nsvc is not None:
+        try:
+            if not await nsvc.should_deliver("reminder_timed"):
+                await nsvc.queue_notification(
+                    type="reminder_timed",
+                    title=f"Lembrete: {message[:80]}",
+                    body=message,
+                    payload={"reminder_id": reminder_id, "fired_at": fired_at},
+                )
+                logger.info(
+                    "reminder %s queued by notification intelligence (DND/low priority)",
+                    reminder_id,
+                )
+                return
+        except Exception:
+            pass  # fail-open: deliver normally if gate errors
+
     # 1. Push to all connected WS clients
     ws_clients: set = getattr(app_state, "ws_clients", set())
     delivered_to_ws = False

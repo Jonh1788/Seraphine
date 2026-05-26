@@ -46,9 +46,33 @@ from seraphine.work.routes import router as work_router
 from seraphine.work.service import WorkProjectService
 from seraphine.music.routes import router as music_router
 from seraphine.music.service import FocusMusicService
+from seraphine.mood import schema as mood_schema
+from seraphine.mood.routes import router as mood_router
+from seraphine.mood.service import MoodService
+from seraphine.journal import schema as journal_schema
+from seraphine.journal.routes import router as journal_router
+from seraphine.journal.service import JournalService
+from seraphine.focus import schema as focus_schema
+from seraphine.focus.routes import router as focus_router
+from seraphine.focus.service import FocusService
+from seraphine.goals import schema as goals_schema
+from seraphine.goals.routes import router as goals_router
+from seraphine.goals.service import GoalService
 from seraphine.cv_triage import schema as cv_triage_schema
 from seraphine.cv_triage import storage as cv_triage_storage
 from seraphine.cv_triage.routes import router as cv_triage_router
+from seraphine.reading import schema as reading_schema
+from seraphine.reading.routes import router as reading_router
+from seraphine.reading.service import ReadingService
+from seraphine.planning import schema as planning_schema
+from seraphine.planning.routes import router as planning_router
+from seraphine.planning.service import PlanningService
+from seraphine.contextual import schema as contextual_schema
+from seraphine.contextual.routes import router as contextual_router
+from seraphine.contextual.service import ContextualActionsService
+from seraphine.notifications import schema as notifications_schema
+from seraphine.notifications.routes import router as notifications_router
+from seraphine.notifications.service import NotificationService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -262,6 +286,60 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Health service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Mood tracking — always enabled (SQLite-backed). Mood events from
+    # the conversation engine are persisted as time series.
+    # ------------------------------------------------------------------
+    mood_service = None
+    try:
+        store.register_migrator("seraphine_mood", mood_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        mood_service = MoodService(store)
+        logger.info("Mood service wired")
+    except Exception as e:
+        logger.warning("Mood service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Journal / Diario — always enabled (SQLite + ChromaDB for search)
+    # ------------------------------------------------------------------
+    journal_service = None
+    try:
+        store.register_migrator("seraphine_journal", journal_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        journal_service = JournalService(
+            store,
+            chroma_path=settings.chroma_path,
+            embeddings=embeddings,
+        )
+        await journal_service.start()
+        logger.info("Journal service wired")
+    except Exception as e:
+        logger.warning("Journal service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Focus analytics — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    focus_service = None
+    try:
+        store.register_migrator("seraphine_focus", focus_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        focus_service = FocusService(store)
+        logger.info("Focus service wired")
+    except Exception as e:
+        logger.warning("Focus service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Goals (OKRs) — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    goal_service = None
+    try:
+        store.register_migrator("seraphine_goals", goals_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        goal_service = GoalService(store)
+        logger.info("Goal service wired")
+    except Exception as e:
+        logger.warning("Goal service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # CV Triage — always enabled (SQLite-backed). Worker dispatched
     # from the REST routes; nothing to instantiate up-front.
     # ------------------------------------------------------------------
@@ -318,7 +396,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         store.register_migrator("seraphine_notes", notes_schema.migrate)
         await store.ensure_schema()  # idempotent
-        note_service = NoteService(store=store)
+        note_service = NoteService(store=store, task_service=task_service)
         logger.info("Note service wired")
     except Exception as e:
         logger.warning("Note service failed (non-critical): %s", e)
@@ -334,6 +412,73 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Work project service wired")
     except Exception as e:
         logger.warning("Work project service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Reading list / knowledge base — always enabled (SQLite + ChromaDB)
+    # ------------------------------------------------------------------
+    reading_service = None
+    try:
+        store.register_migrator("seraphine_reading", reading_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        reading_service = ReadingService(
+            store=store,
+            llm=llm,
+            embeddings=embeddings,
+            chroma_path=settings.chroma_path,
+        )
+        await reading_service.start()
+        logger.info("Reading service wired")
+    except Exception as e:
+        logger.warning("Reading service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Planning (SDD 093) — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    planning_service = None
+    try:
+        store.register_migrator("seraphine_planning", planning_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        planning_service = PlanningService(
+            store,
+            google_client=google_client,
+            task_service=task_service,
+            habit_service=habit_service,
+            health_service=health_service,
+            goal_service=goal_service,
+            mood_service=mood_service,
+            llm=llm,
+        )
+        logger.info("Planning service wired")
+    except Exception as e:
+        logger.warning("Planning service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Contextual shortcuts (SDD 095) — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    contextual_service = None
+    try:
+        store.register_migrator("seraphine_contextual", contextual_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        contextual_service = ContextualActionsService(store)
+        logger.info("Contextual actions service wired")
+    except Exception as e:
+        logger.warning("Contextual actions service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Notification Intelligence (SDD 094) — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    notification_service = None
+    try:
+        store.register_migrator("seraphine_notifications", notifications_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        notification_service = NotificationService(
+            store,
+            google_client=google_client,
+            focus_service=focus_service,
+        )
+        logger.info("Notification intelligence service wired")
+    except Exception as e:
+        logger.warning("Notification service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Insights — always enabled (SQLite-backed); analysers fan out over
@@ -439,6 +584,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         health_service=health_service,
         note_service=note_service,
         work_service=work_service,
+        goal_service=goal_service,
+        reading_service=reading_service,
+        mood_service=mood_service,
+        focus_service=focus_service,
+        journal_service=journal_service,
+        planning_service=planning_service,
         llm=llm,
     )
     # ------------------------------------------------------------------
@@ -625,6 +776,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.note_service = note_service
     app.state.work_service = work_service
     app.state.music_service = music_service
+    app.state.mood_service = mood_service
+    app.state.journal_service = journal_service
+    app.state.focus_service = focus_service
+    app.state.goal_service = goal_service
+    app.state.reading_service = reading_service
+    app.state.planning_service = planning_service
+    app.state.contextual_service = contextual_service
+    app.state.notification_service = notification_service
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
@@ -711,15 +870,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                                 or (now_utc - last_fired) >= gap
                             )
                             if intake_overdue and not_spammed:
-                                await notify_reminder(
-                                    app.state,
-                                    f"water-{now_utc.isoformat()}",
-                                    "Bora beber agua!",
-                                )
+                                # 094: check notification intelligence gate
+                                _nsvc = getattr(app.state, "notification_service", None)
+                                _deliver = True
+                                if _nsvc is not None:
+                                    try:
+                                        _deliver = await _nsvc.should_deliver("water")
+                                        if not _deliver:
+                                            await _nsvc.queue_notification(
+                                                type="water",
+                                                title="Agua",
+                                                body="Bora beber agua!",
+                                            )
+                                            logger.info("water reminder queued (DND/low priority)")
+                                    except Exception:
+                                        _deliver = True  # fail-open
+                                if _deliver:
+                                    await notify_reminder(
+                                        app.state,
+                                        f"water-{now_utc.isoformat()}",
+                                        "Bora beber agua!",
+                                    )
                                 await water_service.mark_reminder_fired(now_utc)
                                 logger.info(
-                                    "water reminder fired (last_intake=%s)",
+                                    "water reminder fired (last_intake=%s, delivered=%s)",
                                     last_intake,
+                                    _deliver,
                                 )
                 except Exception:
                     logger.exception("water reminder loop iteration failed")
@@ -729,6 +905,53 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     raise
 
         water_reminder_task = asyncio.create_task(_water_reminder_loop())
+
+    # ------------------------------------------------------------------
+    # 094: Notification queue flush loop — every 30 min, deliver batched
+    # notifications if DND is no longer active.
+    # ------------------------------------------------------------------
+    notif_flush_task: asyncio.Task[None] | None = None
+    if notification_service is not None:
+        async def _notif_flush_loop() -> None:
+            from seraphine.reminders.notify import notify_reminder
+
+            interval = 1800  # 30 min
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+                try:
+                    is_dnd = await notification_service.is_dnd()
+                    if is_dnd:
+                        continue  # still DND, skip
+                    pending = await notification_service.get_pending_queue()
+                    if not pending:
+                        continue
+                    flushed = await notification_service.flush_queue()
+                    if not flushed:
+                        continue
+                    # Build batch summary
+                    summary_parts: list[str] = []
+                    for item in flushed:
+                        summary_parts.append(f"- {item['title']}: {item['body'][:80]}")
+                    batch_msg = (
+                        f"Enquanto voce estava ocupado ({len(flushed)} notificacao(es)):\n"
+                        + "\n".join(summary_parts[:10])
+                    )
+                    await notify_reminder(
+                        app.state,
+                        f"batch-{datetime.now(timezone.utc).isoformat()}",
+                        batch_msg,
+                    )
+                    logger.info(
+                        "notification queue flushed: %d items delivered",
+                        len(flushed),
+                    )
+                except Exception:
+                    logger.exception("notification flush loop iteration failed")
+
+        notif_flush_task = asyncio.create_task(_notif_flush_loop())
 
     # ------------------------------------------------------------------
     # Background insights refresh loop — every 6 hours.
@@ -762,6 +985,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         proactive_scheduler = ProactiveScheduler(
             app.state,
             enabled=settings.proactive_enabled,
+            goal_service=goal_service,
         )
         proactive_scheduler.start()
         app.state.proactive_scheduler = proactive_scheduler
@@ -841,6 +1065,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             water_reminder_task.cancel()
             try:
                 await water_reminder_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if notif_flush_task is not None:
+            notif_flush_task.cancel()
+            try:
+                await notif_flush_task
             except (asyncio.CancelledError, Exception):
                 pass
         if insights_refresh_task is not None:
@@ -935,7 +1165,18 @@ def create_app() -> FastAPI:
     app.include_router(notes_router)
     app.include_router(work_router)
     app.include_router(music_router)
+    app.include_router(mood_router)
+    app.include_router(journal_router)
+    app.include_router(focus_router)
+    app.include_router(goals_router)
     app.include_router(cv_triage_router)
+    app.include_router(reading_router)
+    app.include_router(planning_router)
+    app.include_router(contextual_router)
+    app.include_router(notifications_router)
+
+    from seraphine.calendar_agg.routes import router as calendar_agg_router
+    app.include_router(calendar_agg_router)
 
     from seraphine.reminders.routes import router as reminders_router
 

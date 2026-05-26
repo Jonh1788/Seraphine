@@ -1,10 +1,16 @@
 /**
  * 050 — Reactive animations per active macOS app.
+ * 095 — Extended: also fetches contextual actions from backend and
+ *       publishes them to the contextualStore for pills + command palette.
  *
  * Polls `active_app_local` every 5 seconds and maps the result to an
  * expression/gesture combo on the VrmAvatarController. Debounced so
  * back-and-forth focus doesn't thrash animations.
  */
+
+import { API_BASE } from '../api';
+import { contextualStore } from '../contextual/store';
+import type { ContextualAction } from '../contextual/types';
 
 export interface AvatarLike {
   setExpression?: (emotion: string, fade?: number, hold?: number) => void;
@@ -70,6 +76,23 @@ export class ActiveAppReactor {
     this.waveTimer = null;
   }
 
+  /** 095 — Fetch contextual actions from the backend and publish to store. */
+  private async fetchContextualActions(appName: string): Promise<void> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/contextual/actions?app=${encodeURIComponent(appName)}`,
+      );
+      if (!res.ok) {
+        contextualStore.set({ appName, actions: [] });
+        return;
+      }
+      const data = (await res.json()) as { actions: ContextualAction[] };
+      contextualStore.set({ appName, actions: data.actions ?? [] });
+    } catch {
+      contextualStore.set({ appName, actions: [] });
+    }
+  }
+
   private async tick(): Promise<void> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -83,6 +106,10 @@ export class ActiveAppReactor {
       try {
         this.ctrl.setExpression?.(reaction.expression, 400, 0);
       } catch { /* ready yet? */ }
+
+      // 095 — fetch contextual actions for the new active app
+      void this.fetchContextualActions(app);
+
       if (reaction.gesture) {
         try { await this.ctrl.playGesture?.(reaction.gesture); } catch { /* */ }
         // Slack/Discord wave every 60s while still active.

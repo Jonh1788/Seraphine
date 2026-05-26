@@ -38,6 +38,10 @@ class WeeklyReport:
     tasks: dict[str, Any] = field(default_factory=dict)
     finance: dict[str, Any] = field(default_factory=dict)
     habits: dict[str, Any] = field(default_factory=dict)
+    goals: dict[str, Any] = field(default_factory=dict)
+    mood: dict[str, Any] = field(default_factory=dict)
+    focus: dict[str, Any] = field(default_factory=dict)
+    journal: dict[str, Any] = field(default_factory=dict)
     insights: list[dict[str, Any]] = field(default_factory=list)
     suggestion: str = ""
     created_at: str = ""
@@ -50,6 +54,10 @@ class WeeklyReport:
             "tasks": dict(self.tasks or {}),
             "finance": dict(self.finance or {}),
             "habits": dict(self.habits or {}),
+            "goals": dict(self.goals or {}),
+            "mood": dict(self.mood or {}),
+            "focus": dict(self.focus or {}),
+            "journal": dict(self.journal or {}),
             "insights": list(self.insights or []),
             "suggestion": self.suggestion,
             "created_at": self.created_at,

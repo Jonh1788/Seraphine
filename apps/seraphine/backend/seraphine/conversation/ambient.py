@@ -27,6 +27,10 @@ _CACHE_TTL = {
     "health": 600,     # 10 min
     "tasks": 60,       # 1 min
     "weather": 1800,   # 30 min
+    "mood": 300,       # 5 min
+    "focus": 120,      # 2 min
+    "goals": 600,      # 10 min
+    "reading": 600,    # 10 min
 }
 
 
@@ -183,6 +187,122 @@ async def _fetch_tasks_today(app_state: Any, cache: AmbientCache) -> str | None:
     return formatted
 
 
+async def _fetch_mood(app_state: Any, cache: AmbientCache) -> str | None:
+    cached = cache.get("mood")
+    if cached is not None:
+        return cached or None
+
+    ms = getattr(app_state, "mood_service", None)
+    if ms is None:
+        cache.put("mood", "")
+        return None
+
+    try:
+        data = await ms.get_today()
+    except Exception as e:
+        logger.debug("ambient mood fetch failed: %s", e)
+        cache.put("mood", "")
+        return None
+
+    current = data.get("current")
+    if not current:
+        cache.put("mood", "")
+        return None
+
+    label = current.get("label", "")
+    valence = current.get("valence", 0.0)
+    formatted = f"- humor atual: {label} (valence: {valence:.1f})"
+    cache.put("mood", formatted)
+    return formatted
+
+
+async def _fetch_focus_today(app_state: Any, cache: AmbientCache) -> str | None:
+    cached = cache.get("focus")
+    if cached is not None:
+        return cached or None
+
+    fs = getattr(app_state, "focus_service", None)
+    if fs is None:
+        cache.put("focus", "")
+        return None
+
+    now_sp = datetime.now(TZ)
+    today_start = now_sp.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = now_sp.replace(hour=23, minute=59, second=59, microsecond=0)
+    start_utc = today_start.astimezone(timezone.utc).isoformat()
+    end_utc = today_end.astimezone(timezone.utc).isoformat()
+
+    try:
+        sessions = await fs.get_sessions(start_utc, end_utc)
+    except Exception as e:
+        logger.debug("ambient focus fetch failed: %s", e)
+        cache.put("focus", "")
+        return None
+
+    work = [s for s in sessions if s.type == "work"]
+    if not work:
+        cache.put("focus", "")
+        return None
+
+    total_min = sum(s.duration_sec for s in work) // 60
+    hours = total_min / 60
+    formatted = f"- foco hoje: {hours:.1f}h em {len(work)} sessao(oes)"
+    cache.put("focus", formatted)
+    return formatted
+
+
+async def _fetch_goals_at_risk(app_state: Any, cache: AmbientCache) -> str | None:
+    cached = cache.get("goals")
+    if cached is not None:
+        return cached or None
+
+    gs = getattr(app_state, "goal_service", None)
+    if gs is None:
+        cache.put("goals", "")
+        return None
+
+    try:
+        summary = await gs.get_summary()
+    except Exception as e:
+        logger.debug("ambient goals fetch failed: %s", e)
+        cache.put("goals", "")
+        return None
+
+    if summary.goals_at_risk <= 0:
+        cache.put("goals", "")
+        return None
+
+    formatted = f"- objetivos em risco: {summary.goals_at_risk}"
+    cache.put("goals", formatted)
+    return formatted
+
+
+async def _fetch_reading_backlog(app_state: Any, cache: AmbientCache) -> str | None:
+    cached = cache.get("reading")
+    if cached is not None:
+        return cached or None
+
+    rs = getattr(app_state, "reading_service", None)
+    if rs is None:
+        cache.put("reading", "")
+        return None
+
+    try:
+        unread = await rs.list_items(status="unread", limit=200)
+    except Exception as e:
+        logger.debug("ambient reading fetch failed: %s", e)
+        cache.put("reading", "")
+        return None
+
+    if not unread:
+        cache.put("reading", "")
+        return None
+
+    formatted = f"- leitura pendente: {len(unread)} artigo(s)"
+    cache.put("reading", formatted)
+    return formatted
+
+
 async def build_ambient_block(app_state: Any) -> str | None:
     """Return a system-message snippet with current-moment signals, or
     None when nothing notable is happening."""
@@ -192,7 +312,15 @@ async def build_ambient_block(app_state: Any) -> str | None:
         app_state.ambient_cache = cache
 
     lines = []
-    for fetcher in (_fetch_next_event, _fetch_health, _fetch_tasks_today):
+    for fetcher in (
+        _fetch_next_event,
+        _fetch_health,
+        _fetch_tasks_today,
+        _fetch_mood,
+        _fetch_focus_today,
+        _fetch_goals_at_risk,
+        _fetch_reading_backlog,
+    ):
         try:
             val = await fetcher(app_state, cache)
         except Exception as e:

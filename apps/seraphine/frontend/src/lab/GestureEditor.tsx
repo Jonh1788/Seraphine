@@ -5,8 +5,18 @@ import {
   type GestureDefinition,
 } from '../avatar/gestures';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { DownloadIcon, UploadIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
 import { GestureTimeline } from './GestureTimeline';
+import {
+  exportAllGestures,
+  exportSingleGesture,
+  pickAndReadGestureFile,
+  importGestures,
+  type ExportEnvelope,
+  type ConflictStrategy,
+} from './gestureExportImport';
+import { ImportConflictDialog } from './ImportConflictDialog';
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -87,6 +97,11 @@ export function GestureEditor({ controller }: Props): JSX.Element {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const pendingSwitch = useRef<string | null>(null);
   const originalRef = useRef<string>('');
+
+  // Import/export state
+  const [importBusy, setImportBusy] = useState(false);
+  const [pendingImport, setPendingImport] = useState<ExportEnvelope | null>(null);
+  const [conflictNames, setConflictNames] = useState<string[]>([]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -337,6 +352,101 @@ export function GestureEditor({ controller }: Props): JSX.Element {
     }
   }, [selectedName, duration, keyframes, flash]);
 
+  // --- Export/import handlers ---
+  const handleExportCurrent = useCallback(async () => {
+    // Only export gestures saved on disk
+    if (!savedGestures[selectedName]) {
+      flash('Salve o gesto antes de exportar');
+      return;
+    }
+    try {
+      await exportSingleGesture(selectedName);
+      flash('Exportado');
+    } catch (err) {
+      flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [selectedName, savedGestures, flash]);
+
+  const handleExportAll = useCallback(async () => {
+    try {
+      await exportAllGestures();
+      flash('Todos exportados');
+    } catch (err) {
+      flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [flash]);
+
+  const handleImportPick = useCallback(async () => {
+    setImportBusy(true);
+    try {
+      const envelope = await pickAndReadGestureFile();
+      if (!envelope) {
+        setImportBusy(false);
+        return;
+      }
+
+      // Check for conflicts
+      const existingNames = new Set([
+        ...Object.keys(savedGestures),
+        ...Object.keys(GESTURE_LIBRARY),
+      ]);
+      const conflicts = envelope.gestures
+        .map((g) => (g as Record<string, unknown>).name as string)
+        .filter((n) => typeof n === 'string' && existingNames.has(n));
+
+      if (conflicts.length > 0) {
+        setPendingImport(envelope);
+        setConflictNames(conflicts);
+        setImportBusy(false);
+        return;
+      }
+
+      // No conflicts — import directly
+      const result = await importGestures(envelope, 'skip');
+      if (result.errors.length > 0) {
+        flash(`Importado com erros: ${result.errors[0]}`);
+      } else {
+        flash(`${result.imported.length} gesto(s) importado(s)`);
+      }
+      // Refresh saved gestures
+      const resp = await fetch(`${API_BASE}/lab/gestures`);
+      if (resp.ok) setSavedGestures(await resp.json());
+    } catch (err) {
+      flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImportBusy(false);
+    }
+  }, [savedGestures, flash]);
+
+  const handleConflictResolve = useCallback(async (strategy: ConflictStrategy) => {
+    if (!pendingImport) return;
+    setPendingImport(null);
+    setConflictNames([]);
+    setImportBusy(true);
+    try {
+      const result = await importGestures(pendingImport, strategy);
+      const parts: string[] = [];
+      if (result.imported.length > 0) parts.push(`${result.imported.length} importado(s)`);
+      if (result.skipped.length > 0) parts.push(`${result.skipped.length} pulado(s)`);
+      const renamedCount = Object.keys(result.renamed).length;
+      if (renamedCount > 0) parts.push(`${renamedCount} renomeado(s)`);
+      if (result.errors.length > 0) parts.push(`${result.errors.length} erro(s)`);
+      flash(parts.join(', ') || 'Nenhum gesto importado');
+      // Refresh saved gestures
+      const resp = await fetch(`${API_BASE}/lab/gestures`);
+      if (resp.ok) setSavedGestures(await resp.json());
+    } catch (err) {
+      flash(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImportBusy(false);
+    }
+  }, [pendingImport, flash]);
+
+  const handleConflictCancel = useCallback(() => {
+    setPendingImport(null);
+    setConflictNames([]);
+  }, []);
+
   const sourceLabel = modified
     ? ' (modificado)'
     : source === 'disco'
@@ -401,6 +511,27 @@ export function GestureEditor({ controller }: Props): JSX.Element {
           Nova gesture
         </button>
         <span className="gesture-editor__source">{sourceLabel}</span>
+      </div>
+
+      {/* Import/export toolbar */}
+      <div className="gesture-editor__row" style={{ gap: 6 }}>
+        <button
+          type="button"
+          className="avatar-lab__gesture-btn"
+          disabled={importBusy}
+          onClick={() => void handleImportPick()}
+          title="Importar gestos de arquivo"
+        >
+          <UploadIcon size={14} /> Importar
+        </button>
+        <button
+          type="button"
+          className="avatar-lab__gesture-btn"
+          onClick={() => void handleExportAll()}
+          title="Exportar todos os gestos salvos"
+        >
+          <DownloadIcon size={14} /> Exportar todos
+        </button>
       </div>
 
       {/* Duration */}
@@ -577,6 +708,14 @@ export function GestureEditor({ controller }: Props): JSX.Element {
         >
           Salvar em disco
         </button>
+        <button
+          type="button"
+          className="avatar-lab__gesture-btn"
+          onClick={() => void handleExportCurrent()}
+          title="Exportar este gesto como arquivo"
+        >
+          <DownloadIcon size={14} /> Exportar
+        </button>
       </div>
 
       {feedback && (
@@ -592,6 +731,14 @@ export function GestureEditor({ controller }: Props): JSX.Element {
         variant="danger"
         onConfirm={handleConfirmSwitch}
         onCancel={handleCancelSwitch}
+      />
+
+      <ImportConflictDialog
+        open={conflictNames.length > 0}
+        conflictNames={conflictNames}
+        totalCount={pendingImport?.gestures.length ?? 0}
+        onResolve={(s) => void handleConflictResolve(s)}
+        onCancel={handleConflictCancel}
       />
     </section>
   );

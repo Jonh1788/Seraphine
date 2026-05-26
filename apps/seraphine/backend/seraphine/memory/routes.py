@@ -6,9 +6,11 @@ read-only for now — they're surfaced via the recall endpoint.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -16,7 +18,46 @@ from pydantic import BaseModel, Field
 
 from seraphine.memory.profile import UserProfile
 
+logger = logging.getLogger("seraphine.memory.routes")
+
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+# ---------------------------------------------------------------------------
+# 086 — ephemeral action state (module-level dict, no DB table needed)
+# ---------------------------------------------------------------------------
+
+ActionName = Literal[
+    "rebuild_embeddings", "purge_orphans", "force_reflection", "compact"
+]
+
+_ACTION_NAMES: list[ActionName] = [
+    "rebuild_embeddings", "purge_orphans", "force_reflection", "compact",
+]
+
+
+class _ActionState:
+    __slots__ = ("state", "last_run", "last_error", "progress")
+
+    def __init__(self) -> None:
+        self.state: Literal["idle", "running"] = "idle"
+        self.last_run: str | None = None
+        self.last_error: str | None = None
+        self.progress: dict[str, int] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "state": self.state,
+            "last_run": self.last_run,
+            "last_error": self.last_error,
+        }
+        if self.progress is not None:
+            d["progress"] = self.progress
+        return d
+
+
+_action_states: dict[ActionName, _ActionState] = {
+    name: _ActionState() for name in _ACTION_NAMES
+}
 
 
 class FactCreate(BaseModel):
@@ -298,6 +339,9 @@ async def memory_health(request: Request) -> dict[str, Any]:
       - ``facts`` — active/superseded/total counts
       - ``last_reflect_at`` — timestamp of the last successful reflect
       - ``warnings_24h`` — count of embed/recall failures in the last day
+      - ``orphan_count`` — ChromaDB embeddings with no matching fact in SQLite
+      - ``low_confidence_count`` — active facts with confidence < 0.3
+      - ``stale_count`` — active facts not accessed in 90+ days
     """
     store = request.app.state.store
     memory = request.app.state.memory
@@ -333,6 +377,11 @@ async def memory_health(request: Request) -> dict[str, Any]:
         source="memory", event_type="warning", since=since,
     )
 
+    # --- 086: expanded diagnostics ---
+    orphan_count = await _count_orphans(memory, store)
+    low_confidence_count = await _count_low_confidence(store)
+    stale_count = await _count_stale(store)
+
     overall_ok = bool(ollama.get("reachable")) and chroma.get("reachable") is True
     return {
         "ok": overall_ok,
@@ -342,6 +391,334 @@ async def memory_health(request: Request) -> dict[str, Any]:
         "last_reflect_at": last_reflect_at,
         "last_reflect_inserted": last_reflect_inserted,
         "warnings_24h": warnings_24h,
+        "orphan_count": orphan_count,
+        "low_confidence_count": low_confidence_count,
+        "stale_count": stale_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 086 — helper queries for expanded health
+# ---------------------------------------------------------------------------
+
+async def _count_orphans(memory: Any, store: Any) -> int:
+    """Count ChromaDB IDs that have no corresponding active fact in SQLite."""
+    collection = getattr(memory, "_collection", None)
+    if collection is None:
+        return 0
+    try:
+        chroma_result = await asyncio.to_thread(
+            lambda: collection.get(include=[])
+        )
+        chroma_ids = set(chroma_result.get("ids", []))
+    except Exception:
+        return 0
+    if not chroma_ids:
+        return 0
+    # Get all fact IDs from SQLite (active + superseded — any fact row).
+    def _fact_ids() -> set[str]:
+        with store._connect() as conn:
+            rows = conn.execute("SELECT id FROM facts").fetchall()
+        return {r[0] for r in rows}
+    fact_ids = await asyncio.to_thread(_fact_ids)
+    # Also count turn IDs and window IDs as valid (they live in chroma too).
+    def _turn_ids() -> set[str]:
+        with store._connect() as conn:
+            rows = conn.execute("SELECT id FROM turns").fetchall()
+        return {r[0] for r in rows}
+    def _window_ids() -> set[str]:
+        with store._connect() as conn:
+            try:
+                rows = conn.execute("SELECT id FROM episode_windows").fetchall()
+            except Exception:
+                return set()
+        return {r[0] for r in rows}
+    turn_ids, window_ids = await asyncio.gather(
+        asyncio.to_thread(_turn_ids),
+        asyncio.to_thread(_window_ids),
+    )
+    known_ids = fact_ids | turn_ids | window_ids
+    return len(chroma_ids - known_ids)
+
+
+async def _count_low_confidence(store: Any) -> int:
+    """Count active facts with confidence < 0.3."""
+    def _work() -> int:
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM facts"
+                " WHERE superseded_by IS NULL AND confidence < 0.3",
+            ).fetchone()
+        return int(row[0]) if row else 0
+    return await asyncio.to_thread(_work)
+
+
+async def _count_stale(store: Any) -> int:
+    """Count active facts not accessed (last_used_at or created_at) in 90+ days."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    def _work() -> int:
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM facts"
+                " WHERE superseded_by IS NULL"
+                "   AND COALESCE(last_used_at, created_at) < ?",
+                (cutoff,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+    return await asyncio.to_thread(_work)
+
+
+# ---------------------------------------------------------------------------
+# 086 — WS broadcast helper
+# ---------------------------------------------------------------------------
+
+async def _broadcast_ws(request: Request, payload: dict[str, Any]) -> None:
+    """Send a JSON payload to all connected WebSocket clients."""
+    ws_clients: set = getattr(request.app.state, "ws_clients", set())
+    for ws in list(ws_clients):
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            ws_clients.discard(ws)
+
+
+# ---------------------------------------------------------------------------
+# 086 — corrective action endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/actions/rebuild-embeddings")
+async def action_rebuild_embeddings(request: Request) -> dict[str, Any]:
+    """Re-embed all active facts in ChromaDB. Long-running — returns
+    immediately and emits ``memory_rebuild_progress`` WS events."""
+    state = _action_states["rebuild_embeddings"]
+    if state.state == "running":
+        return {"status": "already_running"}
+    state.state = "running"
+    state.last_error = None
+    state.progress = {"done": 0, "total": 0}
+
+    async def _worker() -> None:
+        store = request.app.state.store
+        memory = request.app.state.memory
+        embeddings = request.app.state.embeddings
+        try:
+            all_facts = await store.list_facts(
+                limit=10_000, include_superseded=False,
+            )
+            total = len(all_facts)
+            state.progress = {"done": 0, "total": total}
+            await _broadcast_ws(request, {
+                "type": "memory_rebuild_progress",
+                "payload": {"done": 0, "total": total},
+            })
+            for i, fact in enumerate(all_facts):
+                try:
+                    vecs = await embeddings.embed([fact.text])
+                    vec = vecs[0]
+                    memory._fact_embedding_cache[fact.id] = vec
+                    await store.save_fact_embedding(
+                        fact.id, vec, model=memory.embedding_model,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "rebuild-embeddings: embed failed for %s: %s",
+                        fact.id[:8], e,
+                    )
+                done = i + 1
+                state.progress = {"done": done, "total": total}
+                # Emit WS progress every 5 facts or on the last one.
+                if done % 5 == 0 or done == total:
+                    await _broadcast_ws(request, {
+                        "type": "memory_rebuild_progress",
+                        "payload": {"done": done, "total": total},
+                    })
+            state.last_run = datetime.now(timezone.utc).isoformat()
+            state.last_error = None
+            await store.add_event(
+                event_type="action_rebuild_embeddings",
+                summary=f"rebuild-embeddings: {total} facts re-embedded",
+                source="memory",
+                metadata={"total": total},
+            )
+        except Exception as e:
+            state.last_error = str(e)[:200]
+            logger.exception("rebuild-embeddings worker failed")
+        finally:
+            state.state = "idle"
+            state.progress = None
+
+    asyncio.create_task(_worker())
+    return {"status": "started"}
+
+
+@router.post("/actions/purge-orphans")
+async def action_purge_orphans(request: Request) -> dict[str, Any]:
+    """Delete ChromaDB embeddings that have no matching row in SQLite."""
+    state = _action_states["purge_orphans"]
+    if state.state == "running":
+        return {"status": "already_running"}
+    state.state = "running"
+    state.last_error = None
+    try:
+        store = request.app.state.store
+        memory = request.app.state.memory
+        collection = getattr(memory, "_collection", None)
+        if collection is None:
+            state.state = "idle"
+            return {"status": "started", "purged": 0, "detail": "no collection"}
+
+        chroma_result = await asyncio.to_thread(
+            lambda: collection.get(include=[])
+        )
+        chroma_ids = set(chroma_result.get("ids", []))
+        if not chroma_ids:
+            state.last_run = datetime.now(timezone.utc).isoformat()
+            state.state = "idle"
+            return {"status": "started", "purged": 0}
+
+        # Gather all known IDs from SQLite.
+        def _all_known_ids() -> set[str]:
+            with store._connect() as conn:
+                fact_rows = conn.execute("SELECT id FROM facts").fetchall()
+                turn_rows = conn.execute("SELECT id FROM turns").fetchall()
+                try:
+                    win_rows = conn.execute(
+                        "SELECT id FROM episode_windows"
+                    ).fetchall()
+                except Exception:
+                    win_rows = []
+            ids: set[str] = set()
+            for r in fact_rows:
+                ids.add(r[0])
+            for r in turn_rows:
+                ids.add(r[0])
+            for r in win_rows:
+                ids.add(r[0])
+            return ids
+
+        known_ids = await asyncio.to_thread(_all_known_ids)
+        orphan_ids = list(chroma_ids - known_ids)
+        if orphan_ids:
+            # ChromaDB delete() accepts a list of IDs.
+            await asyncio.to_thread(
+                lambda: collection.delete(ids=orphan_ids)
+            )
+        state.last_run = datetime.now(timezone.utc).isoformat()
+        state.last_error = None
+        await store.add_event(
+            event_type="action_purge_orphans",
+            summary=f"purge-orphans: {len(orphan_ids)} removed",
+            source="memory",
+            metadata={"purged": len(orphan_ids)},
+        )
+        return {"status": "started", "purged": len(orphan_ids)}
+    except Exception as e:
+        state.last_error = str(e)[:200]
+        logger.exception("purge-orphans failed")
+        raise HTTPException(status_code=500, detail=str(e)[:200])
+    finally:
+        state.state = "idle"
+
+
+@router.post("/actions/force-reflection")
+async def action_force_reflection(request: Request) -> dict[str, Any]:
+    """Trigger an immediate reflect() cycle."""
+    state = _action_states["force_reflection"]
+    if state.state == "running":
+        return {"status": "already_running"}
+    state.state = "running"
+    state.last_error = None
+    try:
+        memory = request.app.state.memory
+        inserted = await memory.reflect()
+        state.last_run = datetime.now(timezone.utc).isoformat()
+        state.last_error = None
+        return {"status": "started", "inserted": inserted}
+    except Exception as e:
+        state.last_error = str(e)[:200]
+        logger.exception("force-reflection failed")
+        raise HTTPException(status_code=500, detail=str(e)[:200])
+    finally:
+        state.state = "idle"
+
+
+@router.post("/actions/compact")
+async def action_compact(request: Request) -> dict[str, Any]:
+    """Delete facts with confidence < 0.3 and archive facts untouched
+    for 90+ days. Long-running — returns immediately."""
+    state = _action_states["compact"]
+    if state.state == "running":
+        return {"status": "already_running"}
+    state.state = "running"
+    state.last_error = None
+
+    async def _worker() -> None:
+        store = request.app.state.store
+        memory = request.app.state.memory
+        try:
+            cutoff_90d = (
+                datetime.now(timezone.utc) - timedelta(days=90)
+            ).isoformat()
+            all_facts = await store.list_facts(
+                limit=10_000, include_superseded=False,
+            )
+            deleted_low = 0
+            archived_stale = 0
+            for fact in all_facts:
+                if fact.confidence < 0.3:
+                    await store.supersede_fact(fact.id, fact.id)
+                    memory._fact_embedding_cache.pop(fact.id, None)
+                    try:
+                        await store.delete_fact_embedding(fact.id)
+                    except Exception:
+                        pass
+                    deleted_low += 1
+                    continue
+                ref = fact.last_used_at or fact.created_at
+                if ref < cutoff_90d:
+                    await store.supersede_fact(fact.id, fact.id)
+                    memory._fact_embedding_cache.pop(fact.id, None)
+                    try:
+                        await store.delete_fact_embedding(fact.id)
+                    except Exception:
+                        pass
+                    archived_stale += 1
+            state.last_run = datetime.now(timezone.utc).isoformat()
+            state.last_error = None
+            await store.add_event(
+                event_type="action_compact",
+                summary=(
+                    f"compact: {deleted_low} low-confidence deleted, "
+                    f"{archived_stale} stale archived"
+                ),
+                source="memory",
+                metadata={
+                    "deleted_low": deleted_low,
+                    "archived_stale": archived_stale,
+                },
+            )
+            await _broadcast_ws(request, {
+                "type": "memory_compact_done",
+                "payload": {
+                    "deleted_low": deleted_low,
+                    "archived_stale": archived_stale,
+                },
+            })
+        except Exception as e:
+            state.last_error = str(e)[:200]
+            logger.exception("compact worker failed")
+        finally:
+            state.state = "idle"
+
+    asyncio.create_task(_worker())
+    return {"status": "started"}
+
+
+@router.get("/actions/status")
+async def action_status() -> dict[str, Any]:
+    """Return the current state of every corrective action."""
+    return {
+        "actions": {name: st.to_dict() for name, st in _action_states.items()}
     }
 
 

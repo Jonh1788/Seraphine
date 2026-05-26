@@ -892,6 +892,23 @@ async def conversation_ws(ws: WebSocket) -> None:
                             # state. Drop any buffered tokens.
                             final_turn_id = getattr(event, "turn_id", final_turn_id)
                             sentence_buf = ""
+                        elif etype == "mood":
+                            # 088: persist non-neutral mood events as
+                            # time series. The neutral/intensity=0 event
+                            # is just a reset signal for the avatar.
+                            mood_label = getattr(event, "mood", "")
+                            mood_intensity = getattr(event, "intensity", 0)
+                            if mood_label and mood_intensity > 0:
+                                _mood_svc = getattr(ws.app.state, "mood_service", None)
+                                if _mood_svc is not None:
+                                    try:
+                                        await _mood_svc.log_mood(
+                                            mood_label,
+                                            source="conversation",
+                                            turn_id=final_turn_id,
+                                        )
+                                    except Exception as _me:
+                                        logger.debug("mood log_mood failed: %s", _me)
 
                         # Ensure correct event ordering for voice turns:
                         # tts_start → binary chunks → tts_end → turn_end.

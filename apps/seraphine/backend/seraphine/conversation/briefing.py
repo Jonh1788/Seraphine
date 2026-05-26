@@ -49,6 +49,10 @@ async def generate_briefing(
     finance_service: Any | None = None,
     google_client: Any | None = None,
     store: Any | None = None,
+    goal_service: Any | None = None,
+    mood_service: Any | None = None,
+    focus_service: Any | None = None,
+    reading_service: Any | None = None,
 ) -> str:
     """Generate a daily briefing markdown string.
 
@@ -168,6 +172,93 @@ async def generate_briefing(
         except Exception:
             pass
 
+    # --- Goals at risk ---
+    if goal_service is not None:
+        try:
+            summary = await goal_service.get_summary()
+            total = summary.total_active
+            at_risk = summary.goals_at_risk
+            parts: list[str] = []
+            if total > 0:
+                parts.append(f"{total} objetivo(s) ativo(s)")
+            if at_risk > 0:
+                parts.append(f"**{at_risk} em risco**")
+                # Find top at-risk goal for detail
+                try:
+                    from datetime import date as _date
+
+                    active_goals = await goal_service.list_goals(status="active")
+                    today_d = now_br.date()
+                    for g in active_goals:
+                        progress = getattr(g, "progress", 0.0)
+                        end_date = getattr(g, "end_date", None)
+                        if end_date and progress < 30.0:
+                            try:
+                                end_d = _date.fromisoformat(end_date)
+                                if (end_d - today_d).days < 30:
+                                    parts.append(
+                                        f"'{g.title}' ({progress:.0f}%)"
+                                    )
+                                    break
+                            except ValueError:
+                                pass
+                except Exception:
+                    pass
+            if parts:
+                sections.append(f"**Objetivos:** {', '.join(parts)}.")
+                sections.append("")
+        except Exception as e:
+            logger.warning("briefing: goals failed: %s", e)
+
+    # --- Mood ---
+    if mood_service is not None:
+        try:
+            mood_data = await mood_service.get_today()
+            current = mood_data.get("current")
+            if current:
+                label = current.get("label", "")
+                valence = current.get("valence", 0.0)
+                sections.append(
+                    f"**Humor:** {label} (valence: {valence:.1f})"
+                )
+                sections.append("")
+        except Exception as e:
+            logger.warning("briefing: mood failed: %s", e)
+
+    # --- Focus today ---
+    if focus_service is not None:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+
+            _sp = _ZI("America/Sao_Paulo")
+            _today_start = now_br.replace(hour=0, minute=0, second=0, microsecond=0)
+            _today_end = now_br.replace(hour=23, minute=59, second=59, microsecond=0)
+            start_utc = _today_start.astimezone(timezone.utc).isoformat()
+            end_utc = _today_end.astimezone(timezone.utc).isoformat()
+            sessions = await focus_service.get_sessions(start_utc, end_utc)
+            work_sessions = [s for s in sessions if s.type == "work"]
+            if work_sessions:
+                total_min = sum(s.duration_sec for s in work_sessions) // 60
+                hours = total_min / 60
+                sections.append(
+                    f"**Foco hoje:** {hours:.1f}h em {len(work_sessions)} sessao(oes)."
+                )
+                sections.append("")
+        except Exception as e:
+            logger.warning("briefing: focus failed: %s", e)
+
+    # --- Reading backlog ---
+    if reading_service is not None:
+        try:
+            unread = await reading_service.list_items(status="unread", limit=200)
+            if unread:
+                sections.append(
+                    f"**Leitura:** {len(unread)} artigo(s) nao lido(s)."
+                )
+                sections.append("")
+        except Exception as e:
+            logger.warning("briefing: reading failed: %s", e)
+
     # Remove trailing empty lines
     while sections and sections[-1] == "":
         sections.pop()
@@ -182,12 +273,20 @@ async def briefing_endpoint(request: Request) -> dict[str, str]:
     finance_service = getattr(request.app.state, "finance_service", None)
     google_client = getattr(request.app.state, "google_client", None)
     store = getattr(request.app.state, "store", None)
+    goal_service = getattr(request.app.state, "goal_service", None)
+    mood_service = getattr(request.app.state, "mood_service", None)
+    focus_service = getattr(request.app.state, "focus_service", None)
+    reading_service = getattr(request.app.state, "reading_service", None)
 
     text = await generate_briefing(
         task_service=task_service,
         finance_service=finance_service,
         google_client=google_client,
         store=store,
+        goal_service=goal_service,
+        mood_service=mood_service,
+        focus_service=focus_service,
+        reading_service=reading_service,
     )
     return {"briefing": text}
 
@@ -211,6 +310,10 @@ async def generate_dashboard_summary(
     finance_service: Any | None = None,
     google_client: Any | None = None,
     habit_service: Any | None = None,
+    goal_service: Any | None = None,
+    mood_service: Any | None = None,
+    focus_service: Any | None = None,
+    reading_service: Any | None = None,
 ) -> dict:
     """Build a structured dashboard summary dict.
 
@@ -379,6 +482,81 @@ async def generate_dashboard_summary(
     }
     if habits_today is not None:
         result["habits_today"] = habits_today
+
+    # --- Goals ---
+    if goal_service is not None:
+        try:
+            goal_summary = await goal_service.get_summary()
+            goals_data: dict[str, Any] = goal_summary.to_dict()
+            # Find top at-risk goal for display
+            try:
+                active_goals = await goal_service.list_goals(status="active")
+                today_d = now_br.date()
+                for g in active_goals:
+                    progress = getattr(g, "progress", 0.0)
+                    end_date_str = getattr(g, "end_date", None)
+                    if end_date_str and progress < 30.0:
+                        from datetime import date as _date
+                        try:
+                            end_d = _date.fromisoformat(end_date_str)
+                            if (end_d - today_d).days < 30:
+                                goals_data["top_at_risk"] = {
+                                    "title": g.title,
+                                    "progress": round(progress, 1),
+                                    "end_date": end_date_str,
+                                }
+                                break
+                        except ValueError:
+                            pass
+            except Exception:
+                pass
+            result["goals"] = goals_data
+        except Exception as exc:
+            logger.warning("dashboard: goal_service failed: %s", exc)
+
+    # --- Mood ---
+    if mood_service is not None:
+        try:
+            mood_data = await mood_service.get_today()
+            current = mood_data.get("current")
+            if current:
+                result["mood"] = {
+                    "label": current.get("label", ""),
+                    "valence": current.get("valence", 0.0),
+                    "arousal": current.get("arousal", 0.0),
+                    "avg_valence": mood_data.get("avg_valence", 0.0),
+                }
+        except Exception as exc:
+            logger.warning("dashboard: mood_service failed: %s", exc)
+
+    # --- Focus today ---
+    if focus_service is not None:
+        try:
+            _today_start = now_br.replace(hour=0, minute=0, second=0, microsecond=0)
+            _today_end = now_br.replace(hour=23, minute=59, second=59, microsecond=0)
+            start_utc_iso = _today_start.astimezone(timezone.utc).isoformat()
+            end_utc_iso = _today_end.astimezone(timezone.utc).isoformat()
+            sessions = await focus_service.get_sessions(start_utc_iso, end_utc_iso)
+            work_sessions = [s for s in sessions if s.type == "work"]
+            total_min = sum(s.duration_sec for s in work_sessions) // 60
+            result["focus_today"] = {
+                "total_min": total_min,
+                "sessions": len(work_sessions),
+                "is_active": focus_service.is_active(),
+            }
+        except Exception as exc:
+            logger.warning("dashboard: focus_service failed: %s", exc)
+
+    # --- Reading backlog ---
+    if reading_service is not None:
+        try:
+            unread = await reading_service.list_items(status="unread", limit=200)
+            result["reading"] = {
+                "unread_count": len(unread),
+            }
+        except Exception as exc:
+            logger.warning("dashboard: reading_service failed: %s", exc)
+
     return result
 
 
@@ -390,4 +568,8 @@ async def dashboard_summary(request: Request) -> dict:
         finance_service=getattr(request.app.state, "finance_service", None),
         google_client=getattr(request.app.state, "google_client", None),
         habit_service=getattr(request.app.state, "habit_service", None),
+        goal_service=getattr(request.app.state, "goal_service", None),
+        mood_service=getattr(request.app.state, "mood_service", None),
+        focus_service=getattr(request.app.state, "focus_service", None),
+        reading_service=getattr(request.app.state, "reading_service", None),
     )
