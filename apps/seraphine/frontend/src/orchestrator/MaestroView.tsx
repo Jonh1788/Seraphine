@@ -5,6 +5,7 @@ import {
   listHosts, checkHost, listRemoteSessions,
 } from './api';
 import { useAgentStream } from './useAgentStream';
+import { SelfImprove } from './SelfImprove';
 import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
 
 const MODES: { v: PermissionMode; label: string }[] = [
@@ -14,6 +15,7 @@ const MODES: { v: PermissionMode; label: string }[] = [
 ];
 
 export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
+  const [tab, setTab] = useState<'agents' | 'improve'>('agents');
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
@@ -70,9 +72,16 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
           <div className="obs-screen__sub">{sessions.length} sessões · orquestração de agentes</div>
         </div>
         <div className="obs-screen__actions">
-          <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}>Atualizar</button>
+          <div className="si-tabs">
+            <button type="button" className={`obs-btn obs-btn--ghost${tab === 'agents' ? ' si-tabs__btn--active' : ''}`} onClick={() => setTab('agents')}>Agentes</button>
+            <button type="button" className={`obs-btn obs-btn--ghost${tab === 'improve' ? ' si-tabs__btn--active' : ''}`} onClick={() => setTab('improve')}>Melhorar a Seraphine</button>
+          </div>
+          {tab === 'agents' && <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}>Atualizar</button>}
         </div>
       </div>
+      {tab === 'improve' ? (
+        <div className="obs-screen__body maestro__body"><SelfImprove /></div>
+      ) : (
       <div className="obs-screen__body maestro__body">
         <aside className="maestro__list">
           <div className="obs-card maestro__new">
@@ -141,6 +150,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
           )}
         </section>
       </div>
+      )}
     </div>
   );
 }
