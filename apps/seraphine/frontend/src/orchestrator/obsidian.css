@@ -25,3 +25,7 @@
 .maestro__badge--observed { color: var(--text-dim); background: rgba(255, 255, 255, 0.06); }
 .maestro__activity { font-size: 11px; color: var(--text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maestro__row-head { gap: 8px; }
+.maestro__hoststatus { font-size: 11px; padding: 4px 8px; border-radius: 6px; margin-top: 4px; }
+.maestro__hoststatus--ok { color: var(--user); background: rgba(74,222,128,0.10); }
+.maestro__hoststatus--err { color: var(--danger); background: rgba(239,68,68,0.10); }
+.maestro__badge--host { color: var(--text-dim); background: rgba(255,255,255,0.06); }

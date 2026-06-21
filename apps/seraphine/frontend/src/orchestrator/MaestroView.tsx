@@ -2,9 +2,10 @@ import './obsidian.css';
 import { useEffect, useMemo, useState } from 'react';
 import {
   listSessions, readTranscript, spawnAgent, sendToAgent, stopAgent, respondPermission, resumeSession, forkSession,
+  listHosts, checkHost, listRemoteSessions,
 } from './api';
 import { useAgentStream } from './useAgentStream';
-import type { SessionInfo, PermissionMode, AgentEvent } from './types';
+import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
 
 const MODES: { v: PermissionMode; label: string }[] = [
   { v: 'ask_all', label: 'Perguntar tudo' },
@@ -18,10 +19,15 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
   const [cwd, setCwd] = useState('');
   const [goal, setGoal] = useState('');
+  const [host, setHost] = useState('');
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [hostStatus, setHostStatus] = useState<HostStatus | null>(null);
+  const [remoteSessions, setRemoteSessions] = useState<SessionInfo[]>([]);
   const events = useAgentStream();
 
   const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
   useEffect(() => { refresh(); }, []);
+  useEffect(() => { void listHosts().then(setHosts).catch(() => {}); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onBack(); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
@@ -76,8 +82,20 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             <select className="maestro__input" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
               {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
             </select>
+            <select className="maestro__input" value={host} onChange={(e) => {
+              const h = e.target.value; setHost(h); setHostStatus(null); setRemoteSessions([]);
+              if (h) { void checkHost(h).then((st) => { setHostStatus(st); if (st.reachable) void listRemoteSessions(h).then(setRemoteSessions).catch(() => {}); }); }
+            }}>
+              <option value="">Local</option>
+              {hosts.map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+            {host && hostStatus && (
+              <div className={`maestro__hoststatus maestro__hoststatus--${hostStatus.reachable ? 'ok' : 'err'}`}>
+                {hostStatus.reachable ? (hostStatus.claude_version || 'acessível') : (hostStatus.error || 'inacessível')}
+              </div>
+            )}
             <button type="button" className="obs-btn obs-btn--primary" disabled={!cwd || !goal}
-              onClick={() => { void spawnAgent(cwd, goal, mode).then((id) => { setSelected(id); setGoal(''); }); }}>
+              onClick={() => { void spawnAgent(cwd, goal, mode, host || undefined).then((id) => { setSelected(id); setGoal(''); }); }}>
               Iniciar
             </button>
           </div>
@@ -86,6 +104,10 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
               owned={ownedSessionIds.has(s.session_id)} activity={activity[s.session_id]}
               onResume={(g) => { void resumeSession(s.session_id, s.cwd, g, mode).then(setSelected); }}
               onFork={(g) => { void forkSession(s.session_id, s.cwd, g, mode).then(setSelected); }} />
+          ))}
+          {remoteSessions.map((s) => (
+            <SessionRow key={s.host + s.slug + s.session_id} s={s}
+              owned={false} activity={undefined} onResume={() => {}} onFork={() => {}} />
           ))}
         </aside>
         <section className="maestro__detail obs-card">
@@ -149,17 +171,22 @@ function SessionRow({ s, owned, activity, onResume, onFork }: { s: SessionInfo; 
       <div className="maestro__row-head" onClick={() => setOpen((o) => !o)}>
         <span className="maestro__cwd">{s.cwd}</span>
         <span className={`maestro__badge maestro__badge--${owned ? 'owned' : 'observed'}`}>{owned ? 'própria' : 'observada'}</span>
+        <span className="maestro__badge maestro__badge--host">{s.host ?? 'Local'}</span>
         <span className="maestro__sid">{s.session_id.slice(0, 8)}</span>
       </div>
       {activity && <div className="maestro__activity">{activity}</div>}
       {open && (
-        <div className="maestro__handover">
-          <input className="maestro__input" placeholder="Objetivo p/ assumir" value={g} onChange={(e) => setG(e.target.value)} />
-          <div className="maestro__handover-actions">
-            <button type="button" className="obs-btn obs-btn--primary" disabled={!g} onClick={() => onResume(g)}>Retomar</button>
-            <button type="button" className="obs-btn obs-btn--ghost" disabled={!g} onClick={() => onFork(g)}>Forkar</button>
+        s.host ? (
+          <div className="maestro__activity">handover remoto: em breve</div>
+        ) : (
+          <div className="maestro__handover">
+            <input className="maestro__input" placeholder="Objetivo p/ assumir" value={g} onChange={(e) => setG(e.target.value)} />
+            <div className="maestro__handover-actions">
+              <button type="button" className="obs-btn obs-btn--primary" disabled={!g} onClick={() => onResume(g)}>Retomar</button>
+              <button type="button" className="obs-btn obs-btn--ghost" disabled={!g} onClick={() => onFork(g)}>Forkar</button>
+            </div>
           </div>
-        </div>
+        )
       )}
     </div>
   );
