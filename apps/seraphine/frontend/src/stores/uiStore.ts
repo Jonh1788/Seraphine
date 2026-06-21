@@ -21,7 +21,8 @@ export type ActiveView =
   | 'routines'
   | 'system'
   | 'focus'
-  | 'planning';
+  | 'planning'
+  | 'maestro';
 
 interface UiState {
   activeView: ActiveView;

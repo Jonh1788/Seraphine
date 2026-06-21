@@ -33,6 +33,7 @@ import { RoutinesView } from './routines';
 import { GoalsView } from './goals';
 import { SystemStatusView } from './system';
 import { PlanningView } from './planning';
+import { MaestroView } from './orchestrator';
 import {
   ChatIcon,
   CalendarIcon,
@@ -294,6 +295,7 @@ export function AppLayout(): JSX.Element {
     { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
     { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
     { id: 'system', icon: <SettingsIcon size={22} />, label: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
+    { id: 'maestro', icon: <FlaskIcon size={22} />, label: 'Maestro', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
   ];
 
   return (
@@ -584,6 +586,9 @@ export function AppLayout(): JSX.Element {
                     onBack={() => setActiveView('dashboard')}
                     onNavigate={(view) => setActiveView(view as ActiveView)}
                   />
+                )}
+                {activeView === 'maestro' && (
+                  <MaestroView onBack={() => setActiveView('chat')} />
                 )}
               </ViewTransition>
             )}
