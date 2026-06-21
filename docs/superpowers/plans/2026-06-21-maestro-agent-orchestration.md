@@ -854,3 +854,32 @@ git commit -m "feat(maestro): handover UI (resume/fork) per session"
 - **Type consistency:** Rust `maestro_*` command names match the `lib.rs` registration (Task 5.1) and the TS bridge invoke strings (Task 5.2); event channel `maestro:agent-event` matches between `mod.rs` emit and `api.ts` listen; `PermissionMode` strings (`ask_all`/`auto_reads`/`full_auto`) match `parse_mode` in Rust.
 
 **Out of scope (Phases 2–3):** SSH remote agents; autonomous self-improvement loop; "Seraphine decides" LLM permission mode; manager→worker recursion.
+
+---
+
+## M0 Spike findings — corrections to later tasks (discovered by Task 0.1)
+
+Capturing real `claude` v2.1.183 stream-json output corrected three assumptions. Later tasks MUST use these real shapes:
+
+**Spawn command (Task 1.2 `spawn_inner`, and resume/fork in Task 4.1):**
+Plain `-p` **auto-denies** gated tools and never asks. To make permissions route to the parent you MUST add `--permission-prompt-tool stdio --setting-sources "" --verbose`, and after spawning send an `initialize` control_request before the first user turn:
+```
+claude -p --output-format stream-json --input-format stream-json \
+  --permission-mode default --permission-prompt-tool stdio --setting-sources "" --verbose [--resume <id>] [--fork-session]
+```
+First stdin line (once, right after spawn): `{"type":"control_request","request_id":"maestro-init","request":{"subtype":"initialize","hooks":{}}}`
+Then the user turn: `{"type":"user","message":{"role":"user","content":"<goal>"}}`
+(`--setting-sources ""` suppresses the global SessionStart hooks that otherwise flood the stream; `--bare` is NOT usable — it breaks OAuth.)
+
+**Permission classify (Task 1.1 `proto.rs`):** a permission ask is `type=="control_request"` **AND** `request.subtype=="can_use_tool"` (control_request also carries `initialize` and others — guard on the subtype). `request_id` is **top-level**; tool name is `request.tool_name`. Update the `control_request` arm to require `request.subtype == "can_use_tool"`, else classify `Other`.
+
+**Permission response (Task 2.2 `write_permission_response`):** the real reply shape (allow AND deny both use `subtype:"success"`; the decision is the camelCase `behavior` in the nested `response`):
+```rust
+let resp = serde_json::json!({
+  "type":"control_response",
+  "response":{"subtype":"success","request_id":request_id,
+              "response":{"behavior": if allow {"allow"} else {"deny"}}}
+});
+```
+
+**Fake-agent harness:** `--wait-stdin-after N` reads the fixture on FD 3 (`done 3< "$fixture"`, `read line <&3`) so the permission-response `read` blocks on real stdin (already fixed, commit d296a13).
