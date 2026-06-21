@@ -18,7 +18,7 @@ from typing import Any, AsyncIterator, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from seraphine.deepsearch.service import DeepSearchService
 
@@ -41,8 +41,16 @@ def _service_or_503(request: Request) -> DeepSearchService:
 
 
 class StartRunBody(BaseModel):
-    query: str
+    query: str = Field(min_length=1)
     mode: Literal["quick", "deep"] = "quick"
+
+    @field_validator("query")
+    @classmethod
+    def _query_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("query must not be blank")
+        return v
 
 
 class ConfigBody(BaseModel):

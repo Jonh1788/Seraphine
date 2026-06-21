@@ -51,7 +51,7 @@ class _FakeEngine:
             emit({"type": "report", "markdown": report, "sources": sources})
         )
         await _maybe_await(emit({"type": "done", "status": "done"}))
-        return {"report": report, "sources": sources}
+        return {"report": report, "sources": sources, "status": "done"}
 
 
 async def _maybe_await(value):

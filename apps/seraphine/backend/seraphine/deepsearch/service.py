@@ -76,7 +76,10 @@ class DeepSearchService:
         self.tools = tools
         self.settings = settings
         # Live, in-process state — never persisted.
-        self._queues: dict[str, asyncio.Queue] = {}
+        # A SET of subscriber queues per run, so multiple concurrent / reconnecting
+        # subscribers each get every event (a single shared queue would let the
+        # first ``get()`` steal events and starve the others).
+        self._subs: dict[str, set[asyncio.Queue]] = {}
         self._tasks: dict[str, asyncio.Task] = {}
 
     # -- config ------------------------------------------------------------
@@ -231,7 +234,7 @@ class DeepSearchService:
             cfg.synth_model,
             created_at,
         )
-        self._queues[run_id] = asyncio.Queue()
+        self._subs[run_id] = set()
         self._tasks[run_id] = asyncio.create_task(
             self._run_task(run_id, query, mode)
         )
@@ -254,11 +257,17 @@ class DeepSearchService:
         }
 
         async def emit(evt: dict) -> None:
-            queue = self._queues.get(run_id)
-            if queue is not None:
-                queue.put_nowait(evt)
-
             etype = evt.get("type")
+            # Fan out live events to every subscriber queue. The engine emits its
+            # OWN terminal {type:done} BEFORE run() returns and the row is
+            # finalized — drop it here and let _finish push the single
+            # authoritative ``done`` AFTER the row is committed (so a subscriber
+            # never sees ``done`` while a concurrent GET still reads ``running``).
+            # ``error`` IS forwarded so the UI gets the failure message.
+            if etype != "done":
+                for q in list(self._subs.get(run_id, ())):
+                    q.put_nowait(evt)
+
             if etype == "report":
                 state["report"] = evt.get("markdown")
                 state["sources"] = evt.get("sources") or []
@@ -356,12 +365,18 @@ class DeepSearchService:
             )
             report = result.get("report")
             sources = result.get("sources") or []
-            status = "done"
+            # The engine catches its own fatal errors and returns NORMALLY, so a
+            # plain return is NOT proof of success — trust the engine's own
+            # terminal status ("done" | "failed"); default to "failed" if absent.
+            status = result.get("status") or "failed"
         except asyncio.CancelledError:
             status = "cancelled"
             report = emit._state.get("report")  # type: ignore[attr-defined]
             sources = emit._state.get("sources") or []  # type: ignore[attr-defined]
-            await self._finish(run_id, status, report, sources)
+            # Shield the finalize: a second cancellation landing during the
+            # ``to_thread`` await inside _finish must not skip persisting
+            # ``cancelled`` + the terminal push to subscribers.
+            await asyncio.shield(self._finish(run_id, status, report, sources))
             raise
         except asyncio.TimeoutError:
             logger.warning("deepsearch: run %s timed out", run_id)
@@ -383,23 +398,38 @@ class DeepSearchService:
         report: Optional[str],
         sources: list,
     ) -> None:
-        """Persist the terminal state, signal subscribers, drop the queue."""
+        """Persist the terminal state, then signal subscribers.
+
+        Order matters: the row is committed/finalized FIRST, and only THEN do we
+        push the single authoritative ``done`` to every current subscriber — so a
+        subscriber can never see ``done`` while a concurrent ``GET /{id}`` still
+        reads ``running``. The subscriber set itself is left in place (each
+        subscribe() generator unregisters its own queue in a ``finally``); we
+        only need to stop accepting NEW subscribers onto a finished run, which
+        ``subscribe`` handles by seeing the terminal persisted status.
+        """
         await asyncio.to_thread(
             self._finalize, run_id, status, report, sources
         )
-        queue = self._queues.pop(run_id, None)
-        if queue is not None:
-            queue.put_nowait({"type": "done", "status": status})
+        subs = self._subs.get(run_id)
+        if subs is not None:
+            for q in list(subs):
+                q.put_nowait({"type": "done", "status": status})
         self._tasks.pop(run_id, None)
 
     # -- runs: live subscribe ---------------------------------------------
 
     async def subscribe(self, run_id: str) -> AsyncIterator[dict]:
-        """Yield a catch-up snapshot, then live events until ``done``/``error``.
+        """Yield a catch-up snapshot, then live events until ``done``.
 
-        Robust to a run that already finished before ``subscribe`` is called:
-        there is no live queue, so we yield the persisted snapshot plus a
-        terminal ``done`` and return (never hang).
+        Each subscriber gets its OWN queue registered in the per-run subscriber
+        set, so multiple concurrent subscribers (e.g. the frontend reconnecting
+        after a dropped stream) each receive every event — none can starve the
+        others by draining a shared queue.
+
+        Robust to a run that already finished before (or during) ``subscribe``:
+        the persisted snapshot status is terminal, so we yield it plus a final
+        ``done`` and return without ever waiting on the queue.
         """
         snap = await self.get_run(run_id)
         if snap is None:
@@ -407,25 +437,45 @@ class DeepSearchService:
             yield {"type": "done", "status": "unknown"}
             return
 
-        yield {
-            "type": "snapshot",
-            "status": snap["status"],
-            "report": snap["report"],
-            "sources": snap["sources"],
-            "progress": snap["progress"],
-        }
+        # Register a private queue BEFORE deciding whether to drain, so we don't
+        # miss a ``done`` that _finish pushes between the snapshot and our drain.
+        subs = self._subs.get(run_id)
+        queue: Optional[asyncio.Queue] = None
+        if subs is not None and snap["status"] == "running":
+            queue = asyncio.Queue()
+            subs.add(queue)
 
-        queue = self._queues.get(run_id)
-        if queue is None:
-            # Already finished (or never live) — close after the snapshot.
-            yield {"type": "done", "status": snap["status"]}
-            return
+        try:
+            yield {
+                "type": "snapshot",
+                "status": snap["status"],
+                "report": snap["report"],
+                "sources": snap["sources"],
+                "progress": snap["progress"],
+            }
 
-        while True:
-            evt = await queue.get()
-            yield evt
-            if evt.get("type") in ("done", "error"):
-                break
+            if queue is None:
+                # Already finished (or never live in-process) — close after the
+                # snapshot with the persisted terminal status.
+                yield {"type": "done", "status": snap["status"]}
+                return
+
+            # Guard the snapshot/registration race: if the run finalized between
+            # the snapshot read and our registration, re-read the status and, if
+            # terminal, close immediately rather than waiting on the queue.
+            latest = await self.get_run(run_id)
+            if latest is not None and latest["status"] != "running":
+                yield {"type": "done", "status": latest["status"]}
+                return
+
+            while True:
+                evt = await queue.get()
+                yield evt
+                if evt.get("type") == "done":
+                    break
+        finally:
+            if queue is not None and subs is not None:
+                subs.discard(queue)
 
     # -- runs: cancel ------------------------------------------------------
 
