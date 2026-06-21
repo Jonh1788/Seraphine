@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { onAgentEvent, onAgentExit } from './api';
+import { useEffect } from 'react';
+import { useAgentStreamStore } from './agentStreamStore';
 import type { AgentEvent } from './types';
 
+/**
+ * Subscribes (once, process-wide) to the global agent-event stream and returns
+ * the accumulated events. Backed by a Zustand store so the stream PERSISTS
+ * across view/tab remounts — leaving the Maestro tab and returning no longer
+ * loses the running sessions or an in-flight self-improve run.
+ */
 export function useAgentStream(): AgentEvent[] {
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const unsub = useRef<Array<() => void>>([]);
-  useEffect(() => {
-    let live = true;
-    void onAgentEvent((e) => { if (live) setEvents((p) => [...p, e]); }).then((u) => unsub.current.push(u));
-    void onAgentExit((id) => { if (live) setEvents((p) => [...p, { agent_id: id, kind: { kind: 'other' }, raw: { exit: true } }]); })
-      .then((u) => unsub.current.push(u));
-    return () => { live = false; unsub.current.forEach((u) => u()); unsub.current = []; };
-  }, []);
-  return events;
+  const ensureSubscribed = useAgentStreamStore((s) => s.ensureSubscribed);
+  useEffect(() => { ensureSubscribed(); }, [ensureSubscribed]);
+  return useAgentStreamStore((s) => s.events);
 }

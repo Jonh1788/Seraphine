@@ -6,6 +6,7 @@ import {
 } from './api';
 import { useAgentStream } from './useAgentStream';
 import { SelfImprove } from './SelfImprove';
+import { useSelfImproveStore } from './selfImproveStore';
 import { Timeline } from './Timeline';
 import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
 
@@ -51,7 +52,11 @@ const STATUS_META: Record<SessionStatus, { label: string; cls: string }> = {
 };
 
 export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
-  const [tab, setTab] = useState<'agents' | 'improve'>('agents');
+  // Land on the Melhorar tab when a self-improve run is already in flight, so
+  // returning to Maestro after leaving mid-run shows the run instead of resetting.
+  const [tab, setTab] = useState<'agents' | 'improve'>(
+    () => (useSelfImproveStore.getState().phase !== 'idle' ? 'improve' : 'agents'),
+  );
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');

@@ -1,70 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { siCreate, siDiffstat, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
+import { useEffect, useMemo, useState } from 'react';
 import { useAgentStream } from './useAgentStream';
 import { Timeline } from './Timeline';
-import type { SiSession, DiffFile, GateResult } from './types';
-
-const DEFAULT_ROOT = '/Users/jonh1788/Dev/Projeto-Seraphine';
-const REPO_KEY = 'maestro.repoRoot';
-const MAX_ATTEMPTS = 3;
-
-// The worktree root (session.path) is the repo root of the worktree; cargo
-// lives in apps/seraphine/frontend/src-tauri and npm in apps/seraphine/frontend,
-// so each gate step cd's into the right subdir (cwd = session.path).
-const GATE = [
-  'cd apps/seraphine/frontend/src-tauri && cargo build',
-  'cd apps/seraphine/frontend/src-tauri && cargo test agents:: --lib',
-  'cd apps/seraphine/frontend/src-tauri && cargo test --test supervisor',
-  'cd apps/seraphine/frontend && npm run build',
-];
-
-// Short, human labels for the gate command list (the full GATE strings carry the
-// `cd …` prefix; the card shows just the meaningful command).
-const GATE_LABELS = ['cargo build', 'cargo test agents::', 'cargo test --test supervisor', 'npm run build'];
-
-type Phase = 'idle' | 'working' | 'gating' | 'ready' | 'failed';
-
-/** A reference URL row with a stable id so list rows key on identity, not index. */
-type Ref = { id: string; url: string };
-
-/** Mirror of the server-side `slugify` (selfimprove.rs): ascii-alnum→lowercase,
- *  everything else→'-', collapse/trim dashes, max 40 chars, empty→'session'. */
-function slugify(goal: string): string {
-  const s = Array.from(goal).map((c) => (/[a-z0-9]/i.test(c) ? c.toLowerCase() : '-')).join('');
-  const out = s.split('-').filter(Boolean).join('-').slice(0, 40).replace(/^-+|-+$/g, '');
-  return out || 'session';
-}
-
-function composePrompt(goal: string, refs: string[]): string {
-  const clean = refs.map((r) => r.trim()).filter(Boolean);
-  const parts: string[] = [];
-  parts.push('Você é um agente de auto-aperfeiçoamento trabalhando dentro de um worktree isolado do repositório da Seraphine.');
-  parts.push('');
-  parts.push('Objetivo:');
-  parts.push(goal.trim());
-  if (clean.length) {
-    parts.push('');
-    parts.push('Referências (estude antes de implementar):');
-    for (const r of clean) parts.push(`- ${r}`);
-    parts.push('');
-    parts.push('Para cada referência: leia o conteúdo com WebFetch e adapte apenas o que fizer sentido para a arquitetura da Seraphine. Se for um repositório do GitHub que precise de leitura mais profunda, faça `git clone` dele para um diretório temporário de rascunho FORA deste repositório (ex.: em /tmp) e leia lá. NÃO copie código de referência por atacado — adapte só o que encaixar.');
-  }
-  parts.push('');
-  parts.push('Antes de finalizar, rode você mesmo o build e os testes para garantir que tudo compila e passa:');
-  parts.push('- cd apps/seraphine/frontend/src-tauri && cargo build');
-  parts.push('- cd apps/seraphine/frontend/src-tauri && cargo test agents:: --lib');
-  parts.push('- cd apps/seraphine/frontend/src-tauri && cargo test --test supervisor');
-  parts.push('- cd apps/seraphine/frontend && npm run build');
-  parts.push('');
-  parts.push('Quando terminar, me avise com um resumo curto do que mudou.');
-  return parts.join('\n');
-}
+import { useSelfImproveStore, GATE_LABELS, type Phase } from './selfImproveStore';
 
 // ---- diff-stat parsing (graceful degradation) -----------------------------
 // The backend returns DiffFile.changes as the right side of `git diff --stat`
 // (e.g. "+64 −12", "+32", "12 +++++-----"). Best-effort: pull the first two
 // integers as added/removed; if we can only find one, treat it per the badge.
-// Never throws — returns { added, removed, raw } with raw kept for fallback.
+// Never throws — returns { added, removed, ok }.
 function parseChanges(changes: string): { added: number; removed: number; ok: boolean } {
   const s = changes ?? '';
   // Form A: explicit signed counts "+64 −12" / "+32 -0" (− or - both accepted).
@@ -185,77 +128,37 @@ function Stepper({ phase }: { phase: Phase }): JSX.Element {
 }
 
 export function SelfImprove(): JSX.Element {
-  const [repoRoot, setRepoRoot] = useState<string>(() => localStorage.getItem(REPO_KEY) || DEFAULT_ROOT);
-  const [goal, setGoal] = useState('');
-  const [refs, setRefs] = useState<Ref[]>([]);
-  const [newRef, setNewRef] = useState('');
-  const refCounter = useRef(0); // stable, monotonic ids for ref rows (no Math.random/crypto)
-  const [session, setSession] = useState<SiSession | null>(null);
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [gate, setGate] = useState<GateResult | null>(null);
-  const [diff, setDiff] = useState<DiffFile[]>([]);
-  const [attempts, setAttempts] = useState(0);
-  const [iterFeedback, setIterFeedback] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [runStart, setRunStart] = useState<number | null>(null);
-  const [, setTick] = useState(0); // drives the elapsed-minutes re-render
+  // Run state + actions live in the store so an in-flight run survives leaving
+  // and re-entering the Maestro tab/view. The gate-iterate loop is driven by the
+  // global event stream inside the store (selfImproveStore.ts), not here.
+  const repoRoot = useSelfImproveStore((s) => s.repoRoot);
+  const goal = useSelfImproveStore((s) => s.goal);
+  const refs = useSelfImproveStore((s) => s.refs);
+  const newRef = useSelfImproveStore((s) => s.newRef);
+  const session = useSelfImproveStore((s) => s.session);
+  const agentId = useSelfImproveStore((s) => s.agentId);
+  const phase = useSelfImproveStore((s) => s.phase);
+  const gate = useSelfImproveStore((s) => s.gate);
+  const diff = useSelfImproveStore((s) => s.diff);
+  const attempts = useSelfImproveStore((s) => s.attempts);
+  const iterFeedback = useSelfImproveStore((s) => s.iterFeedback);
+  const error = useSelfImproveStore((s) => s.error);
+  const runStart = useSelfImproveStore((s) => s.runStart);
+  const setRepoRoot = useSelfImproveStore((s) => s.setRepoRoot);
+  const setGoal = useSelfImproveStore((s) => s.setGoal);
+  const setNewRef = useSelfImproveStore((s) => s.setNewRef);
+  const setIterFeedback = useSelfImproveStore((s) => s.setIterFeedback);
+  const addRef = useSelfImproveStore((s) => s.addRef);
+  const removeRef = useSelfImproveStore((s) => s.removeRef);
+  const startSI = useSelfImproveStore((s) => s.startSI);
+  const approve = useSelfImproveStore((s) => s.approve);
+  const reject = useSelfImproveStore((s) => s.reject);
+  const iterate = useSelfImproveStore((s) => s.iterate);
 
   const events = useAgentStream();
-  // Index (in the global events array) of the last `result` event we already
-  // gated on. Ensures the gate fires exactly once per finished turn even though
-  // the effect re-runs on every incoming event.
-  const lastGatedIdx = useRef(-1);
-  // Per-run token: bumped whenever the session context changes (new run, reject,
-  // approve-reset, iterate) so a long in-flight `siGate.then` that resolves after
-  // the change is recognized as stale and dropped instead of clobbering fresh state.
-  const runId = useRef(0);
+  const [, setTick] = useState(0); // drives the elapsed-minutes re-render
 
-  useEffect(() => { localStorage.setItem(REPO_KEY, repoRoot); }, [repoRoot]);
-
-  const agentEvents = useMemo(
-    () => events.filter((e) => e.agent_id === agentId),
-    [events, agentId],
-  );
-
-  // Gate-iterate loop: when the agent finishes a turn (a `result` event) while
-  // we're in the 'working' phase, run the gate. We track the index of the
-  // newest `result` event for this agent and only act when it advances past the
-  // last index we processed.
-  useEffect(() => {
-    if (phase !== 'working' || !agentId || !session) return;
-    let newestResultIdx = -1;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.agent_id === agentId && e.kind.kind === 'result') { newestResultIdx = i; break; }
-    }
-    if (newestResultIdx < 0 || newestResultIdx <= lastGatedIdx.current) return;
-    lastGatedIdx.current = newestResultIdx;
-
-    setPhase('gating');
-    const s = session;
-    const aid = agentId;
-    const myRun = runId.current;
-    void siGate(s.path, GATE).then((g) => {
-      if (runId.current !== myRun) return; // a reset/new-run happened mid-gate; drop this stale result
-      setGate(g);
-      if (g.ok) {
-        void siDiffstat(repoRoot, s.branch).then(setDiff).catch(() => {});
-        setPhase('ready');
-      } else if (attempts < MAX_ATTEMPTS) {
-        setAttempts((a) => a + 1);
-        const last = g.steps.at(-1);
-        void sendToAgent(aid, `O gate falhou na etapa: ${last?.cmd}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
-        setPhase('working');
-      } else {
-        setPhase('failed');
-      }
-    }).catch((err) => {
-      if (runId.current !== myRun) return; // stale: don't surface a dropped run's gate error
-      setError(String(err));
-      setPhase('failed');
-    });
-  }, [events, phase, agentId, session, attempts, repoRoot]);
+  const agentEvents = useMemo(() => events.filter((e) => e.agent_id === agentId), [events, agentId]);
 
   // Tick every 30s while a run is in flight so the elapsed-minutes clock line
   // re-renders. Cleared when the run ends or runStart resets.
@@ -266,81 +169,9 @@ export function SelfImprove(): JSX.Element {
     return () => clearInterval(t);
   }, [runStart, phase]);
 
-  const reset = (): void => {
-    setSession(null);
-    setAgentId(null);
-    setPhase('idle');
-    setGate(null);
-    setDiff([]);
-    setAttempts(0);
-    setIterFeedback('');
-    setError(null);
-    setRunStart(null);
-    lastGatedIdx.current = -1;
-    runId.current += 1; // invalidate any in-flight gate (covers reject + approve-reset)
-  };
-
-  const startSI = (): void => {
-    setError(null);
-    setGate(null);
-    setDiff([]);
-    setAttempts(0);
-    setRunStart(Date.now());
-    lastGatedIdx.current = events.length - 1; // ignore any pre-existing results
-    runId.current += 1; // invalidate any in-flight gate from a prior session
-    const id = `si-${Date.now()}`;
-    void siCreate(repoRoot, slugify(goal), id).then((s) => {
-      setSession(s);
-      setPhase('working');
-      void spawnAgent(s.path, composePrompt(goal, refs.map((r) => r.url)), 'sandbox').then(setAgentId).catch((err) => {
-        setError(String(err));
-        setPhase('failed');
-      });
-    }).catch((err) => {
-      setError(String(err));
-      setPhase('idle');
-    });
-  };
-
-  const approve = (): void => {
-    if (!session) return;
-    const s = session;
-    void siMerge(repoRoot, s.branch).then(() => {
-      void siDiscard(repoRoot, s.id, s.branch).then(reset).catch(reset);
-    }).catch((err) => {
-      // Merge conflict (Rust returns Err containing "abortado"): keep the
-      // session so the user can iterate or reject manually.
-      setError(String(err));
-    });
-  };
-
-  const reject = (): void => {
-    if (!session) return;
-    const s = session;
-    void siDiscard(repoRoot, s.id, s.branch).then(reset).catch(reset);
-  };
-
-  const iterate = (): void => {
-    if (!agentId || !iterFeedback.trim()) return;
-    void sendToAgent(agentId, iterFeedback.trim());
-    setIterFeedback('');
-    setPhase('working');
-    setAttempts(0);
-    lastGatedIdx.current = events.length - 1; // wait for the NEXT result
-    runId.current += 1; // drop any in-flight gate; the new turn captures a fresh token
-  };
-
-  const addRef = (): void => {
-    const r = newRef.trim();
-    if (!r) return;
-    const id = `si-ref-${(refCounter.current += 1)}`;
-    setRefs((rs) => [...rs, { id, url: r }]);
-    setNewRef('');
-  };
-
   const canStart = !!repoRoot && !!goal.trim() && (phase === 'idle' || phase === 'failed');
-  const showActions = phase === 'ready' || phase === 'failed';
   const editable = phase === 'idle' || phase === 'failed';
+  const showActions = phase === 'ready' || phase === 'failed';
   const showSummary = phase === 'working' || phase === 'gating' || phase === 'ready';
   const live = phase === 'working' || phase === 'gating';
 
@@ -443,7 +274,7 @@ export function SelfImprove(): JSX.Element {
                           className="si-ref__rm"
                           aria-label="Remover referência"
                           disabled={!editable}
-                          onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
+                          onClick={() => removeRef(r.id)}
                         ><IconX /></button>
                       </div>
                     ))}
