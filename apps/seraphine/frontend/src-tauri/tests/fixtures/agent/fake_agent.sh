@@ -9,10 +9,13 @@ fixture="$1"; shift || true
 wait_after=""
 [ "${1:-}" = "--wait-stdin-after" ] && wait_after="$2"
 i=0
-while IFS= read -r line; do
+# Read the fixture on FD 3 so the `read _ans` below blocks on the script's
+# real stdin (FD 0 = the supervisor's permission response), instead of
+# consuming the next fixture line.
+while IFS= read -r line <&3; do
   i=$((i+1))
   printf '%s\n' "$line"
   if [ -n "$wait_after" ] && [ "$i" = "$wait_after" ]; then
     IFS= read -r _ans   # block for one stdin line (the permission response)
   fi
-done < "$fixture"
+done 3< "$fixture"
