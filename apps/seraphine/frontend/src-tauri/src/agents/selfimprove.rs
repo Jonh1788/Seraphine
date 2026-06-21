@@ -33,6 +33,35 @@ pub fn maestro_si_list(repo_root: String) -> Result<Vec<String>, String> {
     Ok(out.lines().filter_map(|l| l.strip_prefix("worktree ")).filter(|p| p.contains("/.worktrees/selfimprove-")).map(String::from).collect())
 }
 
+#[derive(Serialize, Clone)]
+pub struct DiffFile { pub path: String, pub changes: String }
+
+#[tauri::command]
+pub fn maestro_si_diffstat(repo_root: String, branch: String) -> Result<Vec<DiffFile>, String> {
+    let out = git(&repo_root, &["diff", "--stat", &format!("main...{branch}")])?;
+    Ok(out.lines().filter(|l| l.contains('|')).map(|l| {
+        let mut p = l.splitn(2, '|');
+        DiffFile { path: p.next().unwrap_or("").trim().to_string(), changes: p.next().unwrap_or("").trim().to_string() }
+    }).collect())
+}
+
+#[tauri::command]
+pub fn maestro_si_merge(repo_root: String, branch: String) -> Result<String, String> {
+    git(&repo_root, &["switch", "main"])?;
+    match git(&repo_root, &["merge", "--no-ff", "-m", &format!("merge: self-improvement {branch}"), &branch]) {
+        Ok(o) => Ok(o),
+        Err(e) => { let _ = git(&repo_root, &["merge", "--abort"]); Err(format!("conflito no merge (abortado): {e}")) }
+    }
+}
+
+#[tauri::command]
+pub fn maestro_si_discard(repo_root: String, id: String, branch: String) -> Result<(), String> {
+    let rel = format!(".worktrees/selfimprove-{id}");
+    let _ = git(&repo_root, &["worktree", "remove", "--force", &rel]);
+    let _ = git(&repo_root, &["branch", "-D", &branch]);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
