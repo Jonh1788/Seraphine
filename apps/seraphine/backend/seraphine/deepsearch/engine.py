@@ -215,6 +215,10 @@ class DeepResearchEngine:
         self.fanout = fanout
         self.synth = synth
         self.tools = tools
+        # Records the last LLM-call error so an empty report can be reported as a
+        # real failure (e.g. the cliproxy/OpenRouter backend is unreachable or the
+        # configured model is invalid) instead of a silent blank report.
+        self._llm_error: str | None = None
 
     # -- public API --------------------------------------------------------
 
@@ -226,6 +230,7 @@ class DeepResearchEngine:
         emit: Callable[[dict], Any],
     ) -> dict:
         ledger = _SourceLedger()
+        self._llm_error = None
 
         async def _emit(evt: dict) -> None:
             try:
@@ -249,6 +254,21 @@ class DeepResearchEngine:
             }
 
         sources = ledger.sources()
+        # An empty report means the LLM produced nothing — almost always the LLM
+        # backend is unreachable (e.g. cliproxy not running / OpenRouter key/model
+        # invalid). Surface it as a real failure instead of a silent blank report.
+        if not (report or "").strip():
+            msg = (
+                "Não consegui gerar o relatório: o modelo de LLM não retornou conteúdo. "
+                "Verifique a configuração de modelos (Configurar modelos) e se o backend "
+                "de LLM (cliproxy/OpenRouter) está acessível e o modelo escolhido é válido."
+            )
+            if self._llm_error:
+                msg += f" (detalhe: {self._llm_error[:300]})"
+            await _emit({"type": "error", "message": msg})
+            await _emit({"type": "done", "status": "failed"})
+            return {"report": "", "sources": sources, "status": "failed"}
+
         await _emit({"type": "report", "markdown": report, "sources": sources})
         await _emit({"type": "done", "status": "done"})
         return {"report": report, "sources": sources, "status": "done"}
@@ -609,8 +629,9 @@ class DeepResearchEngine:
                 ],
                 max_tokens=1024,
             )
-        except Exception:
+        except Exception as exc:
             # If extraction fails, fall back to the raw (capped) text as data.
+            self._llm_error = str(exc)
             out = text[:EXTRACT_CHAR_CAP]
         return (out or "").strip()[:EXTRACT_CHAR_CAP]
 
@@ -621,7 +642,8 @@ class DeepResearchEngine:
             data = await self.fanout.complete_json(
                 system=system, user=user, tool=tool
             )
-        except Exception:
+        except Exception as exc:
+            self._llm_error = str(exc)
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -646,11 +668,13 @@ class DeepResearchEngine:
                 chunks.append(chunk)
                 await emit({"type": "synthesis", "text": chunk})
             return "".join(chunks).strip()
-        except Exception:
+        except Exception as exc:
             # Fall back to a non-streaming completion if streaming is unsupported.
+            self._llm_error = str(exc)
             try:
                 out = await role.complete(messages, max_tokens=max_tokens)
-            except Exception:
+            except Exception as exc2:
+                self._llm_error = str(exc2)
                 return "".join(chunks).strip()
             out = (out or "").strip()
             if out and not chunks:

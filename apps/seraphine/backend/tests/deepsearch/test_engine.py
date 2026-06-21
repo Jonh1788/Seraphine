@@ -76,6 +76,39 @@ async def test_quick_run_emits_and_reports():
     assert result["sources"]  # at least one source
 
 
+class _FailingSynthRole(_FakeRole):
+    """Synthesis role that fails like an unreachable LLM backend (cliproxy down)."""
+
+    async def complete(self, messages, **kw):
+        raise RuntimeError("Anthropic HTTP connection refused (cliproxy down)")
+
+    async def stream(self, messages, **kw):
+        raise RuntimeError("Anthropic HTTP connection refused (cliproxy down)")
+        yield ""  # pragma: no cover — makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_empty_report_surfaces_failure_with_detail():
+    # Search/extract work, but synthesis can't reach the LLM → empty report.
+    # The run must surface a FAILURE (not a silent blank "done" report).
+    events = []
+    eng = DeepResearchEngine(
+        fanout=_FakeRole(),
+        synth=_FailingSynthRole(),
+        tools={"search": _FakeSearch(), "fetch": _FakeFetch()},
+    )
+    result = await eng.run(
+        "o que é X?", mode="quick", emit=lambda e: events.append(e)
+    )
+    assert result["status"] == "failed"
+    assert result["report"] == ""
+    errs = [e for e in events if e["type"] == "error"]
+    assert errs and "cliproxy" in errs[-1]["message"].lower()  # detail surfaced
+    assert not any(e["type"] == "report" for e in events)  # no blank success report
+    dones = [e for e in events if e["type"] == "done"]
+    assert dones and dones[-1]["status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Deep mode fakes + tests (Task 3.2)
 # ---------------------------------------------------------------------------
