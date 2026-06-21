@@ -30,6 +30,11 @@ struct AgentHandle {
     // remote observability/handover in later milestones.
     #[allow(dead_code)]
     host: Option<String>,
+    // Tool inputs of outstanding permission requests (request_id -> input),
+    // stashed when a request arrives so the allow response can echo
+    // `updatedInput` (mandatory in the claude permission schema) on the
+    // UI-approve path, which otherwise has no access to the original input.
+    pending: HashMap<String, Value>,
 }
 static REGISTRY: OnceLock<Mutex<HashMap<String, AgentHandle>>> = OnceLock::new();
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -84,20 +89,26 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, host: Option<
                 // SHORT registry lock: do not hold it across the emit below.
                 let mut reg = registry().lock().unwrap();
                 if let Some(h) = reg.get_mut(&id2) {
+                    // The tool input rides on the request; the allow response must
+                    // echo it back as `updatedInput` or claude rejects the response
+                    // (ZodError) and the tool never runs.
+                    let input = v.get("request").and_then(|r| r.get("input"));
                     let decision = if h.mode == "sandbox" {
-                        let input = v.get("request").and_then(|r| r.get("input"));
                         crate::agents::policy::decide_sandbox(&h.cwd, tool, input)
                     } else {
                         crate::agents::policy::decide(crate::agents::policy::parse_mode(&h.mode), tool)
                     };
                     match decision {
                         crate::agents::policy::Decision::Allow => {
-                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, true); }
+                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, true, input); }
                         }
                         crate::agents::policy::Decision::Deny => {
-                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, false); }
+                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, false, input); }
                         }
-                        crate::agents::policy::Decision::Escalate => { /* leave for the UI via the emitted event */ }
+                        crate::agents::policy::Decision::Escalate => {
+                            // Stash the input so the UI-approve path can echo updatedInput.
+                            if let Some(inp) = input { h.pending.insert(request_id.clone(), inp.clone()); }
+                        }
                     }
                 }
                 drop(reg);
@@ -107,7 +118,7 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, host: Option<
         }
         let _ = app2.emit("maestro:agent-exit", id2.clone());
     });
-    registry().lock().unwrap().insert(agent_id.clone(), AgentHandle { child, stdin, cwd: cwd.to_string(), mode: mode.to_string(), host: host.map(String::from) });
+    registry().lock().unwrap().insert(agent_id.clone(), AgentHandle { child, stdin, cwd: cwd.to_string(), mode: mode.to_string(), host: host.map(String::from), pending: HashMap::new() });
     Ok(agent_id)
 }
 
@@ -134,13 +145,23 @@ pub fn maestro_send_to_agent(agent_id: String, text: String) -> Result<(), Strin
 }
 
 /// Write a `control_response` answering a `can_use_tool` permission request.
-/// REAL shape (verified in M0): camelCase `behavior`, `subtype:"success"` for
-/// BOTH allow and deny — the decision lives in the nested `response.behavior`.
-fn write_permission_response(si: &mut ChildStdin, request_id: &str, allow: bool) -> Result<(), String> {
+/// Envelope: `subtype:"success"` for both outcomes. The nested `response` is the
+/// `PermissionResult` claude validates with Zod:
+///   allow -> {behavior:"allow", updatedInput:<record>}  (updatedInput MANDATORY —
+///            omitting it yields `path:["updatedInput"] expected record, received
+///            undefined` and the tool never runs)
+///   deny  -> {behavior:"deny", message:<reason>}
+/// `input` is the tool's original input from the request, echoed unchanged
+/// (approve as-is); falls back to an empty record if absent.
+fn write_permission_response(si: &mut ChildStdin, request_id: &str, allow: bool, input: Option<&Value>) -> Result<(), String> {
+    let inner = if allow {
+        serde_json::json!({ "behavior": "allow", "updatedInput": input.cloned().unwrap_or_else(|| serde_json::json!({})) })
+    } else {
+        serde_json::json!({ "behavior": "deny", "message": "Negado pela política do Maestro." })
+    };
     let resp = serde_json::json!({
         "type":"control_response",
-        "response":{"subtype":"success","request_id":request_id,
-                    "response":{"behavior": if allow {"allow"} else {"deny"}}}
+        "response":{"subtype":"success","request_id":request_id,"response": inner}
     });
     writeln!(si, "{}", resp).map_err(|e| format!("write failed: {e}"))?;
     si.flush().map_err(|e| e.to_string())
@@ -150,8 +171,10 @@ fn write_permission_response(si: &mut ChildStdin, request_id: &str, allow: bool)
 pub fn maestro_respond_permission(agent_id: String, request_id: String, allow: bool) -> Result<(), String> {
     let mut reg = registry().lock().unwrap();
     let h = reg.get_mut(&agent_id).ok_or("unknown agent")?;
+    // The input was stashed when the request arrived (reader thread, Escalate arm).
+    let input = h.pending.remove(&request_id);
     let si = h.stdin.as_mut().ok_or("agent stdin closed")?;
-    write_permission_response(si, &request_id, allow)
+    write_permission_response(si, &request_id, allow, input.as_ref())
 }
 
 #[tauri::command]
