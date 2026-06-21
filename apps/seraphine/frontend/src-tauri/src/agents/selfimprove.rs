@@ -10,6 +10,9 @@ fn git(repo_root: &str, args: &[&str]) -> Result<String, String> {
 }
 
 /// kebab-case, ascii, max 40 chars — for the branch/worktree name.
+// Retained as the canonical server-side slug rule (the client now supplies the slug
+// to `maestro_si_create`); exercised by the `slugify_is_kebab` test.
+#[allow(dead_code)]
 pub fn slugify(goal: &str) -> String {
     let s: String = goal.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
     let s = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");

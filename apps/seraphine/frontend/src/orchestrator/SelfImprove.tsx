@@ -19,6 +19,9 @@ const GATE = [
 
 type Phase = 'idle' | 'working' | 'gating' | 'ready' | 'failed';
 
+/** A reference URL row with a stable id so list rows key on identity, not index. */
+type Ref = { id: string; url: string };
+
 /** Mirror of the server-side `slugify` (selfimprove.rs): ascii-alnum→lowercase,
  *  everything else→'-', collapse/trim dashes, max 40 chars, empty→'session'. */
 function slugify(goal: string): string {
@@ -55,8 +58,9 @@ function composePrompt(goal: string, refs: string[]): string {
 export function SelfImprove(): JSX.Element {
   const [repoRoot, setRepoRoot] = useState<string>(() => localStorage.getItem(REPO_KEY) || DEFAULT_ROOT);
   const [goal, setGoal] = useState('');
-  const [refs, setRefs] = useState<string[]>([]);
+  const [refs, setRefs] = useState<Ref[]>([]);
   const [newRef, setNewRef] = useState('');
+  const refCounter = useRef(0); // stable, monotonic ids for ref rows (no Math.random/crypto)
   const [session, setSession] = useState<SiSession | null>(null);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -71,6 +75,10 @@ export function SelfImprove(): JSX.Element {
   // gated on. Ensures the gate fires exactly once per finished turn even though
   // the effect re-runs on every incoming event.
   const lastGatedIdx = useRef(-1);
+  // Per-run token: bumped whenever the session context changes (new run, reject,
+  // approve-reset, iterate) so a long in-flight `siGate.then` that resolves after
+  // the change is recognized as stale and dropped instead of clobbering fresh state.
+  const runId = useRef(0);
 
   useEffect(() => { localStorage.setItem(REPO_KEY, repoRoot); }, [repoRoot]);
 
@@ -96,7 +104,9 @@ export function SelfImprove(): JSX.Element {
     setPhase('gating');
     const s = session;
     const aid = agentId;
+    const myRun = runId.current;
     void siGate(s.path, GATE).then((g) => {
+      if (runId.current !== myRun) return; // a reset/new-run happened mid-gate; drop this stale result
       setGate(g);
       if (g.ok) {
         void siDiffstat(repoRoot, s.branch).then(setDiff).catch(() => {});
@@ -110,6 +120,7 @@ export function SelfImprove(): JSX.Element {
         setPhase('failed');
       }
     }).catch((err) => {
+      if (runId.current !== myRun) return; // stale: don't surface a dropped run's gate error
       setError(String(err));
       setPhase('failed');
     });
@@ -125,6 +136,7 @@ export function SelfImprove(): JSX.Element {
     setIterFeedback('');
     setError(null);
     lastGatedIdx.current = -1;
+    runId.current += 1; // invalidate any in-flight gate (covers reject + approve-reset)
   };
 
   const startSI = (): void => {
@@ -133,11 +145,12 @@ export function SelfImprove(): JSX.Element {
     setDiff([]);
     setAttempts(0);
     lastGatedIdx.current = events.length - 1; // ignore any pre-existing results
+    runId.current += 1; // invalidate any in-flight gate from a prior session
     const id = `si-${Date.now()}`;
     void siCreate(repoRoot, slugify(goal), id).then((s) => {
       setSession(s);
       setPhase('working');
-      void spawnAgent(s.path, composePrompt(goal, refs), 'sandbox').then(setAgentId).catch((err) => {
+      void spawnAgent(s.path, composePrompt(goal, refs.map((r) => r.url)), 'sandbox').then(setAgentId).catch((err) => {
         setError(String(err));
         setPhase('failed');
       });
@@ -172,12 +185,14 @@ export function SelfImprove(): JSX.Element {
     setPhase('working');
     setAttempts(0);
     lastGatedIdx.current = events.length - 1; // wait for the NEXT result
+    runId.current += 1; // drop any in-flight gate; the new turn captures a fresh token
   };
 
   const addRef = (): void => {
     const r = newRef.trim();
     if (!r) return;
-    setRefs((rs) => [...rs, r]);
+    const id = `si-ref-${(refCounter.current += 1)}`;
+    setRefs((rs) => [...rs, { id, url: r }]);
     setNewRef('');
   };
 
@@ -215,14 +230,14 @@ export function SelfImprove(): JSX.Element {
 
         <label className="si-label">Referências (URLs opcionais)</label>
         <div className="si-refs">
-          {refs.map((r, i) => (
-            <div key={i} className="si-refs__row">
-              <span className="si-refs__url">{r}</span>
+          {refs.map((r) => (
+            <div key={r.id} className="si-refs__row">
+              <span className="si-refs__url">{r.url}</span>
               <button
                 type="button"
                 className="obs-btn obs-btn--ghost"
                 disabled={phase !== 'idle' && phase !== 'failed'}
-                onClick={() => setRefs((rs) => rs.filter((_, j) => j !== i))}
+                onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
               >
                 Remover
               </button>
