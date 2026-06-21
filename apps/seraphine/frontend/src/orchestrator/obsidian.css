@@ -335,36 +335,205 @@
 .maestro__evt-kind { font-size: 10px; font-weight: 700; color: var(--faint); text-transform: uppercase; }
 .maestro__evt-raw { font-size: 11px; color: var(--dim); margin: 2px 0 0; white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }
 
-/* Phase 3 — "Melhorar a Seraphine" panel + gate-iterate loop */
-.si-tabs { display: flex; gap: 6px; }
-.si-tabs__btn--active { color: var(--accent); background: var(--accent-soft); }
-.si-panel { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; }
-.si-form { display: flex; flex-direction: column; gap: 8px; }
-.si-label { font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
-.si-textarea { resize: vertical; min-height: 64px; font-family: inherit; line-height: 1.5; }
+/* =====================================================================
+   "Melhorar Seraphine" (SelfImprove) — Obsidian reskin.
+   Pipeline stepper + two-column (config / run-summary | live | diff).
+   Sits below the MaestroView header+tabs. Semantic colors as literals
+   (#4ade80 green, #ffa726/#ffce8a amber, #ef6b6b red); palette via tokens.
+   Reuses .mst-tl-* (shared Timeline), barFlow + caretBlink (this file),
+   and the global statusBlink / ringPulse / spin keyframes.
+   ===================================================================== */
+.si-root { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0; }
+.si-mono { font-family: var(--font-mono); }
+.si-add { color: #4ade80; }
+.si-del { color: #ef6b6b; }
+.si-dim { color: var(--dim); }
+
+/* ---- Pipeline stepper (§4) ---- */
+.si-stepper { display: flex; align-items: center; gap: 0; padding: 6px 0 14px; flex: none; }
+.si-stepper__seg { display: flex; align-items: center; flex: none; }
+.si-stepper__seg:not(:last-child) { flex: 1; }
+.si-step { display: flex; align-items: center; gap: 9px; flex: none; }
+.si-step__circle { width: 26px; height: 26px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
+.si-step__circle--completed { background: #4ade80; }
+.si-step__circle--active { background: var(--accent-soft); border: 2px solid var(--accent); }
+.si-step__circle--fail { background: rgba(239,107,107,0.16); border: 2px solid rgba(239,107,107,0.55); }
+.si-step__circle--pending { background: transparent; border: 1.5px solid var(--border-strong); }
+.si-step__num { font-size: 12px; font-weight: 700; color: var(--faint); }
+.si-step__num--active { font-size: 12px; font-weight: 700; color: var(--accent); }
+.si-step__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: statusBlink 1.2s ease-in-out infinite; }
+.si-step__ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent); animation: ringPulse 1.8s ease-in-out infinite; pointer-events: none; }
+.si-step__label { font-size: 12px; font-weight: 600; }
+.si-step__label--completed { color: var(--text); }
+.si-step__label--active { color: var(--accent); font-weight: 700; }
+.si-step__label--fail { color: #ef6b6b; font-weight: 700; }
+.si-step__label--pending { color: var(--faint); }
+.si-step-conn { flex: 1; height: 2px; margin: 0 12px; border-radius: 2px; }
+.si-step-conn--done { background: #4ade80; }
+.si-step-conn--grad { background: linear-gradient(90deg, #4ade80, var(--accent)); }
+.si-step-conn--pending { background: var(--border); }
+
+/* ---- Two-column content (§5) ---- */
+.si-content { flex: 1; display: flex; gap: 16px; min-height: 0; }
+.si-aside { width: 340px; flex: none; display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.si-main { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
+
+.si-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+.si-fieldlabel { font-size: 11px; font-weight: 600; color: var(--faint); display: block; margin-bottom: 6px; }
+.si-inset { background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px; }
+
+/* ---- Config card (§6) ---- */
+.si-config { display: flex; flex-direction: column; gap: 13px; }
+.si-field { display: flex; flex-direction: column; }
+.si-inset--row { display: flex; align-items: center; gap: 8px; padding: 9px 11px; }
+.si-inset__icon { color: var(--faint); flex: none; display: flex; }
+.si-inset__input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; font-size: 12px; color: var(--text); }
+.si-inset__input::placeholder { color: var(--faint); }
+.si-inset__textarea { width: 100%; resize: vertical; min-height: 56px; padding: 10px 11px; background: var(--bg-0); border: 1px solid var(--border); outline: none; font-size: 13px; color: var(--text); line-height: 1.5; font-family: inherit; }
+.si-inset__textarea::placeholder { color: var(--faint); }
+.si-inset__input:focus, .si-inset__textarea:focus { border-color: var(--accent); }
+.si-inset__input:disabled, .si-inset__textarea:disabled { opacity: 0.6; }
+
 .si-refs { display: flex; flex-direction: column; gap: 6px; }
-.si-refs__row { display: flex; gap: 8px; align-items: center; }
-.si-refs__url { flex: 1; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SF Mono", Menlo, monospace; }
-.si-refs__input { flex: 1; }
-.si-phase { font-size: 13px; font-weight: 600; color: var(--text-dim); padding: 8px 12px; border-radius: 8px; background: var(--bg-2); }
-.si-phase--working, .si-phase--gating { color: var(--accent); background: var(--accent-soft); }
-.si-phase--ready { color: var(--user); background: rgba(74,222,128,0.10); }
-.si-phase--failed { color: var(--danger); background: rgba(239,68,68,0.10); }
-.si-error { font-size: 12px; color: var(--danger); background: rgba(239,68,68,0.10); border-radius: 8px; padding: 8px 12px; white-space: pre-wrap; }
-.si-stream { max-height: 280px; }
-.si-gate { display: flex; flex-direction: column; gap: 6px; background: var(--bg-2); border-radius: 10px; padding: 12px; }
-.si-gate__title { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
-.si-gate__step { border-left: 2px solid var(--user); padding-left: 8px; }
-.si-gate__step--fail { border-left-color: var(--danger); }
-.si-gate__cmd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); }
-.si-gate__cmd code { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); }
-.si-gate__mark { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--user); flex: none; }
-.si-gate__step--fail .si-gate__mark { color: var(--danger); }
-.si-gate__tail { font-size: 11px; color: var(--text-dim); margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; font-family: "SF Mono", Menlo, monospace; max-height: 200px; overflow-y: auto; }
-.si-diff { display: flex; flex-direction: column; gap: 4px; background: var(--bg-2); border-radius: 10px; padding: 12px; }
-.si-diff__title { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
-.si-diff__row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
-.si-diff__path { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SF Mono", Menlo, monospace; }
-.si-diff__changes { color: var(--text-dim); flex: none; font-family: "SF Mono", Menlo, monospace; }
-.si-actions { display: flex; gap: 8px; }
-.si-iterate { display: flex; flex-direction: column; gap: 8px; }
+.si-ref { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.si-ref__icon { color: var(--accent); flex: none; display: flex; }
+.si-ref--add .si-ref__icon { color: var(--faint); }
+.si-ref__url { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-ref__rm { background: transparent; border: none; cursor: pointer; color: var(--faint); flex: none; display: flex; padding: 0; }
+.si-ref__rm:hover:not(:disabled) { color: #ef6b6b; }
+.si-ref__rm:disabled { opacity: 0.4; cursor: default; }
+.si-ref--add { border: 1px dashed var(--border); border-radius: 9px; color: var(--faint); }
+.si-ref__input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; font-size: 12px; color: var(--text); }
+.si-ref__input::placeholder { color: var(--faint); }
+.si-ref__input:disabled { opacity: 0.6; }
+.si-ref__addbtn { background: transparent; border: none; cursor: pointer; color: var(--accent); flex: none; display: flex; padding: 0; }
+.si-ref__addbtn:disabled { opacity: 0.4; cursor: default; color: var(--faint); }
+
+/* ---- Gate de qualidade card (§6.2) ---- */
+.si-quality__head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+.si-quality__head svg { flex: none; }
+.si-quality__title { font-size: 12px; font-weight: 700; color: var(--text); }
+.si-quality__note { margin-left: auto; font-size: 11px; color: var(--faint); }
+.si-quality__list { display: flex; flex-direction: column; gap: 7px; }
+.si-quality__item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim); }
+.si-quality__item code { font-size: 11px; }
+.si-quality__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+
+/* ---- Iniciar button (§6 note) ---- */
+.si-start {
+  flex: none; width: 100%; border: none; cursor: pointer;
+  background: var(--accent); color: var(--accent-contrast);
+  font-size: 13px; font-weight: 700; padding: 11px 20px; border-radius: 11px;
+  transition: background 200ms ease;
+}
+.si-start:hover:not(:disabled) { background: var(--accent-hi); }
+.si-start:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- Accent shield footnote (§6.3) ---- */
+.si-footnote { margin-top: auto; display: flex; align-items: center; gap: 9px; background: var(--accent-soft); border: 1px solid rgba(154,147,255,0.22); border-radius: 12px; padding: 11px 13px; }
+.si-footnote svg { flex: none; }
+.si-footnote__text { font-size: 11px; color: var(--dim); line-height: 1.5; }
+.si-footnote__text strong { color: var(--text); font-weight: 600; }
+.si-footnote__text code { font-size: 11px; }
+
+/* ---- Run summary card (§7.1) ---- */
+.si-summary__goal { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.si-summary__meta { display: flex; flex-direction: column; gap: 9px; margin-top: 14px; }
+.si-meta-row { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--dim); }
+.si-meta-row svg { flex: none; stroke: var(--dim); }
+.si-meta-row code { font-size: 12px; }
+.si-meta-icon { display: flex; flex: none; }
+.si-meta-icon--amber svg { stroke: #ffa726; }
+
+/* ---- Gate result card (§7.2) ---- */
+.si-gate { display: flex; flex-direction: column; }
+.si-gate--pass { border-color: rgba(74,222,128,0.25); }
+.si-gate--fail { border-color: rgba(239,107,107,0.35); }
+.si-gate--inline { background: var(--bg-0); margin-bottom: 4px; }
+.si-gate__head { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; }
+.si-gate__tile { width: 26px; height: 26px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.si-gate--pass .si-gate__tile { background: rgba(74,222,128,0.16); }
+.si-gate--fail .si-gate__tile { background: rgba(239,107,107,0.16); }
+.si-gate__title { font-size: 13px; font-weight: 700; color: var(--text); }
+.si-gate__count { margin-left: auto; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 8px; }
+.si-gate--pass .si-gate__count { color: #4ade80; background: rgba(74,222,128,0.12); }
+.si-gate--fail .si-gate__count { color: #ef6b6b; background: rgba(239,107,107,0.12); }
+.si-gate__steps { display: flex; flex-direction: column; gap: 8px; }
+.si-gate__step { display: flex; flex-direction: column; gap: 6px; }
+.si-gate__row { display: flex; align-items: center; gap: 9px; }
+.si-gate__row svg { flex: none; }
+.si-gate__cmd { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.si-gate__cmd--fail { color: #ef6b6b; }
+.si-gate__tail { margin: 0 0 0 24px; background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px; padding: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+
+/* ---- "Seguro pra mesclar" seal (§7.3) ---- */
+.si-seal { margin-top: auto; display: flex; align-items: center; gap: 9px; background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); border-radius: 12px; padding: 11px 13px; }
+.si-seal svg { flex: none; }
+.si-seal__text { font-size: 11px; color: var(--dim); line-height: 1.5; }
+.si-seal__text strong { color: var(--text); font-weight: 600; }
+
+/* ---- Error surface ---- */
+.si-error { font-size: 12px; color: #ef6b6b; background: rgba(239,107,107,0.08); border: 1px solid rgba(239,107,107,0.35); border-radius: 9px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); }
+
+/* ---- Live header (working / gating, §8.1) ---- */
+.si-livehead { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); flex: none; }
+.si-livehead__status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; color: var(--accent); }
+.si-livehead__try { font-weight: 600; color: var(--accent); }
+.si-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; display: inline-block; animation: spin 0.8s linear infinite; flex: none; }
+.si-livehead__branch { font-size: 11px; color: var(--dim); display: inline-flex; align-items: center; gap: 5px; }
+.si-livehead__branch svg { stroke: currentColor; flex: none; }
+.si-livehead__branch code { font-size: 11px; }
+.si-livehead__seal { margin-left: auto; font-size: 11px; font-weight: 600; color: #ffce8a; background: rgba(255,167,38,0.14); padding: 4px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; }
+.si-livehead__seal svg { stroke: currentColor; flex: none; }
+
+/* ---- Live body (shared Timeline) + progress bar (§8.2) ---- */
+.si-livebody { flex: 1; overflow-y: auto; padding: 18px 20px; }
+.si-progress { flex: none; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
+.si-progress__bar { position: absolute; top: 0; left: 0; height: 100%; width: 25%; background: var(--accent); border-radius: 2px; animation: barFlow 1.6s ease-in-out infinite; }
+
+/* ---- Main empty (idle) ---- */
+.si-mainempty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px; text-align: center; }
+.si-mainempty__icon { width: 44px; height: 44px; border-radius: 13px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
+.si-mainempty__title { font-size: 15px; font-weight: 700; color: var(--text); }
+.si-mainempty__body { font-size: 13px; color: var(--dim); line-height: 1.6; max-width: 380px; }
+
+/* ---- Diff header (§9.1) ---- */
+.si-diffhead { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--border); flex: none; }
+.si-diffhead__title { font-size: 14px; font-weight: 700; color: var(--text); }
+.si-diffhead__count { font-size: 12px; color: var(--dim); }
+.si-diffhead__totals { margin-left: auto; font-size: 12px; font-family: var(--font-mono); }
+
+/* ---- Diff body + file rows (§9.2) ---- */
+.si-diffbody { flex: 1; overflow-y: auto; padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; }
+.si-diffempty { font-size: 13px; color: var(--faint); }
+.si-difffile { display: flex; align-items: center; gap: 12px; background: var(--elev); border: 1px solid var(--border); border-radius: 11px; padding: 12px 14px; }
+.si-difffile__badge { width: 24px; height: 24px; flex: none; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
+.si-difffile__badge--M { background: rgba(255,167,38,0.16); color: #ffa726; }
+.si-difffile__badge--A { background: rgba(74,222,128,0.16); color: #4ade80; }
+.si-difffile__path { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-difffile__counts { flex: none; display: flex; align-items: center; gap: 8px; font-size: 12px; font-family: var(--font-mono); }
+.si-difffile__bars { display: flex; gap: 2px; }
+.si-bar { width: 6px; height: 11px; border-radius: 2px; }
+.si-bar--add { background: #4ade80; }
+.si-bar--del { background: #ef6b6b; }
+
+/* ---- Action bar (§9.3) ---- */
+.si-actionbar { padding: 14px 20px 18px; flex: none; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 11px; }
+.si-actionbar__row { display: flex; align-items: center; gap: 10px; }
+.si-actionbar__legend { margin-left: auto; font-size: 11px; color: var(--faint); }
+.si-actionbar__legend code { font-size: 11px; }
+.si-btn { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 11px; }
+.si-btn svg { flex: none; }
+.si-btn--merge { border: none; background: #4ade80; color: #0d0d11; font-size: 13px; font-weight: 700; padding: 11px 20px; }
+.si-btn--merge:hover { background: #66e095; }
+.si-btn--reject { border: 1px solid rgba(239,107,107,0.35); background: rgba(239,107,107,0.08); color: #ef6b6b; font-size: 13px; font-weight: 600; padding: 11px 16px; }
+.si-btn--reject:hover { background: rgba(239,107,107,0.14); }
+
+/* ---- Iterate input (§9.3 row 2) ---- */
+.si-iterate { display: flex; align-items: center; gap: 10px; background: var(--bg-0); border: 1px solid var(--border); border-radius: 12px; padding: 8px 8px 8px 14px; }
+.si-iterate__icon { color: var(--faint); flex: none; display: flex; }
+.si-iterate__input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; font-size: 13px; color: var(--text); font-family: inherit; }
+.si-iterate__input::placeholder { color: var(--faint); }
+.si-iterate__btn { border: 1px solid var(--border-strong); background: transparent; color: var(--text); font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 9px; cursor: pointer; flex: none; }
+.si-iterate__btn:hover:not(:disabled) { background: var(--bg-2); }
+.si-iterate__btn:disabled { opacity: 0.5; cursor: default; }
