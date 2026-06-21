@@ -74,6 +74,9 @@ from seraphine.contextual.service import ContextualActionsService
 from seraphine.notifications import schema as notifications_schema
 from seraphine.notifications.routes import router as notifications_router
 from seraphine.notifications.service import NotificationService
+from seraphine.deepsearch import schema as deepsearch_schema
+from seraphine.deepsearch.routes import router as deepsearch_router
+from seraphine.deepsearch.service import DeepSearchService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -610,6 +613,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Music service wired (focus auto-play)")
     except Exception as e:
         logger.warning("Music service failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
+    # Deep Research (deepsearch) — always enabled (SQLite-backed). Reuses
+    # the web tools from the registry built above and the cliproxy LLM.
+    # ------------------------------------------------------------------
+    deepsearch_service = None
+    try:
+        store.register_migrator("seraphine_deepsearch", deepsearch_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        deepsearch_service = DeepSearchService(
+            store, llm=llm, tools=tools, settings=settings,
+        )
+        logger.info("Deep Research service wired")
+    except Exception as e:
+        logger.warning("Deep Research service failed (non-critical): %s", e)
     # ------------------------------------------------------------------
     # MCP (Supertasks) integration — optional
     # ------------------------------------------------------------------
@@ -793,6 +811,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.planning_service = planning_service
     app.state.contextual_service = contextual_service
     app.state.notification_service = notification_service
+    app.state.deepsearch_service = deepsearch_service
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     # Connected WS clients — the event listener pushes notifications here
@@ -1183,6 +1202,7 @@ def create_app() -> FastAPI:
     app.include_router(planning_router)
     app.include_router(contextual_router)
     app.include_router(notifications_router)
+    app.include_router(deepsearch_router)
 
     from seraphine.calendar_agg.routes import router as calendar_agg_router
     app.include_router(calendar_agg_router)
