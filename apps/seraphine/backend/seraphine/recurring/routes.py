@@ -8,6 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from seraphine.recurring.routine_service import RoutineService
 from seraphine.recurring.service import RecurringService
 
 router = APIRouter(prefix="/recurring", tags=["recurring"])
@@ -41,6 +42,136 @@ def _service_or_503(request: Request) -> RecurringService:
     if svc is None:
         raise HTTPException(status_code=503, detail="recurring service not configured")
     return svc
+
+
+def _routine_service_or_503(request: Request) -> RoutineService:
+    svc: Optional[RoutineService] = getattr(
+        request.app.state, "routine_service", None,
+    )
+    if svc is None:
+        raise HTTPException(status_code=503, detail="routine service not configured")
+    return svc
+
+
+# ----------------------------------------------------------------------
+# Routines: prompt launchers (distinct from recurring task rules above).
+# Mounted under /recurring/routines so they ride the existing proxy.
+# Declared before the /{rule_id} routes so the static segment wins.
+# ----------------------------------------------------------------------
+
+
+class CreateRoutineBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(default="", max_length=4000)
+    detail: str = Field(default="", max_length=400)
+    kind: str = "manual"
+    trigger: str | None = None
+    enabled: bool = True
+    icon: str | None = None
+    icon_bg: str | None = None
+    icon_color: str | None = None
+    job_name: str | None = None
+
+
+class PatchRoutineBody(BaseModel):
+    enabled: bool | None = None
+    name: str | None = None
+    detail: str | None = None
+    trigger: str | None = None
+    prompt: str | None = None
+    kind: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+@router.get("/routines")
+async def list_routines(request: Request) -> dict[str, Any]:
+    svc = _routine_service_or_503(request)
+    routines = await svc.list_all()
+    return {"routines": [r.to_dict() for r in routines]}
+
+
+@router.post("/routines")
+async def create_routine(
+    request: Request,
+    body: CreateRoutineBody,
+) -> dict[str, Any]:
+    svc = _routine_service_or_503(request)
+    try:
+        routine = await svc.create(
+            name=body.name,
+            prompt=body.prompt,
+            detail=body.detail,
+            kind=body.kind,
+            trigger=body.trigger,
+            enabled=body.enabled,
+            icon=body.icon,
+            icon_bg=body.icon_bg,
+            icon_color=body.icon_color,
+            job_name=body.job_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"id": routine.id, "routine": routine.to_dict()}
+
+
+@router.patch("/routines/{routine_id}")
+async def patch_routine(
+    request: Request,
+    routine_id: str,
+    body: PatchRoutineBody,
+) -> dict[str, Any]:
+    svc = _routine_service_or_503(request)
+    fields = body.model_dump(exclude_unset=True)
+    try:
+        routine = await svc.update(
+            routine_id,
+            enabled=fields.get("enabled"),
+            name=fields.get("name"),
+            detail=fields.get("detail"),
+            trigger=fields.get("trigger"),
+            prompt=fields.get("prompt"),
+            kind=fields.get("kind"),
+            _trigger_provided="trigger" in fields,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if routine is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    return {"routine": routine.to_dict()}
+
+
+@router.post("/routines/{routine_id}/run")
+async def run_routine(
+    request: Request,
+    routine_id: str,
+) -> dict[str, Any]:
+    """Resolve a routine's prompt for launching into the chat composer.
+
+    The actual send happens client-side (AppLayout pushes the prompt into the
+    composer with auto-send); this endpoint is the server-side source of truth
+    for the prompt text so the catalog can evolve without a frontend redeploy.
+    """
+    svc = _routine_service_or_503(request)
+    routine = await svc.get(routine_id)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    return {"id": routine.id, "prompt": routine.prompt}
+
+
+@router.delete("/routines/{routine_id}")
+async def delete_routine(
+    request: Request,
+    routine_id: str,
+) -> dict[str, bool]:
+    svc = _routine_service_or_503(request)
+    affected = await svc.delete(routine_id)
+    if not affected:
+        # Either not found, or a builtin routine which is protected.
+        raise HTTPException(
+            status_code=404, detail="routine not found or not deletable",
+        )
+    return {"ok": True}
 
 
 @router.get("")

@@ -1,0 +1,297 @@
+/* ============================================================
+   Obsidian reskin — Inbox screen
+   Loaded after globals (src/styles.css); equal-specificity wins.
+   Scoped with .inbox-view / .inbox-* prefixes.
+   ============================================================ */
+
+.inbox-view {
+  min-height: 100%;
+  padding: 24px 32px 28px;
+  color: var(--text);
+  overflow: auto;
+}
+
+/* ---- Header: title + subtitle + ghost "mark all read" ---- */
+.inbox-view__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.inbox-view__titles {
+  min-width: 0;
+}
+
+.inbox-view__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.inbox-view__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.inbox-view__markall {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.inbox-view__markall:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+.inbox-view__markall:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- Source filter pills ---- */
+.inbox-filter {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.inbox-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 7px 13px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.inbox-filter button:hover {
+  background: var(--bg-3);
+}
+
+.inbox-filter button.is-active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: transparent;
+}
+
+.inbox-filter button.is-active:hover {
+  background: var(--accent);
+}
+
+.inbox-filter__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* ---- Empty / error states ---- */
+.inbox-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-1);
+  color: var(--text-dim);
+  padding: 28px 24px;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.inbox-empty strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.inbox-empty p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 360px;
+}
+
+/* ---- Unified card: single rounded container, hairline rows ---- */
+.inbox-list {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--bg-1);
+}
+
+.inbox-item {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 15px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.inbox-item:hover {
+  background: var(--bg-3);
+}
+
+.inbox-item + .inbox-item {
+  border-top: 1px solid var(--border);
+}
+
+.inbox-item--unread {
+  border-left: 3px solid var(--accent);
+}
+
+.inbox-item--read {
+  opacity: 0.62;
+}
+
+/* ---- Source-tinted icon tile ---- */
+.inbox-item__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.inbox-item__icon--whatsapp {
+  background: rgba(37, 211, 102, 0.14);
+  color: #25d366;
+}
+
+.inbox-item__icon--email {
+  background: rgba(66, 165, 245, 0.14);
+  color: #42a5f5;
+}
+
+.inbox-item__icon--seraphine {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---- Row body ---- */
+.inbox-item__body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* NOTE: a pre-existing rule in styles.css — `.inbox-item__body span`
+   (0-1-1) — sets display:block + ellipsis + dim/12px on every span in the
+   body. These spans live inside .inbox-item__body, so we prefix with it to
+   reach 0-2-0 and win the cascade; otherwise the top-line collapses. */
+.inbox-item__body .inbox-item__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-item__body .inbox-item__sender {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-item--read .inbox-item__sender {
+  font-weight: 600;
+}
+
+.inbox-item__body .inbox-item__badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 7px;
+  margin-top: 0;
+  flex: none;
+}
+
+.inbox-item__body .inbox-item__badge--whatsapp {
+  color: #25d366;
+  background: rgba(37, 211, 102, 0.14);
+}
+
+.inbox-item__body .inbox-item__badge--email {
+  color: #42a5f5;
+  background: rgba(66, 165, 245, 0.14);
+}
+
+.inbox-item__body .inbox-item__badge--seraphine {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.inbox-item__body .inbox-item__time {
+  margin-left: auto;
+  margin-top: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  flex: none;
+}
+
+.inbox-item__body .inbox-item__preview {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-item--read .inbox-item__preview {
+  color: var(--text-dim);
+}
+
+.inbox-item__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+/* ---- Mobile: keep flex row, let preview ellipsize ---- */
+@media (max-width: 760px) {
+  .inbox-view {
+    padding: 18px 16px 24px;
+  }
+
+  .inbox-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px 14px;
+  }
+}

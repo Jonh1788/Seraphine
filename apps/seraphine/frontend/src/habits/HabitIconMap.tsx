@@ -72,7 +72,7 @@ export const HABIT_ICON_KEYS: string[] = [
 export const HABIT_COLOR_PALETTE: string[] = [
   '#22d3ee', // cyan (default)
   '#4ade80', // green
-  '#a78bfa', // purple
+  '#9a93ff', // purple
   '#f59e0b', // amber
   '#ef4444', // red
   '#3b82f6', // blue

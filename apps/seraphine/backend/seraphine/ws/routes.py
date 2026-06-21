@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import platform as _platform
+import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from seraphine.conversation.audio_engine import (
@@ -31,6 +35,12 @@ from seraphine.conversation.sentences import (
 logger = logging.getLogger("seraphine.ws")
 
 router = APIRouter()
+
+# Module import happens during create_app(), so this approximates the
+# backend process start time. Used by GET /system/status to report a
+# real uptime instead of a hardcoded string.
+_PROCESS_START_MONOTONIC = time.monotonic()
+_PROCESS_START_ISO = datetime.now(timezone.utc).isoformat()
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB safety cap per utterance
 
@@ -588,6 +598,80 @@ async def _deliver_pending_notifications(ws: WebSocket) -> None:
                 })
         except Exception:
             pass
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Sum the on-disk size of every regular file under *path*.
+
+    Returns 0 when the directory does not exist. Broken symlinks and
+    unreadable entries are skipped silently — this is a best-effort
+    diagnostic, not an accounting report.
+    """
+    total = 0
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            fp = os.path.join(root, name)
+            try:
+                total += os.stat(fp, follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return total
+
+
+@router.get("/system/status")
+async def system_status(request: Request) -> dict[str, Any]:
+    """Liveness + process metadata for the Sistema screen.
+
+    Unlike the bare GET /health (which only returns {"status": "ok"}),
+    this exposes the backend version and a real uptime derived from the
+    process start time captured at import.
+    """
+    uptime_seconds = max(0.0, time.monotonic() - _PROCESS_START_MONOTONIC)
+    version = getattr(request.app, "version", None) or "0.1.0"
+    return {
+        "status": "ok",
+        "version": version,
+        "started_at": _PROCESS_START_ISO,
+        "uptime_seconds": round(uptime_seconds, 1),
+        "platform": f"{_platform.system()} {_platform.machine()}".strip(),
+    }
+
+
+@router.get("/system/storage")
+async def system_storage() -> dict[str, Any]:
+    """Real on-disk byte usage of the local data stores.
+
+    Reads existing files/dirs only — no new tables, no migrations:
+      - SQLite DB file (conversations, tasks, finance, etc.)
+      - Chroma vector store directory (semantic memory)
+      - Image storage directory (generated/attached images)
+
+    There is no hard quota for a local SQLite install, so ``quota_bytes``
+    is intentionally null — the frontend renders bytes used without an
+    invented denominator.
+    """
+    from seraphine.config import settings as _cfg
+
+    db_bytes = _dir_size_bytes(Path(str(_cfg.sqlite_path)))
+    vectors_bytes = _dir_size_bytes(Path(str(_cfg.chroma_path)))
+    images_bytes = _dir_size_bytes(Path(os.path.expanduser(_cfg.image_storage_dir)))
+    total = db_bytes + vectors_bytes + images_bytes
+    return {
+        "segments": [
+            {"key": "conversas", "label": "Conversas", "bytes": db_bytes},
+            {"key": "imagens", "label": "Imagens", "bytes": images_bytes},
+            {"key": "memoria", "label": "Memória", "bytes": vectors_bytes},
+        ],
+        "total_bytes": total,
+        "quota_bytes": None,
+    }
 
 
 @router.websocket("/ws/conversation")

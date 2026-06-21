@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import './obsidian.css';
 import { API_BASE } from '../api';
 import { listJobs } from './api';
 import type { JobSummary } from './types';
 import { JobDetailPanel } from './JobDetailPanel';
+import { SparkleIcon } from '../icons/Icons';
 
 /**
  * Task 19 — JobsTab
@@ -22,20 +24,6 @@ interface Props {
    *  consume it once — re-mounting Trabalhos shouldn't auto-open the
    *  same job again. */
   onInitialJobConsumed?: () => void;
-}
-
-type WorkTab = 'overview' | 'projects' | 'triage';
-
-interface WorkTask {
-  id: number;
-  title: string;
-  status: string;
-  type: string;
-  source: string;
-  due_date?: string | null;
-  due_time?: string | null;
-  priority?: string | null;
-  tags?: string[];
 }
 
 interface WorkProject {
@@ -77,29 +65,16 @@ interface WorkProjectDetail {
   };
 }
 
-interface WorkBriefing {
-  projects: WorkProject[];
-  open_tasks: WorkTask[];
-  active_triages: JobSummary[];
-  due_projects: WorkProject[];
-}
-
-interface ProjectGroup {
-  key: string;
-  label: string;
-  tasks: WorkTask[];
-  overdue: number;
-  high: number;
-}
-
 export function JobsTab({
   initialJobId,
   onInitialJobConsumed,
 }: Props): JSX.Element {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [tasks, setTasks] = useState<WorkTask[]>([]);
-  const [projects, setProjects] = useState<WorkProject[]>([]);
-  const [briefing, setBriefing] = useState<WorkBriefing | null>(null);
+  // The triage-run board renders real cv_triage jobs (see vagaFromJob).
+  // Work projects are still fetched so the create flow can prepend new
+  // ones; the previously-fetched-but-discarded /tasks and /work/briefing
+  // calls were removed (dead data on this surface).
+  const [, setProjects] = useState<WorkProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectDetail, setProjectDetail] = useState<WorkProjectDetail | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -114,16 +89,12 @@ export function JobsTab({
   const [selectedId, setSelectedId] = useState<number | null>(
     initialJobId ?? null,
   );
-  const [activeTab, setActiveTab] = useState<WorkTab>(
-    initialJobId != null ? 'triage' : 'overview',
-  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Consume the deep-link target exactly once.
   useEffect(() => {
     if (initialJobId != null) {
-      setActiveTab('triage');
       setSelectedId(initialJobId);
       onInitialJobConsumed?.();
     }
@@ -134,31 +105,19 @@ export function JobsTab({
     let cancelled = false;
     Promise.allSettled([
       listJobs(),
-      fetch(`${API_BASE}/tasks?limit=120`).then((r) =>
-        r.ok ? r.json() as Promise<{ tasks: WorkTask[] }> : { tasks: [] },
-      ),
       fetch(`${API_BASE}/work/projects`).then((r) =>
         r.ok ? r.json() as Promise<{ projects: WorkProject[] }> : { projects: [] },
       ),
-      fetch(`${API_BASE}/work/briefing`).then((r) =>
-        r.ok ? r.json() as Promise<WorkBriefing> : null,
-      ),
     ])
-      .then(([jobsResult, tasksResult, projectsResult, briefingResult]) => {
+      .then(([jobsResult, projectsResult]) => {
         if (cancelled) return;
         if (jobsResult.status === 'fulfilled') {
           setJobs(jobsResult.value);
         } else {
           setError(jobsResult.reason instanceof Error ? jobsResult.reason.message : String(jobsResult.reason));
         }
-        if (tasksResult.status === 'fulfilled') {
-          setTasks(tasksResult.value.tasks || []);
-        }
         if (projectsResult.status === 'fulfilled') {
           setProjects(projectsResult.value.projects || []);
-        }
-        if (briefingResult.status === 'fulfilled') {
-          setBriefing(briefingResult.value);
         }
       })
       .catch((e) => {
@@ -318,25 +277,33 @@ export function JobsTab({
     );
   }
 
-  const grouped = groupByDay(jobs);
-  const openTasks = tasks.filter(isOpenTask);
-  const overdueTasks = openTasks.filter(isOverdue);
-  const suggestedProjects = groupProjects(openTasks);
-  const activeTriages = jobs.filter((j) => !['done', 'failed', 'cancelled'].includes(j.status));
-  const lastTriage = jobs[0] || null;
-  const briefingProjects = briefing?.projects || projects.filter((p) => p.status === 'active');
-  const briefingTasks = briefing?.open_tasks || openTasks;
-  const dueProjects = briefing?.due_projects || projects.filter((p) => p.due_date && p.due_date <= new Date().toISOString().slice(0, 10));
+  // Triage-run view-models, derived from real cv_triage runs (see vagaFromJob).
+  const vagas = jobs.map((job, i) => vagaFromJob(job, i));
+  const activeCount = jobs.filter(
+    (j) => !['done', 'failed', 'cancelled'].includes(j.status),
+  ).length;
+  const doneCount = jobs.filter((j) => j.status === 'done').length;
+  const totalCvs = jobs.reduce((sum, j) => sum + (j.total_cvs || 0), 0);
+  // Tip driven off a real top match when a finished run has one, else a
+  // neutral nudge. No fabricated "vaga" name — uses real triage data.
+  const topVaga = vagas.find((v) => v.match != null) || vagas[0] || null;
+  const tip = topVaga && topVaga.match != null
+    ? `Melhor candidato de "${topVaga.role}" com ${topVaga.match}% de match — quer revisar a triagem?`
+    : 'Inicie uma triagem de CV no chat e a Seraphine ranqueia os candidatos pra você.';
 
   return (
     <div className="cvt-jobs-tab">
       <header className="cvt-jobs-header">
         <div>
           <h1>Trabalhos</h1>
-          <p>Projetos, pendencias e operacoes de triagem em um so lugar.</p>
+          <p>
+            {vagas.length} triage{vagas.length === 1 ? 'm' : 'ns'} · {activeCount} em andamento
+            {doneCount > 0 ? ` · ${doneCount} concluída${doneCount === 1 ? '' : 's'}` : ''}
+            {totalCvs > 0 ? ` · ${totalCvs} CV${totalCvs === 1 ? '' : 's'}` : ''}
+          </p>
         </div>
         <button type="button" className="work-primary-button" onClick={() => setCreateOpen((v) => !v)}>
-          Novo projeto
+          + Novo projeto
         </button>
       </header>
 
@@ -376,208 +343,56 @@ export function JobsTab({
         </form>
       )}
 
-      <div className="work-tabs">
-        <button
-          type="button"
-          className={activeTab === 'overview' ? 'is-active' : ''}
-          onClick={() => setActiveTab('overview')}
-        >
-          Visao geral
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'projects' ? 'is-active' : ''}
-          onClick={() => setActiveTab('projects')}
-        >
-          Projetos
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'triage' ? 'is-active' : ''}
-          onClick={() => setActiveTab('triage')}
-        >
-          Triagens
-        </button>
+      <div className="jobs-list">
+        {vagas.length === 0 && (
+          <div className="jobs-list-empty">
+            <strong>Nenhuma triagem ainda</strong>
+            <small>Inicie uma triagem de CV no chat e ela aparece aqui.</small>
+          </div>
+        )}
+        {vagas.map((vaga) => (
+          <button
+            key={vaga.id}
+            type="button"
+            className={`job-card${
+              vaga.statusKey === 'entrevista' && vaga.highlight
+                ? ' is-highlight'
+                : vaga.statusKey === 'candidatado'
+                  ? ' is-candidatado'
+                  : ''
+            }`}
+            onClick={() => setSelectedId(vaga.id)}
+          >
+            <span className="job-card__avatar" style={{ background: vaga.avatarGradient }}>
+              {vaga.initial}
+            </span>
+            <span className="job-card__main">
+              <span className="job-card__role">{vaga.role}</span>
+              <span className="job-card__sub">{vaga.subline}</span>
+            </span>
+            <span className="job-card__match">
+              {vaga.match != null ? (
+                <>
+                  <span style={{ color: matchColor(vaga.match) }}>{vaga.match}%</span>
+                  <small>match</small>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: 'var(--text-dim)' }}>—</span>
+                  <small>sem ranking</small>
+                </>
+              )}
+            </span>
+            <span className={`job-status job-status--${vaga.statusKey}`}>
+              {vaga.statusLabel}
+            </span>
+          </button>
+        ))}
+        <div className="jobs-tip">
+          <SparkleIcon size={16} />
+          <span>{tip}</span>
+        </div>
       </div>
-
-      {activeTab === 'overview' && (
-        <>
-          <div className="work-summary-grid">
-            <div className="work-summary-card">
-              <span>Trabalho aberto</span>
-              <strong>{openTasks.length}</strong>
-              <small>{overdueTasks.length} atrasado{overdueTasks.length === 1 ? '' : 's'}</small>
-            </div>
-            <div className="work-summary-card">
-              <span>Projetos ativos</span>
-              <strong>{briefingProjects.length}</strong>
-              <small>{dueProjects.length} pedindo atencao</small>
-            </div>
-            <div className="work-summary-card">
-              <span>Triagens em andamento</span>
-              <strong>{activeTriages.length}</strong>
-              <small>{jobs.length} no historico</small>
-            </div>
-          </div>
-
-          <section className="work-section">
-            <div className="work-section__header">
-              <h3>Fila de trabalho</h3>
-              <button type="button" onClick={() => setActiveTab('projects')}>
-                Ver projetos
-              </button>
-            </div>
-            {openTasks.length === 0 && (
-              <p className="cvt-empty">Nenhuma tarefa de trabalho aberta.</p>
-            )}
-            {briefingTasks.slice(0, 6).map((task) => (
-              <div key={task.id} className="work-task-row">
-                <span className="work-task-row__main">
-                  <strong>{task.title}</strong>
-                  <small>
-                    {task.tags?.[0] || task.type || task.source}
-                    {task.due_date ? ` · ${task.due_date}${task.due_time ? ` ${task.due_time}` : ''}` : ''}
-                  </small>
-                </span>
-                {task.priority && <span className={`work-priority work-priority--${task.priority}`}>{task.priority}</span>}
-              </div>
-            ))}
-          </section>
-
-          <section className="work-section">
-            <div className="work-section__header">
-              <h3>Triagem de CV</h3>
-              <button type="button" onClick={() => setActiveTab('triage')}>
-                Ver triagens
-              </button>
-            </div>
-            {!lastTriage && (
-              <p className="cvt-empty">Nenhuma triagem ainda. Use a Triagem de CV no chat.</p>
-            )}
-            {lastTriage && (
-              <div
-                className="work-triage-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setActiveTab('triage');
-                  setSelectedId(lastTriage.id);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setActiveTab('triage');
-                    setSelectedId(lastTriage.id);
-                  }
-                }}
-              >
-                <span>
-                  <strong>Ultima triagem · {lastTriage.total_cvs} CV{lastTriage.total_cvs === 1 ? '' : 's'}</strong>
-                  <small>{lastTriage.target_label} · {new Date(lastTriage.created_at).toLocaleString()}</small>
-                </span>
-                <span className={`cvt-badge cvt-badge-${lastTriage.status}`}>
-                  {lastTriage.status}
-                </span>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-
-      {activeTab === 'projects' && (
-        <>
-          {projects.length === 0 && (
-            <p className="cvt-empty">Nenhum projeto criado ainda. Crie um projeto ou use as sugestoes abaixo.</p>
-          )}
-          <div className="work-project-grid">
-            {projects.map((project) => (
-              <section
-                key={project.id}
-                className="work-project-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedProjectId(project.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedProjectId(project.id);
-                  }
-                }}
-              >
-                <div className="work-project-card__header">
-                  <h3>{project.name}</h3>
-                  <span>{project.priority}</span>
-                </div>
-                <p>
-                  {project.area || 'sem area'} · {project.due_date ? `prazo ${project.due_date}` : 'sem prazo'}
-                </p>
-                <div className="work-project-card__tasks">
-                  {project.description && <div className="work-project-task"><strong>{project.description}</strong></div>}
-                  {project.tags.slice(0, 3).map((tag) => <small key={tag}>#{tag}</small>)}
-                </div>
-              </section>
-            ))}
-          </div>
-          {suggestedProjects.length > 0 && (
-            <section className="work-section">
-              <div className="work-section__header">
-                <h3>Sugestoes por tarefas</h3>
-                <span>{suggestedProjects.length}</span>
-              </div>
-              {suggestedProjects.slice(0, 6).map((project) => (
-                <div key={project.key} className="work-task-row">
-                  <span className="work-task-row__main">
-                    <strong>{project.label}</strong>
-                    <small>{project.tasks.length} tarefas · {project.overdue} atrasadas · {project.high} alta prioridade</small>
-                  </span>
-                </div>
-              ))}
-            </section>
-          )}
-        </>
-      )}
-
-      {activeTab === 'triage' && (
-        <>
-          {grouped.length === 0 && (
-            <p className="cvt-empty">Nenhum job ainda. Use a Triagem de CV no chat.</p>
-          )}
-          {grouped.map(({ label, items }) => (
-            <section key={label} className="cvt-jobs-group">
-              <h3>{label}</h3>
-              <ul className="cvt-jobs-list">
-                {items.map((j) => (
-                  <li
-                    key={j.id}
-                    className="cvt-jobs-row"
-                    onClick={() => setSelectedId(j.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedId(j.id);
-                      }
-                    }}
-                  >
-                    <span className="cvt-jobs-meta">
-                      <strong>
-                        Triagem · {j.total_cvs} CV{j.total_cvs === 1 ? '' : 's'}
-                      </strong>
-                      <small>
-                        {j.target_label} · {new Date(j.created_at).toLocaleString()}
-                      </small>
-                    </span>
-                    <span className={`cvt-badge cvt-badge-${j.status}`}>
-                      {j.status}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </>
-      )}
     </div>
   );
 }
@@ -600,63 +415,124 @@ function projectItemDetail(item: { target_type: string; data?: Record<string, un
   return item.target_type;
 }
 
-function groupByDay(
-  jobs: JobSummary[],
-): { label: string; items: JobSummary[] }[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today.getTime() - 86_400_000);
-  const weekAgo = new Date(today.getTime() - 7 * 86_400_000);
-  const buckets: Record<string, JobSummary[]> = {};
-  for (const j of jobs) {
-    const d = new Date(j.created_at);
-    const label =
-      d >= today
-        ? 'Hoje'
-        : d >= yesterday
-          ? 'Ontem'
-          : d >= weekAgo
-            ? 'Esta semana'
-            : 'Mais antigo';
-    (buckets[label] ??= []).push(j);
+/**
+ * Status chip for a triage-run card. The cv_triage backend models triage
+ * RUNS (not a job-application pipeline), so the chip reflects the real
+ * `job.status` phase. The CSS keys are reused from the original reskin:
+ *   entrevista -> done (green), candidatado -> in-progress (blue),
+ *   nova -> queued (dim), falhou -> failed/cancelled (red).
+ */
+type VagaStatusKey = 'nova' | 'candidatado' | 'entrevista' | 'falhou';
+
+interface Vaga {
+  id: number;
+  initial: string;
+  avatarGradient: string;
+  /** Recruiter chat label the triage was sent to (real backend field). */
+  role: string;
+  /** Real triage stats line (CV counts + rubric snippet + date). */
+  subline: string;
+  /** 0–100 best match score from the ranked top5; null until a run is done. */
+  match: number | null;
+  statusKey: VagaStatusKey;
+  statusLabel: string;
+  /** Top-match rows get a lilac left accent in the design. */
+  highlight: boolean;
+}
+
+/** Map a match score (0–100) to a band color per the Obsidian spec. */
+function matchColor(match: number): string {
+  if (match >= 90) return '#4ade80'; // green
+  if (match >= 83) return '#8bc34a'; // lime
+  if (match >= 75) return '#ffa726'; // orange
+  return 'var(--text-dim)';
+}
+
+/** Short rubric snippet for the card sub-line (the vaga description). */
+function rubricSnippet(rubric: string | undefined): string {
+  const r = (rubric || '').trim().replace(/\s+/g, ' ');
+  if (!r) return '';
+  return r.length > 60 ? `${r.slice(0, 57)}…` : r;
+}
+
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg,#5c6bc0,#3949ab)',
+  'linear-gradient(135deg,#635bff,#4b3fd6)',
+  'linear-gradient(135deg,#f6821f,#e8590c)',
+  'linear-gradient(135deg,#9a93ff,#6c63d6)',
+  'linear-gradient(135deg,#26a69a,#00897b)',
+  'linear-gradient(135deg,#ab47bc,#8e24aa)',
+];
+
+/** Stable pick so the same job keeps the same avatar gradient. */
+function avatarGradient(id: number): string {
+  return AVATAR_GRADIENTS[Math.abs(id) % AVATAR_GRADIENTS.length]!;
+}
+
+/**
+ * Build a triage-run card view-model from a real cv_triage JobSummary.
+ * Every field is backed by real backend data:
+ *   role      <- job.target_label (recruiter chat the triage was sent to)
+ *   subline   <- real CV counts + rubric snippet + created_at
+ *   match     <- best match_pct from the ranked top5 (parsed server-side),
+ *                null when the run hasn't produced a ranking yet
+ *   status    <- job.status phase mapped to an honest chip
+ *
+ * Company / location / salary were removed: cv_triage models a triage run
+ * keyed off a recruiter chat label, not a job posting, so those fields had
+ * no backend source (see followUps for the vagas-domain option).
+ */
+function vagaFromJob(job: JobSummary, index: number): Vaga {
+  const label = job.target_label?.trim() || `Triagem #${job.id}`;
+  const initial = label.charAt(0).toUpperCase() || '·';
+  // Real ranked match: top5 is now parsed by the backend (_job_to_dict).
+  const match = job.top5?.length
+    ? Math.round(Math.max(...job.top5.map((t) => t.match_pct)))
+    : null;
+
+  // Real triage stats sub-line: CV throughput + rubric snippet + date.
+  const parts: string[] = [];
+  if (job.total_cvs) {
+    parts.push(
+      job.processed_cvs && job.processed_cvs < job.total_cvs
+        ? `${job.processed_cvs}/${job.total_cvs} CVs`
+        : `${job.total_cvs} CV${job.total_cvs === 1 ? '' : 's'}`,
+    );
   }
-  return ['Hoje', 'Ontem', 'Esta semana', 'Mais antigo']
-    .filter((l) => buckets[l]?.length)
-    .map((label) => ({ label, items: buckets[label]! }));
-}
-
-function isOpenTask(task: WorkTask): boolean {
-  return !['completed', 'rejected', 'failed'].includes(task.status);
-}
-
-function isOverdue(task: WorkTask): boolean {
-  if (!task.due_date) return false;
-  return task.due_date < new Date().toISOString().slice(0, 10);
-}
-
-function projectKey(task: WorkTask): string {
-  return task.tags?.[0] || task.source || task.type || 'geral';
-}
-
-function labelProject(key: string): string {
-  return key
-    .replace(/[_-]/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function groupProjects(tasks: WorkTask[]): ProjectGroup[] {
-  const map = new Map<string, WorkTask[]>();
-  for (const task of tasks) {
-    const key = projectKey(task);
-    map.set(key, [...(map.get(key) || []), task]);
+  const snippet = rubricSnippet(job.rubric);
+  if (snippet) parts.push(snippet);
+  if (job.created_at) {
+    parts.push(new Date(job.created_at).toLocaleDateString('pt-BR'));
   }
-  return Array.from(map.entries())
-    .map(([key, items]) => ({
-      key,
-      label: labelProject(key),
-      tasks: items,
-      overdue: items.filter(isOverdue).length,
-      high: items.filter((task) => task.priority === 'high').length,
-    }))
-    .sort((a, b) => b.tasks.length - a.tasks.length);
+  const subline = parts.join(' · ') || 'Triagem de CV';
+
+  // Honest triage-run status chip (not a job-application pipeline).
+  let statusKey: VagaStatusKey = 'nova';
+  let statusLabel = 'Em fila';
+  if (job.status === 'done') {
+    statusKey = 'entrevista';
+    statusLabel = 'Concluída';
+  } else if (job.status === 'failed') {
+    statusKey = 'falhou';
+    statusLabel = 'Falhou';
+  } else if (job.status === 'cancelled') {
+    statusKey = 'falhou';
+    statusLabel = 'Cancelada';
+  } else if (['extracting', 'ranking', 'sending'].includes(job.status)) {
+    statusKey = 'candidatado';
+    statusLabel = 'Processando';
+  }
+
+  return {
+    id: job.id,
+    initial,
+    avatarGradient: avatarGradient(job.id),
+    role: label,
+    subline,
+    match,
+    statusKey,
+    statusLabel,
+    highlight: index === 0 || statusKey === 'entrevista' || statusKey === 'candidatado',
+  };
 }
+

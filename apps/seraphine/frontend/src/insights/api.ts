@@ -1,8 +1,10 @@
 import { API_BASE } from '../api';
 import type {
+  FocusStats,
   Insight,
   InsightDismissResponse,
   InsightsListResponse,
+  TimeByCategoryResponse,
   WeeklyReport,
   WeeklyReportEnvelope,
 } from './types';
@@ -59,4 +61,26 @@ export async function generateWeeklyReport(): Promise<WeeklyReport | null> {
     { method: 'POST', body: JSON.stringify({}) },
   );
   return data?.report ?? null;
+}
+
+// GET /focus/stats returns the bare ``FocusStats.to_dict()`` (no envelope).
+// ``period`` is 'week' (last 7 days) or 'month' (calendar month-to-date).
+export async function getFocusStats(
+  period: 'week' | 'month' = 'week',
+): Promise<FocusStats | null> {
+  const data = await request<FocusStats>(
+    `/focus/stats?period=${encodeURIComponent(period)}`,
+  );
+  return data ?? null;
+}
+
+// GET /insights/time-by-category — focus minutes summed by category.
+// Backs the "Onde foi seu tempo" breakdown card.
+export async function getTimeByCategory(
+  period: 'week' | 'month' = 'week',
+): Promise<TimeByCategoryResponse | null> {
+  const data = await request<TimeByCategoryResponse>(
+    `/insights/time-by-category?period=${encodeURIComponent(period)}`,
+  );
+  return data ?? null;
 }

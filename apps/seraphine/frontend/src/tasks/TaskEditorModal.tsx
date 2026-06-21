@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { XIcon, BellIcon, CalendarIcon, ClockIcon } from '../icons/Icons';
 import type { SeraphineTask } from '../finance/types';
+import { CATEGORY_COLORS, CATEGORY_LABELS } from '../finance/types';
 import { API_BASE } from '../api';
 
+// Category options reuse the finance taxonomy (same keys the card chip
+// maps against). Labels carry an emoji prefix in finance/types — strip
+// leading non-letter glyphs since the design system forbids emojis.
+const CATEGORY_OPTIONS: { value: string; label: string; color?: string }[] = [
+  { value: '', label: 'Selecionar' },
+  ...Object.keys(CATEGORY_COLORS).map((key) => ({
+    value: key,
+    label: (CATEGORY_LABELS[key] || key).replace(/^[^\p{L}]+/u, '').trim(),
+    color: CATEGORY_COLORS[key],
+  })),
+];
+
 const STATUS_COLORS: Record<string, string> = {
-  pending: '#a78bfa',
+  pending: '#9a93ff',
   approved: '#22d3ee',
   completed: '#4ade80',
   rejected: '#64748b',
@@ -56,6 +69,9 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
   const [remind, setRemind] = useState('');
+  const [category, setCategory] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -86,6 +102,8 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
         setDueDate(data.due_date || '');
         setDueTime(data.due_time || '');
         setRemind(data.remind || '');
+        setCategory((data.category || '').toLowerCase());
+        setTags(Array.isArray(data.tags) ? data.tags : []);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -169,6 +187,44 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
   const handleRemindChange = (v: string): void => {
     setRemind(v);
     patchField({ remind: v || '' });
+  };
+
+  const handleCategoryChange = (v: string): void => {
+    setCategory(v);
+    // PATCH /tasks/{id} accepts category; "" clears it end-to-end.
+    patchField({ category: v || '' });
+  };
+
+  const commitTags = (next: string[]): void => {
+    setTags(next);
+    // PATCH /tasks/{id} accepts a tags list; [] clears it end-to-end.
+    patchField({ tags: next });
+  };
+
+  const addTag = (raw: string): void => {
+    const clean = raw.trim().replace(/^#+/, '').trim();
+    if (!clean) return;
+    const exists = tags.some((t) => t.toLowerCase() === clean.toLowerCase());
+    if (exists) {
+      setTagDraft('');
+      return;
+    }
+    commitTags([...tags, clean]);
+    setTagDraft('');
+  };
+
+  const removeTag = (tag: string): void => {
+    commitTags(tags.filter((t) => t !== tag));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(tagDraft);
+    } else if (e.key === 'Backspace' && !tagDraft && tags.length > 0) {
+      e.preventDefault();
+      removeTag(tags[tags.length - 1]);
+    }
   };
 
   const handleDelete = async (): Promise<void> => {
@@ -300,6 +356,26 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
 
           <div className="te__row">
             <span className="te__label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+              Categoria
+            </span>
+            <select
+              className="te__value te__select"
+              value={category}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              style={{ color: CATEGORY_COLORS[category] || 'var(--text)' }}
+            >
+              {CATEGORY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value} style={{ color: o.color || 'var(--text)' }}>{o.label}</option>
+              ))}
+            </select>
+            {category && CATEGORY_COLORS[category] && (
+              <span className="te__dot" style={{ background: CATEGORY_COLORS[category] }} />
+            )}
+          </div>
+
+          <div className="te__row">
+            <span className="te__label">
               <CalendarIcon size={14} />
               Data
             </span>
@@ -330,7 +406,70 @@ export function TaskEditorModal({ taskId, onClose, onDeleted, onUpdated }: TaskE
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
               Tags
             </span>
-            <span className="te__value te__tags-placeholder">adicionar tag...</span>
+            <span
+              className="te__value"
+              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}
+            >
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    padding: '3px 4px 3px 9px',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--accent-soft)',
+                    color: 'var(--accent)',
+                  }}
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    title="Remover tag"
+                    aria-label={`Remover tag ${tag}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 16,
+                      height: 16,
+                      padding: 0,
+                      border: 'none',
+                      borderRadius: 4,
+                      background: 'transparent',
+                      color: 'inherit',
+                      cursor: 'pointer',
+                      opacity: 0.75,
+                    }}
+                  >
+                    <XIcon size={12} />
+                  </button>
+                </span>
+              ))}
+              <input
+                type="text"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+                onBlur={() => addTag(tagDraft)}
+                placeholder={tags.length ? 'adicionar...' : 'adicionar tag...'}
+                style={{
+                  flex: '1 1 90px',
+                  minWidth: 90,
+                  background: 'none',
+                  border: 'none',
+                  outline: 'none',
+                  color: 'var(--text)',
+                  fontFamily: 'inherit',
+                  fontSize: 14,
+                  padding: '2px 0',
+                }}
+              />
+            </span>
           </div>
         </div>
 

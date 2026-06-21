@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 _ITEM_COLS = (
     "id, url, title, domain, summary, content_text, "
-    "tags, status, saved_at, read_at, archived_at, error_msg"
+    "tags, status, saved_at, read_at, archived_at, error_msg, "
+    "author, progress"
 )
 
 _VALID_STATUSES = {"processing", "unread", "reading", "read", "archived", "error"}
@@ -106,18 +107,73 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-def _extract_title_and_text(body: bytes, content_type: str) -> tuple[str, str]:
-    """Parse HTML and return (title, text). For non-HTML, decode as UTF-8."""
+def _extract_author(soup: "BeautifulSoup") -> str:
+    """Best-effort author extraction from page metadata.
+
+    Checks, in order: <meta name="author">, OpenGraph article:author,
+    Dublin Core <meta name="dc.creator">, then JSON-LD ``author`` (which may
+    be a string, an object with a ``name``, or a list of either). Returns ""
+    when nothing usable is found.
+    """
+    # 1. <meta name="author"> / og:article:author / dc.creator
+    meta_names = ("author", "article:author", "dc.creator", "dcterms.creator")
+    for tag in soup.find_all("meta"):
+        key = (tag.get("name") or tag.get("property") or "").strip().lower()
+        if key in meta_names:
+            val = (tag.get("content") or "").strip()
+            # article:author is sometimes a profile URL, not a name; skip URLs.
+            if val and not val.lower().startswith(("http://", "https://")):
+                return val[:200]
+
+    # 2. JSON-LD author
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = script.string or script.get_text() or ""
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        candidates = data if isinstance(data, list) else [data]
+        for node in candidates:
+            if not isinstance(node, dict):
+                continue
+            author = node.get("author")
+            name = _author_name(author)
+            if name:
+                return name[:200]
+
+    return ""
+
+
+def _author_name(author: Any) -> str:
+    """Coerce a JSON-LD ``author`` value (str | dict | list) to a name."""
+    if isinstance(author, str):
+        return author.strip()
+    if isinstance(author, dict):
+        return str(author.get("name", "")).strip()
+    if isinstance(author, list):
+        for entry in author:
+            name = _author_name(entry)
+            if name:
+                return name
+    return ""
+
+
+def _extract_title_text_author(body: bytes, content_type: str) -> tuple[str, str, str]:
+    """Parse HTML and return (title, text, author). For non-HTML, decode as UTF-8."""
     ct = (content_type or "").lower()
     if "html" in ct or "xhtml" in ct or body[:256].lstrip().lower().startswith(b"<!doctype html"):
         try:
             soup = BeautifulSoup(body, "html.parser")
         except Exception:
-            return "", body.decode("utf-8", errors="replace")
+            return "", body.decode("utf-8", errors="replace"), ""
 
         title = ""
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
+
+        author = _extract_author(soup)
 
         for tag in soup(_NOISE_TAGS):
             tag.decompose()
@@ -126,12 +182,12 @@ def _extract_title_and_text(body: bytes, content_type: str) -> tuple[str, str]:
         text = root.get_text(separator="\n", strip=True)
         lines = [line.strip() for line in text.splitlines()]
         compact = "\n".join(line for line in lines if line)
-        return title, compact
+        return title, compact, author
 
     try:
-        return "", body.decode("utf-8")
+        return "", body.decode("utf-8"), ""
     except UnicodeDecodeError:
-        return "", body.decode("utf-8", errors="replace")
+        return "", body.decode("utf-8", errors="replace"), ""
 
 
 class ReadingService:
@@ -208,7 +264,7 @@ class ReadingService:
         """Async processing pipeline: fetch -> LLM summarize -> embed."""
         try:
             # 1. Fetch content
-            html_title, content_text = await self._fetch_content(url)
+            html_title, content_text, author = await self._fetch_content(url)
             if not content_text or not content_text.strip():
                 await self._mark_error(item_id, "failed to extract content from URL")
                 return
@@ -234,7 +290,7 @@ class ReadingService:
                     conn.execute(
                         "UPDATE reading_items SET "
                         "  title = ?, summary = ?, content_text = ?, "
-                        "  tags = ?, status = ? "
+                        "  tags = ?, status = ?, author = ? "
                         "WHERE id = ?",
                         (
                             title or "",
@@ -242,6 +298,7 @@ class ReadingService:
                             content_text,
                             json.dumps(merged_tags, ensure_ascii=False),
                             "unread",
+                            author or "",
                             item_id,
                         ),
                     )
@@ -258,8 +315,8 @@ class ReadingService:
             logger.exception("reading: processing failed for %s", item_id)
             await self._mark_error(item_id, str(e)[:500])
 
-    async def _fetch_content(self, url: str) -> tuple[str, str]:
-        """Fetch URL and extract title + text content."""
+    async def _fetch_content(self, url: str) -> tuple[str, str, str]:
+        """Fetch URL and extract (title, text, author)."""
         headers = {
             "User-Agent": _USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
@@ -282,7 +339,7 @@ class ReadingService:
                         break
                 content_type = resp.headers.get("content-type", "")
 
-        return _extract_title_and_text(bytes(body), content_type)
+        return _extract_title_text_author(bytes(body), content_type)
 
     async def _llm_summarize(self, content: str) -> tuple[str, str, list[str]]:
         """Use LLM to generate title, summary, and tags from content.
@@ -399,6 +456,64 @@ class ReadingService:
 
         return await asyncio.to_thread(_work)
 
+    async def count_items(
+        self,
+        *,
+        status: str | None = None,
+        tag: str | None = None,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate counts over existing reading_items rows.
+
+        Returns ``{"total": n, "by_status": {status: n, ...}}``.
+
+        ``total`` honors the same status/tag/q filters as ``list_items`` so it
+        matches the filtered result set. ``by_status`` is a global GROUP BY over
+        all rows (ignoring the status filter) so the header subtitle can show
+        true global "lendo / na fila" counts regardless of the active filter.
+        """
+
+        def _work() -> dict[str, Any]:
+            clauses: list[str] = []
+            params: list[Any] = []
+
+            if status and status in _VALID_STATUSES:
+                clauses.append("status = ?")
+                params.append(status)
+
+            if tag:
+                clauses.append("LOWER(tags) LIKE LOWER(?)")
+                params.append(f'%"{tag.strip().lower()}"%')
+
+            if q:
+                like = f"%{q.strip()}%"
+                clauses.append(
+                    "(LOWER(title) LIKE LOWER(?) "
+                    "OR LOWER(summary) LIKE LOWER(?) "
+                    "OR LOWER(tags) LIKE LOWER(?))"
+                )
+                params.extend([like, like, like])
+
+            where = ""
+            if clauses:
+                where = " WHERE " + " AND ".join(clauses)
+
+            with self._store._connect() as conn:
+                total_row = conn.execute(
+                    f"SELECT COUNT(*) FROM reading_items{where}",
+                    params,
+                ).fetchone()
+                total = int(total_row[0]) if total_row else 0
+
+                status_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM reading_items GROUP BY status"
+                ).fetchall()
+
+            by_status = {str(r[0]): int(r[1]) for r in status_rows}
+            return {"total": total, "by_status": by_status}
+
+        return await asyncio.to_thread(_work)
+
     async def get_item(self, item_id: str) -> ReadingItem | None:
         """Get a single reading item by ID."""
         def _work() -> ReadingItem | None:
@@ -417,8 +532,9 @@ class ReadingService:
         *,
         status: str | None = None,
         tags: list[str] | None = None,
+        progress: int | None = None,
     ) -> ReadingItem | None:
-        """Update status and/or tags of a reading item."""
+        """Update status, tags, and/or progress of a reading item."""
         sets: list[str] = []
         params: list[Any] = []
 
@@ -437,6 +553,16 @@ class ReadingService:
         if tags is not None:
             sets.append("tags = ?")
             params.append(_serialize_tags(tags))
+
+        if progress is not None:
+            try:
+                pct = int(progress)
+            except (TypeError, ValueError):
+                raise ValueError("progress must be an integer 0-100")
+            if pct < 0 or pct > 100:
+                raise ValueError("progress must be between 0 and 100")
+            sets.append("progress = ?")
+            params.append(pct)
 
         if not sets:
             return await self.get_item(item_id)

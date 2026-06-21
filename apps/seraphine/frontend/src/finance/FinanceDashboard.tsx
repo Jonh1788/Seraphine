@@ -1,15 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import './obsidian.css';
 import type { DashboardData, FinanceEntry, SeraphineTask } from './types';
+import { CATEGORY_LABELS } from './types';
 import { PieChart, buildPieData } from './PieChart';
 import { CategoryTable } from './CategoryTable';
 import { TransactionList } from './TransactionList';
 import { PendingReview } from './PendingReview';
-import { ArrowLeftIcon, FinanceIcon } from '../icons/Icons';
+import { ArrowLeftIcon, FinanceIcon, SparkleIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
 import { Skeleton, useDelayedFlag } from '../utils';
 
+/** Diagonal up-right arrow (income / healthy) */
+function ArrowUpRightIcon({ size = 13, color = 'currentColor' }: { size?: number; color?: string }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 17L17 7M9 7h8v8" />
+    </svg>
+  );
+}
+
+/** Diagonal down-right arrow (expense) */
+function ArrowDownRightIcon({ size = 13, color = 'currentColor' }: { size?: number; color?: string }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 7L7 17M15 17H7V9" />
+    </svg>
+  );
+}
+
 const TAB_KEYS = ['Visao Geral', 'Categorias', 'Transacoes', 'Pendentes'] as const;
 type Tab = (typeof TAB_KEYS)[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  'Visao Geral': 'Visão geral',
+  Categorias: 'Categorias',
+  Transacoes: 'Transações',
+  Pendentes: 'Pendentes',
+};
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -20,11 +47,16 @@ function fmtBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/** Strip leading emoji from a CATEGORY_LABELS value (e.g. "🏠 Moradia" → "Moradia") */
+function stripCategoryEmoji(text: string): string {
+  return text.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '');
+}
+
 interface FinanceDashboardProps {
   onBack: () => void;
 }
 
-export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element {
+export function FinanceDashboard({ onBack: _onBack }: FinanceDashboardProps): JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>('Visao Geral');
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -120,6 +152,31 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
     }));
   }, [data]);
 
+  // Descriptive sub-lines for the income / expense summary cards (derived client-side)
+  const incomeSub = useMemo(() => {
+    if (!data) return 'Entradas do mês';
+    const incomeEntries = data.entries.filter((e) => e.type === 'income');
+    const names = [...new Set(incomeEntries.map((e) => CATEGORY_LABELS[e.category] ?? e.category))]
+      .map(stripCategoryEmoji)
+      .slice(0, 2);
+    return names.length ? names.join(' + ') : 'Entradas do mês';
+  }, [data]);
+
+  const expenseSub = useMemo(() => {
+    if (!data || data.income <= 0) return 'Total de saídas';
+    const pct = Math.round((data.expenses / data.income) * 100);
+    return `${pct}% das receitas`;
+  }, [data]);
+
+  // Insight line under the donut: largest-category share (derived client-side)
+  const pieInsight = useMemo(() => {
+    if (!data || data.by_category.length === 0 || data.expenses <= 0) return null;
+    const top = [...data.by_category].sort((a, b) => b.total - a.total)[0];
+    const pct = Math.round((top.total / data.expenses) * 100);
+    const name = stripCategoryEmoji(CATEGORY_LABELS[top.category] ?? top.category);
+    return `${name} concentra ${pct}% dos seus gastos este mês.`;
+  }, [data]);
+
   const prevMonth = (): void => {
     if (month === 0) {
       setMonth(11);
@@ -153,27 +210,23 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
       )}
       {/* Header */}
       <div className="finance__header">
-        <button className="finance__back" onClick={onBack} type="button">
-          <ArrowLeftIcon size={18} />
-          <span>Voltar</span>
-        </button>
-        <div className="finance__header-center">
-          <div className="finance__header-icon">
-            <FinanceIcon size={28} />
-          </div>
-          <h2 className="finance__title">Financas</h2>
+        <div className="finance__header-text">
+          <h2 className="finance__title">Finanças</h2>
           <p className="finance__subtitle">Controle suas receitas e despesas</p>
         </div>
-        <div className="finance__month-nav">
-          <button className="finance__month-btn" onClick={prevMonth} type="button">
-            <ArrowLeftIcon size={16} />
-          </button>
-          <span className="finance__month-label">
-            {MONTH_NAMES[month]} {year}
-          </span>
-          <button className="finance__month-btn finance__month-btn--next" onClick={nextMonth} type="button">
-            <ArrowLeftIcon size={16} />
-          </button>
+        <div className="finance__header-actions">
+          <div className="finance__month-nav">
+            <button className="finance__month-btn" onClick={prevMonth} type="button" aria-label="Mês anterior">
+              <ArrowLeftIcon size={16} />
+            </button>
+            <span className="finance__month-label">
+              {MONTH_NAMES[month]} {year}
+            </span>
+            <button className="finance__month-btn finance__month-btn--next" onClick={nextMonth} type="button" aria-label="Próximo mês">
+              <ArrowLeftIcon size={16} />
+            </button>
+          </div>
+          <button className="finance__add-btn" type="button">+ Lançamento</button>
         </div>
       </div>
 
@@ -186,7 +239,7 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
             className={`finance__tab ${activeTab === tab ? 'finance__tab--active' : ''}`}
             onClick={() => setActiveTab(tab)}
           >
-            {tab}
+            {TAB_LABELS[tab]}
             {tab === 'Pendentes' && (pendingEntries.length + pendingTasks.length) > 0 && (
               <span className="finance-tab-badge">{pendingEntries.length + pendingTasks.length}</span>
             )}
@@ -239,34 +292,55 @@ export function FinanceDashboard({ onBack }: FinanceDashboardProps): JSX.Element
           <>
             {overallBalance !== null && (
               <div className={`finance__balance-hero ${overallBalance >= 0 ? 'finance__balance-hero--positive' : 'finance__balance-hero--negative'}`}>
-                <span className="finance__balance-label">Saldo Atual</span>
-                <span className="finance__balance-value">{fmtBRL(overallBalance)}</span>
+                <div>
+                  <span className="finance__balance-label">Saldo atual</span>
+                  <span className="finance__balance-value">{fmtBRL(overallBalance)}</span>
+                </div>
+                <span className="finance__balance-badge">
+                  {overallBalance >= 0 ? <ArrowUpRightIcon /> : <ArrowDownRightIcon />}
+                  {overallBalance >= 0 ? 'Saudável' : 'Atenção'}
+                </span>
               </div>
             )}
 
             <div className="finance__summary-cards">
+              <div className={`finance__card ${data.balance >= 0 ? 'finance__card--positive' : 'finance__card--negative'}`}>
+                <span className="finance__card-label">Balanço do mês</span>
+                <span className="finance__card-value">{data.balance >= 0 ? '+' : ''}{fmtBRL(data.balance)}</span>
+                <span className="finance__card-sub">Receitas − despesas</span>
+              </div>
               <div className="finance__card finance__card--income">
-                <span className="finance__card-label">Receitas do mes</span>
+                <span className="finance__card-label">
+                  <ArrowUpRightIcon color="#4ade80" />
+                  Receitas
+                </span>
                 <span className="finance__card-value">{fmtBRL(data.income)}</span>
+                <span className="finance__card-sub">{incomeSub}</span>
               </div>
               <div className="finance__card finance__card--expense">
-                <span className="finance__card-label">Despesas do mes</span>
+                <span className="finance__card-label">
+                  <ArrowDownRightIcon color="#ef4444" />
+                  Despesas
+                </span>
                 <span className="finance__card-value">{fmtBRL(data.expenses)}</span>
-              </div>
-              <div className={`finance__card ${data.balance >= 0 ? 'finance__card--positive' : 'finance__card--negative'}`}>
-                <span className="finance__card-label">Balanco do mes</span>
-                <span className="finance__card-value">{fmtBRL(data.balance)}</span>
+                <span className="finance__card-sub">{expenseSub}</span>
               </div>
             </div>
 
             <div className="finance__overview-body">
               <div className="finance__pie-section">
-                <h3 className="finance__section-title">Despesas por Categoria</h3>
+                <h3 className="finance__section-title">Despesas por categoria</h3>
                 <PieChart data={pieData} />
+                {pieInsight && (
+                  <div className="finance__pie-insight">
+                    <SparkleIcon size={14} />
+                    <span>{pieInsight}</span>
+                  </div>
+                )}
               </div>
               <div className="finance__recent-section">
-                <h3 className="finance__section-title">Transacoes Recentes</h3>
-                <TransactionList entries={data.entries} limit={5} />
+                <h3 className="finance__section-title">Transações recentes</h3>
+                <TransactionList entries={data.entries} limit={5} compact />
               </div>
             </div>
           </>

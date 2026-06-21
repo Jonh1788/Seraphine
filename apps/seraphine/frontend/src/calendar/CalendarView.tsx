@@ -1,3 +1,4 @@
+import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listEvents } from '../google/api';
 import type { CalendarEvent } from '../google/types';
@@ -14,7 +15,7 @@ import {
   isSameDay,
   monthGrid,
 } from '../google/utils';
-import { ArrowLeftIcon, BellIcon, CalendarIcon, FinanceIcon, TasksIcon } from '../icons/Icons';
+import { ArrowLeftIcon, CalendarIcon } from '../icons/Icons';
 import { Skeleton, useDelayedFlag } from '../utils';
 
 /* ------------------------------------------------------------------ */
@@ -117,17 +118,6 @@ const fmtDayLong = new Intl.DateTimeFormat('pt-BR', {
   month: 'long',
 });
 
-const fmtGreetingDate = new Intl.DateTimeFormat('pt-BR', {
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-});
-
-const fmtDetailDate = new Intl.DateTimeFormat('pt-BR', {
-  day: 'numeric',
-  month: 'long',
-});
-
 const fmtDetailWeekday = new Intl.DateTimeFormat('pt-BR', {
   weekday: 'long',
 });
@@ -142,11 +132,11 @@ const WEEKDAY_LONG: string[] = [
 /* ------------------------------------------------------------------ */
 
 const CATEGORY_COLORS: Record<FilterKey, string> = {
-  agenda: '#a78bfa',
-  financas: '#4ade80',
-  outros: '#42a5f5',
-  tarefas: '#22d3ee',
-  lembretes: '#f59e0b',
+  agenda: '#42a5f5',
+  financas: '#66bb6a',
+  outros: '#78909c',
+  tarefas: '#9a93ff',
+  lembretes: '#ffa726',
 };
 
 const CATEGORY_LABELS: Record<FilterKey, string> = {
@@ -227,7 +217,7 @@ function entryToItem(entry: FinanceEntry): CalendarItem {
     end: d,
     allDay: true,
     title: entry.description,
-    color: entry.type === 'income' ? '#4ade80' : '#f87171',
+    color: entry.type === 'income' ? '#66bb6a' : '#ef6b6b',
     amount: entry.amount,
     amountKind: entry.type,
   };
@@ -266,7 +256,7 @@ function expandRecurring(rule: RecurringRule, rangeStart: Date, rangeEnd: Date):
         end,
         allDay: true,
         title: rule.title,
-        color: '#22d3ee',
+        color: CATEGORY_COLORS.tarefas,
         recurring: true,
       });
     }
@@ -297,7 +287,7 @@ function taskToItem(task: SeraphineTask): CalendarItem | null {
 /** Expand a reminder into CalendarItems for the visible range. */
 function expandReminder(rem: Reminder, rangeStart: Date, rangeEnd: Date): CalendarItem[] {
   const items: CalendarItem[] = [];
-  const AMBER = '#f59e0b';
+  const AMBER = CATEGORY_COLORS.lembretes;
 
   if (!rem.recurring) {
     // One-time reminder — single item on fire_at date
@@ -389,11 +379,11 @@ function expandReminder(rem: Reminder, rangeStart: Date, rangeEnd: Date): Calend
 
 const HEATMAP_COLORS: Record<number, string> = {
   0: '#2a2a3e',
-  1: 'rgba(167, 139, 250, 0.2)',
-  2: 'rgba(167, 139, 250, 0.35)',
-  3: 'rgba(167, 139, 250, 0.55)',
-  4: 'rgba(167, 139, 250, 0.75)',
-  5: '#a78bfa',
+  1: 'rgba(154, 147, 255, 0.2)',
+  2: 'rgba(154, 147, 255, 0.35)',
+  3: 'rgba(154, 147, 255, 0.55)',
+  4: 'rgba(154, 147, 255, 0.75)',
+  5: '#9a93ff',
 };
 
 function heatmapBg(score: number): string {
@@ -424,7 +414,7 @@ function DayDetailPanel({
 }): JSX.Element {
   if (!selectedDay) {
     return (
-      <div className="day-detail-panel glass-card">
+      <div className="day-detail-panel">
         <div className="day-detail-panel__empty">
           <CalendarIcon size={32} className="day-detail-panel__empty-icon" />
           <span className="day-detail-panel__empty-text">Selecione um dia</span>
@@ -438,7 +428,7 @@ function DayDetailPanel({
   );
   dayItems.sort((a, b) => a.start.getTime() - b.start.getTime());
 
-  const dateLabel = fmtDetailDate.format(selectedDay);
+  const dateLabel = String(selectedDay.getDate());
   const weekdayLabel = fmtDetailWeekday.format(selectedDay);
 
   const agendaItems = dayItems.filter((it) => it.category === 'agenda');
@@ -462,7 +452,10 @@ function DayDetailPanel({
           <div
             key={it.key}
             className={`day-detail-panel__item${it.taskId ? ' day-detail-panel__item--clickable' : ''}`}
-            style={{ borderLeftColor: CATEGORY_COLORS[it.category] }}
+            style={{
+              borderLeftColor: CATEGORY_COLORS[it.category],
+              background: `${CATEGORY_COLORS[it.category]}14`,
+            }}
             onClick={it.taskId ? () => onItemClick(it) : undefined}
           >
             <div className="day-detail-panel__item-title">{it.title}</div>
@@ -496,7 +489,7 @@ function DayDetailPanel({
   };
 
   return (
-    <div className="day-detail-panel glass-card">
+    <div className="day-detail-panel">
       <div className="day-detail-panel__header">
         <div className="day-detail-panel__date">{dateLabel}</div>
         <div className="day-detail-panel__weekday">{weekdayLabel}</div>
@@ -538,7 +531,7 @@ function HeatmapDetailPanel({
 }): JSX.Element {
   if (!selectedDay || !aggregate) {
     return (
-      <div className="day-detail-panel glass-card">
+      <div className="day-detail-panel">
         <div className="day-detail-panel__empty">
           <CalendarIcon size={32} className="day-detail-panel__empty-icon" />
           <span className="day-detail-panel__empty-text">Selecione um dia</span>
@@ -547,19 +540,19 @@ function HeatmapDetailPanel({
     );
   }
 
-  const dateLabel = fmtDetailDate.format(selectedDay);
+  const dateLabel = String(selectedDay.getDate());
   const weekdayLabel = fmtDetailWeekday.format(selectedDay);
   const { tasks, habits, health, water, events, score } = aggregate;
   const hasContent = tasks.length > 0 || habits.length > 0 || health || water || events.length > 0;
 
   return (
-    <div className="day-detail-panel glass-card">
+    <div className="day-detail-panel">
       <div className="day-detail-panel__header">
         <div className="day-detail-panel__date">{dateLabel}</div>
         <div className="day-detail-panel__weekday">{weekdayLabel}</div>
-        <div className="heatmap-detail__score" style={{ backgroundColor: heatmapBg(score) }}>
-          {score}/5 - {scoreLabel(score)}
-        </div>
+      </div>
+      <div className="heatmap-detail__score" style={{ backgroundColor: heatmapBg(score) }}>
+        {score}/5 - {scoreLabel(score)}
       </div>
       <div className="day-detail-panel__divider" />
       <div className="day-detail-panel__content">
@@ -753,7 +746,7 @@ function HeatmapGrid({
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="heatmap-grid glass-card">
+    <div className="heatmap-grid">
       {WEEKDAY_LABELS.map((label) => (
         <div key={label} className="heatmap-grid__header">{label}</div>
       ))}
@@ -886,7 +879,7 @@ function MonthGrid({
   void onItemClick;
 
   return (
-    <div className="month-grid-v2 glass-card">
+    <div className="month-grid-v2">
       {WEEKDAY_LABELS.map((label) => (
         <div key={label} className="month-grid-v2__header">{label}</div>
       ))}
@@ -1220,7 +1213,7 @@ function DayView({
 /*  CalendarView (main)                                                */
 /* ------------------------------------------------------------------ */
 
-export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): JSX.Element {
+export function CalendarView({ onNavigateToTask }: CalendarViewProps): JSX.Element {
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const now = new Date();
@@ -1545,136 +1538,132 @@ export function CalendarView({ onBack, onNavigateToTask }: CalendarViewProps): J
       ? fmtDayLong.format(currentDate)
       : fmtMonthYear.format(currentDate);
 
-  const greetingLabel = fmtGreetingDate.format(now);
-
   // Selected day's aggregate (for heatmap detail panel)
   const selectedAggregate = useMemo<DayAggregate | null>(() => {
     if (!selectedDay) return null;
     return aggregates.get(toIsoDate(selectedDay)) ?? null;
   }, [selectedDay, aggregates]);
 
-  // Filter pill data
-  const filterPills: { key: FilterKey; label: string; color: string; icon: JSX.Element | null }[] = [
-    { key: 'agenda', label: CATEGORY_LABELS.agenda, color: CATEGORY_COLORS.agenda, icon: <CalendarIcon size={14} /> },
-    { key: 'financas', label: CATEGORY_LABELS.financas, color: CATEGORY_COLORS.financas, icon: <FinanceIcon size={14} /> },
-    { key: 'tarefas', label: CATEGORY_LABELS.tarefas, color: CATEGORY_COLORS.tarefas, icon: <TasksIcon size={14} /> },
-    { key: 'outros', label: CATEGORY_LABELS.outros, color: CATEGORY_COLORS.outros, icon: null },
-    { key: 'lembretes', label: CATEGORY_LABELS.lembretes, color: CATEGORY_COLORS.lembretes, icon: <BellIcon size={14} /> },
+  // Filter pill data — each leads with an 8px colored dot in the category color.
+  const filterPills: { key: FilterKey; label: string; color: string }[] = [
+    { key: 'agenda', label: CATEGORY_LABELS.agenda, color: CATEGORY_COLORS.agenda },
+    { key: 'financas', label: CATEGORY_LABELS.financas, color: CATEGORY_COLORS.financas },
+    { key: 'tarefas', label: CATEGORY_LABELS.tarefas, color: CATEGORY_COLORS.tarefas },
+    { key: 'outros', label: CATEGORY_LABELS.outros, color: CATEGORY_COLORS.outros },
+    { key: 'lembretes', label: CATEGORY_LABELS.lembretes, color: CATEGORY_COLORS.lembretes },
   ];
 
   return (
     <div className="calendar-view">
-      {/* Greeting header */}
-      <div className="calendar-view__greeting">
-        <button className="calendar-view__back" onClick={onBack} type="button">
-          <ArrowLeftIcon size={18} />
-        </button>
-        <div className="calendar-view__greeting-text">
-          <span className="calendar-view__greeting-date">{greetingLabel}</span>
-          {(loading || aggLoading) && <span className="calendar-view__loading">atualizando...</span>}
-        </div>
-      </div>
-
-      {/* Header */}
+      {/* Header: title (left) | [Heatmap|Mês|Semana|Dia] [‹ Hoje ›] [+ Evento] (right) */}
       <div className="calendar-view__header">
         <div className="calendar-view__header-left">
           <h2 className="calendar-view__title">{headerLabel}</h2>
+          {(loading || aggLoading) && <span className="calendar-view__loading">atualizando...</span>}
         </div>
 
-        {viewMode !== 'heatmap' && (
-          <div className="calendar-view__filters">
-            {filterPills.map((pill) => {
-              const active = filters.has(pill.key);
-              return (
-                <button
-                  key={pill.key}
-                  type="button"
-                  className={`calendar-filter${active ? ' calendar-filter--active' : ''}`}
-                  style={active ? {
-                    backgroundColor: `${pill.color}1f`,
-                    borderColor: `${pill.color}4d`,
-                    color: pill.color,
-                  } : undefined}
-                  onClick={() => toggleFilter(pill.key)}
-                >
-                  {pill.icon}
-                  {pill.label}
-                </button>
-              );
-            })}
+        <div className="calendar-view__actions">
+          {/* Segmented view toggle */}
+          <div className="calendar-view__toggle" role="tablist">
+            <button
+              type="button"
+              className={`calendar-view__toggle-btn${viewMode === 'heatmap' ? ' calendar-view__toggle-btn--active' : ''}`}
+              onClick={() => {
+                setViewMode('heatmap');
+                setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+              }}
+            >
+              Heatmap
+            </button>
+            <button
+              type="button"
+              className={`calendar-view__toggle-btn${viewMode === 'month' ? ' calendar-view__toggle-btn--active' : ''}`}
+              onClick={() => {
+                setViewMode('month');
+                setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+              }}
+            >
+              Mes
+            </button>
+            <button
+              type="button"
+              className={`calendar-view__toggle-btn${viewMode === 'week' ? ' calendar-view__toggle-btn--active' : ''}`}
+              onClick={() => {
+                setViewMode('week');
+                setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+              }}
+            >
+              Semana
+            </button>
+            <button
+              type="button"
+              className={`calendar-view__toggle-btn${viewMode === 'day' ? ' calendar-view__toggle-btn--active' : ''}`}
+              onClick={() => {
+                setViewMode('day');
+                setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+              }}
+            >
+              Dia
+            </button>
           </div>
-        )}
 
-        <div className="calendar-view__nav">
+          {/* Prev / Hoje / Next pill */}
+          <div className="calendar-view__nav">
+            <button
+              type="button"
+              className="calendar-view__nav-btn"
+              onClick={goPrev}
+              aria-label="Anterior"
+            >
+              <ArrowLeftIcon size={16} />
+            </button>
+            <button
+              type="button"
+              className="calendar-view__today-btn"
+              onClick={goToday}
+            >
+              Hoje
+            </button>
+            <button
+              type="button"
+              className="calendar-view__nav-btn calendar-view__nav-btn--next"
+              onClick={goNext}
+              aria-label="Proximo"
+            >
+              <ArrowLeftIcon size={16} />
+            </button>
+          </div>
+
+          {/* Primary CTA — focus today's day panel (no dedicated create modal exists) */}
           <button
             type="button"
-            className="calendar-view__nav-btn"
-            onClick={goPrev}
-            aria-label="Anterior"
+            className="calendar-view__add-event"
+            onClick={() => handleDayClick(new Date())}
           >
-            <ArrowLeftIcon size={16} />
-          </button>
-          <button
-            type="button"
-            className="calendar-view__today-btn"
-            onClick={goToday}
-          >
-            Hoje
-          </button>
-          <button
-            type="button"
-            className="calendar-view__nav-btn calendar-view__nav-btn--next"
-            onClick={goNext}
-            aria-label="Proximo"
-          >
-            <ArrowLeftIcon size={16} />
+            + Evento
           </button>
         </div>
       </div>
 
-      {/* View toggle */}
-      <div className="calendar-view__toggle">
-        <button
-          type="button"
-          className={`calendar-view__toggle-btn${viewMode === 'heatmap' ? ' calendar-view__toggle-btn--active' : ''}`}
-          onClick={() => {
-            setViewMode('heatmap');
-            setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
-          }}
-        >
-          Heatmap
-        </button>
-        <button
-          type="button"
-          className={`calendar-view__toggle-btn${viewMode === 'month' ? ' calendar-view__toggle-btn--active' : ''}`}
-          onClick={() => {
-            setViewMode('month');
-            setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
-          }}
-        >
-          Mes
-        </button>
-        <button
-          type="button"
-          className={`calendar-view__toggle-btn${viewMode === 'week' ? ' calendar-view__toggle-btn--active' : ''}`}
-          onClick={() => {
-            setViewMode('week');
-            setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-          }}
-        >
-          Semana
-        </button>
-        <button
-          type="button"
-          className={`calendar-view__toggle-btn${viewMode === 'day' ? ' calendar-view__toggle-btn--active' : ''}`}
-          onClick={() => {
-            setViewMode('day');
-            setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-          }}
-        >
-          Dia
-        </button>
-      </div>
+      {/* Filter pills (8px colored dots) */}
+      {viewMode !== 'heatmap' && (
+        <div className="calendar-view__filters">
+          {filterPills.map((pill) => {
+            const active = filters.has(pill.key);
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                className={`calendar-filter${active ? ' calendar-filter--active' : ' calendar-filter--off'}`}
+                onClick={() => toggleFilter(pill.key)}
+              >
+                <span className="calendar-filter__dot" style={{ background: pill.color }} />
+                {pill.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Grid */}
       {delayedFirstLoading ? (

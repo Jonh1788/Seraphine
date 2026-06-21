@@ -1,0 +1,333 @@
+/* Obsidian reskin — Insights dashboard.
+ * Loaded after globals so equal-specificity overrides win. Scoped with the
+ * .insights-view prefix. Reuses obs-* tokens from src/obsidian.css. */
+
+/* --- Screen header --------------------------------------------------- */
+.insights-view__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px 16px;
+  flex: none;
+}
+
+.insights-view__heading {
+  min-width: 0;
+}
+
+.insights-view__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.insights-view__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* --- Segmented period toggle ---------------------------------------- */
+.insights-view__period {
+  display: flex;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 3px;
+}
+
+.insights-view__period-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.insights-view__period-btn:hover {
+  color: var(--text);
+}
+
+.insights-view__period-btn--active,
+.insights-view__period-btn--active:hover {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* --- Body / dashboard column ---------------------------------------- */
+.insights-view__body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 6px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.insights-view__error {
+  font-size: 13px;
+  color: var(--danger);
+}
+
+/* --- Stat cards ------------------------------------------------------ */
+.insights-view__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.insights-view__stat {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.insights-view__stat-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.insights-view__stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.insights-view__stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.insights-view__stat-delta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--user);
+}
+
+.insights-view__stat-mood {
+  display: inline-flex;
+  align-items: center;
+  color: var(--user);
+}
+
+.insights-view__stat-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* --- Chart + time split --------------------------------------------- */
+/* The "Onde foi seu tempo" card is hidden until time-by-category data
+   exists (Wave B), so the chart card spans the full width on its own. */
+.insights-view__split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.insights-view__chart-empty {
+  font-size: 12px;
+  color: var(--text-dim, var(--text));
+  opacity: 0.7;
+  margin: 14px 0 0;
+}
+
+.insights-view__chart-card,
+.insights-view__time-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.insights-view__chart-title,
+.insights-view__time-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 18px;
+}
+
+/* Weekly bar chart */
+.insights-view__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  height: 150px;
+}
+
+.insights-view__bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.insights-view__bar {
+  width: 100%;
+  max-width: 34px;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent-soft);
+}
+
+.insights-view__bar--hi {
+  background: var(--accent);
+}
+
+.insights-view__bar-label {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.insights-view__bar-label--today {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Category time bars */
+.insights-view__time-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.insights-view__time-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.insights-view__time-name {
+  color: var(--text);
+}
+
+.insights-view__time-value {
+  color: var(--text-dim);
+}
+
+.insights-view__time-track {
+  height: 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.insights-view__time-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+
+/* --- 'Seraphine notou' gradient card -------------------------------- */
+.insights-view__noticed {
+  background: linear-gradient(
+    160deg,
+    rgba(154, 147, 255, 0.12),
+    rgba(154, 147, 255, 0.03)
+  );
+  border: 1px solid rgba(154, 147, 255, 0.22);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.insights-view__noticed-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.insights-view__noticed-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.insights-view__noticed-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.insights-view__noticed-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.insights-view__noticed-item {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.insights-view__noticed-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.insights-view__noticed-text strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* --- Empty state ----------------------------------------------------- */
+.insights-view__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 32px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--text-dim);
+}
+
+.insights-view__empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.insights-view__empty-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 420px;
+}
+
+/* Responsive: collapse grids on narrow viewports */
+@media (max-width: 900px) {
+  .insights-view__stats,
+  .insights-view__split,
+  .insights-view__noticed-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,196 @@
+/* Obsidian reskin — Trabalhos (vaga board)
+ * Scoped to this screen. Loads after globals so equal-specificity wins.
+ * Common patterns (header, primary button) reuse global tokens; only
+ * the screen-specific vaga-card surfaces live here. */
+
+/* ---- Header (matches global obs-screen header spec) ---- */
+.cvt-jobs-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.cvt-jobs-header p {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ---- Primary CTA (dark-on-accent per design system) ---- */
+.cvt-jobs-tab .work-primary-button {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: 11px;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cvt-jobs-tab .work-primary-button:hover {
+  background: var(--accent-hi);
+}
+
+/* ---- Vaga list ---- */
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Vaga card ---- */
+.job-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-1);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.job-card:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+.job-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.3);
+}
+.job-card.is-highlight {
+  border-left: 3px solid var(--accent);
+}
+.job-card.is-candidatado {
+  border-left: 3px solid #42a5f5;
+}
+
+.job-card__avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.job-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.job-card__role {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-card__sub {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-card__match {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+}
+.job-card__match span {
+  font-size: 16px;
+  font-weight: 700;
+}
+.job-card__match small {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* ---- Status chips (real cv_triage run phase) ---- */
+.job-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 8px;
+  flex: none;
+  white-space: nowrap;
+}
+/* concluída (job.status === 'done') */
+.job-status--entrevista {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+}
+/* processando (extracting / ranking / sending) */
+.job-status--candidatado {
+  color: #42a5f5;
+  background: rgba(66, 165, 245, 0.14);
+}
+/* em fila (queued) */
+.job-status--nova {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+}
+/* falhou / cancelada (failed / cancelled) */
+.job-status--falhou {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+}
+
+/* ---- Seraphine tip card ---- */
+.jobs-tip {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(154, 147, 255, 0.22);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.jobs-tip svg {
+  flex: none;
+  color: var(--accent);
+}
+.jobs-tip span {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* ---- Empty state for the board ---- */
+.jobs-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-1);
+  text-align: center;
+}
+.jobs-list-empty strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.jobs-list-empty small {
+  font-size: 12px;
+  color: var(--text-dim);
+}

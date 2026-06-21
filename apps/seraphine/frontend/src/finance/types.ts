@@ -47,6 +47,7 @@ export interface SeraphineTask {
   due_time?: string | null; // HH:MM 24h (optional, pairs with due_date)
   priority?: string | null; // low / med / high
   tags?: string[];
+  category?: string | null; // persisted finance-taxonomy key (chip color)
   remind?: string | null; // at_time / 1h_before / 1d_before
 }
 

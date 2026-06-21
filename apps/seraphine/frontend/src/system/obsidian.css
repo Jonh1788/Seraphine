@@ -1,0 +1,261 @@
+/* =====================================================================
+   Obsidian reskin — Sistema (system status) screen
+   Loaded after styles.css + obsidian.css so equal-specificity wins.
+   Reuses .obs-screen / .obs-card / statusBlink from the shared layer;
+   only screen-unique structures (service grid, storage bar, legend,
+   info rows) are defined here, all prefixed with `sys-`.
+   ===================================================================== */
+
+/* ---- Green "Tudo operacional" header pill ---- */
+.sys-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  padding: 7px 13px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.sys-status-pill--warn {
+  color: var(--warning);
+  background: rgba(255, 167, 38, 0.12);
+}
+.sys-status-pill--off {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+.sys-status-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: statusBlink 2.4s ease-in-out infinite;
+}
+
+/* ---- Subtle header refresh (ghost, de-emphasized vs pill) ---- */
+.sys-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 6px 11px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), color 200ms ease, border-color 200ms ease;
+}
+.sys-refresh:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.sys-refresh:disabled { opacity: 0.5; cursor: default; }
+.sys-refresh svg { width: 14px; height: 14px; }
+
+/* ---- 3-column service status grid ---- */
+.sys-services {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.sys-service {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+.sys-service__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sys-service__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.sys-service__detail {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+.sys-service__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.sys-service__dot--ok { background: #4ade80; }
+.sys-service__dot--warn { background: var(--warning); }
+.sys-service__dot--off { background: var(--danger); }
+
+/* ---- Two-card row (Armazenamento / Aplicativo) ---- */
+.sys-cards-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.sys-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+}
+.sys-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+
+/* ---- Storage usage bar + legend ---- */
+.sys-storage-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+.sys-storage-bar {
+  height: 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  display: flex;
+}
+.sys-storage-seg { height: 100%; }
+.sys-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.sys-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sys-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ---- App info key/value rows ---- */
+.sys-info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sys-info-row:last-child { border-bottom: 0; }
+.sys-info-row .k {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.sys-info-row .v {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+.sys-info-row .v--ok { color: #4ade80; }
+
+/* ---- Operational shortcuts (preserved Controles actions) ---- */
+.sys-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.sys-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 9px 14px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), border-color 200ms ease;
+}
+.sys-actions button:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+/* ---- Proactive jobs list (preserved Controles content) ---- */
+.sys-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sys-empty {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.sys-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.sys-job__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sys-job__main strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.sys-job__main span {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sys-job__actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.sys-job__actions button {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease;
+}
+.sys-job__actions button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-1);
+}
+.sys-job__actions button:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 760px) {
+  .sys-services { grid-template-columns: 1fr; }
+  .sys-cards-row { grid-template-columns: 1fr; }
+}

@@ -16,6 +16,7 @@ class FocusSession:
     completed: bool
     interruptions: int = 0
     notes: str | None = None
+    category: str = "Foco"  # life/work category, e.g. 'Trabalho', 'Estudo'
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +28,7 @@ class FocusSession:
             "completed": self.completed,
             "interruptions": self.interruptions,
             "notes": self.notes,
+            "category": self.category,
         }
 
 
@@ -67,6 +69,22 @@ class FocusDayStat:
 
 
 @dataclass
+class FocusCategoryStat:
+    """Focus minutes accumulated under a single category ('onde foi seu tempo')."""
+
+    category: str
+    focus_min: int
+    sessions: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.category,
+            "focus_min": self.focus_min,
+            "sessions": self.sessions,
+        }
+
+
+@dataclass
 class FocusStats:
     total_focus_min: int
     completed_sessions: int
@@ -75,6 +93,7 @@ class FocusStats:
     streak_days: int
     interruption_rate: float  # interruptions / total_sessions (0.0 .. 1.0)
     by_day: list[FocusDayStat] = field(default_factory=list)
+    by_category: list[FocusCategoryStat] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,4 +104,5 @@ class FocusStats:
             "streak_days": self.streak_days,
             "interruption_rate": round(self.interruption_rate, 3),
             "by_day": [d.to_dict() for d in self.by_day],
+            "by_category": [c.to_dict() for c in self.by_category],
         }

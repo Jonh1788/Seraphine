@@ -20,6 +20,9 @@ export interface Habit {
 export interface HabitWithStatus extends Habit {
   today_completed: boolean;
   current_streak: number;
+  best_streak: number;        // true record streak (computed by backend)
+  total_completed: number;    // lifetime completed-day count
+  is_target_today: boolean;   // whether the habit is due today
 }
 
 export interface HabitStreaks {
@@ -48,10 +51,17 @@ export interface HabitListResponse {
 export interface HabitToggleResponse {
   log: HabitLog;
   current_streak: number;
+  best_streak: number;
+  total_completed: number;
 }
 
 export interface HabitCalendarResponse {
   logs: HabitLog[];
+}
+
+/** Batch calendar: logs grouped by habit_id, for the weekly grid (one fetch). */
+export interface HabitCalendarBatchResponse {
+  logs: Record<string, HabitLog[]>;
 }
 
 export interface HabitCreateInput {

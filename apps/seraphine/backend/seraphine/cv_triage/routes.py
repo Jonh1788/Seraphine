@@ -129,6 +129,26 @@ def _result_to_dict(r) -> dict[str, Any]:
     }
 
 
+def _parse_top5(top5_json: str | None) -> list[dict[str, Any]] | None:
+    """Parse the stored ``top5_json`` string into the same array shape the
+    ``cv_triage_finished`` WS frame emits.
+
+    The worker persists ``top5_json`` as a JSON string (rank/filename/
+    candidate_name/score/match_pct/strengths/gaps/justification). Both the
+    list and detail REST endpoints emitted only the raw string, so the
+    frontend (which reads a parsed ``top5`` array) always saw ``undefined``
+    and fell back to a synthetic match %. Parsing it here makes the real
+    ranked match data available over REST for DONE jobs.
+    """
+    if not top5_json:
+        return None
+    try:
+        parsed = json.loads(top5_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
 def _job_to_dict(job, *, include_results: bool = False, results=None) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": job.id,
@@ -145,6 +165,9 @@ def _job_to_dict(job, *, include_results: bool = False, results=None) -> dict[st
         "unreadable": job.unreadable,
         "staging_dir": job.staging_dir,
         "top5_json": job.top5_json,
+        # Parsed alongside the raw string so the frontend can read real
+        # ranked match data without re-parsing client-side.
+        "top5": _parse_top5(job.top5_json),
         "whatsapp_status": (
             job.whatsapp_status.value if job.whatsapp_status else None
         ),

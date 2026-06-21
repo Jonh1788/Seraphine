@@ -1,0 +1,360 @@
+/* ============================================================================
+   Obsidian reskin — Leituras (reading)
+   Loaded AFTER src/styles.css so equal-specificity overrides win.
+   Reskin only: presentation/markup. No logic/handlers/data flow changed.
+   ============================================================================ */
+
+/* ---------- View shell: asymmetric region padding ---------- */
+.reading-view {
+  padding: 0;
+  gap: 0;
+  background: var(--app);
+}
+
+.reading-view__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 24px 32px 14px;
+  flex: none;
+}
+
+/* Title block (title + count subtitle) */
+.reading-view__titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.reading-view__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.reading-view__subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Back button kept (Seraphine routing extra) — sober ghost styling */
+.reading-view__back {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reading-view__back:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Primary CTA */
+.reading-view__add-btn {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-radius: 11px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reading-view__add-btn:hover {
+  opacity: 1;
+  background: var(--accent-hi);
+}
+
+/* Inline add form sits under the header */
+.reading-view__add-form {
+  padding: 0 32px 8px;
+}
+.reading-view__input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.reading-view__input:focus {
+  border-color: var(--accent);
+}
+.reading-view__save-btn {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-radius: 11px;
+}
+
+/* ---------- Filters row ---------- */
+.reading-view__filters {
+  padding: 0 32px 8px;
+  flex: none;
+}
+
+.reading-view__status-chips {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.reading-view__chip {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 13px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reading-view__chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.reading-view__chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+.reading-view__chip--active:hover {
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* Search (Seraphine extra, not in mockup) — restyled to Obsidian tokens */
+.reading-view__search {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.reading-view__search:focus {
+  border-color: var(--accent);
+}
+.reading-view__semantic-toggle {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.reading-view__semantic-toggle--active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Tag pills (Seraphine extra) — Obsidian tokens */
+.reading-view__tag-pills {
+  padding: 0 32px 8px;
+}
+.reading-view__tag-pill {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.reading-view__tag-pill:hover {
+  border-color: var(--border-strong);
+}
+.reading-view__tag-pill--active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Toast / error / empty state — keep horizontal inset off the new shell */
+.reading-view__toast,
+.reading-view__error {
+  margin: 0 32px 8px;
+}
+.reading-view__empty {
+  padding: 80px 32px;
+}
+
+/* ---------- Card grid ---------- */
+.reading-view__grid {
+  padding: 10px 32px 28px;
+  align-content: start;
+  gap: 16px;
+}
+
+/* ---------- Reading Card: Obsidian colored-cover tile ---------- */
+.reading-card {
+  position: relative;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reading-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.reading-card--read {
+  opacity: 0.7;
+}
+
+.reading-card--skeleton {
+  min-height: 140px;
+  padding: var(--space-4);
+}
+
+/* Cover band */
+.reading-card__cover {
+  height: 84px;
+  display: flex;
+  align-items: flex-end;
+  padding: 12px;
+}
+
+.reading-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 3px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.reading-card__badge-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: reading-spin 0.8s linear infinite;
+}
+
+/* Body */
+.reading-card__body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.reading-card__title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reading-card__meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-card__error {
+  font-size: 12px;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  margin-top: 8px;
+}
+
+.reading-card__progress {
+  margin-top: 10px;
+  height: 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.reading-card__progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Progress control (drag-to-set how far you've read). */
+.reading-card__progress-control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+.reading-card__progress-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.reading-card__progress-slider {
+  width: 100%;
+  height: 4px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* Hover action overlay (replaces the in-body date+actions footer) */
+.reading-card__overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 5;
+}
+.reading-card:hover .reading-card__overlay,
+.reading-card__overlay:focus-within {
+  opacity: 1;
+}
+
+.reading-card__overlay-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-strong);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reading-card__overlay-btn:hover {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* Action dropdown menu (reused, tokenized) */
+.reading-card__menu-wrap {
+  position: relative;
+}
+.reading-card__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  bottom: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 4px;
+  min-width: 170px;
+  box-shadow: var(--shadow-md);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}

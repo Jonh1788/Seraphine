@@ -1,6 +1,7 @@
 import { API_BASE } from '../api';
 import type {
   Habit,
+  HabitCalendarBatchResponse,
   HabitCalendarResponse,
   HabitCreateInput,
   HabitListResponse,
@@ -36,21 +37,23 @@ export async function listHabits(): Promise<HabitWithStatus[]> {
 }
 
 export async function createHabit(body: HabitCreateInput): Promise<Habit> {
-  const res = await request<Habit>('/habits', {
+  // Backend envelopes the habit: { id, habit }.
+  const res = await request<{ id: string; habit: Habit }>('/habits', {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (!res) throw new Error('Empty response from POST /habits');
-  return res;
+  if (!res?.habit) throw new Error('Empty response from POST /habits');
+  return res.habit;
 }
 
 export async function updateHabit(id: string, body: HabitUpdateInput): Promise<Habit> {
-  const res = await request<Habit>(`/habits/${encodeURIComponent(id)}`, {
+  // Backend envelopes the habit: { habit }.
+  const res = await request<{ habit: Habit }>(`/habits/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
-  if (!res) throw new Error('Empty response from PATCH /habits');
-  return res;
+  if (!res?.habit) throw new Error('Empty response from PATCH /habits');
+  return res.habit;
 }
 
 export async function deleteHabit(id: string): Promise<void> {
@@ -82,5 +85,21 @@ export async function getCalendar(
     `/habits/${encodeURIComponent(id)}/calendar?${params.toString()}`,
   );
   if (!res) throw new Error('Empty response from GET /habits/calendar');
+  return res;
+}
+
+/**
+ * Batch calendar for ALL active habits in one fetch (replaces the N+1 grid).
+ * Returns logs grouped by habit_id for the given month.
+ */
+export async function getCalendarBatch(
+  month: number,
+  year: number,
+): Promise<HabitCalendarBatchResponse> {
+  const params = new URLSearchParams({ month: String(month), year: String(year) });
+  const res = await request<HabitCalendarBatchResponse>(
+    `/habits/calendar?${params.toString()}`,
+  );
+  if (!res) throw new Error('Empty response from GET /habits/calendar (batch)');
   return res;
 }

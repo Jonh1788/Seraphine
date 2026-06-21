@@ -2,8 +2,10 @@ import { API_BASE } from '../api';
 import type {
   JournalEntry,
   JournalCreateInput,
+  JournalEntryEnvelope,
   JournalListResponse,
   JournalSearchResponse,
+  JournalStats,
   JournalType,
   JournalUpdateInput,
 } from './types';
@@ -54,34 +56,47 @@ export async function fetchJournalEntries(
 }
 
 export async function fetchJournalEntry(id: string): Promise<JournalEntry> {
-  const data = await request<JournalEntry>(`/journal/${encodeURIComponent(id)}`);
-  if (!data) throw new Error('Empty response from GET /journal/:id');
-  return data;
+  // Backend wraps the entry as { "entry": {...} } (journal/routes.py).
+  const data = await request<JournalEntryEnvelope>(`/journal/${encodeURIComponent(id)}`);
+  if (!data?.entry) throw new Error('Empty response from GET /journal/:id');
+  return data.entry;
 }
 
 export async function createJournalEntry(body: JournalCreateInput): Promise<JournalEntry> {
-  const data = await request<JournalEntry>('/journal', {
+  // Backend wraps the entry as { "entry": {...} } (journal/routes.py).
+  const data = await request<JournalEntryEnvelope>('/journal', {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (!data) throw new Error('Empty response from POST /journal');
-  return data;
+  if (!data?.entry) throw new Error('Empty response from POST /journal');
+  return data.entry;
 }
 
 export async function updateJournalEntry(
   id: string,
   body: JournalUpdateInput,
 ): Promise<JournalEntry> {
-  const data = await request<JournalEntry>(`/journal/${encodeURIComponent(id)}`, {
+  // Backend wraps the entry as { "entry": {...} } (journal/routes.py).
+  const data = await request<JournalEntryEnvelope>(`/journal/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
-  if (!data) throw new Error('Empty response from PATCH /journal/:id');
-  return data;
+  if (!data?.entry) throw new Error('Empty response from PATCH /journal/:id');
+  return data.entry;
 }
 
 export async function deleteJournalEntry(id: string): Promise<void> {
   await request<void>(`/journal/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function fetchJournalStats(): Promise<JournalStats> {
+  const data = await request<JournalStats>('/journal/stats');
+  return {
+    current_streak: data?.current_streak ?? 0,
+    longest_streak: data?.longest_streak ?? 0,
+    total_entries: data?.total_entries ?? 0,
+    days_logged: data?.days_logged ?? 0,
+  };
 }
 
 export async function searchJournal(q: string, limit = 10): Promise<JournalEntry[]> {

@@ -22,6 +22,10 @@ class JournalCreateBody(BaseModel):
     content: str = Field(default="", max_length=20_000)
     tags: list[str] | None = None
     date: str | None = None  # optional override, defaults to today SP
+    # Composer-selected mood. When provided, it wins over the conversation
+    # mood snapshot so the user's chosen face actually feeds the histogram/map.
+    mood_label: str | None = Field(default=None, max_length=40)
+    mood_valence: float | None = Field(default=None, ge=-1.0, le=1.0)
 
     model_config = {"extra": "forbid"}
 
@@ -90,6 +94,13 @@ async def journal_list(
     return {"entries": [e.to_dict() for e in entries], "total": len(total)}
 
 
+@router.get("/stats")
+async def journal_stats(request: Request) -> dict[str, int]:
+    """Writing stats aggregated over existing entry dates (read-only)."""
+    svc = _service_or_503(request)
+    return await svc.get_stats()
+
+
 @router.get("/{entry_id}")
 async def journal_get(request: Request, entry_id: str) -> dict[str, Any]:
     svc = _service_or_503(request)
@@ -107,19 +118,21 @@ async def journal_create(
     svc = _service_or_503(request)
     date = body.date or _today_sp()
 
-    # Optionally attach today's mood
-    mood_label: str | None = None
-    mood_valence: float | None = None
-    mood_service = getattr(request.app.state, "mood_service", None)
-    if mood_service is not None:
-        try:
-            today_mood = await mood_service.get_today()
-            current = today_mood.get("current")
-            if current:
-                mood_label = current.get("label")
-                mood_valence = current.get("valence")
-        except Exception:
-            pass
+    # Mood resolution: the composer-selected mood (body) always wins. Only when
+    # the user did not pick a face do we fall back to today's conversation mood.
+    mood_label: str | None = body.mood_label
+    mood_valence: float | None = body.mood_valence
+    if mood_valence is None and mood_label is None:
+        mood_service = getattr(request.app.state, "mood_service", None)
+        if mood_service is not None:
+            try:
+                today_mood = await mood_service.get_today()
+                current = today_mood.get("current")
+                if current:
+                    mood_label = current.get("label")
+                    mood_valence = current.get("valence")
+            except Exception:
+                pass
 
     entry = await svc.create_entry(
         date=date,
@@ -131,6 +144,17 @@ async def journal_create(
         tags=body.tags,
         source="user",
     )
+
+    # Best-effort, non-blocking Seraphine reflection on the entry. Falls back to
+    # null (no callout) when no LLM is configured or generation fails.
+    try:
+        reflection = await svc.generate_reflection(body.content)
+        if reflection:
+            await svc.set_reflection(entry.id, reflection)
+            entry.reflection = reflection
+    except Exception as e:
+        logger.warning("journal: reflection step skipped: %s", e)
+
     return {"entry": entry.to_dict()}
 
 

@@ -432,6 +432,7 @@ async def generate_dashboard_summary(
     finance_expenses = 0.0
     finance_balance = 0.0
     finance_pending_review = 0
+    finance_by_category: list[dict[str, Any]] = []
 
     if finance_service is not None:
         try:
@@ -441,6 +442,10 @@ async def generate_dashboard_summary(
             finance_income = summary.get("income", 0.0)
             finance_expenses = summary.get("expenses", 0.0)
             finance_balance = summary.get("balance", 0.0)
+            # by_category already computed by FinanceService (expenses grouped,
+            # ORDER BY total DESC). Forward it so the dashboard can render real
+            # per-category amounts instead of a hardcoded legend.
+            finance_by_category = summary.get("by_category", []) or []
         except Exception as exc:
             logger.warning("dashboard: finance summary failed: %s", exc)
 
@@ -478,6 +483,7 @@ async def generate_dashboard_summary(
             "expenses": finance_expenses,
             "balance": finance_balance,
             "pending_review": finance_pending_review,
+            "by_category": finance_by_category,
         },
     }
     if habits_today is not None:

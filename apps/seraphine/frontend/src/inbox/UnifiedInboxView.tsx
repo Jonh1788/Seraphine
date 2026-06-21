@@ -1,22 +1,20 @@
+import './obsidian.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../api';
-import {
-  ArrowLeftIcon,
-  BrainIcon,
-  CalendarIcon,
-  FinanceIcon,
-  InboxIcon,
-  LightbulbIcon,
-  RefreshIcon,
-  TargetIcon,
-  TasksIcon,
-} from '../icons/Icons';
+import { CalendarIcon } from '../icons/Icons';
 
 type InboxKind = 'task' | 'email' | 'finance' | 'insight' | 'memory' | 'work';
+type InboxSource = 'whatsapp' | 'email' | 'seraphine';
+type SourceFilter = 'all' | InboxSource;
 
 interface InboxItem {
   id: string;
   kind: InboxKind;
+  /** Communications source bucket. Drives the filter chip + per-row badge.
+   * Bound from the real source of the row (email = Gmail, whatsapp = WhatsApp
+   * webhook notification, seraphine = every other domain/notification item).
+   * NOT derived from kind, because WhatsApp rows share kind 'memory'. */
+  source: InboxSource;
   title: string;
   detail: string;
   urgency: 'high' | 'medium' | 'low';
@@ -27,11 +25,77 @@ interface InboxItem {
     label: string;
     action: () => void | Promise<void>;
   }>;
+  /** Epoch ms used to derive the relative timestamp; falls back to now. */
+  receivedAt?: number;
 }
 
 interface UnifiedInboxViewProps {
   onBack: () => void;
   onNavigate: (view: string) => void;
+}
+
+/** Human label for the per-row source badge chip. */
+function sourceBadge(item: InboxItem): string {
+  if (item.source === 'email') return 'E-mail';
+  if (item.source === 'whatsapp') return 'WhatsApp';
+  if (item.kind === 'insight') return 'Resumo';
+  return 'Lembrete';
+}
+
+/** PT-BR urgency keywords mirroring the backend WhatsApp importance heuristic
+ * (whatsapp/routes.py:_is_important). The backend computes importance on the
+ * webhook but only ships it over WS — it is NOT persisted in the stored
+ * notification payload, so we re-derive it client-side from the same signals. */
+const WHATSAPP_URGENCY_RE = /\b(?:urgente|importante|ajuda|socorro|emerg[eê]ncia|agora|preciso|por\s+favor\s+respond[ea])\b/i;
+
+interface WhatsAppNote {
+  source: 'whatsapp';
+  sender: string;
+  body: string;
+  important: boolean;
+}
+
+/** Detect + decode a WhatsApp notification row from /memory/notifications.
+ * WhatsApp rows arrive with event='whatsapp.*' and title='WhatsApp: {author}';
+ * the full webhook JSON is in the `payload` string column. Returns null for
+ * non-WhatsApp notifications so they fall through to the generic branch. */
+function parseWhatsApp(note: {
+  event?: string;
+  title?: string;
+  summary?: string;
+  payload?: string;
+}): WhatsAppNote | null {
+  const isWhatsApp = (note.event?.startsWith('whatsapp') ?? false)
+    || (note.title?.startsWith('WhatsApp:') ?? false);
+  if (!isWhatsApp) return null;
+
+  let chatId = '';
+  let fromMe = false;
+  let author = '';
+  let body = note.summary || '';
+  let chatName = '';
+  if (typeof note.payload === 'string' && note.payload.length > 0) {
+    try {
+      const data = JSON.parse(note.payload) as {
+        chatId?: string;
+        chatName?: string;
+        message?: { author?: string; body?: string; fromMe?: boolean };
+      };
+      chatId = data.chatId || '';
+      chatName = data.chatName || '';
+      author = data.message?.author || '';
+      fromMe = Boolean(data.message?.fromMe);
+      if (data.message?.body) body = data.message.body;
+    } catch {
+      // malformed payload — fall back to the title/summary below.
+    }
+  }
+  // Prefer the parsed author/chatName; else strip the 'WhatsApp: ' title prefix.
+  const sender = author || chatName || (note.title || '').replace(/^WhatsApp:\s*/, '') || 'WhatsApp';
+  // Re-derive importance with the same rules as the backend heuristic.
+  const isDirect = chatId.length > 0 && !chatId.endsWith('@g.us');
+  const important = !fromMe && (isDirect || WHATSAPP_URGENCY_RE.test(body));
+  return { source: 'whatsapp', sender, body, important };
 }
 
 function todayISO(): string {
@@ -42,6 +106,23 @@ function todayISO(): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Best-effort relative timestamp derived from receivedAt (PT-BR). */
+function relativeTime(receivedAt?: number): string {
+  if (!receivedAt) return 'agora';
+  const diff = Date.now() - receivedAt;
+  if (diff < 60_000) return 'agora';
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins} min`;
+  const sameDay = new Date(receivedAt).toDateString() === new Date().toDateString();
+  if (sameDay) {
+    return new Date(receivedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+  const days = Math.floor(diff / 86_400_000);
+  if (days <= 1) return 'ontem';
+  if (days < 7) return `${days} d`;
+  return new Date(receivedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
 function taskUrgency(task: { due_date?: string | null; priority?: string | null }): InboxItem['urgency'] {
   if (task.priority === 'high') return 'high';
   if (task.due_date && task.due_date < todayISO()) return 'high';
@@ -49,15 +130,28 @@ function taskUrgency(task: { due_date?: string | null; priority?: string | null 
   return 'low';
 }
 
-function iconFor(kind: InboxKind): JSX.Element {
-  switch (kind) {
-    case 'task': return <TasksIcon size={18} />;
-    case 'email': return <InboxIcon size={18} />;
-    case 'finance': return <FinanceIcon size={18} />;
-    case 'insight': return <LightbulbIcon size={18} />;
-    case 'memory': return <BrainIcon size={18} />;
-    case 'work': return <TargetIcon size={18} />;
+/** Source-tinted glyph (inline svg, stroke currentColor inherited from tile color). */
+function sourceIcon(source: InboxSource): JSX.Element {
+  if (source === 'whatsapp') {
+    return (
+      <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 11.5a8.5 8.5 0 0 1-12.2 7.7L3 21l1.8-5.8A8.5 8.5 0 1 1 21 11.5z" />
+      </svg>
+    );
   }
+  if (source === 'email') {
+    return (
+      <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 7 9 6 9-6" />
+      </svg>
+    );
+  }
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
 }
 
 export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps): JSX.Element {
@@ -65,8 +159,18 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
   const [loading, setLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | InboxKind>('all');
-  const [decisionFilter, setDecisionFilter] = useState(false);
+  const [filter, setFilter] = useState<SourceFilter>('all');
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
+
+  // Esc returns to the previous view (the visible back button is gone in the
+  // Obsidian layout — navigation lives in the global left rail).
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onBack();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onBack]);
 
   const resolveItem = useCallback(async (
     itemId: string,
@@ -123,6 +227,17 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       fetch(`${API_BASE}/work/autopilot`).then((r) => r.ok ? r.json() : { suggestions: [] }),
     ]);
 
+    const parseTime = (value: unknown): number | undefined => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value > 1e12 ? value : value * 1000;
+      }
+      if (typeof value === 'string') {
+        const ms = Date.parse(value);
+        return Number.isNaN(ms) ? undefined : ms;
+      }
+      return undefined;
+    };
+
     const tasks = settle[0].status === 'fulfilled' ? (settle[0].value.tasks || []) : [];
     for (const task of tasks) {
       if (task.status === 'completed' || task.status === 'rejected') continue;
@@ -130,9 +245,11 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: `task-${task.id}`,
         kind: 'task',
+        source: 'seraphine',
         title: task.title || 'Tarefa sem titulo',
         detail: `${due}${task.priority ? ` · ${task.priority}` : ''}`,
         urgency: taskUrgency(task),
+        receivedAt: parseTime(task.created_at ?? task.updated_at),
         actionLabel: 'Concluir',
         action: () => resolveItem(`task-${task.id}`, `/tasks/${task.id}`, {
           method: 'PATCH',
@@ -147,9 +264,11 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: `email-${email.id}`,
         kind: 'email',
-        title: email.subject || 'Email importante',
-        detail: email.from || email.snippet || 'Gmail',
+        source: 'email',
+        title: email.from || email.subject || 'Email importante',
+        detail: email.subject || email.snippet || 'Gmail',
         urgency: 'medium',
+        receivedAt: parseTime(email.date ?? email.received_at ?? email.internal_date),
         actionLabel: 'Marcar lido',
         action: () => resolveItem(`email-${email.id}`, `/google/gmail/messages/${email.id}/mark-read`, {
           method: 'POST',
@@ -162,10 +281,12 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: `finance-${entry.id}`,
         kind: 'finance',
+        source: 'seraphine',
         title: entry.description || 'Lancamento pendente',
         detail: `${entry.type || 'entrada'} · R$ ${Number(entry.amount || 0).toLocaleString('pt-BR')}`,
         urgency: 'medium',
         decision: true,
+        receivedAt: parseTime(entry.created_at ?? entry.date),
         actionLabel: 'Aprovar',
         action: () => resolveItem(`finance-${entry.id}`, `/finance/entries/${entry.id}/status`, {
           method: 'PATCH',
@@ -180,9 +301,11 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: `insight-${insight.id}`,
         kind: 'insight',
+        source: 'seraphine',
         title: insight.title || 'Insight ativo',
         detail: insight.summary || insight.description || 'Padrao detectado',
         urgency: insight.severity === 'high' ? 'high' : 'low',
+        receivedAt: parseTime(insight.created_at),
         actionLabel: 'Dispensar',
         action: () => resolveItem(`insight-${insight.id}`, `/insights/${insight.id}/dismiss`, {
           method: 'POST',
@@ -192,12 +315,38 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
 
     const notifications = settle[4].status === 'fulfilled' && Array.isArray(settle[4].value) ? settle[4].value : [];
     for (const note of notifications) {
+      const wa = parseWhatsApp(note);
+      if (wa) {
+        // WhatsApp message: real source + sender + body live in the payload.
+        next.push({
+          id: `memory-${note.id}`,
+          kind: 'memory',
+          source: 'whatsapp',
+          title: wa.sender,
+          // `summary` is the real backend field (was wrongly read as `body`).
+          detail: wa.body || note.summary || 'Mensagem do WhatsApp',
+          urgency: wa.important ? 'high' : 'low',
+          receivedAt: parseTime(note.created_at),
+          actionLabel: 'Marcar lida',
+          action: () => resolveItem(`memory-${note.id}`, '/memory/notifications/read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [note.id] }),
+          }),
+        });
+        continue;
+      }
       next.push({
         id: `memory-${note.id}`,
         kind: 'memory',
+        source: 'seraphine',
         title: note.title || note.summary || 'Notificacao',
-        detail: note.body || note.message || 'Memoria',
+        // Backend row shape is {title, summary, ...} — the previous read of
+        // `note.body`/`note.message` never existed and always hit the fallback.
+        detail: note.summary || 'Memoria',
         urgency: 'low',
+        // Backend supplies `created_at` (ISO UTC); there is no `timestamp` field.
+        receivedAt: parseTime(note.created_at),
         actionLabel: 'Marcar lida',
         action: () => resolveItem(`memory-${note.id}`, '/memory/notifications/read', {
           method: 'POST',
@@ -219,10 +368,12 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: `work-${project.id}`,
         kind: 'work',
+        source: 'seraphine',
         title: project.name || 'Projeto de trabalho',
         detail: `${project.area || 'Trabalho'}${project.due_date ? ` · prazo ${project.due_date}` : ''}`,
         urgency: project.due_date && project.due_date < todayISO() ? 'high' : project.priority === 'high' ? 'medium' : 'low',
         decision: true,
+        receivedAt: parseTime(project.updated_at ?? project.created_at),
         actionLabel: 'Abrir',
         action: () => onNavigate('trabalhos'),
       });
@@ -234,10 +385,12 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       next.push({
         id: itemId,
         kind: 'work',
+        source: 'seraphine',
         title: suggestion.title || 'Decisao de trabalho',
         detail: suggestion.detail || 'Autopilot de trabalho',
         urgency: suggestion.severity === 'high' ? 'high' : suggestion.severity === 'medium' ? 'medium' : 'low',
         decision: true,
+        receivedAt: parseTime(suggestion.created_at),
         actionLabel: suggestion.action_label || 'Aplicar',
         action: () => resolveAutopilot(itemId, suggestion.id, 'apply'),
         secondaryActions: [
@@ -251,6 +404,7 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       setError('Nao foi possivel carregar a inbox.');
     }
     setItems(next);
+    setReadIds(new Set());
     setLoading(false);
   }, [onNavigate, resolveAutopilot, resolveItem]);
 
@@ -259,61 +413,109 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
   }, [refresh]);
 
   const filtered = useMemo(
-    () => {
-      const base = decisionFilter ? items.filter((item) => item.decision) : items;
-      return filter === 'all' ? base : base.filter((item) => item.kind === filter);
-    },
-    [decisionFilter, filter, items],
+    () => (filter === 'all'
+      ? items
+      : items.filter((item) => item.source === filter)),
+    [filter, items],
   );
 
-  const counts = useMemo(() => ({
-    all: items.length,
-    task: items.filter((i) => i.kind === 'task').length,
-    email: items.filter((i) => i.kind === 'email').length,
-    finance: items.filter((i) => i.kind === 'finance').length,
-    insight: items.filter((i) => i.kind === 'insight').length,
-    memory: items.filter((i) => i.kind === 'memory').length,
-    work: items.filter((i) => i.kind === 'work').length,
-  }), [items]);
+  const unreadCount = useMemo(
+    () => items.filter((item) => !readIds.has(item.id)).length,
+    [items, readIds],
+  );
+
+  const markAllRead = useCallback(async () => {
+    // Optimistic: every visible item reads as read immediately.
+    setReadIds(new Set(items.map((item) => item.id)));
+
+    // Persist the two buckets that have a real server-side read flag.
+    // - memory + WhatsApp rows -> notifications.read=1 (POST /memory/notifications/read)
+    // - Gmail "important" rows -> remove UNREAD label (POST batch-mark-read)
+    // Domain items (task/finance/work/insight) have no server read concept;
+    // they rely on their existing resolve/dismiss actions and are skipped here.
+    const notificationIds = items
+      .filter((item) => item.kind === 'memory')
+      .map((item) => item.id.replace(/^memory-/, ''));
+    const emailIds = items
+      .filter((item) => item.kind === 'email')
+      .map((item) => item.id.replace(/^email-/, ''));
+
+    const calls: Array<Promise<unknown>> = [];
+    if (notificationIds.length > 0) {
+      calls.push(fetch(`${API_BASE}/memory/notifications/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: notificationIds }),
+      }));
+    }
+    if (emailIds.length > 0) {
+      calls.push(fetch(`${API_BASE}/google/gmail/messages/batch-mark-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: emailIds }),
+      }));
+    }
+    if (calls.length === 0) return;
+    try {
+      await Promise.allSettled(calls);
+      // Re-pull so server truth (now read) removes these from the feed.
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [items, refresh]);
+
+  const openItem = useCallback((item: InboxItem) => {
+    setReadIds((prev) => {
+      if (prev.has(item.id)) return prev;
+      const nextSet = new Set(prev);
+      nextSet.add(item.id);
+      return nextSet;
+    });
+    onNavigate(
+      item.kind === 'email' ? 'chat'
+        : item.kind === 'memory' ? 'memory'
+        : item.kind === 'insight' ? 'insights'
+        : item.kind === 'finance' ? 'finance'
+        : item.kind === 'work' ? 'trabalhos'
+        : 'tasks',
+    );
+  }, [onNavigate]);
+
+  const sourceFilters: Array<{ key: SourceFilter; label: string; dot?: string }> = [
+    { key: 'all', label: 'Tudo' },
+    { key: 'email', label: 'E-mail', dot: '#42a5f5' },
+    { key: 'whatsapp', label: 'WhatsApp', dot: '#25d366' },
+    { key: 'seraphine', label: 'Notificações', dot: '#9a93ff' },
+  ];
 
   return (
     <div className="inbox-view">
       <div className="inbox-view__header">
-        <button className="inbox-view__back" type="button" onClick={onBack}>
-          <ArrowLeftIcon size={18} />
-          <span>Voltar</span>
-        </button>
-        <div className="inbox-view__title-wrap">
-          <div className="inbox-view__icon"><InboxIcon size={22} /></div>
-          <div>
-            <h2 className="inbox-view__title">Inbox</h2>
-            <p className="inbox-view__subtitle">{items.length} itens pedindo atencao</p>
-          </div>
+        <div className="inbox-view__titles">
+          <h2 className="inbox-view__title">Inbox</h2>
+          <p className="inbox-view__subtitle">{unreadCount} não lidos · tudo num lugar só</p>
         </div>
-        <button className="inbox-view__refresh" type="button" onClick={() => void refresh()} disabled={loading}>
-          <RefreshIcon size={16} />
-          <span>{loading ? 'Atualizando' : 'Atualizar'}</span>
+        <button
+          className="inbox-view__markall"
+          type="button"
+          onClick={() => { void markAllRead(); }}
+          disabled={loading || unreadCount === 0}
+        >
+          Marcar tudo como lido
         </button>
       </div>
 
       <div className="inbox-filter">
-        <button
-          type="button"
-          className={decisionFilter ? 'is-active' : ''}
-          onClick={() => setDecisionFilter((value) => !value)}
-        >
-          Decisoes
-          <span>{items.filter((item) => item.decision).length}</span>
-        </button>
-        {(['all', 'task', 'email', 'finance', 'insight', 'memory', 'work'] as const).map((key) => (
+        {sourceFilters.map(({ key, label, dot }) => (
           <button
             key={key}
             type="button"
             className={filter === key ? 'is-active' : ''}
             onClick={() => setFilter(key)}
           >
-            {key === 'all' ? 'Tudo' : key}
-            <span>{counts[key]}</span>
+            {dot && <span className="inbox-filter__dot" style={{ background: dot }} />}
+            {label}
           </button>
         ))}
       </div>
@@ -327,41 +529,38 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
         </div>
       )}
 
-      <div className="inbox-list">
-        {filtered.map((item) => (
-          <div key={item.id} className={`inbox-item inbox-item--${item.urgency}`}>
-            <div className={`inbox-item__icon inbox-item__icon--${item.kind}`}>
-              {iconFor(item.kind)}
-            </div>
-            <div className="inbox-item__body">
-              <strong>{item.title}</strong>
-              <span>{item.detail}</span>
-            </div>
-            <div className="inbox-item__actions">
+      {filtered.length > 0 && (
+        <div className="inbox-list">
+          {filtered.map((item) => {
+            const source = item.source;
+            const unread = !readIds.has(item.id);
+            return (
               <button
+                key={item.id}
                 type="button"
-                onClick={() => void item.action?.()}
+                className={`inbox-item inbox-item--${unread ? 'unread' : 'read'}`}
+                onClick={() => openItem(item)}
                 disabled={actingId === item.id}
               >
-                {actingId === item.id ? '...' : item.actionLabel}
+                <span className={`inbox-item__icon inbox-item__icon--${source}`}>
+                  {sourceIcon(source)}
+                </span>
+                <span className="inbox-item__body">
+                  <span className="inbox-item__top">
+                    <span className="inbox-item__sender">{item.title}</span>
+                    <span className={`inbox-item__badge inbox-item__badge--${source}`}>
+                      {sourceBadge(item)}
+                    </span>
+                    <span className="inbox-item__time">{relativeTime(item.receivedAt)}</span>
+                  </span>
+                  <span className="inbox-item__preview">{item.detail}</span>
+                </span>
+                {unread && <span className="inbox-item__dot" />}
               </button>
-              <button type="button" onClick={() => onNavigate(item.kind === 'email' ? 'chat' : item.kind === 'memory' ? 'memory' : item.kind === 'insight' ? 'insights' : item.kind === 'finance' ? 'finance' : item.kind === 'work' ? 'trabalhos' : 'tasks')}>
-                Abrir
-              </button>
-              {item.secondaryActions?.map((secondary) => (
-                <button
-                  key={secondary.label}
-                  type="button"
-                  onClick={() => void secondary.action()}
-                  disabled={actingId === item.id}
-                >
-                  {secondary.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

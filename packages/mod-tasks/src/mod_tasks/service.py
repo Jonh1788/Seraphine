@@ -26,6 +26,10 @@ from typing import Any, Awaitable, Callable
 from core_db import Store
 
 from mod_tasks.models import SeraphineTask
+from mod_tasks.schema import (
+    _derive_category as _derive_task_category,
+    _normalize_category as _normalize_task_category,
+)
 
 # Optional callback fired right after a task row is inserted. Receives
 # (task_id, user_id) — implementations can fetch the row themselves and
@@ -58,7 +62,7 @@ def _freshness_policy_now() -> datetime | None:
 
 
 def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
-    """Map a 15-column SELECT row to a SeraphineTask."""
+    """Map a SELECT row (see ``_SELECT_COLS``) to a SeraphineTask."""
     raw_payload = row[6]
     try:
         payload = json.loads(raw_payload) if raw_payload else {}
@@ -91,13 +95,14 @@ def _row_to_task(row: tuple[Any, ...]) -> SeraphineTask:
         priority=row[13] if len(row) > 13 else None,
         remind=row[14] if len(row) > 14 else None,
         completed_by=row[15] if len(row) > 15 else None,
+        category=row[16] if len(row) > 16 else None,
     )
 
 
 _SELECT_COLS = (
     "id, type, status, title, description, source, payload, created_at,"
     " updated_at, due_date, due_time, user_id, tags, priority, remind,"
-    " completed_by"
+    " completed_by, category"
 )
 
 
@@ -502,10 +507,18 @@ class TaskService:
         priority: str | None = None,
         tags: list[str] | None = None,
         remind: str | None = None,
+        category: str | None = None,
     ) -> int:
         ts = _now()
         payload_json = json.dumps(payload or {}, ensure_ascii=False)
         tags_json = json.dumps(tags or [], ensure_ascii=False)
+        # Explicit category wins (normalized); otherwise derive from
+        # tags/type so the chip lights up without manual tagging — same
+        # precedence the frontend uses.
+        if category is not None:
+            category = _normalize_task_category(category) or None
+        if category is None:
+            category = _derive_task_category(tags_json, type)
 
         def _work() -> int:
             with self._store._connect() as conn:
@@ -513,11 +526,11 @@ class TaskService:
                     "INSERT INTO seraphine_tasks"
                     " (type, status, title, description, source, payload,"
                     "  created_at, updated_at, due_date, due_time, user_id,"
-                    "  tags, priority, remind)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "  tags, priority, remind, category)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (type, status, title, description, source,
                      payload_json, ts, ts, due_date, due_time, user_id,
-                     tags_json, priority, remind),
+                     tags_json, priority, remind, category),
                 )
                 new_id = int(cur.lastrowid or 0)
                 if user_id is not None and new_id > 0:
@@ -764,16 +777,23 @@ class TaskService:
         priority: str | None = None,
         tags: list[str] | None = None,
         remind: str | None = None,
+        category: str | None = None,
         unset_due_date: bool = False,
         unset_due_time: bool = False,
         unset_priority: bool = False,
         unset_remind: bool = False,
+        unset_category: bool = False,
     ) -> int:
         """Partial update. Only provided fields are written.
 
         To clear a nullable field, pass the ``unset_*`` flag rather than
         ``None`` (None means "don't touch"). ``tags`` uses a special
         sentinel: pass an empty list to clear tags.
+
+        ``category`` precedence: an explicit (normalized) value wins;
+        ``unset_category`` clears it; otherwise, when ``tags`` is provided
+        and no category was given, it is re-derived from the new tags so
+        the chip stays in sync with the labels.
         """
         sets: list[str] = []
         params: list[Any] = []
@@ -801,14 +821,32 @@ class TaskService:
         elif priority is not None:
             sets.append("priority = ?")
             params.append(priority)
+        tags_json: str | None = None
         if tags is not None:
+            tags_json = json.dumps(tags, ensure_ascii=False)
             sets.append("tags = ?")
-            params.append(json.dumps(tags, ensure_ascii=False))
+            params.append(tags_json)
         if unset_remind:
             sets.append("remind = NULL")
         elif remind is not None:
             sets.append("remind = ?")
             params.append(remind)
+
+        # category: explicit value (normalized) > unset > re-derive from
+        # newly-set tags. Leave untouched when none of these apply.
+        if unset_category:
+            sets.append("category = NULL")
+        elif category is not None:
+            norm = _normalize_task_category(category)
+            if norm:
+                sets.append("category = ?")
+                params.append(norm)
+            else:
+                sets.append("category = NULL")
+        elif tags is not None:
+            derived = _derive_task_category(tags_json, None)
+            sets.append("category = ?")
+            params.append(derived)
 
         if not sets:
             # Nothing to update — treat as a no-op; callers that want to

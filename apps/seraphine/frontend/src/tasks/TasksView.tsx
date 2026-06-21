@@ -1,6 +1,8 @@
+import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftIcon, BellIcon, CalendarIcon, ClockIcon, TasksIcon, CheckIcon, XIcon } from '../icons/Icons';
+import { BellIcon, CalendarIcon, ClockIcon, CheckIcon, XIcon } from '../icons/Icons';
 import type { FinanceEntry, SeraphineTask, FinanceImportPayload } from '../finance/types';
+import { CATEGORY_COLORS, CATEGORY_LABELS } from '../finance/types';
 import { TaskEditorModal } from './TaskEditorModal';
 import { Skeleton, useDelayedFlag } from '../utils';
 
@@ -56,6 +58,69 @@ function typeLabelForTask(task: SeraphineTask): string {
   return 'Sistema';
 }
 
+/* Normalize a free-text category to a CATEGORY_COLORS key (strip accents). */
+function normalizeCategory(raw: string | undefined | null): string {
+  if (!raw) return '';
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim();
+}
+
+/* CATEGORY_LABELS in finance/types.ts carry an emoji prefix; the project
+   forbids emojis in the UI, so strip any leading non-letter glyphs. */
+function cleanCategoryLabel(key: string): string {
+  const label = CATEGORY_LABELS[key];
+  if (!label) return '';
+  // Drop leading emoji + whitespace, keep the word(s).
+  return label.replace(/^[^\p{L}]+/u, '').trim();
+}
+
+/* Convert a #rrggbb hex to an rgba() string at the given alpha. Falls back
+   to the raw color (e.g. a CSS var) when it isn't a 6-digit hex. */
+function hexToAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+interface CategoryChip {
+  label: string;
+  color: string;
+}
+
+/* Resolve a per-category colored chip for a card. Entries always carry a
+   finance category; tasks now carry a persisted task.category (server-
+   derived). Falls back to the tags/type guess for legacy rows that
+   predate the column. Returns null when nothing maps so the card omits
+   the chip gracefully. */
+function categoryChipForCard(card: Card): CategoryChip | null {
+  let raw = '';
+  if (card.kind === 'entry') {
+    raw = card.entry.category;
+  } else {
+    const task = card.task;
+    // Prefer the real persisted category; fall back to the tags/type guess.
+    if (task.category && normalizeCategory(task.category) in CATEGORY_COLORS) {
+      raw = task.category;
+    } else {
+      const candidates = [
+        ...(Array.isArray(task.tags) ? task.tags : []),
+        task.type,
+      ];
+      raw = candidates.find((c) => normalizeCategory(c) in CATEGORY_COLORS) || '';
+    }
+  }
+  const key = normalizeCategory(raw);
+  if (!(key in CATEGORY_COLORS)) return null;
+  return { label: cleanCategoryLabel(key) || raw, color: CATEGORY_COLORS[key] };
+}
+
 function timeAgo(iso: string): string {
   if (!iso) return '';
   const t = new Date(iso).getTime();
@@ -84,9 +149,9 @@ function isWithinDays(iso: string, days: number): boolean {
 }
 
 const COLUMNS: { id: ColumnId; title: string }[] = [
-  { id: 'pending', title: 'Pendentes' },
-  { id: 'in_progress', title: 'Em andamento' },
-  { id: 'done', title: 'Concluidas' },
+  { id: 'pending', title: 'A fazer' },
+  { id: 'in_progress', title: 'Fazendo' },
+  { id: 'done', title: 'Concluido' },
   { id: 'discarded', title: 'Descartadas' },
 ];
 
@@ -359,6 +424,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   const [newTaskBusy, setNewTaskBusy] = useState(false);
   const [focusedCardKey, setFocusedCardKey] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   // Optimistic overrides: key -> column (to move cards instantly on drop)
   const [overrides, setOverrides] = useState<Record<string, ColumnId>>({});
   // Per-card in-flight mutation counter. Refresh must NOT clear overrides
@@ -441,6 +507,19 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The Obsidian header drops the visible "Voltar" button; preserve the
+  // back affordance (and the onBack prop) by mapping Escape → onBack when no
+  // modal/editor is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      if (showNewTask || passwordTask || editingTaskId != null) return;
+      onBack();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onBack, showNewTask, passwordTask, editingTaskId]);
 
   // Build the card list grouped by column (before overrides).
   const allCards: Card[] = useMemo(() => {
@@ -830,7 +909,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     // Shadow is also reinforced by the .task-card__ghost CSS rule; this
     // inline value is a fallback that matches var(--shadow-lg) and adds a
     // subtle accent tint.
-    ghost.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(167, 139, 250, 0.18)';
+    ghost.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(154, 147, 255, 0.18)';
     document.body.appendChild(ghost);
     return ghost;
   };
@@ -1183,10 +1262,16 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     const dataTaskId =
       card.kind === 'task' && card.task.id != null ? String(card.task.id) : undefined;
 
+    const isDone = card.column === 'done';
+    const isActive = card.column === 'in_progress';
+    const chip = categoryChipForCard(card);
+
     const classes = ['task-card'];
     if (isDragging) classes.push('dragging');
     if (!canDrag) classes.push('task-card--locked');
     if (isFocused) classes.push('task-card--focused');
+    if (isDone) classes.push('task-card--done');
+    if (isActive) classes.push('task-card--active');
 
     return (
       <div
@@ -1200,18 +1285,38 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
         onPointerCancel={canDrag ? handlePointerCancel : undefined}
         onClick={canDrag ? undefined : () => toggleExpand(card.key)}
       >
-        <div className="task-card__head">
-          <span className="task-card__badge">{card.typeLabel}</span>
-          <span className="task-card__time">{timeAgo(card.createdAt)}</span>
-        </div>
+        {isDone ? (
+          <div className="task-card__head">
+            <span className="task-card__check" aria-hidden>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0d0d11" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l4 4 10-10" /></svg>
+            </span>
+            <span className="task-card__done-cat">{chip ? chip.label : card.typeLabel}</span>
+          </div>
+        ) : (
+          <div className="task-card__head">
+            {chip ? (
+              <span
+                className="task-card__badge"
+                style={{ color: chip.color, background: hexToAlpha(chip.color, 0.16) }}
+              >
+                {chip.label}
+              </span>
+            ) : (
+              <span className="task-card__badge">{card.typeLabel}</span>
+            )}
+            <span className={`task-card__time${isActive ? ' task-card__time--due' : ''}`}>
+              {timeAgo(card.createdAt)}
+            </span>
+          </div>
+        )}
         <div className="task-card__title">
-          {card.kind === 'task' && card.task.priority && (
+          {!isDone && card.kind === 'task' && card.task.priority && (
             <span className={`task-card__priority-dot task-card__priority-dot--${card.task.priority}`} />
           )}
           {card.title}
         </div>
-        {card.subtitle && <div className="task-card__subtitle">{card.subtitle}</div>}
-        {card.kind === 'task' && (card.task.due_date || card.task.due_time) && (
+        {!isDone && card.subtitle && <div className="task-card__subtitle">{card.subtitle}</div>}
+        {!isDone && card.kind === 'task' && (card.task.due_date || card.task.due_time) && (
           <div className={`task-card__due${card.task.due_date && card.task.due_date < new Date().toISOString().slice(0, 10) && card.task.status !== 'completed' && card.task.status !== 'rejected' ? ' task-card__due--overdue' : ''}`}>
             {card.task.due_date && card.task.due_date.length >= 10
               ? `${card.task.due_date.slice(8, 10)}/${card.task.due_date.slice(5, 7)}`
@@ -1231,28 +1336,39 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     );
   };
 
+  const activeCount = byColumn.pending.length + byColumn.in_progress.length;
+
   return (
     <div className="tasks-view">
-      <div className="memory-view__header">
-        <div className="memory-view__header-left">
-          <button
-            className="memory-view__back"
-            onClick={onBack}
-            type="button"
-            aria-label="Voltar"
-          >
-            <ArrowLeftIcon size={18} />
-            <span>Voltar</span>
-          </button>
-          <div className="memory-view__header-icon">
-            <TasksIcon size={22} />
-          </div>
-          <div className="memory-view__header-text">
-            <h2 className="memory-view__title">Tarefas</h2>
-            <p className="memory-view__subtitle">Kanban de tarefas e itens pendentes</p>
-          </div>
+      <header className="tasks-view__topbar">
+        <div>
+          <h2 className="tasks-view__title">Tarefas</h2>
+          <p className="tasks-view__subtitle">
+            {activeCount} {activeCount === 1 ? 'ativa' : 'ativas'} · {summary.completedToday}{' '}
+            {summary.completedToday === 1 ? 'concluida hoje' : 'concluidas hoje'}
+          </p>
         </div>
-        <div className="tasks-view__header-actions">
+        <div className="tasks-view__controls">
+          <div className="obs-seg" role="tablist" aria-label="Modo de visualizacao">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'kanban'}
+              className={`obs-seg__opt${viewMode === 'kanban' ? ' obs-seg__opt--active' : ''}`}
+              onClick={() => setViewMode('kanban')}
+            >
+              Kanban
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'list'}
+              className={`obs-seg__opt${viewMode === 'list' ? ' obs-seg__opt--active' : ''}`}
+              onClick={() => setViewMode('list')}
+            >
+              Lista
+            </button>
+          </div>
           <button
             type="button"
             className="tasks-view__new-btn"
@@ -1262,26 +1378,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
             <span>Nova tarefa</span>
           </button>
         </div>
-      </div>
-
-      <div className="tasks-view__summary">
-        <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.totalTasks}</span>
-          <span className="tasks-summary-pill__label">total</span>
-        </div>
-        <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.completedToday}</span>
-          <span className="tasks-summary-pill__label">concluidas hoje</span>
-        </div>
-        <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.pendingCount}</span>
-          <span className="tasks-summary-pill__label">pendentes</span>
-        </div>
-        <div className="tasks-summary-pill">
-          <span className="tasks-summary-pill__value">{summary.overdueCount}</span>
-          <span className="tasks-summary-pill__label">atrasadas</span>
-        </div>
-      </div>
+      </header>
 
       {error && (
         <div className="tasks-view__error" role="alert">
@@ -1297,7 +1394,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
             </div>
           ))}
         </div>
-      ) : (
+      ) : viewMode === 'kanban' ? (
         <div className="tasks-kanban">
           {COLUMNS.map((col) => {
             const cards = byColumn[col.id];
@@ -1309,6 +1406,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
                 data-column-id={col.id}
               >
                 <div className="tasks-column__header">
+                  <span className={`tasks-column__dot tasks-column__dot--${col.id}`} />
                   <span className="tasks-column__title">{col.title}</span>
                   <span className="tasks-column__count">{cards.length}</span>
                 </div>
@@ -1319,6 +1417,30 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
                   {cards.map((c) => renderCard(c))}
                 </div>
               </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="tasks-list">
+          {COLUMNS.map((col) => {
+            const cards = byColumn[col.id];
+            if (cards.length === 0) return null;
+            const isOver = dragOver === col.id;
+            return (
+              <section
+                key={col.id}
+                className={`tasks-list__group${isOver ? ' drag-over' : ''}`}
+                data-column-id={col.id}
+              >
+                <div className="tasks-column__header">
+                  <span className={`tasks-column__dot tasks-column__dot--${col.id}`} />
+                  <span className="tasks-column__title">{col.title}</span>
+                  <span className="tasks-column__count">{cards.length}</span>
+                </div>
+                <div className="tasks-list__rows">
+                  {cards.map((c) => renderCard(c))}
+                </div>
+              </section>
             );
           })}
         </div>

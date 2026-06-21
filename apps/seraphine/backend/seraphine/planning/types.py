@@ -28,6 +28,14 @@ class PlanContext:
     free_slots_min: int = 0
     mood_valence: float | None = None
     mood_reason: str | None = None
+    # Natural-language pitch for the plan. When the LLM is available this is
+    # a model-written sentence; otherwise it is None and the frontend derives
+    # an honest numeric summary client-side.
+    summary: str | None = None
+    # True only when the LLM actually produced the summary/reasons. The UI
+    # uses this to decide whether the "sugerido pela Seraphine" AI label is
+    # truthful -- heuristic-only plans must NOT claim AI authorship.
+    ai_generated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

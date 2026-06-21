@@ -11,7 +11,50 @@ Multi-tenancy column ``user_id`` is added in two ways for safety:
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import unicodedata
+
+# Finance taxonomy keys the frontend chip maps against (CATEGORY_COLORS in
+# apps/seraphine/frontend/src/finance/types.ts). A task's `category` only
+# lights a chip when it normalizes to one of these. Kept in sync manually.
+_CATEGORY_KEYS = frozenset(
+    {
+        "moradia", "alimentacao", "transporte", "saude", "lazer",
+        "educacao", "salario", "freelance", "investimento", "outros",
+    }
+)
+
+
+def _normalize_category(raw: str | None) -> str:
+    """Mirror the frontend normalizeCategory(): lowercase, strip accents,
+    trim. Returns "" for falsy input."""
+    if not raw:
+        return ""
+    text = unicodedata.normalize("NFD", str(raw))
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    return text.lower().strip()
+
+
+def _derive_category(tags_json: str | None, type_: str | None) -> str | None:
+    """Pick the first tag (then the type) that normalizes to a known
+    finance-taxonomy key. Returns the normalized key, or None when nothing
+    maps — same precedence the frontend categoryChipForCard() uses."""
+    candidates: list[str] = []
+    if tags_json:
+        try:
+            parsed = json.loads(tags_json)
+            if isinstance(parsed, list):
+                candidates.extend(str(t) for t in parsed)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if type_:
+        candidates.append(str(type_))
+    for cand in candidates:
+        key = _normalize_category(cand)
+        if key in _CATEGORY_KEYS:
+            return key
+    return None
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -35,7 +78,8 @@ def migrate(conn: sqlite3.Connection) -> None:
           user_id       TEXT,
           priority      TEXT,
           tags          TEXT,
-          remind        TEXT
+          remind        TEXT,
+          category      TEXT
         )
         """
     )
@@ -63,6 +107,31 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as exc:
         if "duplicate column name" not in str(exc).lower():
             raise
+    # store-categories — persisted task category (finance-taxonomy key).
+    # NULL until set/backfilled; the frontend chip lights only for known keys.
+    category_is_new = False
+    try:
+        conn.execute("ALTER TABLE seraphine_tasks ADD COLUMN category TEXT")
+        category_is_new = True
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+    # Backfill: derive category from each row's tags/type (same precedence
+    # the frontend chip uses) for rows that don't yet have one. Runs on the
+    # first migration that adds the column and is a no-op afterwards (the
+    # WHERE clause skips already-populated rows).
+    if category_is_new:
+        rows = conn.execute(
+            "SELECT id, tags, type FROM seraphine_tasks"
+            " WHERE category IS NULL"
+        ).fetchall()
+        for row_id, tags_json, type_ in rows:
+            derived = _derive_category(tags_json, type_)
+            if derived is not None:
+                conn.execute(
+                    "UPDATE seraphine_tasks SET category = ? WHERE id = ?",
+                    (derived, row_id),
+                )
     # Step 3: indexes — safe now that all columns exist.
     conn.executescript(
         """

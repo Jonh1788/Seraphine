@@ -21,6 +21,8 @@ class ReadingItem:
     read_at: str | None = None
     archived_at: str | None = None
     error_msg: str | None = None
+    author: str = ""  # parsed from page metadata (meta/OG/JSON-LD); may be ""
+    progress: int = 0  # percent read, 0-100 (0 == not started)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,12 +38,15 @@ class ReadingItem:
             "read_at": self.read_at,
             "archived_at": self.archived_at,
             "error_msg": self.error_msg,
+            "author": self.author,
+            "progress": self.progress,
         }
 
     @classmethod
     def from_row(cls, row: tuple[Any, ...]) -> "ReadingItem":
         """Map a row of (id, url, title, domain, summary, content_text,
-        tags_json, status, saved_at, read_at, archived_at, error_msg)."""
+        tags_json, status, saved_at, read_at, archived_at, error_msg,
+        author, progress)."""
         tags: list[str] = []
         raw_tags = row[6]
         if raw_tags:
@@ -64,4 +69,6 @@ class ReadingItem:
             read_at=str(row[9]) if row[9] else None,
             archived_at=str(row[10]) if row[10] else None,
             error_msg=str(row[11]) if row[11] else None,
+            author=str(row[12]) if len(row) > 12 and row[12] else "",
+            progress=int(row[13]) if len(row) > 13 and row[13] is not None else 0,
         )

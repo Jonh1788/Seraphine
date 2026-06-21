@@ -1,8 +1,12 @@
 """PlanningService -- generate context-aware daily plans (SDD 093).
 
 Single-tenant. Aggregates Google Calendar, tasks, habits, and health
-data into a heuristic time-block plan. Optionally polishes block
-reasons via the LLM.
+data into a heuristic time-block plan. When an LLM client is injected the
+plan is then polished by a real model pass that writes the natural-language
+summary and the focus-block reasons; the resulting plan is flagged
+``context.ai_generated`` so the UI only claims AI authorship when it is true.
+If no LLM is available (or the call fails) the heuristic plan is returned
+unchanged with ``ai_generated`` left False.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from core_db import Store
+from llm_adapters.types import ChatMessage
 
 from seraphine.planning.types import (
     DailyPlan,
@@ -63,6 +68,32 @@ def _min_to_hm(total: int) -> str:
     return _hm(total // 60, total % 60)
 
 
+def _focus_reason_for_energy(energy: str) -> str:
+    """Deterministic focus-block rationale derived from the energy estimate.
+
+    Used when there are no pending priorities so the block still carries a
+    real, context-aware reason instead of relying on a static UI fallback.
+    """
+    if energy == "high":
+        return "Energia alta -- bom momento para trabalho profundo"
+    if energy == "low":
+        return "Energia baixa -- bloco leve para avancar aos poucos"
+    return "Janela protegida para trabalho focado"
+
+
+_PLAN_LLM_SYSTEM = (
+    "Voce e a Seraphine, uma assistente pessoal. Recebe o rascunho heuristico"
+    " do plano do dia (blocos, prioridades e contexto de energia/sono/humor) e"
+    " escreve, em portugues do Brasil, uma justificativa curta. Responda APENAS"
+    " com um objeto JSON valido, sem markdown, no formato:\n"
+    '{"summary": "frase curta (max 200 caracteres) que apresenta o plano em'
+    ' primeira pessoa e termina perguntando se pode aplicar", "focus_reasons":'
+    ' ["motivo curto para cada bloco de foco, na ordem"]}\n'
+    "Use o contexto real (energia, sono, humor, prioridades) na justificativa."
+    " Nao invente compromissos. Seja direta e sem emojis."
+)
+
+
 # ------------------------------------------------------------------
 # Service
 # ------------------------------------------------------------------
@@ -89,6 +120,95 @@ class PlanningService:
         self._goals = goal_service
         self._mood = mood_service
         self._llm = llm
+
+    # ------------------------------------------------------------------
+    # LLM polish
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _strip_think(raw: str) -> str:
+        """Drop any <think>...</think> reasoning the streaming client may emit."""
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1]
+        return raw.strip()
+
+    async def _llm_polish(
+        self,
+        *,
+        focus_blocks: list[TimeBlock],
+        priorities: list[dict[str, Any]],
+        context: PlanContext,
+    ) -> tuple[str | None, list[str]]:
+        """Ask the LLM for a natural-language plan summary + per-focus reasons.
+
+        Returns ``(summary, focus_reasons)``. On any failure (no LLM, network
+        error, unparseable output) returns ``(None, [])`` so the caller keeps
+        the heuristic plan and does NOT claim AI authorship.
+        """
+        if self._llm is None or not focus_blocks:
+            return None, []
+
+        # Compact, factual context for the model -- only real numbers/fields.
+        lines: list[str] = []
+        lines.append(f"Blocos de foco: {len(focus_blocks)}")
+        for b in focus_blocks:
+            lines.append(f"- {b.start}-{b.end} foco")
+        free_h = round(context.free_slots_min / 60, 1)
+        lines.append(f"Horas livres na agenda: {free_h}")
+        lines.append(f"Reunioes hoje: {context.meetings_count}")
+        lines.append(f"Energia estimada: {context.energy_estimate}")
+        if context.sleep_hours is not None:
+            lines.append(f"Sono: {context.sleep_hours}h")
+        if context.mood_reason:
+            lines.append(f"Humor: {context.mood_reason}")
+        if priorities:
+            titles = ", ".join(str(p.get("title", "?")) for p in priorities)
+            lines.append(f"Prioridades a encaixar: {titles}")
+        else:
+            lines.append("Sem prioridades pendentes.")
+        user = "\n".join(lines)
+
+        messages = [
+            ChatMessage(role="system", content=_PLAN_LLM_SYSTEM),
+            ChatMessage(role="user", content=user),
+        ]
+
+        accumulated: list[str] = []
+        try:
+            async for tok in self._llm.chat(messages, temperature=0.4):
+                if tok.text:
+                    accumulated.append(tok.text)
+        except Exception as exc:  # noqa: BLE001 -- best-effort polish
+            logger.warning("planning: LLM polish failed: %s", exc)
+            return None, []
+
+        raw = self._strip_think("".join(accumulated))
+        if not raw:
+            return None, []
+        # Strip markdown code fences if the model wrapped the JSON.
+        if raw.startswith("```"):
+            parts = raw.split("\n")
+            if parts and parts[-1].strip() == "```":
+                parts = parts[:-1]
+            raw = "\n".join(parts[1:]).strip()
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("planning: could not parse LLM JSON: %s", raw[:200])
+            return None, []
+
+        summary = data.get("summary")
+        summary = str(summary).strip() if summary else None
+        if summary and len(summary) > 240:
+            summary = summary[:237].rstrip() + "..."
+
+        reasons_raw = data.get("focus_reasons")
+        focus_reasons: list[str] = []
+        if isinstance(reasons_raw, list):
+            for r in reasons_raw:
+                if r:
+                    focus_reasons.append(str(r).strip())
+        return summary, focus_reasons
 
     # ------------------------------------------------------------------
     # Generate plan
@@ -349,6 +469,11 @@ class PlanningService:
                     reason_parts.append(
                         f"{len(priorities)} tarefa(s) prioritaria(s)"
                     )
+                else:
+                    # No pending priorities: still give a real, deterministic
+                    # reason derived from the energy estimate so the UI never
+                    # has to fall back to a static phrase.
+                    reason_parts.append(_focus_reason_for_energy(energy))
                 blocks.append(
                     TimeBlock(
                         id=str(uuid.uuid4()),
@@ -383,21 +508,43 @@ class PlanningService:
         # Sort all blocks by start time
         blocks.sort(key=lambda b: b.start)
 
+        context = PlanContext(
+            sleep_hours=sleep_hours,
+            energy_estimate=energy,
+            meetings_count=meetings_count,
+            free_slots_min=free_total,
+            mood_valence=mood_valence,
+            mood_reason=mood_reason,
+        )
+
+        # 7. LLM polish (real AI pass) ────────────────────────────────
+        # The heuristic plan above is always complete on its own. Here we
+        # OPTIONALLY route it through the injected LLM to (a) write a real
+        # natural-language summary and (b) rewrite focus-block reasons in
+        # the model's words. If the LLM is absent or fails, we keep the
+        # heuristic output and leave ai_generated=False so the UI does not
+        # falsely claim AI authorship.
+        focus_blocks = [b for b in blocks if b.type == "focus"]
+        summary, focus_reasons = await self._llm_polish(
+            focus_blocks=focus_blocks,
+            priorities=priorities,
+            context=context,
+        )
+        if summary or focus_reasons:
+            context.summary = summary
+            context.ai_generated = True
+            for blk, reason in zip(focus_blocks, focus_reasons):
+                if reason:
+                    blk.reason = reason
+
         plan = DailyPlan(
             time_blocks=blocks,
             priorities=priorities,
             at_risk={"habits": habits_at_risk, "goals": goals_at_risk},
-            context=PlanContext(
-                sleep_hours=sleep_hours,
-                energy_estimate=energy,
-                meetings_count=meetings_count,
-                free_slots_min=free_total,
-                mood_valence=mood_valence,
-                mood_reason=mood_reason,
-            ),
+            context=context,
         )
 
-        # 7. Persist plan ────────────────────────────────────────────
+        # 8. Persist plan ────────────────────────────────────────────
         plan_id = str(uuid.uuid4())
         plan_json = json.dumps(plan.to_dict(), ensure_ascii=False)
         ts = _now_iso()

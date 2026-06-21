@@ -189,7 +189,7 @@ export function CommandPalette({ open, onClose, onAction }: CommandPaletteProps)
                     fontSize: 10,
                     padding: '1px 6px',
                     borderRadius: 8,
-                    background: 'rgba(167, 139, 250, 0.2)',
+                    background: 'rgba(154, 147, 255, 0.2)',
                     color: '#c4b5fd',
                     marginLeft: 6,
                     fontWeight: 500,

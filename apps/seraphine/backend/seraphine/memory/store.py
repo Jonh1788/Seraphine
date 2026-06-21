@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import struct
 import uuid
@@ -12,6 +13,59 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from core_db import Store
+
+# Server-side fact categorization. Mirrors the frontend deriveCategory()
+# regex (apps/seraphine/frontend/src/memory/MemoryView.tsx) so the card
+# eyebrow is now backed by a persisted column instead of a client-side
+# guess. Ordered list: first match wins. Each entry is the uppercase
+# eyebrow label shown on the card + its detection pattern.
+_FACT_CATEGORY_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("METAS", re.compile(r"\b(meta|objetivo|lan[çc]ar|quero|pretendo|sonho)\b")),
+    (
+        "TRABALHO",
+        re.compile(
+            r"\b(trabalh|desenvolved|empresa|projeto|c[oó]digo|react|rust|"
+            r"tauri|reuni[ãa]o|cliente|deploy)\b"
+        ),
+    ),
+    (
+        "ROTINA",
+        re.compile(
+            r"\b(acorda|treina|manh[ãa]|rotina|todo dia|toda manh|"
+            r"caf[ée]|dorme|h[áa]bito|sempre)\b"
+        ),
+    ),
+    (
+        "PESSOAS",
+        re.compile(
+            r"\b(namorad|amig|fam[íi]lia|m[ãa]e|pai|irm[ãa]|"
+            r"esposa|marido|filh|anivers[áa]rio|ana|jo[ãa]o)\b"
+        ),
+    ),
+    (
+        "LOCAL",
+        re.compile(
+            r"\b(mora|bairro|cidade|endere[çc]o|s[ãa]o paulo|"
+            r"rua|casa|local)\b"
+        ),
+    ),
+    (
+        "PREFERENCIA",
+        re.compile(
+            r"\b(prefere|gosta|n[ãa]o gosta|odeia|chama|favorit|costuma)\b"
+        ),
+    ),
+]
+
+
+def _derive_fact_category(text: str) -> str:
+    """Return the uppercase eyebrow label for a fact's text. Falls back to
+    'OUTROS' when nothing matches — same buckets as the frontend regex."""
+    t = (text or "").lower()
+    for label, pattern in _FACT_CATEGORY_RULES:
+        if pattern.search(t):
+            return label
+    return "OUTROS"
 
 
 class Turn(BaseModel):
@@ -43,6 +97,10 @@ class Fact(BaseModel):
     created_at: str
     superseded_by: str | None = None
     last_used_at: str | None = None
+    # Server-derived category eyebrow (METAS/TRABALHO/ROTINA/PESSOAS/LOCAL/
+    # PREFERENCIA/OUTROS). Persisted on the facts table; backfilled for
+    # rows that predate the column.
+    category: str | None = None
 
 
 def _now() -> str:
@@ -365,6 +423,32 @@ def _seraphine_facts_decay_migrator(conn: sqlite3.Connection) -> None:
         pass  # column already exists
 
 
+def _seraphine_facts_category_migrator(conn: sqlite3.Connection) -> None:
+    """Add a `category` column to facts (idempotent ALTER) and backfill it.
+
+    The category is the uppercase eyebrow label the memory card shows. It
+    used to be derived client-side from fact.text on every render; this
+    promotes it to a persisted column derived server-side via the same
+    rules. Existing rows are backfilled on the first run that adds the
+    column; the WHERE clause makes a re-run a no-op.
+    """
+    column_is_new = False
+    try:
+        conn.execute("ALTER TABLE facts ADD COLUMN category TEXT")
+        column_is_new = True
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    if column_is_new:
+        rows = conn.execute(
+            "SELECT id, text FROM facts WHERE category IS NULL"
+        ).fetchall()
+        for fact_id, text in rows:
+            conn.execute(
+                "UPDATE facts SET category = ? WHERE id = ?",
+                (_derive_fact_category(text or ""), fact_id),
+            )
+
+
 def _seraphine_fts5_migrator(conn: sqlite3.Connection) -> None:
     """Create FTS5 virtual table over turns.content + sync triggers."""
     conn.executescript(
@@ -451,6 +535,7 @@ class MemoryStore(Store):
         # TABLE block from `_seraphine_core_migrator`.
         self.register_migrator("seraphine_core", _seraphine_core_migrator)
         self.register_migrator("seraphine_facts_decay", _seraphine_facts_decay_migrator)
+        self.register_migrator("seraphine_facts_category", _seraphine_facts_category_migrator)
         self.register_migrator("seraphine_fts5", _seraphine_fts5_migrator)
         self.register_migrator("seraphine_reflect_cursor", _seraphine_reflect_cursor_migrator)
         self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
@@ -771,21 +856,34 @@ class MemoryStore(Store):
 
     # ---------- facts ----------
 
-    async def add_fact(self, text: str, source: str, confidence: float) -> Fact:
+    async def add_fact(
+        self,
+        text: str,
+        source: str,
+        confidence: float,
+        *,
+        category: str | None = None,
+    ) -> Fact:
+        # Derive the category eyebrow server-side when the caller doesn't
+        # supply one, so every fact lands with a persisted category.
+        resolved_category = category or _derive_fact_category(text)
         fact = Fact(
             id=str(uuid.uuid4()),
             text=text,
             source=source,  # type: ignore[arg-type]
             confidence=confidence,
             created_at=_now(),
+            category=resolved_category,
         )
 
         def _work() -> None:
             with self._connect() as conn:
                 conn.execute(
-                    "INSERT INTO facts(id, text, source, confidence, created_at, superseded_by)"
-                    " VALUES (?, ?, ?, ?, ?, NULL)",
-                    (fact.id, fact.text, fact.source, fact.confidence, fact.created_at),
+                    "INSERT INTO facts(id, text, source, confidence, created_at,"
+                    " superseded_by, category)"
+                    " VALUES (?, ?, ?, ?, ?, NULL, ?)",
+                    (fact.id, fact.text, fact.source, fact.confidence,
+                     fact.created_at, fact.category),
                 )
 
         await asyncio.to_thread(_work)
@@ -811,7 +909,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at"
+                    " superseded_by, last_used_at, category"
                     " FROM facts WHERE superseded_by IS NULL"
                     " ORDER BY created_at ASC",
                 ).fetchall()
@@ -819,7 +917,7 @@ class MemoryStore(Store):
                 Fact(
                     id=r[0], text=r[1], source=r[2],
                     confidence=r[3], created_at=r[4],
-                    superseded_by=r[5], last_used_at=r[6],
+                    superseded_by=r[5], last_used_at=r[6], category=r[7],
                 )
                 for r in rows
             ]
@@ -854,7 +952,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 sql = (
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at"
+                    " superseded_by, last_used_at, category"
                     " FROM facts"
                     f"{where} ORDER BY created_at DESC LIMIT ?"
                 )
@@ -868,6 +966,7 @@ class MemoryStore(Store):
                     created_at=r[4],
                     superseded_by=r[5],
                     last_used_at=r[6],
+                    category=r[7],
                 )
                 for r in rows
             ]
@@ -884,7 +983,14 @@ class MemoryStore(Store):
 
         await asyncio.to_thread(_work)
 
-    async def update_fact(self, fact_id: str, text: str | None = None, confidence: float | None = None) -> Fact | None:
+    async def update_fact(
+        self,
+        fact_id: str,
+        text: str | None = None,
+        confidence: float | None = None,
+        *,
+        category: str | None = None,
+    ) -> Fact | None:
         def _work() -> Fact | None:
             with self._connect() as conn:
                 parts: list[str] = []
@@ -892,9 +998,17 @@ class MemoryStore(Store):
                 if text is not None:
                     parts.append("text = ?")
                     vals.append(text)
+                    # Re-derive the category from the new text unless the
+                    # caller is overriding it explicitly below.
+                    if category is None:
+                        parts.append("category = ?")
+                        vals.append(_derive_fact_category(text))
                 if confidence is not None:
                     parts.append("confidence = ?")
                     vals.append(confidence)
+                if category is not None:
+                    parts.append("category = ?")
+                    vals.append(category)
                 if not parts:
                     return None
                 vals.append(fact_id)
@@ -904,7 +1018,7 @@ class MemoryStore(Store):
                 )
                 row = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at"
+                    " superseded_by, last_used_at, category"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -913,7 +1027,7 @@ class MemoryStore(Store):
             return Fact(
                 id=row[0], text=row[1], source=row[2],
                 confidence=row[3], created_at=row[4], superseded_by=row[5],
-                last_used_at=row[6],
+                last_used_at=row[6], category=row[7],
             )
 
         return await asyncio.to_thread(_work)
@@ -1197,7 +1311,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at"
+                    " superseded_by, last_used_at, category"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -1211,6 +1325,7 @@ class MemoryStore(Store):
                 created_at=row[4],
                 superseded_by=row[5],
                 last_used_at=row[6],
+                category=row[7],
             )
 
         return await asyncio.to_thread(_work)

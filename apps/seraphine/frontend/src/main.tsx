@@ -4,6 +4,7 @@ import { App } from './App';
 import { ThemeProvider } from './theme';
 import { ConfirmProvider, ErrorBoundary } from './ui';
 import './styles.css';
+import './obsidian.css';
 
 // Apply persisted theme before first paint to avoid flash.
 try {

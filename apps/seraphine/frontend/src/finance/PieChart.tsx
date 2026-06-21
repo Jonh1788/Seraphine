@@ -51,21 +51,6 @@ export function PieChart({ data, size = 180 }: PieChartProps): JSX.Element {
     <div className="finance-pie">
       <div className="finance-pie__chart" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {/* Subtle glow behind donut */}
-          <defs>
-            <filter id="donut-glow">
-              <feGaussianBlur stdDeviation="4" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
-          </defs>
-          <circle
-            cx={cx}
-            cy={cy}
-            r={radius}
-            fill="none"
-            stroke="rgba(167,139,250,0.08)"
-            strokeWidth={strokeWidth + 8}
-          />
           {sorted.map((slice) => {
             const pct = slice.value / total;
             const dash = circumference * pct;

@@ -13,7 +13,18 @@ export interface ReadingItem {
   read_at: string | null;
   archived_at: string | null;
   error_msg: string | null;
+  // Real backend columns (Wave B): author parsed from page metadata, progress
+  // is percent read (0-100). Both always present from the API now.
+  author: string;
+  progress: number;
+  // Obsidian cover-card meta still derived client-side:
+  //  - kind: heuristic by domain (no backend column; see deriveKind).
+  //  - duration_min: estimated from content_text word count (no stored value).
+  kind?: ReadingKind;
+  duration_min?: number;
 }
+
+export type ReadingKind = 'livro' | 'artigo';
 
 export type ReadingStatus =
   | 'processing'
@@ -25,7 +36,7 @@ export type ReadingStatus =
 
 export const STATUS_LABELS: Record<ReadingStatus, string> = {
   processing: 'Processando',
-  unread: 'Nao lido',
+  unread: 'Quero ler',
   reading: 'Lendo',
   read: 'Lido',
   archived: 'Arquivado',

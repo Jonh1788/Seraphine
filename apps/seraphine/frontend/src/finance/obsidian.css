@@ -1,0 +1,462 @@
+/* ============================================================
+   Finance — Obsidian reskin (scoped overrides)
+   Loaded after globals; equal-specificity rules win.
+   Reuses obs-* layer where possible; .finance__* / .fin-* scoped.
+   ============================================================ */
+
+/* ---- Screen scaffold ---- */
+.finance {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--app);
+}
+
+/* ---- Header: horizontal bar (title left / actions right) ---- */
+.finance__header {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 32px 12px;
+  border-bottom: none;
+  position: static;
+  flex: none;
+}
+
+.finance__header-text {
+  display: block;
+  text-align: left;
+  min-width: 0;
+}
+
+.finance__title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.finance__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.finance__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+/* Month nav pill (compact, inside surface chip) */
+.finance__month-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 4px;
+}
+
+.finance__month-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.finance__month-btn:hover {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: transparent;
+}
+
+.finance__month-btn--next {
+  transform: rotate(180deg);
+}
+
+.finance__month-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 64px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* + Lançamento primary action */
+.finance__add-btn {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.finance__add-btn:hover {
+  background: var(--accent-hi);
+}
+
+/* ---- Tabs: solid accent fill on active ---- */
+.finance__tabs {
+  gap: 6px;
+  padding: 0 32px 6px;
+  border-bottom: none;
+  flex: none;
+}
+
+.finance__tab {
+  padding: 8px 15px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.finance__tab:hover {
+  color: var(--text);
+  background: var(--bg-2);
+}
+
+.finance__tab--active,
+.finance__tab--active:hover {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.finance-tab-badge {
+  background: #ff8a4c;
+  color: #14141a;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 0;
+}
+
+/* Active-tab badge stays orange/dark, readable on accent fill */
+.finance__tab--active .finance-tab-badge {
+  background: #14141a;
+  color: var(--accent-contrast);
+}
+
+/* ---- Content area ---- */
+.finance__content {
+  flex: 1;
+  padding: 4px 32px 28px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---- Balance hero (horizontal gradient card + status pill) ---- */
+.finance__balance-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  padding: 16px 22px;
+  margin-bottom: 0;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.13), rgba(74, 222, 128, 0.03));
+  border: 1px solid rgba(74, 222, 128, 0.22);
+}
+
+.finance__balance-hero--negative {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.13), rgba(239, 68, 68, 0.03));
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.finance__balance-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-bottom: 0;
+}
+
+.finance__balance-value {
+  display: block;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 2px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance__balance-hero--positive .finance__balance-value,
+.finance__balance-hero--negative .finance__balance-value {
+  color: var(--text);
+}
+
+.finance__balance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  padding: 7px 13px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.finance__balance-hero--negative .finance__balance-badge {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* ---- Summary cards (Balanço / Receitas / Despesas) ---- */
+.finance__summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 0;
+}
+
+.finance__card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  gap: 0;
+}
+
+.finance__card-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.finance__card-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance__card-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.finance__card--income .finance__card-value { color: #4ade80; }
+.finance__card--expense .finance__card-value { color: #ef6b6b; }
+.finance__card--positive .finance__card-value { color: #4ade80; }
+.finance__card--negative .finance__card-value { color: #ef6b6b; }
+
+/* ---- Overview body: pie (wide) + recent (narrow), both carded ---- */
+.finance__overview-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.finance__pie-section,
+.finance__recent-section {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.finance__section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 18px 0;
+}
+
+.finance__recent-section .finance__section-title {
+  margin-bottom: 14px;
+}
+
+/* Pie card: drop inner padding nesting, align legend with gap */
+.finance__pie-section .finance-pie {
+  padding: 0;
+  gap: 26px;
+}
+
+/* Center hole reads the flat card surface (no halo) */
+.finance__pie-section .finance-pie__center-label {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+.finance__pie-section .finance-pie__center-value {
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+/* Accent insight footer pinned to bottom of pie card */
+.finance__pie-insight {
+  margin-top: auto;
+  padding-top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.finance__pie-insight svg {
+  flex: none;
+}
+
+/* ---- Pie legend: rounded-square swatch, dimmer amount ---- */
+.finance-pie__legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.finance-pie__legend-amount {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.finance-pie__legend-pct {
+  min-width: 34px;
+}
+
+/* ---- Transaction rows: flat, hairline dividers, category tiles ---- */
+.finance-tx-list {
+  gap: 0;
+  padding: 0;
+}
+
+/* Compact (recent) variant: flat list, no date-group chrome */
+.finance-tx-list--compact {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.finance-tx {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: default;
+}
+
+.finance-tx:hover {
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+.finance-tx + .finance-tx {
+  border-top: 1px solid var(--border);
+}
+
+/* Date-group rows (full Transações tab) also get hairline dividers */
+.finance-tx-group__items {
+  gap: 0;
+}
+
+.finance-tx-group__items .finance-tx + .finance-tx {
+  border-top: 1px solid var(--border);
+}
+
+.finance-tx-group__date {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+/* Category-tinted rounded-square tile (color set inline) */
+.finance-tx__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.finance-tx__icon svg {
+  display: block;
+}
+
+.finance-tx__desc {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.finance-tx__meta {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-wrap: nowrap;
+}
+
+.finance-tx__amount {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.finance-tx__amount--expense {
+  color: #ef6b6b;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+  .finance__header {
+    padding: 18px 16px 12px;
+  }
+  .finance__tabs {
+    padding: 0 16px 6px;
+    overflow-x: auto;
+  }
+  .finance__content {
+    padding: 4px 16px 24px;
+  }
+  .finance__summary-cards {
+    grid-template-columns: 1fr;
+  }
+  .finance__overview-body {
+    grid-template-columns: 1fr;
+  }
+}

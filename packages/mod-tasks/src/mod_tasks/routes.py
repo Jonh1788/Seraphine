@@ -95,6 +95,7 @@ class TaskCreate(BaseModel):
     due_time: str | None = None  # HH:MM (24h)
     priority: str | None = None  # low / med / high
     tags: list[str] | None = None
+    category: str | None = None  # finance-taxonomy key (None => derive from tags/type)
     remind: str | None = None  # at_time / 1h_before / 1d_before (legacy)
     reminder_offsets: list[int] | None = None  # minutes before due_time
 
@@ -110,6 +111,7 @@ class TaskPatch(BaseModel):
     due_time: str | None = None
     priority: str | None = None
     tags: list[str] | None = None
+    category: str | None = None  # finance-taxonomy key; "" clears, None leaves as-is
     remind: str | None = None  # at_time / 1h_before / 1d_before / "" to clear
     reminder_offsets: list[int] | None = None  # None = leave as-is
 
@@ -203,6 +205,7 @@ async def create_task(
             priority=body.priority,
             tags=body.tags,
             remind=body.remind,
+            category=body.category,
         )
         materialized = await _materialize_offsets(
             validated_offsets, body.due_time, svc, user_id,
@@ -294,6 +297,17 @@ async def update_task(
                 detail=f"remind must be one of {sorted(REMIND_VALUES)}",
             )
 
+    # category: empty string / None means "clear"; a real value is
+    # normalized + persisted by the service. Omitted key = leave as-is.
+    unset_category = False
+    category_val: str | None = None
+    if "category" in data:
+        raw = data["category"]
+        if raw in (None, ""):
+            unset_category = True
+        else:
+            category_val = raw
+
     # reminder_offsets: explicit None = leave as-is, [] = clear, list = replace.
     offsets_provided = "reminder_offsets" in data
     offsets_val: list[int] | None = None
@@ -324,10 +338,12 @@ async def update_task(
                 priority=priority_val,
                 tags=data.get("tags") if "tags" in data else None,
                 remind=remind_val,
+                category=category_val,
                 unset_due_date=unset_due_date,
                 unset_due_time=unset_due_time,
                 unset_priority=unset_priority,
                 unset_remind=unset_remind,
+                unset_category=unset_category,
             )
         except Exception as e:
             logger.exception("task update failed")

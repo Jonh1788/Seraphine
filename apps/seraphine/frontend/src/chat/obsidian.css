@@ -1,0 +1,522 @@
+/**
+ * Obsidian reskin — Chat screen.
+ *
+ * Scoped overrides for the chat pane, message bubbles, composer pill, plus
+ * the chat sidebar identity block + FOCO Pomodoro card (rendered from
+ * AppLayout). Imported at the top of ChatView.tsx, which is always mounted,
+ * so these rules load after the global styles.css / obsidian.css layers and
+ * win at equal specificity. Reuses the shared statusBlink / orbGlow / orbFloat
+ * keyframes defined globally.
+ *
+ * HARD RULE: do not duplicate obs-* component classes here.
+ */
+
+/* ============================================================
+   Chat pane surface — flatten the glass tint
+   ============================================================ */
+.chat {
+  background: var(--app);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ============================================================
+   Greeting header
+   ============================================================ */
+.chat__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 26px 32px 6px;
+  flex-shrink: 0;
+}
+
+.chat__header-titles {
+  min-width: 0;
+}
+
+.chat__greeting {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.chat__greeting-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* "Nova conversa" now lives at the top-right of the greeting header. */
+.chat__header .btn-new-chat {
+  flex-shrink: 0;
+}
+
+/* Standalone toolbar (kept for backward compat if header is absent) */
+.chat__toolbar {
+  padding: var(--space-2) 32px 0;
+}
+
+/* Flatten the new-chat button hover (no gradient / glow) */
+.btn-new-chat:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+/* ============================================================
+   Message list spacing — match the mockup's 18px gap / 32px pad
+   ============================================================ */
+.chat__messages {
+  padding: 14px 32px;
+  gap: 18px;
+}
+
+/* "Comece a conversa" heading should not use the old gradient text */
+.chat__empty strong,
+.chat__empty h2 {
+  background: none;
+  -webkit-text-fill-color: var(--text);
+  color: var(--text);
+}
+
+/* ============================================================
+   User bubble — solid accent fill, no avatar, no name
+   ============================================================ */
+.bubble--user {
+  max-width: 74%;
+}
+
+.bubble--user .bubble__avatar,
+.bubble--user .bubble__name {
+  display: none;
+}
+
+.bubble--user .bubble__content {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: 18px 18px 6px 18px;
+  padding: 11px 15px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ============================================================
+   Assistant turn — no bubble container, square sparkle avatar
+   ============================================================ */
+.bubble--assistant {
+  max-width: 100%;
+  width: 100%;
+  align-items: flex-start;
+}
+
+.bubble--assistant .bubble__avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: none;
+  margin-top: 0;
+}
+
+.bubble--assistant .bubble__avatar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.bubble--assistant .bubble__body {
+  flex: 1;
+  min-width: 0;
+  gap: 5px;
+}
+
+.bubble--assistant .bubble__name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.bubble__time {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+  letter-spacing: 0;
+}
+
+.bubble--assistant .bubble__content {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.bubble--assistant .bubble__content strong {
+  color: var(--accent);
+}
+
+/* Briefing keeps a subtle treatment but flat (no glass blur) */
+.bubble--briefing .bubble__content {
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.bubble--error .bubble__content {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 14px;
+  padding: 11px 15px;
+  color: #fda4a4;
+}
+
+/* ============================================================
+   Composer — one unified pill
+   ============================================================ */
+.chat__composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 32px 20px;
+  padding: 9px 9px 9px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  border-top: 1px solid var(--border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding-bottom: max(9px, calc(9px + env(safe-area-inset-bottom, 0px)));
+}
+
+/* Input sits flush inside the pill — no field chrome */
+.chat__input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.chat__input:focus {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.chat__input::placeholder {
+  color: var(--text-faint);
+}
+
+/* Flatten the round action buttons to 38px / radius 11 */
+.btn-attach,
+.btn-mic,
+.btn-realtime {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.btn-attach:hover:not(:disabled),
+.btn-mic:hover:not(:disabled),
+.btn-realtime:hover:not(:disabled) {
+  background: var(--bg-3);
+  border: none;
+  color: var(--accent);
+}
+
+.btn-attach__icon,
+.btn-mic__icon,
+.btn-realtime__icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Active mic (recording) keeps danger color but flat radius */
+.btn-mic--active {
+  background: var(--danger);
+  border: none;
+  color: #fff;
+  border-radius: 11px;
+}
+
+.btn-mic--active:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Active realtime — flat accent fill, drop the glow ring */
+.btn-realtime--active {
+  background: var(--accent-soft);
+  border: none;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.btn-realtime--active::before {
+  display: none;
+}
+
+/* Accent SEND button — 38px square, arrow glyph */
+.btn-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease;
+}
+
+.btn-send svg {
+  width: 19px;
+  height: 19px;
+}
+
+.btn-send:hover:not(:disabled) {
+  background: var(--accent-hi);
+}
+
+.btn-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ============================================================
+   Inline action card (task card) — lilac flat surface
+   ============================================================ */
+.rich-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-radius: 14px;
+}
+
+.rich-card--tasks {
+  border-left: 2px solid var(--accent);
+}
+
+.rich-card__icon--tasks {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.task-chat-card__date-group {
+  color: var(--accent);
+}
+
+.task-chat-card__toggle:hover {
+  color: var(--accent);
+}
+
+/* ============================================================
+   Sidebar identity block (rendered from AppLayout)
+   ============================================================ */
+.sidebar {
+  background: var(--bg-1);
+  padding: 24px 22px;
+  gap: 20px;
+}
+
+/* Avatar stage loses its card chrome / radial glow — VRM sits on surface */
+.avatar-stage {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.avatar-stage::before {
+  display: none;
+}
+
+.sidebar__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-top: -4px;
+}
+
+.sidebar__name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.sidebar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sidebar__status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3fbf6a;
+  animation: statusBlink 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.sidebar__status--off .sidebar__status-dot {
+  background: var(--warning);
+}
+
+/* ============================================================
+   Sidebar toggles — bare rows separated by a divider
+   ============================================================ */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.controls .toggle {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 11px 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.controls .toggle:hover {
+  background: transparent;
+  border: none;
+}
+
+.controls .toggle + .toggle {
+  border-top: 1px solid var(--border);
+}
+
+.controls .toggle input {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.controls .toggle input::after {
+  width: 18px;
+  height: 18px;
+  background: #cfcfda;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.controls .toggle input:checked {
+  background: var(--accent);
+}
+
+.controls .toggle input:checked::after {
+  transform: translateX(16px);
+  background: #fff;
+  box-shadow: none;
+}
+
+/* Push the approval panel + Foco card to fill remaining space */
+.sidebar__panels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ============================================================
+   Sidebar FOCO Pomodoro card — pinned to the bottom
+   ============================================================ */
+.sidebar__foco {
+  margin-top: auto;
+  border: 1px solid var(--border);
+  background: var(--app);
+  border-radius: 16px;
+  padding: 16px;
+  flex-shrink: 0;
+}
+
+.sidebar__foco-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar__foco-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.sidebar__foco-mode {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.sidebar__foco-time {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sidebar__foco-num {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar__foco-rest {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sidebar__foco-bar {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.sidebar__foco-bar > div {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Idle state: muted accent, mode reads "Iniciar" */
+.sidebar__foco--idle .sidebar__foco-num {
+  color: var(--text-dim);
+}

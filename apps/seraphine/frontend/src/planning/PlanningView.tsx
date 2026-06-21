@@ -1,16 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  ArrowLeftIcon,
-  CalendarIcon,
-  ClockIcon,
-  CheckIcon,
-  AlertTriangleIcon,
-  FlameIcon,
-  BedIcon,
-  TargetIcon,
-} from '../icons/Icons';
+import './obsidian.css';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeftIcon, SparkleIcon } from '../icons/Icons';
 import { fetchPlan, acceptPlan, updateBlock } from './api';
-import type { DailyPlan, TimeBlock } from './types';
+import type { DailyPlan, PlanContext, TimeBlock } from './types';
 
 interface PlanningViewProps {
   onBack: () => void;
@@ -21,13 +13,14 @@ interface PlanningViewProps {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
+/* Event chip colors aligned to the global category palette. */
 const BLOCK_COLORS: Record<string, string> = {
-  focus: '#a78bfa',
-  meeting: '#60a5fa',
-  break: '#4ade80',
-  exercise: '#fb923c',
-  admin: '#9ca3af',
-  free: 'transparent',
+  focus: '#9a93ff', // --accent
+  meeting: '#42a5f5', // Educação
+  break: '#26a69a', // Transporte
+  exercise: '#ab47bc', // Lazer
+  admin: '#78909c', // Outros
+  free: '#5f5e6b', // --text-faint
 };
 
 const BLOCK_LABELS: Record<string, string> = {
@@ -41,8 +34,19 @@ const BLOCK_LABELS: Record<string, string> = {
 
 const HOUR_START = 6;
 const HOUR_END = 23;
-const TOTAL_MINUTES = (HOUR_END - HOUR_START) * 60;
-const PX_PER_MINUTE = 2.5;
+
+/* PT labels for the energy estimate the backend already computes. */
+const ENERGY_LABELS: Record<string, string> = {
+  high: 'Energia alta',
+  medium: 'Energia media',
+  low: 'Energia baixa',
+};
+
+const dateFormatter = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+});
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -53,212 +57,299 @@ function hmToMin(hm: string): number {
   return h * 60 + m;
 }
 
-function blockDuration(block: TimeBlock): number {
-  return Math.max(0, hmToMin(block.end) - hmToMin(block.start));
+function blockHour(block: TimeBlock): number {
+  return Math.floor(hmToMin(block.start) / 60);
 }
 
-function energyLabel(energy: string): string {
-  switch (energy) {
-    case 'high': return 'Alta';
-    case 'medium': return 'Media';
-    case 'low': return 'Baixa';
-    default: return energy;
-  }
+/** Color-tinted background for a category color at 0.14 alpha. */
+function tintBg(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, 0.14)`;
 }
 
-function energyColor(energy: string): string {
-  switch (energy) {
-    case 'high': return '#4ade80';
-    case 'medium': return '#fbbf24';
-    case 'low': return '#f87171';
-    default: return '#9ca3af';
-  }
+function formatToday(): string {
+  const raw = dateFormatter.format(new Date());
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+/* 6-dot drag-handle (inline, stroke 1.8 currentColor — no emoji). */
+function GripIcon({ size = 14 }: { size?: number }): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
+    </svg>
+  );
 }
 
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
 
-function ContextCards({ plan }: { plan: DailyPlan }) {
-  const ctx = plan.context;
-  return (
-    <div className="planning__context-row">
-      {ctx.sleep_hours != null && (
-        <div className="planning__context-card">
-          <BedIcon size={16} />
-          <span className="planning__context-value">{ctx.sleep_hours}h</span>
-          <span className="planning__context-label">sono</span>
-        </div>
-      )}
-      <div className="planning__context-card">
-        <FlameIcon size={16} />
-        <span
-          className="planning__context-value"
-          style={{ color: energyColor(ctx.energy_estimate) }}
-        >
-          {energyLabel(ctx.energy_estimate)}
-        </span>
-        <span className="planning__context-label">energia</span>
-      </div>
-      <div className="planning__context-card">
-        <CalendarIcon size={16} />
-        <span className="planning__context-value">{ctx.meetings_count}</span>
-        <span className="planning__context-label">
-          {ctx.meetings_count === 1 ? 'reuniao' : 'reunioes'}
-        </span>
-      </div>
-      <div className="planning__context-card">
-        <ClockIcon size={16} />
-        <span className="planning__context-value">
-          {Math.round(ctx.free_slots_min / 60)}h
-        </span>
-        <span className="planning__context-label">livre</span>
-      </div>
-    </div>
-  );
-}
-
-function TimelineBlock({
+function EventChip({
   block,
   onEdit,
+  aiGenerated = false,
 }: {
   block: TimeBlock;
   onEdit: (block: TimeBlock) => void;
-}) {
-  const topMin = hmToMin(block.start) - HOUR_START * 60;
-  const heightMin = blockDuration(block);
-  const top = topMin * PX_PER_MINUTE;
-  const height = Math.max(heightMin * PX_PER_MINUTE, 24);
-  const color = BLOCK_COLORS[block.type] || '#9ca3af';
+  aiGenerated?: boolean;
+}): JSX.Element {
+  const color = BLOCK_COLORS[block.type] || BLOCK_COLORS.admin;
   const isFree = block.type === 'free';
+  const isFocus = block.type === 'focus';
+
+  if (isFocus) {
+    return (
+      <div
+        className="planning__event planning__event--focus"
+        onClick={() => onEdit(block)}
+        title={`${block.start} - ${block.end} | ${BLOCK_LABELS[block.type] || block.type}`}
+      >
+        <div className="planning__event-title">{block.title}</div>
+        <div className="planning__event-time">
+          {block.start} – {block.end}
+          {block.reason ? ` · ${block.reason}` : ''}
+        </div>
+        {/* Only claim AI authorship when the backend actually ran an LLM
+            pass. Heuristic blocks get an honest, non-AI label. */}
+        <div className="planning__suggested">
+          {aiGenerated ? (
+            <>
+              <SparkleIcon size={11} />
+              sugerido pela Seraphine
+            </>
+          ) : (
+            'bloco de foco sugerido'
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
-      className={`planning__block${isFree ? ' planning__block--free' : ''}`}
-      style={{
-        top: `${top}px`,
-        height: `${height}px`,
-        borderLeftColor: color,
-        ...(isFree
-          ? { border: `1px dashed rgba(255,255,255,0.15)`, borderLeft: `3px dashed ${color}` }
-          : {}),
-      }}
+      className={`planning__event${isFree ? ' planning__event--free' : ''}`}
+      style={
+        isFree
+          ? undefined
+          : { borderLeftColor: color, background: tintBg(color) }
+      }
       onClick={() => onEdit(block)}
       title={`${block.start} - ${block.end} | ${BLOCK_LABELS[block.type] || block.type}`}
     >
-      <div className="planning__block-header">
-        <span
-          className="planning__block-type"
-          style={{ color }}
-        >
-          {BLOCK_LABELS[block.type] || block.type}
-        </span>
-        <span className="planning__block-time">
-          {block.start} - {block.end}
-        </span>
-      </div>
-      {heightMin >= 30 && (
-        <div className="planning__block-title">{block.title}</div>
-      )}
-      {heightMin >= 50 && block.reason && (
-        <div className="planning__block-reason">{block.reason}</div>
+      <div className="planning__event-title">{block.title}</div>
+      {!isFree && (
+        <div className="planning__event-time">
+          {block.start} – {block.end}
+        </div>
       )}
     </div>
   );
 }
 
-function HourLabels() {
-  const labels: JSX.Element[] = [];
+function Timeline({
+  blocks,
+  onEdit,
+  aiGenerated,
+}: {
+  blocks: TimeBlock[];
+  onEdit: (block: TimeBlock) => void;
+  aiGenerated: boolean;
+}): JSX.Element {
+  // Group every block by the hour in which it starts. Multiple blocks can
+  // share an hour (e.g. a short break + free slot, or back-to-back meetings),
+  // so we keep all of them rather than only the first.
+  const byHour = useMemo(() => {
+    const map = new Map<number, TimeBlock[]>();
+    for (const block of [...blocks].sort((a, b) => a.start.localeCompare(b.start))) {
+      const h = blockHour(block);
+      const bucket = map.get(h);
+      if (bucket) bucket.push(block);
+      else map.set(h, [block]);
+    }
+    return map;
+  }, [blocks]);
+
+  const rows: JSX.Element[] = [];
   for (let h = HOUR_START; h <= HOUR_END; h++) {
-    const top = (h - HOUR_START) * 60 * PX_PER_MINUTE;
-    labels.push(
+    const hourBlocks = byHour.get(h) ?? [];
+    const hasFocus = hourBlocks.some((b) => b.type === 'focus');
+    rows.push(
       <div
         key={h}
-        className="planning__hour-label"
-        style={{ top: `${top}px` }}
+        className={`planning__hour-row${hasFocus ? ' planning__hour-row--focus' : ''}`}
       >
-        {String(h).padStart(2, '0')}:00
+        <span className="planning__hour">{String(h).padStart(2, '0')}:00</span>
+        {hourBlocks.length > 0 ? (
+          <div className="planning__hour-blocks">
+            {hourBlocks.map((block) => (
+              <EventChip
+                key={block.id}
+                block={block}
+                onEdit={onEdit}
+                aiGenerated={aiGenerated}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="planning__hour-empty" />
+        )}
       </div>,
     );
-    // Grid line
-    labels.push(
-      <div
-        key={`line-${h}`}
-        className="planning__hour-line"
-        style={{ top: `${top}px` }}
-      />,
-    );
   }
-  return <>{labels}</>;
+
+  return <div className="planning__timeline-card">{rows}</div>;
 }
 
-function PriorityList({ priorities }: { priorities: DailyPlan['priorities'] }) {
-  if (priorities.length === 0) return null;
+function AEncaixarCard({
+  priorities,
+}: {
+  priorities: DailyPlan['priorities'];
+}): JSX.Element {
   return (
-    <div className="planning__section">
-      <h3 className="planning__section-title">
-        <TargetIcon size={16} />
-        Prioridades
-      </h3>
-      <ul className="planning__priority-list">
-        {priorities.map((p) => (
-          <li key={p.id} className="planning__priority-item">
-            <span className="planning__priority-title">{p.title}</span>
-            {p.priority && (
-              <span
-                className="planning__priority-badge"
-                data-prio={p.priority}
-              >
-                {p.priority}
+    <div className="planning__sidebar-card">
+      <div className="planning__sidebar-title">A encaixar</div>
+      <div className="planning__unscheduled">
+        {priorities.length === 0 ? (
+          <span className="planning__task-empty">Nada pendente para encaixar</span>
+        ) : (
+          priorities.map((p) => (
+            <div key={p.id} className="planning__task" draggable>
+              <span className="planning__task-grip">
+                <GripIcon />
               </span>
-            )}
-            {p.due_date && (
-              <span className="planning__priority-due">{p.due_date}</span>
-            )}
-          </li>
-        ))}
-      </ul>
+              <span className="planning__task-label">{p.title}</span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
 
-function AtRiskSection({ atRisk }: { atRisk: DailyPlan['at_risk'] }) {
-  const hasHabits = atRisk.habits.length > 0;
-  const hasGoals = atRisk.goals.length > 0;
-  if (!hasHabits && !hasGoals) return null;
+function EmRiscoCard({
+  atRisk,
+}: {
+  atRisk: DailyPlan['at_risk'];
+}): JSX.Element | null {
+  const { habits, goals } = atRisk;
+  if (habits.length === 0 && goals.length === 0) return null;
 
   return (
-    <div className="planning__section">
-      <h3 className="planning__section-title">
-        <AlertTriangleIcon size={16} />
-        Em risco
-      </h3>
-      {hasHabits && (
-        <ul className="planning__risk-list">
-          {atRisk.habits.map((h) => (
-            <li key={h.id} className="planning__risk-item">
-              <FlameIcon size={14} />
-              <span>{h.title}</span>
-              <span className="planning__risk-streak">
-                {h.current_streak} dias
-              </span>
-            </li>
-          ))}
-        </ul>
+    <div className="planning__sidebar-card">
+      <div className="planning__sidebar-title">Em risco hoje</div>
+      <div className="planning__risk-list">
+        {habits.map((h) => (
+          <div key={`habit-${h.id}`} className="planning__risk-item">
+            <span className="planning__risk-label">{h.title}</span>
+            <span className="planning__risk-meta">
+              {h.current_streak} dia{h.current_streak === 1 ? '' : 's'} de sequencia
+            </span>
+          </div>
+        ))}
+        {goals.map((g) => (
+          <div key={`goal-${g.id}`} className="planning__risk-item">
+            <span className="planning__risk-label">{g.title}</span>
+            <span className="planning__risk-meta">
+              {Math.round(g.progress)}% concluido
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContextStrip({ ctx }: { ctx: PlanContext }): JSX.Element | null {
+  const chips: string[] = [];
+  chips.push(ENERGY_LABELS[ctx.energy_estimate] || ctx.energy_estimate);
+  if (ctx.sleep_hours != null) {
+    chips.push(`Sono ${ctx.sleep_hours}h`);
+  }
+  if (ctx.meetings_count > 0) {
+    chips.push(
+      `${ctx.meetings_count} reuniao${ctx.meetings_count === 1 ? '' : 's'}`,
+    );
+  }
+
+  return (
+    <div className="planning__context">
+      <div className="planning__context-chips">
+        {chips.map((c) => (
+          <span key={c} className="planning__context-chip">
+            {c}
+          </span>
+        ))}
+      </div>
+      {ctx.mood_reason ? (
+        <p className="planning__context-mood">{ctx.mood_reason}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PlanoSugeridoCard({
+  plan,
+  accepting,
+  accepted,
+  onApply,
+  onAdjust,
+}: {
+  plan: DailyPlan;
+  accepting: boolean;
+  accepted: boolean;
+  onApply: () => void;
+  onAdjust: () => void;
+}): JSX.Element {
+  const ctx = plan.context;
+  const focusBlocks = plan.time_blocks.filter((b) => b.type === 'focus').length;
+  const freeHours = Math.round(ctx.free_slots_min / 60);
+  const aiGenerated = ctx.ai_generated === true;
+
+  // Prefer the model-written pitch when a real LLM pass produced one;
+  // otherwise fall back to an honest numeric summary derived client-side.
+  const derived =
+    focusBlocks > 0
+      ? `Reservei ${focusBlocks > 1 ? `${focusBlocks} blocos` : '1 bloco'} de foco para quando você rende mais e deixei ${freeHours}h livres na agenda. Aplico?`
+      : `Organizei sua agenda com ${freeHours}h livres para o que importa hoje. Aplico?`;
+  const body = aiGenerated && ctx.summary ? ctx.summary : derived;
+  const heading = aiGenerated ? 'Sugerido pela Seraphine' : 'Plano do dia';
+
+  return (
+    <div className="planning__suggestion-card">
+      <div className="planning__suggestion-head">
+        {aiGenerated ? <SparkleIcon size={16} /> : null}
+        <span>{heading}</span>
+      </div>
+      <p className="planning__suggestion-body">{body}</p>
+      {accepted ? (
+        <button className="planning__apply planning__apply--accepted" disabled>
+          Plano aplicado
+        </button>
+      ) : (
+        <button
+          className="planning__apply"
+          onClick={onApply}
+          disabled={accepting}
+        >
+          {accepting ? 'Aplicando...' : 'Aplicar plano'}
+        </button>
       )}
-      {hasGoals && (
-        <ul className="planning__risk-list">
-          {atRisk.goals.map((g) => (
-            <li key={g.id} className="planning__risk-item">
-              <TargetIcon size={14} />
-              <span>{g.title}</span>
-              <span className="planning__risk-streak">
-                {g.progress}%
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <button className="planning__adjust" onClick={onAdjust}>
+        Ajustar via chat
+      </button>
     </div>
   );
 }
@@ -401,20 +492,34 @@ export function PlanningView({ onBack, onNavigate }: PlanningViewProps): JSX.Ele
     }
   }, [onNavigate]);
 
-  const timelineHeight = TOTAL_MINUTES * PX_PER_MINUTE;
+  const formattedDate = formatToday();
 
   return (
     <div className="planning">
       <header className="planning__header">
+        <div className="planning__header-titles">
+          <button
+            type="button"
+            className="planning__back"
+            onClick={onBack}
+            aria-label="Voltar"
+          >
+            <ArrowLeftIcon size={18} />
+          </button>
+          <div>
+            <h2 className="planning__title">Planejamento</h2>
+            <p className="planning__subtitle">{formattedDate}</p>
+          </div>
+        </div>
         <button
           type="button"
-          className="planning__back"
-          onClick={onBack}
-          aria-label="Voltar"
+          className="planning__plan-cta"
+          onClick={() => void loadPlan()}
+          disabled={loading}
         >
-          <ArrowLeftIcon size={20} />
+          <SparkleIcon size={14} />
+          Planejar com a Seraphine
         </button>
-        <h2 className="planning__title">Plano do dia</h2>
       </header>
 
       {loading && (
@@ -426,56 +531,26 @@ export function PlanningView({ onBack, onNavigate }: PlanningViewProps): JSX.Ele
       )}
 
       {plan && !loading && (
-        <>
-          <ContextCards plan={plan} />
+        <div className="planning__layout">
+          <Timeline
+            blocks={plan.time_blocks}
+            onEdit={handleBlockEdit}
+            aiGenerated={plan.context.ai_generated === true}
+          />
 
-          <div className="planning__timeline-wrapper">
-            <div
-              className="planning__timeline"
-              style={{ height: `${timelineHeight}px` }}
-            >
-              <HourLabels />
-              <div className="planning__blocks">
-                {plan.time_blocks.map((block) => (
-                  <TimelineBlock
-                    key={block.id}
-                    block={block}
-                    onEdit={handleBlockEdit}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="planning__bottom">
-            <PriorityList priorities={plan.priorities} />
-            <AtRiskSection atRisk={plan.at_risk} />
-
-            <div className="planning__actions">
-              {!accepted ? (
-                <button
-                  className="planning__btn planning__btn--primary planning__btn--wide"
-                  onClick={handleAccept}
-                  disabled={accepting}
-                >
-                  <CheckIcon size={16} />
-                  {accepting ? 'Criando eventos...' : 'Aceitar plano'}
-                </button>
-              ) : (
-                <div className="planning__accepted-msg">
-                  <CheckIcon size={16} />
-                  Plano aceito - eventos criados no Google Calendar
-                </div>
-              )}
-              <button
-                className="planning__btn planning__btn--secondary planning__btn--wide"
-                onClick={handleChatAdjust}
-              >
-                Ajustar via chat
-              </button>
-            </div>
-          </div>
-        </>
+          <aside className="planning__sidebar">
+            <ContextStrip ctx={plan.context} />
+            <AEncaixarCard priorities={plan.priorities} />
+            <EmRiscoCard atRisk={plan.at_risk} />
+            <PlanoSugeridoCard
+              plan={plan}
+              accepting={accepting}
+              accepted={accepted}
+              onApply={handleAccept}
+              onAdjust={handleChatAdjust}
+            />
+          </aside>
+        </div>
       )}
 
       {editingBlock && (

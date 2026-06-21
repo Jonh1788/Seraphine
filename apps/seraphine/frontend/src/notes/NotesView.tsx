@@ -3,6 +3,7 @@ import { ArrowLeftIcon, NotesIcon, SearchIcon } from '../icons/Icons';
 import { createNote, deleteNote, fetchTags, getNote, listNotes, updateNote } from './api';
 import { NoteEditor } from './NoteEditor';
 import type { Note, TagCount } from './types';
+import './obsidian.css';
 
 interface NotesViewProps {
   onBack: () => void;
@@ -281,15 +282,42 @@ export function NotesView({ onBack, initialNoteId }: NotesViewProps): JSX.Elemen
 
       <div className="notes-view__body">
         <aside className="notes-view__sidebar">
-          <div className="notes-view__search">
-            <SearchIcon size={14} />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar notas..."
-              className="notes-view__search-input"
-            />
+          <div className="notes-view__sidebar-head">
+            <div className="notes-view__sidebar-titlerow">
+              <span className="notes-view__sidebar-title">Notas</span>
+              <button
+                type="button"
+                className="notes-view__add"
+                onClick={() => void handleNew()}
+                disabled={busy}
+                aria-label="Nova nota"
+                title="Nova nota"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+            <div className="notes-view__search">
+              <SearchIcon size={14} />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar notas..."
+                className="notes-view__search-input"
+              />
+            </div>
           </div>
 
           {allTags.length > 0 && (

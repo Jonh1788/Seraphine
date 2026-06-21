@@ -1,10 +1,77 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftIcon, BrainIcon } from '../icons/Icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import './obsidian.css';
+import { ArrowLeftIcon, BrainIcon, PencilIcon, SearchIcon, TrashIcon } from '../icons/Icons';
 import { useConfirm } from '../ui';
 import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 
 import { API_BASE } from '../api';
+
+// Category filter chips (mockup). 'Tudo' shows everything.
+const CATEGORY_FILTERS = ['Tudo', 'Preferencias', 'Pessoas', 'Trabalho', 'Rotina', 'Metas'] as const;
+type CategoryFilter = (typeof CATEGORY_FILTERS)[number];
+
+// Derive a category bucket client-side from the fact text (backend has no
+// category field yet — see followUp). Returns the filter group + the
+// uppercase eyebrow label shown on the card.
+function deriveCategory(text: string): { group: CategoryFilter; eyebrow: string } {
+  const t = (text || '').toLowerCase();
+  if (/\b(meta|objetivo|lan[çc]ar|quero|pretendo|sonho)\b/.test(t)) return { group: 'Metas', eyebrow: 'METAS' };
+  if (/\b(trabalh|desenvolved|empresa|projeto|c[oó]digo|react|rust|tauri|reuni[ãa]o|cliente|deploy)\b/.test(t)) return { group: 'Trabalho', eyebrow: 'TRABALHO' };
+  if (/\b(acorda|treina|manh[ãa]|rotina|todo dia|toda manh|caf[ée]|dorme|h[áa]bito|sempre)\b/.test(t)) return { group: 'Rotina', eyebrow: 'ROTINA' };
+  if (/\b(namorad|amig|fam[íi]lia|m[ãa]e|pai|irm[ãa]|esposa|marido|filh|anivers[áa]rio|ana|jo[ãa]o)\b/.test(t)) return { group: 'Pessoas', eyebrow: 'PESSOAS' };
+  if (/\b(mora|bairro|cidade|endere[çc]o|s[ãa]o paulo|rua|casa|local)\b/.test(t)) return { group: 'Pessoas', eyebrow: 'LOCAL' };
+  if (/\b(prefere|gosta|n[ãa]o gosta|odeia|chama|favorit|costuma)\b/.test(t)) return { group: 'Preferencias', eyebrow: 'PREFERENCIA' };
+  return { group: 'Preferencias', eyebrow: 'OUTROS' };
+}
+
+// Map a persisted backend eyebrow label to its filter-chip group. The
+// backend stores the uppercase eyebrow (e.g. 'LOCAL'); the chips bucket
+// LOCAL/PESSOAS together under 'Pessoas', etc.
+const EYEBROW_TO_GROUP: Record<string, CategoryFilter> = {
+  METAS: 'Metas',
+  TRABALHO: 'Trabalho',
+  ROTINA: 'Rotina',
+  PESSOAS: 'Pessoas',
+  LOCAL: 'Pessoas',
+  PREFERENCIA: 'Preferencias',
+  OUTROS: 'Preferencias',
+};
+
+// Resolve a fact's category eyebrow + filter group. Prefers the persisted
+// backend fact.category (server-derived); falls back to the client regex
+// for legacy payloads that predate the column.
+function factCategory(fact: Fact): { group: CategoryFilter; eyebrow: string } {
+  const persisted = (fact.category || '').toUpperCase();
+  if (persisted && persisted in EYEBROW_TO_GROUP) {
+    return { group: EYEBROW_TO_GROUP[persisted], eyebrow: persisted };
+  }
+  return deriveCategory(fact.text);
+}
+
+type ConfLevel = 'alta' | 'media' | 'baixa';
+function confLevel(c: number): ConfLevel {
+  if (c >= 0.8) return 'alta';
+  if (c >= 0.5) return 'media';
+  return 'baixa';
+}
+function confWord(c: number): string {
+  const lvl = confLevel(c);
+  return lvl === 'media' ? 'média' : lvl;
+}
+
+// Card footer source pill: via chat / manual / inferido.
+function factSourceLabel(s: string): string {
+  switch (s) {
+    case 'explicit':
+    case 'user_taught':
+      return 'manual';
+    case 'reflection':
+      return 'inferido';
+    default:
+      return 'via chat';
+  }
+}
 
 const TAB_KEYS = ['Timeline', 'Perfil', 'Facts', 'Auditoria', 'Tudo'] as const;
 type Tab = (typeof TAB_KEYS)[number];
@@ -16,6 +83,13 @@ interface Fact {
   confidence: number;
   created_at: string;
   superseded_by: string | null;
+  // Real backend field (GET /memory/facts model_dump): timestamp the fact was
+  // last revalidated/used. Null until the fact is recalled at least once.
+  last_used_at: string | null;
+  // Server-derived category eyebrow (METAS / TRABALHO / ROTINA / PESSOAS /
+  // LOCAL / PREFERENCIA / OUTROS). Persisted on the facts table. May be
+  // absent on very old payloads — the card falls back to deriveCategory().
+  category?: string | null;
 }
 
 interface TimelineEvent {
@@ -51,6 +125,9 @@ interface MemoryHealth {
   chroma?: { reachable?: boolean; count?: number | null };
   facts?: { active?: number; superseded?: number; total?: number };
   last_reflect_at?: string | null;
+  // Real backend field (GET /memory/health): facts extracted by the most
+  // recent successful reflect cycle. Null if no reflection has run.
+  last_reflect_inserted?: number | null;
   warnings_24h?: number;
   orphan_count?: number;
   low_confidence_count?: number;
@@ -189,6 +266,14 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState<string | null>(null);
   const [newFact, setNewFact] = useState('');
+
+  // Obsidian grid UI state
+  const [query, setQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<CategoryFilter>('Tudo');
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const loadedRef = useRef<Record<Tab, boolean>>({ Timeline: false, Perfil: false, Facts: false, Auditoria: false, Tudo: false });
   const [memoryHealth, setMemoryHealth] = useState<MemoryHealth | null>(null);
   const [auditMessage, setAuditMessage] = useState<string | null>(null);
@@ -374,24 +459,33 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as Record<string, unknown>;
 
-      // For long-running actions (rebuild, compact) that return "started",
-      // keep running state — WS events or polling will finalize.
-      if (data.status === 'started' || data.status === 'already_running') {
-        if (data.status === 'already_running') {
-          setActionUI((prev) => ({
-            ...prev,
-            [action]: { ...prev[action], state: 'running' as const },
-          }));
-        }
+      // already_running: backend rejected (another caller holds it). Keep the
+      // button in running state; a WS event or poll will finalize.
+      if (data.status === 'already_running') {
+        setActionUI((prev) => ({
+          ...prev,
+          [action]: { ...prev[action], state: 'running' as const },
+        }));
+        return;
+      }
+
+      // rebuild_embeddings & compact run in a background task (asyncio.create_task)
+      // and return {status: "started"} immediately — WS progress / *_done events
+      // finalize them. purge_orphans & force_reflection complete synchronously and
+      // already carry their real result count in this same response, so finalize now.
+      const isAsync = action === 'rebuild_embeddings' || action === 'compact';
+      if (isAsync) {
         return; // WS or poll will transition to completed
       }
 
-      // Synchronous actions (purge_orphans, force_reflection) complete immediately
+      // Synchronous actions — bind the REAL counts the backend returns:
+      //   purge-orphans -> {status:"started", purged:N}
+      //   force-reflection -> {status:"started", inserted:N}
       let successMsg = 'Concluido';
-      if (action === 'purge_orphans' && typeof data.orphans_removed === 'number') {
-        successMsg = `${data.orphans_removed} orfas removidas`;
-      } else if (action === 'force_reflection' && typeof data.facts_inserted === 'number') {
-        successMsg = `${data.facts_inserted} facts extraidos`;
+      if (action === 'purge_orphans' && typeof data.purged === 'number') {
+        successMsg = `${data.purged} orfas removidas`;
+      } else if (action === 'force_reflection' && typeof data.inserted === 'number') {
+        successMsg = `${data.inserted} facts extraidos`;
       }
 
       setActionUI((prev) => ({
@@ -477,6 +571,14 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
     };
   }, []);
 
+  // Facts power the primary Obsidian card grid — load on mount.
+  useEffect(() => {
+    if (!loadedRef.current.Facts) {
+      loadedRef.current.Facts = true;
+      void fetchFacts();
+    }
+  }, [fetchFacts]);
+
   // Load data lazily per tab, once.
   useEffect(() => {
     if (activeTab === 'Timeline' && !loadedRef.current.Timeline) {
@@ -549,24 +651,226 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
     }
   };
 
+  const startEdit = (fact: Fact): void => {
+    setEditingId(fact.id);
+    setEditText(fact.text);
+  };
+
+  const cancelEdit = (): void => {
+    setEditingId(null);
+    setEditText('');
+  };
+
+  const handleEditSave = async (): Promise<void> => {
+    if (!editingId) return;
+    const text = editText.trim();
+    if (!text) return;
+    try {
+      const res = await fetch(`${API_BASE}/memory/facts/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEditingId(null);
+      setEditText('');
+      await fetchFacts();
+    } catch (e) {
+      setFactsError(String(e));
+    }
+  };
+
+  // Facts shown in the grid: only active (non-superseded), filtered by the
+  // category chip and the header search query.
+  const visibleFacts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return facts
+      .filter((f) => !f.superseded_by)
+      .filter((f) => {
+        if (activeFilter === 'Tudo') return true;
+        return factCategory(f).group === activeFilter;
+      })
+      .filter((f) => (q ? f.text.toLowerCase().includes(q) : true));
+  }, [facts, activeFilter, query]);
+
+  const activeFactCount = facts.filter((f) => !f.superseded_by).length;
+
   return (
-    <div className="memory-view">
-      <div className="memory-view__header">
-        <div className="memory-view__header-left">
-          <button className="memory-view__back" onClick={onBack} type="button" aria-label="Voltar">
-            <ArrowLeftIcon size={18} />
-            <span>Voltar</span>
+    <div className="memory-view obs-screen">
+      <div className="memory-view__header obs-screen__header">
+        <div className="memory-view__header-text obs-screen__titles">
+          <h2 className="memory-view__title">Memória</h2>
+          <p className="memory-view__subtitle">
+            O que a Seraphine lembra sobre você · {activeFactCount} {activeFactCount === 1 ? 'item' : 'itens'}
+          </p>
+        </div>
+        <div className="memory-view__actions">
+          <button
+            type="button"
+            className="obs-btn obs-btn--ghost memory-view__back"
+            onClick={onBack}
+            aria-label="Voltar"
+          >
+            <ArrowLeftIcon size={16} />
           </button>
-          <div className="memory-view__header-icon">
-            <BrainIcon size={22} />
+          <div className="memory-search">
+            <SearchIcon size={16} />
+            <input
+              type="text"
+              placeholder="Buscar na memória…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Buscar na memória"
+            />
           </div>
-          <div className="memory-view__header-text">
-            <h2 className="memory-view__title">Memoria</h2>
-            <p className="memory-view__subtitle">Dados e perfil da Seraphine</p>
-          </div>
+          <button
+            type="button"
+            className="obs-btn obs-btn--primary memory-view__add"
+            onClick={() => setAdding((v) => !v)}
+          >
+            + Lembrança
+          </button>
+          <button
+            type="button"
+            className="obs-btn obs-btn--ghost memory-adv-toggle"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-pressed={showAdvanced}
+          >
+            {showAdvanced ? 'Voltar' : 'Avançado'}
+          </button>
         </div>
       </div>
 
+      {!showAdvanced && (
+        <>
+          {adding && (
+            <div className="memory-add-row">
+              <input
+                type="text"
+                placeholder="Ensinar um fato novo…"
+                value={newFact}
+                autoFocus
+                onChange={(e) => setNewFact(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    void handleAddFact();
+                    setAdding(false);
+                  } else if (e.key === 'Escape') {
+                    setAdding(false);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="obs-btn obs-btn--primary"
+                onClick={() => { void handleAddFact(); setAdding(false); }}
+                disabled={!newFact.trim()}
+              >
+                Adicionar
+              </button>
+            </div>
+          )}
+
+          <div className="memory-filters">
+            {CATEGORY_FILTERS.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={`memory-filter${activeFilter === cat ? ' memory-filter--active' : ''}`}
+                onClick={() => setActiveFilter(cat)}
+              >
+                {cat === 'Preferencias' ? 'Preferências' : cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="memory-grid">
+            {factsLoading && <div className="memory-loading">Carregando…</div>}
+            {!factsLoading && factsError && (
+              <div className="memory-empty">
+                <strong>Não foi possível carregar</strong>
+                <p>{factsError}</p>
+              </div>
+            )}
+            {!factsLoading && !factsError && visibleFacts.length === 0 && (
+              <div className="memory-empty">
+                <div className="memory-empty__icon"><BrainIcon size={40} /></div>
+                <strong>Nenhuma memória ainda</strong>
+                <p>Use “+ Lembrança” para ensinar um fato à Seraphine.</p>
+              </div>
+            )}
+            {!factsLoading && visibleFacts.map((fact) => {
+              const cat = factCategory(fact);
+              const lvl = confLevel(fact.confidence);
+              return (
+                <div key={fact.id} className="memory-card">
+                  <div className="memory-card__top">
+                    <span className="memory-card__eyebrow">{cat.eyebrow}</span>
+                    <div className="memory-card__icons">
+                      <button type="button" onClick={() => startEdit(fact)} aria-label="Editar">
+                        <PencilIcon size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="memory-card__del"
+                        onClick={() => void handleDeleteFact(fact.id)}
+                        aria-label="Esquecer"
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  {editingId === fact.id ? (
+                    <>
+                      <textarea
+                        className="memory-card__edit"
+                        value={editText}
+                        rows={3}
+                        autoFocus
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                      />
+                      <div className="memory-card__edit-actions">
+                        <button
+                          type="button"
+                          className="obs-btn obs-btn--primary"
+                          onClick={() => void handleEditSave()}
+                          disabled={!editText.trim()}
+                        >
+                          Salvar
+                        </button>
+                        <button type="button" className="obs-btn obs-btn--ghost" onClick={cancelEdit}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="memory-card__text">{fact.text}</div>
+                  )}
+                  <div className="memory-card__footer">
+                    <span className="memory-card__source">{factSourceLabel(fact.source)}</span>
+                    {/* Real recency from backend: prefer last_used_at (when the
+                        fact was last recalled/revalidated), fall back to
+                        created_at. Both ship in the /memory/facts payload. */}
+                    <span className="memory-card__time" title={fact.last_used_at ? 'usado pela última vez' : 'criado'}>
+                      {timeAgo(fact.last_used_at ?? fact.created_at)}
+                    </span>
+                    <span className={`memory-card__conf memory-card__conf--${lvl}`}>
+                      <i />
+                      {confWord(fact.confidence)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {showAdvanced && (
+      <div className="memory-view__advanced">
       <div className="memory-view__tabs">
         {TAB_KEYS.map((tab) => (
           <button
@@ -756,7 +1060,12 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
               <div className="memory-audit-card">
                 <span>Ultima reflexao</span>
                 <strong>{memoryHealth?.last_reflect_at ? timeAgo(memoryHealth.last_reflect_at) : 'nunca'}</strong>
-                <p>{memoryHealth?.last_reflect_at ? new Date(memoryHealth.last_reflect_at).toLocaleString('pt-BR') : ''}</p>
+                <p>
+                  {memoryHealth?.last_reflect_at ? new Date(memoryHealth.last_reflect_at).toLocaleString('pt-BR') : ''}
+                  {typeof memoryHealth?.last_reflect_inserted === 'number'
+                    ? `${memoryHealth?.last_reflect_at ? ' · ' : ''}${memoryHealth.last_reflect_inserted} facts extraidos`
+                    : ''}
+                </p>
               </div>
             </div>
 
@@ -878,6 +1187,8 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 }

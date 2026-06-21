@@ -34,3 +34,48 @@ class RecurringRule:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+@dataclass
+class Routine:
+    """A curated or user-authored prompt launcher.
+
+    Distinct from RecurringRule: a routine is not materialized into a task;
+    it carries a prompt/action that is launched into the chat composer when
+    the user runs it. ``kind`` drives the AGENDADAS vs MANUAIS split in the UI.
+    """
+
+    id: str  # UUID (or stable slug for builtin catalog entries)
+    name: str
+    detail: str
+    kind: str  # 'scheduled' | 'manual'
+    trigger: str | None  # human-readable schedule label, scheduled only
+    enabled: bool
+    prompt: str
+    icon: str | None  # icon key (e.g. 'coffee'), resolved on the frontend
+    icon_bg: str | None
+    icon_color: str | None
+    job_name: str | None  # backing proactive scheduler job, when any
+    builtin: bool  # True for the code-owned catalog (not user-deletable)
+    sort_order: int
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "detail": self.detail,
+            "kind": self.kind,
+            "trigger": self.trigger,
+            "enabled": self.enabled,
+            "prompt": self.prompt,
+            "icon": self.icon,
+            "icon_bg": self.icon_bg,
+            "icon_color": self.icon_color,
+            "job_name": self.job_name,
+            "builtin": self.builtin,
+            "sort_order": self.sort_order,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }

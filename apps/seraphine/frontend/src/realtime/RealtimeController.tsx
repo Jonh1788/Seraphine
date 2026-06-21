@@ -1,9 +1,11 @@
+import './obsidian.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 import type { PCMPlayback } from '../audio/playback';
 import { TauriVpioSession, isTauriVpioAvailable } from '../audio/tauriVpio';
 import { warmSharedAudioContext } from '../audio/sharedContext';
+import { VrmAvatar } from '../avatar/VrmAvatar';
 import { createRealtimeVAD, type RealtimeVAD } from './vad';
 import {
   computeRmsByteTimeDomain,
@@ -57,6 +59,32 @@ const STATE_LABELS: Record<RealtimeState, string> = {
   processing: 'Seraphine esta pensando',
   botSpeaking: 'Seraphine esta respondendo (fale para interromper)',
 };
+
+/**
+ * Empty-state fallback for the stage headline, keyed by state. The real
+ * assistant reply streams over the shared WS as `token` events and is
+ * accumulated into `answerText` (rendered when present); these status
+ * strings only show before the first token arrives or between turns.
+ */
+const STAGE_HEADLINES: Record<RealtimeState, string> = {
+  idle: 'Modo realtime pausado',
+  listening: 'Estou ouvindo — fale quando quiser.',
+  userSpeaking: 'Capturando sua fala...',
+  processing: 'Pensando na melhor resposta...',
+  botSpeaking: 'Respondendo agora.',
+};
+
+const AVATAR_URL =
+  (typeof localStorage !== 'undefined' &&
+    localStorage.getItem('seraphine.avatarUrl')) ||
+  '/avatars/seraphine.vrm';
+
+/** Format elapsed seconds as mm:ss for the stage timer. */
+function formatTimer(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 /**
  * Convert a Float32 PCM frame (-1..1) to s16le little-endian bytes
@@ -135,6 +163,23 @@ export function RealtimeController({
 }: RealtimeControllerProps): JSX.Element {
   const [state, setState] = useState<RealtimeState>('idle');
   const [error, setError] = useState<string | null>(null);
+  // Session timer (mm:ss) shown in the stage header. Reset whenever a
+  // realtime session starts; ticks once per second while active.
+  const [elapsed, setElapsed] = useState<number>(0);
+  // Keyboard/transcript toggle (header + control row). Purely presentational
+  // — shows/hides the transcript caption. No backend wiring (frontend-only).
+  const [showTranscript, setShowTranscript] = useState<boolean>(true);
+  // Real transcript text carried over the shared /ws/conversation socket.
+  //  - userTranscript: the user's last spoken utterance. On Mac/Tauri it's
+  //    the local-Whisper result (set in endUserSegment); in the browser it's
+  //    the backend `transcription` event.
+  //  - answerText: Seraphine's reply, accumulated from streamed `token`
+  //    events. Reset at the start of each new bot turn.
+  const [userTranscript, setUserTranscript] = useState<string>('');
+  const [answerText, setAnswerText] = useState<string>('');
+  // turn_id of the answer currently being accumulated, so we reset the
+  // buffer cleanly when a new turn's tokens begin streaming.
+  const answerTurnRef = useRef<string | null>(null);
 
   // Latest refs so async VAD callbacks and WS subscribers see fresh values.
   const stateRef = useRef<RealtimeState>('idle');
@@ -207,6 +252,10 @@ export function RealtimeController({
     if (!socket) return;
     // Reset buffer for this segment regardless of path.
     localBufferRef.current = [];
+    // New user turn — clear the previous reply so the stage doesn't show
+    // stale answer text while we capture/transcribe the new utterance.
+    setAnswerText('');
+    answerTurnRef.current = null;
 
     if (isTauri()) {
       localSttRef.current = true;
@@ -253,6 +302,10 @@ export function RealtimeController({
       // to avoid a cold LLM round-trip.
       return;
     }
+    // Surface the real user utterance on the stage caption. On the Mac
+    // path the transcript is in hand here (local Whisper); the browser
+    // path gets it from the backend `transcription` WS event instead.
+    setUserTranscript(text);
     socket.send({
       type: 'user_message',
       conversation_id: conversationIdRef.current,
@@ -299,6 +352,9 @@ export function RealtimeController({
         void session.stop().catch(() => { /* ignore */ });
       }
       setMicAnalyser(null);
+      setUserTranscript('');
+      setAnswerText('');
+      answerTurnRef.current = null;
       setState('idle');
       return;
     }
@@ -497,6 +553,27 @@ export function RealtimeController({
         return;
       }
       const type = (msg as { type?: string }).type;
+      if (type === 'token') {
+        // Real assistant reply text streaming over the shared socket.
+        // Accumulate per turn; reset the buffer when a new turn starts.
+        const tokenMsg = msg as { turn_id?: string; text?: string };
+        const turnId = tokenMsg.turn_id ?? null;
+        const text = tokenMsg.text ?? '';
+        if (answerTurnRef.current !== turnId) {
+          answerTurnRef.current = turnId;
+          setAnswerText(text);
+        } else {
+          setAnswerText((prev) => prev + text);
+        }
+        return;
+      }
+      if (type === 'transcription') {
+        // Browser/backend-STT path: the user's transcribed utterance.
+        // (On Mac the local-Whisper text is set in endUserSegment.)
+        const text = (msg as { text?: string }).text ?? '';
+        if (text.trim()) setUserTranscript(text);
+        return;
+      }
       if (type === 'tts_start') {
         // DEBUG: reset per-turn counters.
         turnChunkCountRef.current = 0;
@@ -640,29 +717,107 @@ export function RealtimeController({
     }
   }, [active, manualMute]);
 
+  // --- Session timer ---------------------------------------------------
+  // Tick once per second while realtime is active; reset on (de)activation.
+  useEffect(() => {
+    if (!active) {
+      setElapsed(0);
+      return;
+    }
+    setElapsed(0);
+    const id = window.setInterval(() => {
+      setElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [active]);
+
   const waveformMode: WaveformMode =
     manualMute && state !== 'botSpeaking' ? 'idle'
     : state === 'botSpeaking' ? 'bot'
     : state === 'userSpeaking' || state === 'listening' ? 'mic'
     : 'idle';
 
-  const waveformAnalyser =
-    state === 'botSpeaking' ? botAnalyser
-    : (state === 'userSpeaking' || state === 'listening') && !manualMute ? micAnalyser
-    : null;
-
   const statusLabel = manualMute && state !== 'botSpeaking'
     ? 'Microfone mudo — clique no icone para falar'
     : STATE_LABELS[state];
 
+  // Stage headline + caption. The assistant reply (answerText) and user
+  // utterance (userTranscript) are the real text streamed over the shared
+  // WS; the STATE_HEADLINES strings are only the empty-state fallback shown
+  // before the first token arrives or between turns.
+  const headline = manualMute && state !== 'botSpeaking'
+    ? 'Microfone no mudo — toque no microfone para falar.'
+    : answerText.trim()
+      ? answerText
+      : STAGE_HEADLINES[state];
+  const isStageIdle = waveformMode === 'idle';
+  // True while the mic VAD analyser is live and we're in a mic-driven mode —
+  // used to mark the waveform as actively listening for assistive tech.
+  const micLive = waveformMode === 'mic' && micAnalyser !== null;
+
   return (
-    <div className={`realtime-panel realtime-panel--${state}${manualMute ? ' realtime-panel--muted' : ''}`}>
-      <div className="realtime-panel__header">
-        <span className={`realtime-panel__dot realtime-panel__dot--${state}`} />
-        <span className="realtime-panel__label">{statusLabel}</span>
+    <div
+      className={`realtime-stage realtime-stage--${state}${manualMute ? ' realtime-stage--muted' : ''}${isStageIdle ? ' realtime-stage--idle' : ''}`}
+      role="region"
+      aria-label="Modo realtime"
+    >
+      <header className="realtime-stage__bar">
+        <span className="realtime-stage__status" aria-label={statusLabel}>
+          <i className="realtime-stage__blink" aria-hidden />
+          {statusLabel}
+        </span>
+        <div className="realtime-stage__meta">
+          <span className="realtime-stage__timer">{formatTimer(elapsed)}</span>
+          <button
+            type="button"
+            className="realtime-stage__kbd"
+            onClick={() => setShowTranscript((v) => !v)}
+            aria-label={showTranscript ? 'Ocultar transcrição' : 'Mostrar transcrição'}
+            aria-pressed={showTranscript}
+            title={showTranscript ? 'Ocultar transcrição' : 'Mostrar transcrição'}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="2" y="6" width="20" height="13" rx="2" />
+              <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div className="realtime-stage__center">
+        <div className="realtime-stage__avatar">
+          <span className="realtime-stage__ring" aria-hidden />
+          <span className="realtime-stage__ring" aria-hidden />
+          <span className="realtime-stage__glow" aria-hidden />
+          <div className="realtime-stage__vrm">
+            <VrmAvatar avatarUrl={AVATAR_URL} width={150} height={150} />
+          </div>
+        </div>
+
+        <div className="realtime-stage__transcript">
+          <p className="realtime-stage__answer">{headline}</p>
+          {showTranscript && userTranscript.trim() && (
+            <p className="realtime-stage__said">você disse · &quot;{userTranscript}&quot;</p>
+          )}
+        </div>
+
+        <div className="realtime-stage__wave" data-mic-live={micLive} aria-hidden>
+          <Waveform
+            analyser={waveformMode === 'bot' ? botAnalyser : micAnalyser}
+            mode={waveformMode}
+            width={300}
+            height={56}
+            bars={36}
+          />
+        </div>
+      </div>
+
+      {error && <div className="realtime-stage__error" role="alert">{error}</div>}
+
+      <footer className="realtime-stage__controls">
         <button
           type="button"
-          className={`realtime-panel__mute${manualMute ? ' realtime-panel__mute--on' : ''}`}
+          className={`realtime-stage__ctrl${manualMute ? ' realtime-stage__ctrl--on' : ''}`}
           onClick={onManualMuteToggle}
           aria-label={manualMute ? 'Ativar meu microfone' : 'Silenciar meu microfone'}
           aria-pressed={manualMute}
@@ -670,7 +825,7 @@ export function RealtimeController({
         >
           {manualMute ? (
             // mic-slash (muted) icon
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <line x1="1" y1="1" x2="23" y2="23" />
               <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
               <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
@@ -679,29 +834,39 @@ export function RealtimeController({
             </svg>
           ) : (
             // mic (live) icon
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="9" y="2" width="6" height="12" rx="3" />
-              <path d="M5 10a7 7 0 0 0 14 0" />
-              <line x1="12" y1="19" x2="12" y2="23" />
-              <line x1="8" y1="23" x2="16" y2="23" />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
             </svg>
           )}
-          <span className="realtime-panel__mute-label">{manualMute ? 'Mudo' : 'Ativo'}</span>
         </button>
+
         <button
           type="button"
-          className="realtime-panel__close"
+          className="realtime-stage__end"
           onClick={onToggle}
-          aria-label="Sair do modo realtime"
-          title="Sair do modo realtime"
+          aria-label="Encerrar modo realtime"
+          title="Encerrar modo realtime"
         >
-          &times;
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
         </button>
-      </div>
-      <div className="realtime-panel__waveform">
-        <Waveform analyser={waveformAnalyser} mode={waveformMode} width={360} height={96} />
-      </div>
-      {error && <div className="realtime-panel__error">{error}</div>}
+
+        <button
+          type="button"
+          className="realtime-stage__ctrl"
+          onClick={() => setShowTranscript((v) => !v)}
+          aria-label={showTranscript ? 'Ocultar transcrição' : 'Mostrar transcrição'}
+          aria-pressed={showTranscript}
+          title={showTranscript ? 'Ocultar transcrição' : 'Mostrar transcrição'}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="2" y="6" width="20" height="13" rx="2" />
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10" />
+          </svg>
+        </button>
+      </footer>
     </div>
   );
 }

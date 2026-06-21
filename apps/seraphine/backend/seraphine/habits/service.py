@@ -550,6 +550,40 @@ class HabitService:
 
         return await asyncio.to_thread(_work)
 
+    async def get_calendar_batch(
+        self,
+        month: int,
+        year: int,
+    ) -> dict[str, list[HabitLog]]:
+        """Calendar logs for ALL active habits in one pass, grouped by habit_id.
+
+        Read-only aggregation over the existing habit_logs table -- replaces the
+        per-habit N+1 fetch the weekly grid would otherwise do.
+        """
+        if not (1 <= int(month) <= 12):
+            raise ValueError("month must be 1..12")
+        last_day = _calendar.monthrange(int(year), int(month))[1]
+        start = f"{int(year):04d}-{int(month):02d}-01"
+        end = f"{int(year):04d}-{int(month):02d}-{last_day:02d}"
+
+        def _work() -> dict[str, list[HabitLog]]:
+            with self._store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT l.id, l.habit_id, l.date, l.completed, l.created_at"
+                    " FROM habit_logs l"
+                    " JOIN habits h ON h.id = l.habit_id"
+                    " WHERE h.active = 1 AND l.date BETWEEN ? AND ?"
+                    " ORDER BY l.habit_id ASC, l.date ASC",
+                    (start, end),
+                ).fetchall()
+            grouped: dict[str, list[HabitLog]] = {}
+            for r in rows:
+                log = _row_to_log(r)
+                grouped.setdefault(log.habit_id, []).append(log)
+            return grouped
+
+        return await asyncio.to_thread(_work)
+
     async def get_today_progress(self) -> dict[str, Any]:
         """Summary used by the dashboard.
 

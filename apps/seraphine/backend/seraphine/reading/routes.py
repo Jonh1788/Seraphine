@@ -24,6 +24,7 @@ class SaveItemBody(BaseModel):
 class PatchItemBody(BaseModel):
     status: str | None = None
     tags: list[str] | None = None
+    progress: int | None = Field(default=None, ge=0, le=100)
 
     model_config = {"extra": "forbid"}
 
@@ -63,7 +64,12 @@ async def list_items(
     items = await svc.list_items(
         status=status, tag=tag, q=q, limit=limit, offset=offset,
     )
-    return {"items": [i.to_dict() for i in items]}
+    counts = await svc.count_items(status=status, tag=tag, q=q)
+    return {
+        "items": [i.to_dict() for i in items],
+        "total": counts["total"],
+        "by_status": counts["by_status"],
+    }
 
 
 @router.get("/items/{item_id}")

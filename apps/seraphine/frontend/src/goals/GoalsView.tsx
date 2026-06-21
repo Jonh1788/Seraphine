@@ -10,7 +10,6 @@ import {
   AREA_LABELS,
   AREA_COLORS,
   ALL_AREAS,
-  TIMEFRAME_LABELS,
 } from './types';
 
 interface GoalsViewProps {
@@ -31,6 +30,41 @@ function daysRemaining(endDate: string | null): number | null {
   return Math.ceil(
     (new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
   );
+}
+
+const MONTH_ABBR = [
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+  'jul', 'ago', 'set', 'out', 'nov', 'dez',
+];
+
+/** Compact deadline label for the card head, e.g. "prazo dez 2025". */
+function deadlineLabel(endDate: string | null): string {
+  if (!endDate) return 'sem prazo';
+  const d = new Date(endDate);
+  if (Number.isNaN(d.getTime())) return 'sem prazo';
+  return `prazo ${MONTH_ABBR[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * Real "Marcos" (key-result completion) for the card pip-row. Each list goal
+ * already carries its nested key_results (backend omits them when empty, so
+ * missing => 0/0). A KR counts as done at >=100% progress.
+ */
+function keyResultProgress(goal: Goal): { done: number; total: number } {
+  const krs = goal.key_results ?? [];
+  const total = krs.length;
+  const done = krs.filter((kr) => kr.progress >= 100).length;
+  return { done, total };
+}
+
+/**
+ * At-risk flag, matching the backend's exact rule
+ * (service.get_summary: progress < 30 AND days_left < 30 => at risk).
+ * Keeps the card badge consistent with the summary bar's "em risco" count.
+ */
+function isAtRisk(goal: Goal): boolean {
+  const days = daysRemaining(goal.end_date);
+  return goal.progress < 30 && days !== null && days < 30;
 }
 
 export function GoalsView({ onBack }: GoalsViewProps): JSX.Element {
@@ -289,44 +323,58 @@ function GoalCard({
   goal: Goal;
   onClick: () => void;
 }): JSX.Element {
-  const days = daysRemaining(goal.end_date);
+  const cat = AREA_COLORS[goal.area];
+  // "em dia" (green) mirrors the backend's at-risk rule so the card agrees
+  // with the summary bar's "em risco" / "no caminho" counts.
+  const onTrack = !isAtRisk(goal);
+  const milestones = keyResultProgress(goal);
 
   return (
     <button
       type="button"
       className="goal-card"
       onClick={onClick}
-      style={{ borderLeftColor: AREA_COLORS[goal.area] }}
     >
-      <div className="goal-card__top">
-        <h3 className="goal-card__title">{goal.title}</h3>
-        <div className="goal-card__badges">
-          <span
-            className="goal-card__area-badge"
-            style={{
-              background: `${AREA_COLORS[goal.area]}22`,
-              color: AREA_COLORS[goal.area],
-              borderColor: `${AREA_COLORS[goal.area]}44`,
-            }}
-          >
-            {AREA_LABELS[goal.area]}
-          </span>
-          <span className="goal-card__timeframe-badge">
-            {TIMEFRAME_LABELS[goal.timeframe]}
-          </span>
-        </div>
+      <div className="goal-card__head">
+        <span
+          className="goal-card__area-badge"
+          style={{ background: `${cat}24`, color: cat }}
+        >
+          {AREA_LABELS[goal.area]}
+        </span>
+        <span
+          className={`goal-card__deadline${onTrack ? ' goal-card__deadline--ok' : ''}`}
+        >
+          {onTrack ? 'em dia' : deadlineLabel(goal.end_date)}
+        </span>
       </div>
 
-      <GoalProgressBar progress={goal.progress} endDate={goal.end_date} />
+      <h3 className="goal-card__title">{goal.title}</h3>
+      {goal.description && (
+        <p className="goal-card__desc">{goal.description}</p>
+      )}
 
-      {days !== null && (
-        <span
-          className={`goal-card__days${days <= 0 ? ' goal-card__days--overdue' : days < 14 ? ' goal-card__days--warning' : ''}`}
-        >
-          {days > 0
-            ? `${days} ${days === 1 ? 'dia restante' : 'dias restantes'}`
-            : 'Prazo encerrado'}
-        </span>
+      <GoalProgressBar progress={goal.progress} color={cat} />
+
+      {milestones.total > 0 && (
+        <div className="goal-card__milestones">
+          <span className="goal-card__milestones-label">Marcos</span>
+          <div className="goal-card__pips">
+            {Array.from({ length: milestones.total }, (_, i) => (
+              <span
+                key={i}
+                className="goal-card__pip"
+                style={{
+                  background:
+                    i < milestones.done ? cat : 'rgba(255,255,255,0.08)',
+                }}
+              />
+            ))}
+          </div>
+          <span className="goal-card__milestones-count">
+            {milestones.done} de {milestones.total}
+          </span>
+        </div>
       )}
     </button>
   );

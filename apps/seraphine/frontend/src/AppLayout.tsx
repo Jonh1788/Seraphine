@@ -170,6 +170,23 @@ export function AppLayout(): JSX.Element {
   }, []);
   const [focusState, focusActions] = useFocusTimer(handleFocusTransition);
 
+  // Derived display values for the sidebar FOCO Pomodoro card.
+  const FOCUS_PHASE_SECS: Record<FocusPhase, number> = {
+    work: 25 * 60,
+    break: 5 * 60,
+    long_break: 15 * 60,
+    idle: 25 * 60,
+  };
+  const focusTotal = FOCUS_PHASE_SECS[focusState.phase];
+  const focusRemaining = focusState.phase === 'idle' ? focusTotal : focusState.remaining;
+  const focusMmss = `${Math.floor(focusRemaining / 60)
+    .toString()
+    .padStart(2, '0')}:${(focusRemaining % 60).toString().padStart(2, '0')}`;
+  const focusPct =
+    focusState.phase === 'idle'
+      ? 0
+      : Math.max(0, Math.min(100, ((focusTotal - focusRemaining) / focusTotal) * 100));
+
   // Talk handlers from AppBootstrap (exposed on window)
   const getTalkHandlers = useCallback(() => {
     const t = (window as unknown as Record<string, unknown>).__seraphine_talk as {
@@ -204,6 +221,8 @@ export function AppLayout(): JSX.Element {
   // Avatar ready handler — dispatches custom event for AppBootstrap
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
     avatarCtrlRef.current = controller;
+    // Let listeners (e.g. the Sistema "Avatar 3D" status card) know the VRM is live.
+    try { window.dispatchEvent(new CustomEvent('seraphine:avatar-ready')); } catch { /* */ }
     const pb = playbackRef.current;
     if (pb) {
       const analyser = pb.getAnalyser((a: AnalyserNode) => controller.attachAudioAnalyser(a));
@@ -372,6 +391,14 @@ export function AppLayout(): JSX.Element {
             />
           </div>
 
+          <div className={`sidebar__identity${connected ? '' : ' sidebar__status--off'}`}>
+            <div className="sidebar__name">Seraphine</div>
+            <div className="sidebar__status">
+              <span className="sidebar__status-dot" />
+              {connected ? (talking ? 'online · escutando' : 'online · ouvindo') : 'reconectando...'}
+            </div>
+          </div>
+
           <div className="controls">
             <label className="toggle">
               <span>Responder com audio</span>
@@ -386,6 +413,39 @@ export function AppLayout(): JSX.Element {
           <div className="sidebar__panels">
             <ApprovalPanel ws={wsRef.current} />
           </div>
+
+          <button
+            type="button"
+            className={`sidebar__foco${focusState.phase === 'idle' ? ' sidebar__foco--idle' : ''}`}
+            aria-label={focusState.phase === 'idle' ? 'Iniciar foco Pomodoro' : 'Foco Pomodoro'}
+            onClick={() => {
+              if (focusState.phase === 'idle') focusActions.start();
+              else if (focusState.running) focusActions.pause();
+              else focusActions.resume();
+            }}
+          >
+            <div className="sidebar__foco-head">
+              <span className="sidebar__foco-label">FOCO</span>
+              <span className="sidebar__foco-mode">
+                {focusState.phase === 'idle'
+                  ? 'Iniciar'
+                  : focusState.phase === 'work'
+                    ? 'Pomodoro'
+                    : focusState.phase === 'long_break'
+                      ? 'Pausa longa'
+                      : 'Pausa'}
+              </span>
+            </div>
+            <div className="sidebar__foco-time">
+              <span className="sidebar__foco-num">{focusMmss}</span>
+              <span className="sidebar__foco-rest">
+                {focusState.phase === 'idle' ? 'Pomodoro' : focusState.running ? 'restante' : 'pausado'}
+              </span>
+            </div>
+            <div className="sidebar__foco-bar">
+              <div style={{ width: `${focusPct}%` }} />
+            </div>
+          </button>
         </aside>
 
         <section className="chat">

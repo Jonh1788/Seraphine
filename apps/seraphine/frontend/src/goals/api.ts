@@ -46,32 +46,41 @@ export async function listGoals(
 }
 
 export async function createGoal(body: GoalCreateInput): Promise<Goal> {
-  const res = await request<Goal>('/goals', {
+  // Backend wraps the payload: POST /goals -> { id, goal }.
+  const res = await request<{ id: string; goal: Goal }>('/goals', {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (!res) throw new Error('Empty response from POST /goals');
-  return res;
+  if (!res?.goal) throw new Error('Empty response from POST /goals');
+  return res.goal;
 }
 
 export async function getGoalDetail(id: string): Promise<GoalDetailResponse> {
-  const res = await request<GoalDetailResponse>(
+  // Backend nests key_results/links INSIDE goal: GET /goals/:id -> { goal }.
+  // They are omitted from goal.to_dict when empty, so default to [].
+  const res = await request<{ goal: Goal }>(
     `/goals/${encodeURIComponent(id)}`,
   );
-  if (!res) throw new Error('Empty response from GET /goals/:id');
-  return res;
+  if (!res?.goal) throw new Error('Empty response from GET /goals/:id');
+  const g = res.goal;
+  return {
+    goal: g,
+    key_results: g.key_results ?? [],
+    links: g.links ?? [],
+  };
 }
 
 export async function updateGoal(
   id: string,
   body: GoalUpdateInput,
 ): Promise<Goal> {
-  const res = await request<Goal>(`/goals/${encodeURIComponent(id)}`, {
+  // Backend wraps the payload: PATCH /goals/:id -> { goal }.
+  const res = await request<{ goal: Goal }>(`/goals/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
-  if (!res) throw new Error('Empty response from PATCH /goals/:id');
-  return res;
+  if (!res?.goal) throw new Error('Empty response from PATCH /goals/:id');
+  return res.goal;
 }
 
 export async function deleteGoal(id: string): Promise<void> {
@@ -92,12 +101,15 @@ export async function createKeyResult(
   goalId: string,
   body: KRCreateInput,
 ): Promise<KeyResult> {
-  const res = await request<KeyResult>(
+  // Backend wraps the payload: POST .../key-results -> { key_result }.
+  const res = await request<{ key_result: KeyResult }>(
     `/goals/${encodeURIComponent(goalId)}/key-results`,
     { method: 'POST', body: JSON.stringify(body) },
   );
-  if (!res) throw new Error('Empty response from POST /goals/:id/key-results');
-  return res;
+  if (!res?.key_result) {
+    throw new Error('Empty response from POST /goals/:id/key-results');
+  }
+  return res.key_result;
 }
 
 export async function updateKeyResult(
@@ -105,12 +117,13 @@ export async function updateKeyResult(
   krId: string,
   body: KRUpdateInput,
 ): Promise<KeyResult> {
-  const res = await request<KeyResult>(
+  // Backend wraps the payload: PATCH .../key-results/:kr -> { key_result }.
+  const res = await request<{ key_result: KeyResult }>(
     `/goals/${encodeURIComponent(goalId)}/key-results/${encodeURIComponent(krId)}`,
     { method: 'PATCH', body: JSON.stringify(body) },
   );
-  if (!res) throw new Error('Empty response from PATCH key-result');
-  return res;
+  if (!res?.key_result) throw new Error('Empty response from PATCH key-result');
+  return res.key_result;
 }
 
 /* Links */
@@ -120,15 +133,16 @@ export async function createGoalLink(
   linkedType: string,
   linkedId: string,
 ): Promise<GoalLink> {
-  const res = await request<GoalLink>(
+  // Backend wraps the payload: POST .../links -> { link }.
+  const res = await request<{ link: GoalLink }>(
     `/goals/${encodeURIComponent(goalId)}/links`,
     {
       method: 'POST',
       body: JSON.stringify({ linked_type: linkedType, linked_id: linkedId }),
     },
   );
-  if (!res) throw new Error('Empty response from POST /goals/:id/links');
-  return res;
+  if (!res?.link) throw new Error('Empty response from POST /goals/:id/links');
+  return res.link;
 }
 
 export async function deleteGoalLink(

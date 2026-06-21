@@ -5,9 +5,10 @@
  * flashcard generation.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import './obsidian.css';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { ArrowLeftIcon, BookmarkIcon, PlusIcon, SearchIcon } from '../icons/Icons';
+import { ArrowLeftIcon, BookmarkIcon, SearchIcon } from '../icons/Icons';
 import {
   createFlashcardDeck,
   deleteReadingItem,
@@ -28,17 +29,19 @@ interface ReadingListViewProps {
 type FilterStatus = 'all' | ReadingStatus;
 
 const STATUS_FILTERS: { value: FilterStatus; label: string }[] = [
-  { value: 'all', label: 'Todos' },
-  { value: 'unread', label: 'Nao lidos' },
+  { value: 'all', label: 'Tudo' },
   { value: 'reading', label: 'Lendo' },
+  { value: 'unread', label: 'Quero ler' },
   { value: 'read', label: 'Lidos' },
-  { value: 'archived', label: 'Arquivados' },
 ];
 
 export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
   const confirm = useConfirm();
   const [items, setItems] = useState<ReadingItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [byStatus, setByStatus] = useState<
+    Partial<Record<ReadingStatus, number>>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +67,24 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
   const allTags = Array.from(
     new Set(items.flatMap((i) => i.tags || [])),
   ).sort();
+
+  // Header subtitle counts. Prefer the global GROUP BY status counts from the
+  // backend (accurate regardless of the active filter); fall back to a
+  // page-local derivation only until the first fetch resolves.
+  const { readingCount, queueCount } = useMemo(() => {
+    if (Object.keys(byStatus).length > 0) {
+      const reading = byStatus.reading ?? 0;
+      const queue = (byStatus.unread ?? 0) + (byStatus.processing ?? 0);
+      return { readingCount: reading, queueCount: queue };
+    }
+    let reading = 0;
+    let queue = 0;
+    for (const i of items) {
+      if (i.status === 'reading') reading += 1;
+      else if (i.status === 'unread' || i.status === 'processing') queue += 1;
+    }
+    return { readingCount: reading, queueCount: queue };
+  }, [byStatus, items]);
 
   // ---------- Fetch ----------
 
@@ -94,6 +115,7 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
         const data = await fetchReadingItems(params);
         setItems(data.items);
         setTotal(data.total);
+        setByStatus(data.byStatus);
       } catch {
         setError('Nao foi possivel carregar as leituras.');
       } finally {
@@ -152,6 +174,10 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
       const created = await saveReadingItem(url, tags.length > 0 ? tags : undefined);
       setItems((prev) => [created, ...prev]);
       setTotal((prev) => prev + 1);
+      setByStatus((prev) => ({
+        ...prev,
+        [created.status]: (prev[created.status] ?? 0) + 1,
+      }));
       setNewUrl('');
       setNewTags('');
       setAddOpen(false);
@@ -166,14 +192,22 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
 
   const handleUpdate = useCallback(
     async (id: string, status: ReadingStatus) => {
+      const prevStatus = items.find((i) => i.id === id)?.status;
       try {
         const updated = await updateReadingItem(id, { status });
         setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
+        if (prevStatus && prevStatus !== updated.status) {
+          setByStatus((prev) => ({
+            ...prev,
+            [prevStatus]: Math.max(0, (prev[prevStatus] ?? 0) - 1),
+            [updated.status]: (prev[updated.status] ?? 0) + 1,
+          }));
+        }
       } catch {
         setError('Erro ao atualizar item.');
       }
     },
-    [],
+    [items],
   );
 
   const handleDelete = useCallback(
@@ -185,21 +219,57 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
         variant: 'danger',
       });
       if (!ok) return;
+      const removedStatus = items.find((i) => i.id === id)?.status;
       try {
         await deleteReadingItem(id);
         setItems((prev) => prev.filter((i) => i.id !== id));
         setTotal((prev) => Math.max(0, prev - 1));
+        if (removedStatus) {
+          setByStatus((prev) => ({
+            ...prev,
+            [removedStatus]: Math.max(0, (prev[removedStatus] ?? 0) - 1),
+          }));
+        }
       } catch {
         setError('Erro ao excluir item.');
       }
     },
-    [confirm],
+    [confirm, items],
+  );
+
+  const handleProgress = useCallback(
+    async (id: string, progress: number) => {
+      const current = items.find((i) => i.id === id);
+      if (!current) return;
+      // When a user starts making progress on a queued item, also move it into
+      // "reading" so the badge/filters stay consistent with the bar.
+      const shouldStartReading =
+        progress > 0 &&
+        (current.status === 'unread' || current.status === 'processing');
+      const body: { progress: number; status?: ReadingStatus } = { progress };
+      if (shouldStartReading) body.status = 'reading';
+      const prevStatus = current.status;
+      try {
+        const updated = await updateReadingItem(id, body);
+        setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
+        if (prevStatus !== updated.status) {
+          setByStatus((prev) => ({
+            ...prev,
+            [prevStatus]: Math.max(0, (prev[prevStatus] ?? 0) - 1),
+            [updated.status]: (prev[updated.status] ?? 0) + 1,
+          }));
+        }
+      } catch {
+        setError('Erro ao atualizar progresso.');
+      }
+    },
+    [items],
   );
 
   const handleFlashcards = useCallback(async (item: ReadingItem) => {
     setFlashcardMsg(null);
     try {
-      await createFlashcardDeck(item.title || item.url, item.content_text);
+      await createFlashcardDeck(item.title || item.domain || item.url);
       setFlashcardMsg(`Flashcards criados para "${item.title || item.domain}"`);
       setTimeout(() => setFlashcardMsg(null), 4000);
     } catch {
@@ -217,17 +287,22 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
         <button type="button" onClick={onBack} className="reading-view__back" title="Voltar">
           <ArrowLeftIcon size={18} />
         </button>
-        <BookmarkIcon size={20} />
-        <h2 className="reading-view__title">Leituras</h2>
-        <span className="reading-view__count">{total}</span>
+        <div className="reading-view__titles">
+          <h2 className="reading-view__title">Leituras</h2>
+          <div
+            className="reading-view__subtitle"
+            aria-label={`${total} leituras salvas`}
+          >
+            {readingCount} lendo · {queueCount} na fila
+          </div>
+        </div>
         <div style={{ flex: 1 }} />
         <button
           type="button"
           className="reading-view__add-btn"
           onClick={() => setAddOpen((v) => !v)}
         >
-          <PlusIcon size={16} />
-          Adicionar URL
+          + Adicionar
         </button>
       </div>
 
@@ -373,6 +448,7 @@ export function ReadingListView({ onBack }: ReadingListViewProps): JSX.Element {
               onUpdate={handleUpdate}
               onDelete={handleDelete}
               onFlashcards={handleFlashcards}
+              onProgress={handleProgress}
             />
           ))}
         </AnimatePresence>

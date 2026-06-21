@@ -1,0 +1,368 @@
+/* =====================================================================
+   Calendário — Obsidian reskin (scoped overrides)
+   Imported at the top of CalendarView.tsx so it loads after the globals
+   (styles.css + obsidian.css) and wins at equal specificity.
+   Only presentation — no behaviour changes.
+   ===================================================================== */
+
+/* ---- Screen shell: main area on --app ---- */
+.calendar-view {
+  background: var(--app);
+}
+
+/* ---- Header (title + actions cluster) ---- */
+.calendar-view__header {
+  padding: 22px 32px 12px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-view__header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.calendar-view__title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
+  margin: 0;
+}
+
+.calendar-view__loading {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Right-side action cluster: toggle + nav pill + filters + Evento */
+.calendar-view__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ---- Segmented view toggle (Heatmap | Mês | Semana | Dia) ---- */
+.calendar-view__toggle {
+  display: inline-flex;
+  gap: 0;
+  padding: 3px;
+  margin: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  flex-shrink: 0;
+}
+
+.calendar-view__toggle-btn {
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), color 200ms ease;
+}
+
+.calendar-view__toggle-btn:hover {
+  color: var(--text);
+}
+
+.calendar-view__toggle-btn--active,
+.calendar-view__toggle-btn--active:hover {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* ---- Prev / Hoje / Next nav pill (single bordered container) ---- */
+.calendar-view__nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.calendar-view__nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.calendar-view__nav-btn:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.calendar-view__today-btn {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calendar-view__today-btn:hover {
+  background: transparent;
+}
+
+/* ---- + Evento primary CTA ---- */
+.calendar-view__add-event {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.calendar-view__add-event:hover {
+  background: var(--accent-hi);
+}
+
+/* ---- Filter pills (8px colored dot, no Lucide icon) ---- */
+.calendar-view__filters {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 0 32px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.calendar-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), border-color 200ms ease, color 200ms ease;
+}
+
+.calendar-filter:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+/* Inactive pill = transparent surface + faint text (mockup "Outros") */
+.calendar-filter--off {
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.calendar-filter--off:hover {
+  background: var(--bg-1);
+}
+
+.calendar-filter__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---- Month layout: grid + 300px sidebar ---- */
+.calendar-view__month-layout {
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+  padding: 4px 32px 28px;
+  align-items: stretch;
+}
+
+/* ---- Solid Obsidian cards (replace .glass-card on the three surfaces) ---- */
+.month-grid-v2,
+.heatmap-grid,
+.day-detail-panel {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* ---- Month Grid v2 — left-aligned cells, separated tiles ---- */
+.month-grid-v2 {
+  gap: 4px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.month-grid-v2__header {
+  padding: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+.month-grid-v2__day {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 7px;
+  min-height: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.month-grid-v2__day:hover {
+  background: var(--bg-2);
+}
+
+.month-grid-v2__day-num {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 0;
+  line-height: 1;
+}
+
+/* Today: tint cell + filled accent day-number pill */
+.month-grid-v2__day--today {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.month-grid-v2__day--today:hover {
+  background: var(--accent-soft);
+}
+
+.month-grid-v2__today-ring {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.month-grid-v2__day--selected {
+  background: var(--accent-soft);
+}
+
+.month-grid-v2__day--selected:hover {
+  background: var(--accent-soft);
+}
+
+.month-grid-v2__dots {
+  justify-content: flex-start;
+  gap: 3px;
+}
+
+.month-grid-v2__dot {
+  width: 5px;
+  height: 5px;
+}
+
+/* ---- Heatmap grid header matches month header ---- */
+.heatmap-grid {
+  gap: 4px;
+  padding: 14px;
+}
+
+.heatmap-grid__header {
+  padding: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+/* ---- Day detail panel ---- */
+.day-detail-panel {
+  width: 300px;
+  padding: 18px;
+}
+
+/* Big number + weekday inline */
+.day-detail-panel__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.day-detail-panel__date {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
+}
+
+.day-detail-panel__weekday {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+  margin-top: 0;
+}
+
+.day-detail-panel__divider {
+  margin: 14px 0 4px;
+}
+
+.day-detail-panel__section-label {
+  letter-spacing: 0.04em;
+  margin: 12px 0 8px;
+}
+
+/* Category-tinted items, all four corners rounded */
+.day-detail-panel__item {
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 11px;
+  margin-bottom: 7px;
+}
+
+.day-detail-panel__item-amount--expense {
+  color: #ef6b6b;
+}
+
+.day-detail-panel__item-amount--income {
+  color: #66bb6a;
+}
+
+/* ---- Mobile tweaks (keep filter padding aligned) ---- */
+@media (max-width: 768px) {
+  .calendar-view__header {
+    padding: 16px 16px 8px;
+  }
+
+  .calendar-view__filters {
+    padding: 0 16px;
+    overflow-x: auto;
+  }
+
+  .calendar-view__month-layout {
+    grid-template-columns: 1fr;
+    padding: 8px 16px 20px;
+  }
+
+  .day-detail-panel {
+    width: auto;
+  }
+}

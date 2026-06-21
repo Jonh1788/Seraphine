@@ -1,0 +1,267 @@
+/*
+ * Obsidian reskin — Realtime voice stage.
+ * Full-screen voice stage matching Frame B of the Obsidian handoff.
+ * Loads after global styles so equal-specificity overrides win.
+ * Shared keyframes (statusBlink, ringPulse, orbGlow, orbFloat, waveBar)
+ * are defined globally in styles.css — referenced here, not redefined.
+ * All classes scoped with the `realtime-stage` prefix.
+ */
+
+.realtime-stage {
+  /* Full-screen voice stage. Mounted inside a `position: relative` host
+   * (the chat container), so an inset overlay lets it cover the whole
+   * chat area without the parent having to lay it out in flow. */
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-0);
+  font-family: var(--font, 'Schibsted Grotesk', system-ui, sans-serif);
+  color: var(--text);
+}
+
+/* ---- Header bar ---------------------------------------------------- */
+.realtime-stage__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 26px;
+  flex: none;
+}
+
+.realtime-stage__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.realtime-stage__blink {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: statusBlink 1.6s ease-in-out infinite;
+}
+
+.realtime-stage__meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.realtime-stage__timer {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.realtime-stage__kbd {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.realtime-stage__kbd:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+/* ---- Center zone --------------------------------------------------- */
+.realtime-stage__center {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  padding: 0 40px;
+}
+
+/* ---- Avatar zone: rings + glow around the real VrmAvatar ----------- */
+.realtime-stage__avatar {
+  position: relative;
+  width: 240px;
+  height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.realtime-stage__ring {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: ringPulse 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.realtime-stage__ring:nth-of-type(2) {
+  animation-delay: 1.3s;
+}
+
+.realtime-stage__glow {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--accent-hi), transparent 70%);
+  filter: blur(16px);
+  animation: orbGlow 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Real VrmAvatar floats centered inside the ring/glow box. */
+.realtime-stage__vrm {
+  position: relative;
+  z-index: 1;
+  width: 150px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: orbFloat 5s ease-in-out infinite;
+}
+
+.realtime-stage__vrm #seraphine-avatar-root,
+.realtime-stage__vrm canvas {
+  width: 150px;
+  height: 150px;
+  display: block;
+}
+
+/* ---- Transcript ---------------------------------------------------- */
+.realtime-stage__transcript {
+  text-align: center;
+  max-width: 480px;
+}
+
+.realtime-stage__answer {
+  margin: 0;
+  font-family: var(--font-display, var(--font, 'Schibsted Grotesk', system-ui, sans-serif));
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.realtime-stage__said {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+/* ---- Waveform: real audio-reactive canvas (Waveform.tsx) ----------- */
+.realtime-stage__wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 56px;
+}
+
+/* Canvas visualiser fed by the live mic/playback AnalyserNode. */
+.realtime-waveform {
+  display: block;
+  max-width: 100%;
+}
+
+/* Idle (mic muted / not speaking) — soften the visualiser so the stage
+ * reads as paused. The canvas itself falls back to a subtle breathing
+ * animation when mode === 'idle' (see Waveform.tsx). */
+.realtime-stage--idle .realtime-waveform {
+  opacity: 0.5;
+}
+
+/* ---- Control row --------------------------------------------------- */
+.realtime-stage__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  flex: none;
+}
+
+.realtime-stage__ctrl {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.realtime-stage__ctrl:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+/* Active (muted) state for the mute control — accent tint. */
+.realtime-stage__ctrl--on {
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.realtime-stage__end {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(239, 68, 68, 0.5);
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.realtime-stage__end:hover {
+  box-shadow: 0 10px 34px rgba(239, 68, 68, 0.62);
+  transform: translateY(-1px);
+}
+
+/* ---- Error banner -------------------------------------------------- */
+.realtime-stage__error {
+  margin: 0 26px 18px;
+  padding: 10px 14px;
+  border-radius: var(--r-md, 12px);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  color: var(--danger);
+  font-size: 13px;
+  text-align: center;
+  flex: none;
+}

@@ -136,6 +136,49 @@ class FlashcardsService:
 
         return await asyncio.to_thread(_work)
 
+    async def deck_summaries(self) -> list[dict[str, Any]]:
+        """Read-only aggregation: one row per topic over the EXISTING
+        flashcards table. No new columns. Returns total card count, how many
+        are due now, and avg ease/reps so the frontend can show every deck
+        (including fully-reviewed ones with 0 due) and a real mastery %."""
+
+        def _work() -> list[dict[str, Any]]:
+            now = datetime.now(timezone.utc).isoformat()
+            with self.store._connect() as conn:
+                rows = conn.execute(
+                    "SELECT topic,"
+                    " COUNT(*) AS total,"
+                    " SUM(CASE WHEN next_due_at <= ? THEN 1 ELSE 0 END) AS due,"
+                    " AVG(ease) AS ease_avg,"
+                    " AVG(reps) AS reps_avg"
+                    " FROM flashcards"
+                    " GROUP BY topic"
+                    " ORDER BY due DESC, topic ASC",
+                    (now,),
+                ).fetchall()
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                total = int(r[1] or 0)
+                due = int(r[2] or 0)
+                ease_avg = float(r[3]) if r[3] is not None else 2.5
+                reps_avg = float(r[4]) if r[4] is not None else 0.0
+                # Mastery heuristic (same SM-2 blend the client used, but now
+                # over ALL cards in the deck, not just the due subset).
+                ease_score = max(0.0, min(1.0, (ease_avg - 1.3) / 1.3))
+                rep_score = max(0.0, min(1.0, reps_avg / 6.0))
+                mastery = round((0.55 * ease_score + 0.45 * rep_score) * 100)
+                out.append({
+                    "topic": r[0],
+                    "total": total,
+                    "due": due,
+                    "ease_avg": ease_avg,
+                    "reps_avg": reps_avg,
+                    "mastery": mastery,
+                })
+            return out
+
+        return await asyncio.to_thread(_work)
+
     async def due_count(self) -> int:
         def _work() -> int:
             now = datetime.now(timezone.utc).isoformat()

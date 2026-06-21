@@ -21,6 +21,8 @@ class LogSessionBody(BaseModel):
     completed: bool
     interruptions: int = 0
     notes: str | None = None
+    # Optional life/work category; backend defaults to 'Foco' when omitted.
+    category: str | None = None
 
 
 class LogAppBody(BaseModel):
@@ -67,6 +69,7 @@ async def log_session(request: Request, body: LogSessionBody) -> dict[str, Any]:
             completed=body.completed,
             interruptions=body.interruptions,
             notes=body.notes,
+            category=body.category,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

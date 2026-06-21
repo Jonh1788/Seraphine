@@ -643,7 +643,7 @@ export function AvatarCompanion(): JSX.Element {
             height: 44,
             borderRadius: '50%',
             background: talking
-              ? 'linear-gradient(135deg, #a78bfa, #6366f1)'
+              ? 'linear-gradient(135deg, #9a93ff, #7c74e8)'
               : 'rgba(17, 17, 26, 0.75)',
             border: talking ? 'none' : '1px solid rgba(255,255,255,0.15)',
             color: talking ? '#fff' : '#c4b5fd',
@@ -653,7 +653,7 @@ export function AvatarCompanion(): JSX.Element {
             justifyContent: 'center',
             backdropFilter: 'blur(8px)',
             opacity: realtimeActive ? 0.4 : 1,
-            boxShadow: talking ? '0 0 20px rgba(167, 139, 250, 0.6)' : '0 4px 10px rgba(0, 0, 0, 0.3)',
+            boxShadow: talking ? '0 0 20px rgba(154, 147, 255, 0.6)' : '0 4px 10px rgba(0, 0, 0, 0.3)',
             transition: 'all 150ms',
           }}
         >
@@ -825,7 +825,7 @@ function CameraEditor({ camera, onChange, onSave, onReset, onClose }: CameraEdit
           onClick={handleSave}
           style={{
             flex: 1,
-            background: justSaved ? '#4ade80' : '#a78bfa',
+            background: justSaved ? '#4ade80' : '#9a93ff',
             color: '#08080d',
             border: 'none',
             borderRadius: 6,

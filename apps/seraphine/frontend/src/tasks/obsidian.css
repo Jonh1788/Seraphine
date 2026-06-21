@@ -1,0 +1,447 @@
+/* =====================================================================
+   Obsidian reskin — Tarefas (Kanban)
+   Scoped overrides for the tasks screen. Loaded AFTER styles.css and
+   obsidian.css (imported at the top of TasksView), so equal-specificity
+   rules here win. Reuses the shared obs-* layer for header/seg/buttons;
+   everything tasks-unique is prefixed .tasks-* / .task-card*.
+   ===================================================================== */
+
+/* ---- Screen shell ---------------------------------------------------- */
+.tasks-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--app);
+}
+
+/* ---- Header (24/700 title + live-count subtitle + seg + primary) ----- */
+.tasks-view__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 32px 16px;
+  flex: none;
+}
+.tasks-view__title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.15;
+}
+.tasks-view__subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.tasks-view__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+/* Flat primary "+ Nova tarefa" — no gradient/glow. */
+.tasks-view__new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 16px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+.tasks-view__new-btn:hover:not(:disabled) {
+  background: var(--accent-hi);
+  box-shadow: none;
+  transform: none;
+}
+.tasks-view__new-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.tasks-view__new-btn__plus {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.tasks-view__error {
+  margin: 4px 32px 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: rgba(239, 68, 68, 0.10);
+  color: var(--danger);
+  font-size: 12px;
+  flex: none;
+}
+
+/* ---- Kanban board: transparent borderless columns -------------------- */
+.tasks-kanban {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 32px 28px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.tasks-column {
+  flex: 1 1 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 100%;
+}
+
+/* Borderless inline header row: dot + 13/700 title + bare faint count. */
+.tasks-column__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+.tasks-column__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.tasks-column__dot--pending { background: var(--text-faint); }
+.tasks-column__dot--in_progress { background: var(--accent); }
+.tasks-column__dot--done { background: #4ade80; }
+.tasks-column__dot--discarded { background: var(--danger); }
+.tasks-column__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.tasks-column__count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  min-width: 0;
+  text-align: left;
+}
+
+.tasks-column__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* drag-over: tint the body softly + dashed accent outline, no card box. */
+.tasks-column.drag-over .tasks-column__body {
+  background: var(--accent-soft);
+  border-radius: var(--r-lg);
+  outline: 1px dashed var(--accent-dim);
+  outline-offset: 4px;
+}
+
+.tasks-column__empty {
+  font-size: 12px;
+  color: var(--text-faint);
+  padding: 12px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+}
+
+/* ---- Cards: flat bg-1 surface, radius 14, padding 14, no resting shadow */
+.task-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  cursor: grab;
+  box-shadow: none;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  touch-action: none;
+  user-select: none;
+}
+.task-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+.task-card:active { cursor: grabbing; }
+.task-card.dragging { opacity: 0.5; }
+
+/* Ghost (drag clone): elevation only, no lilac glow halo. */
+.task-card__ghost {
+  cursor: grabbing;
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Focus ring: static 3px accent ring instead of pulsing glow. */
+.task-card--focused {
+  animation: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.30);
+}
+
+/* In-progress: accent ring + progress bar. */
+.task-card--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.task-card__progress {
+  margin-top: 2px;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+.task-card__progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Done: dimmed, line-through title, green check in the head row. */
+.task-card--done { opacity: 0.62; }
+.task-card--done .task-card__title {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  font-weight: 500;
+}
+.task-card__check {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: #4ade80;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.task-card__done-cat {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.task-card--locked { cursor: default; }
+.task-card--locked:active { cursor: default; }
+
+.task-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 1px;
+}
+
+/* Per-category colored chip (color + bg injected inline). */
+.task-card__badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 3px 9px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: none;
+}
+
+.task-card__time {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.task-card__time--due { color: #ff8a4c; }
+
+.task-card__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-card__subtitle {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.task-card__error {
+  font-size: 11px;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.10);
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+}
+
+.task-card__detail {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.task-card__detail p { margin: 0; }
+.task-card__detail-label { color: var(--text-faint); margin-right: 4px; }
+.task-card__detail-meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+
+.task-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.task-card__actions .btn-confirm,
+.task-card__actions .btn-reject {
+  flex: 1;
+  min-width: 80px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 200ms ease, filter 200ms ease;
+}
+/* Sober solid green confirm — no gradient/glow/inset/lift. */
+.task-card__actions .btn-confirm {
+  background: var(--user);
+  color: var(--accent-contrast);
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+.task-card__actions .btn-confirm:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: none;
+  box-shadow: none;
+}
+.task-card__actions .btn-confirm:active:not(:disabled) { transform: scale(0.98); }
+/* Soft-danger reject — drop translateY lift. */
+.task-card__actions .btn-reject {
+  background: rgba(239, 68, 68, 0.10);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  box-shadow: none;
+}
+.task-card__actions .btn-reject:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.55);
+  transform: none;
+}
+.task-card__actions .btn-reject:active:not(:disabled) { transform: scale(0.98); }
+
+/* "Pendentes" due chip keeps the orange accent from the mockup. */
+.task-card__due {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-card__due--overdue { color: var(--danger); }
+.task-card__remind {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+}
+
+/* ---- Lista view: stacked status groups, full-width cards ------------- */
+.tasks-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.tasks-list__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tasks-list__group.drag-over .tasks-list__rows {
+  background: var(--accent-soft);
+  border-radius: var(--r-lg);
+  outline: 1px dashed var(--accent-dim);
+  outline-offset: 4px;
+}
+.tasks-list__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* In list mode the in-progress accent ring would clip against neighbors;
+   keep cards comfortable and let the progress bar read full-width. */
+.tasks-list .task-card { max-width: 720px; }
+
+/* ---- Skeleton (loading) — match transparent-column layout ------------ */
+.tasks-skeleton {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 8px 32px 28px;
+  overflow: hidden;
+  min-height: 0;
+}
+.tasks-skeleton__column {
+  flex: 1 1 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Mobile: stack columns vertically -------------------------------- */
+@media (max-width: 768px) {
+  .tasks-view__topbar { padding: 18px 16px 12px; flex-wrap: wrap; }
+  .tasks-kanban {
+    flex-direction: column;
+    padding: 8px 16px 24px;
+    overflow-y: auto;
+  }
+  .tasks-column { max-height: none; min-width: 0; }
+  .tasks-column__body { max-height: 320px; }
+  .tasks-skeleton { flex-direction: column; padding: 8px 16px 24px; }
+  .tasks-view__error { margin: 4px 16px 0; }
+}

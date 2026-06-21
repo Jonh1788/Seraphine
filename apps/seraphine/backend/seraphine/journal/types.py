@@ -21,6 +21,7 @@ class JournalEntry:
     source_id: str | None = None
     created_at: str = ""  # ISO-8601 UTC
     updated_at: str = ""  # ISO-8601 UTC
+    reflection: str | None = None  # short PT-BR Seraphine reflection on the entry
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +37,7 @@ class JournalEntry:
             "source_id": self.source_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "reflection": self.reflection,
         }
 
     @staticmethod
@@ -43,7 +45,7 @@ class JournalEntry:
         """Build from a SELECT with ENTRY_COLS column order:
 
         id, date, type, title, content, mood_label, mood_valence,
-        source, tags, source_id, created_at, updated_at
+        source, tags, source_id, created_at, updated_at, reflection
         """
         tags_raw = row[8]
         if isinstance(tags_raw, str):
@@ -67,4 +69,9 @@ class JournalEntry:
             source_id=str(row[9]) if row[9] is not None else None,
             created_at=str(row[10]),
             updated_at=str(row[11]),
+            reflection=(
+                str(row[12])
+                if len(row) > 12 and row[12] is not None
+                else None
+            ),
         )

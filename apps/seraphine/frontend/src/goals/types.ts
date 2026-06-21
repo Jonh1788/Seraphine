@@ -28,6 +28,10 @@ export interface Goal {
   progress: number; // 0-100, computed by backend
   created_at: string;
   updated_at: string;
+  // Nested by the backend (goal.to_dict) only when non-empty; absent otherwise.
+  // Present on both list items and the detail payload.
+  key_results?: KeyResult[];
+  links?: GoalLink[];
 }
 
 export interface KeyResult {
@@ -123,12 +127,12 @@ export const STATUS_LABELS: Record<GoalStatus, string> = {
 };
 
 export const AREA_COLORS: Record<GoalArea, string> = {
-  saude: '#10b981',
-  carreira: '#3b82f6',
-  financas: '#f59e0b',
-  pessoal: '#a78bfa',
-  aprendizado: '#06b6d4',
-  relacionamentos: '#ec4899',
+  saude: '#ef5350',
+  carreira: '#5c6bc0',
+  financas: '#66bb6a',
+  pessoal: '#42a5f5',
+  aprendizado: '#42a5f5',
+  relacionamentos: '#ab47bc',
 };
 
 export const ALL_AREAS: GoalArea[] = [

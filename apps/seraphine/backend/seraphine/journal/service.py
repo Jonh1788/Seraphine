@@ -11,9 +11,10 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from core_db import Store
 
@@ -21,9 +22,26 @@ from seraphine.journal.types import JournalEntry
 
 logger = logging.getLogger(__name__)
 
+_SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _today_sp() -> date:
+    return datetime.now(_SP_TZ).date()
+
 _ENTRY_COLS = (
     "id, date, type, title, content, mood_label, mood_valence,"
-    " source, tags, source_id, created_at, updated_at"
+    " source, tags, source_id, created_at, updated_at, reflection"
+)
+
+# System prompt for the per-entry Seraphine reflection. Kept short on
+# purpose: we want a single warm PT-BR reflective sentence, never a list.
+_REFLECTION_PROMPT = (
+    "Voce e a Seraphine, uma assistente pessoal calorosa e atenta."
+    " Leia a entrada de diario do usuario e devolva UMA unica frase curta"
+    " em portugues do Brasil (no maximo 200 caracteres) que reflita sobre"
+    " o que ele escreveu: acolha, valorize ou ofereca uma perspectiva gentil."
+    " Fale diretamente com o usuario na segunda pessoa. Nao use listas,"
+    " nao repita o texto e nao use aspas. Responda apenas com a frase."
 )
 
 
@@ -45,11 +63,13 @@ class JournalService:
         *,
         chroma_path: Path | str | None = None,
         embeddings: Any = None,
+        llm: Any = None,
     ) -> None:
         self._store = store
         self._embeddings = embeddings
         self._chroma_path = Path(chroma_path) if chroma_path else None
         self._collection: Any = None
+        self._llm = llm
 
     async def start(self) -> None:
         """Initialize ChromaDB collection for semantic search."""
@@ -81,6 +101,7 @@ class JournalService:
         tags: list[str] | None = None,
         source: str = "user",
         source_id: str | None = None,
+        reflection: str | None = None,
     ) -> JournalEntry:
         """Insert a new journal entry.  Embeds in ChromaDB for search."""
         eid = str(uuid.uuid4())
@@ -91,12 +112,12 @@ class JournalService:
             with self._store._connect() as conn:
                 conn.execute(
                     f"INSERT INTO journal_entries ({_ENTRY_COLS})"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         eid, date, type, title, content,
                         mood_label, mood_valence,
                         source, tags_json, source_id,
-                        ts, ts,
+                        ts, ts, reflection,
                     ),
                 )
                 row = conn.execute(
@@ -111,6 +132,59 @@ class JournalService:
         await self._embed(eid, content)
 
         return entry
+
+    async def generate_reflection(self, content: str) -> str | None:
+        """Generate a short PT-BR Seraphine reflection on an entry's content.
+
+        Best-effort and non-blocking on failure: returns ``None`` when no LLM
+        is configured, the content is empty, or the call errors out.
+        """
+        if self._llm is None:
+            return None
+        text = (content or "").strip()
+        if not text:
+            return None
+
+        try:
+            from llm_adapters.types import ChatMessage
+        except Exception:  # pragma: no cover - import guard
+            return None
+
+        messages = [
+            ChatMessage(role="system", content=_REFLECTION_PROMPT),
+            ChatMessage(role="user", content=text[:4000]),
+        ]
+        accumulated: list[str] = []
+        try:
+            async for tok in self._llm.chat(messages, temperature=0.6):
+                piece = getattr(tok, "text", None)
+                if piece:
+                    accumulated.append(piece)
+        except Exception as e:
+            logger.warning("journal: reflection generation failed: %s", e)
+            return None
+
+        reflection = "".join(accumulated).strip().strip('"').strip()
+        if not reflection:
+            return None
+        # Keep it to a single concise sentence/line.
+        reflection = reflection.splitlines()[0].strip()
+        return reflection[:400] or None
+
+    async def set_reflection(self, entry_id: str, reflection: str | None) -> None:
+        """Persist the reflection column for an existing entry (best-effort)."""
+
+        def _work() -> None:
+            with self._store._connect() as conn:
+                conn.execute(
+                    "UPDATE journal_entries SET reflection = ? WHERE id = ?",
+                    (reflection, entry_id),
+                )
+
+        try:
+            await asyncio.to_thread(_work)
+        except Exception as e:
+            logger.warning("journal: persisting reflection failed: %s", e)
 
     async def exists(self, *, date: str, type: str) -> bool:
         """Check if an auto-generated entry for date+type already exists.
@@ -273,6 +347,79 @@ class JournalService:
                     (*params, lim, off),
                 ).fetchall()
             return [JournalEntry.from_row(r) for r in rows]
+
+        return await asyncio.to_thread(_work)
+
+    async def get_stats(self) -> dict[str, int]:
+        """Aggregate writing stats over the existing ``date`` column.
+
+        Read-only: scans the distinct YYYY-MM-DD entry dates and computes the
+        current consecutive-day streak (anchored to today/yesterday SP), the
+        all-time longest streak, total entries, and distinct days logged.
+        No schema change -- pure GROUP BY / scan over existing rows.
+        """
+
+        def _work() -> dict[str, int]:
+            with self._store._connect() as conn:
+                total_row = conn.execute(
+                    "SELECT COUNT(*) FROM journal_entries",
+                ).fetchone()
+                date_rows = conn.execute(
+                    "SELECT DISTINCT substr(date, 1, 10) AS d"
+                    " FROM journal_entries"
+                    " WHERE date IS NOT NULL AND date != ''"
+                    " ORDER BY d ASC",
+                ).fetchall()
+
+            total_entries = int(total_row[0]) if total_row else 0
+
+            days: list[date] = []
+            for row in date_rows:
+                raw = row[0]
+                if not raw:
+                    continue
+                try:
+                    days.append(date.fromisoformat(str(raw)[:10]))
+                except (ValueError, TypeError):
+                    continue
+
+            days_logged = len(days)
+            if not days:
+                return {
+                    "current_streak": 0,
+                    "longest_streak": 0,
+                    "total_entries": total_entries,
+                    "days_logged": 0,
+                }
+
+            # Longest run of consecutive calendar days.
+            longest = 1
+            run = 1
+            for prev, cur in zip(days, days[1:]):
+                if (cur - prev).days == 1:
+                    run += 1
+                else:
+                    run = 1
+                if run > longest:
+                    longest = run
+
+            # Current streak: walk back from today (or yesterday) SP.
+            day_set = set(days)
+            today = _today_sp()
+            cursor = today
+            if today not in day_set:
+                cursor = today - timedelta(days=1)
+            current = 0
+            while cursor in day_set:
+                current += 1
+                cursor -= timedelta(days=1)
+
+            return {
+                "current_streak": current,
+                "longest_streak": longest,
+                "total_entries": total_entries,
+                "days_logged": days_logged,
+            }
 
         return await asyncio.to_thread(_work)
 

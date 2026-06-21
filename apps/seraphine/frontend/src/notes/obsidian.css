@@ -1,0 +1,319 @@
+/* ==========================================================================
+   Notas — Obsidian reskin overrides
+   Loaded AFTER globals (styles.css) via import at the top of NotesView.tsx,
+   so equal-specificity rules win. Scoped to .notes-view / .note-editor.
+   RESKIN ONLY: presentation/markup, no logic changes.
+   ========================================================================== */
+
+/* The Obsidian Notas layout has no top app-header — title + add live in the
+   sidebar head below. Hide the legacy memory-view header (Voltar + "Notas" +
+   "Nova nota") so it doesn't duplicate the sidebar title/add. Nav rail handles
+   navigation, so the back button is unnecessary here. */
+.notes-view > .memory-view__header {
+  display: none;
+}
+
+/* --- Sidebar in-pane header: "Notas" title + 32px square accent + button --- */
+.notes-view__sidebar-head {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 18px 12px;
+  flex: none;
+  border-bottom: none;
+}
+
+.notes-view__sidebar-titlerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.notes-view__sidebar-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.notes-view__add {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.notes-view__add:hover:not(:disabled) {
+  background: var(--accent-hi);
+  transform: translateY(-1px);
+}
+
+.notes-view__add:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.notes-view__add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Pill-shaped search field (boxed, not borderless) --- */
+.notes-view .notes-view__search {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 11px;
+  gap: 8px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.notes-view .notes-view__search-input {
+  font-size: 13px;
+}
+
+.notes-view .notes-view__search-input::placeholder {
+  color: var(--text-faint);
+}
+
+/* --- List padding to match mockup gutter --- */
+.notes-view .notes-view__list {
+  padding: 4px 12px;
+  gap: 4px;
+}
+
+/* --- List item: radius 11, padding 13/14, no full border --- */
+.notes-view .notes-view__item {
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 11px;
+  padding: 13px 14px;
+  gap: 0;
+}
+
+.notes-view .notes-view__item:hover {
+  background: var(--bg-3);
+}
+
+/* Active = accent-soft fill + 3px left accent bar (no full border) */
+.notes-view .notes-view__item--active,
+.notes-view .notes-view__item--active:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+  border-left: 3px solid var(--accent);
+}
+
+.notes-view .notes-view__item-preview {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: initial;
+  margin-top: 3px;
+}
+
+.notes-view .notes-view__item-meta {
+  margin-top: 6px;
+  color: var(--text-faint);
+}
+
+.notes-view .notes-view__item-meta > span {
+  color: var(--text-faint);
+}
+
+/* --- Editor pane surface: read-mode reading column --- */
+.notes-view__main {
+  background: var(--app);
+}
+
+.notes-view .note-editor {
+  padding: 32px 36px;
+}
+
+.note-editor__toolbar {
+  align-items: flex-start;
+  padding: 0;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+/* Title: 26px / 700, letter-spacing -0.02em */
+.note-editor .note-editor__title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  padding: 0;
+  line-height: 1.2;
+}
+
+.note-editor__actions {
+  flex: none;
+}
+
+/* Quieter primary: flat accent, no glow/gradient */
+.note-editor .note-editor__save {
+  padding: 7px 14px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+.note-editor .note-editor__save:hover:not(:disabled) {
+  transform: none;
+  background: var(--accent-hi);
+  box-shadow: none;
+}
+
+.note-editor .note-editor__delete {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+/* --- Meta row: "Editado <data>" faint timestamp inline before tag chips --- */
+.note-editor__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.note-editor__meta-edited {
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Tags container moves into the meta row; drop the old bordered band */
+.note-editor .note-editor__tags {
+  padding: 0;
+  border-bottom: none;
+  gap: 8px;
+  margin: 0;
+}
+
+/* Per-tag rectangular chips: radius 8, 11px/600 — color injected inline */
+.note-editor .note-editor__tag {
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  gap: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.note-editor .note-editor__tag-remove {
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+
+.note-editor .note-editor__tag-remove:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.note-editor .note-editor__tag-input {
+  font-size: 11px;
+  min-width: 90px;
+}
+
+/* --- Hairline divider separating header from body --- */
+.note-editor__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 18px 0;
+  flex: none;
+}
+
+/* --- Body split-pane: keep functional editor, re-typeset preview --- */
+.note-editor .note-editor__split {
+  flex: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.note-editor .note-editor__textarea {
+  background: var(--bg-1);
+  padding: 20px 22px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Reading view typography: 15px / 1.8, accent bullets */
+.note-editor .note-editor__preview {
+  background: var(--bg-1);
+  padding: 28px 30px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.note-editor .note-editor__preview p {
+  margin: 0 0 14px;
+}
+
+.note-editor .note-editor__preview ul,
+.note-editor .note-editor__preview ol {
+  list-style: none;
+  padding-left: 0;
+  margin: 0 0 14px;
+}
+
+.note-editor .note-editor__preview li {
+  position: relative;
+  padding-left: 20px;
+  margin: 0 0 10px;
+}
+
+.note-editor .note-editor__preview ul > li::before {
+  content: '\2022';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.note-editor .note-editor__preview ol {
+  counter-reset: obs-ol;
+}
+
+.note-editor .note-editor__preview ol > li {
+  counter-increment: obs-ol;
+}
+
+.note-editor .note-editor__preview ol > li::before {
+  content: counter(obs-ol) '.';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Keep checkbox list items aligned (no double bullet) */
+.note-editor .note-editor__preview li:has(> input[type='checkbox'])::before {
+  content: none;
+}
+
+.note-editor .note-editor__preview li:has(> input[type='checkbox']) {
+  padding-left: 0;
+}
+
+.note-editor .note-editor__preview h1,
+.note-editor .note-editor__preview h2,
+.note-editor .note-editor__preview h3 {
+  letter-spacing: -0.01em;
+  margin: 18px 0 10px;
+}

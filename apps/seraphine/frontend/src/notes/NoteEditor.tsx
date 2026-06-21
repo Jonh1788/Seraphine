@@ -15,6 +15,56 @@ interface NoteEditorProps {
 }
 
 /**
+ * Per-tag chip color derivation for the Obsidian reading view.
+ * Hashes the tag name into a small, distinct palette so each tag reads
+ * as its own hue (e.g. produto=accent, ideias=blue) instead of a single
+ * uniform accent pill. Returns {color, bg} for inline styling.
+ */
+const TAG_PALETTE: ReadonlyArray<{ color: string; bg: string }> = [
+  { color: 'var(--accent)', bg: 'var(--accent-soft)' },
+  { color: '#42a5f5', bg: 'rgba(66,165,245,0.14)' },
+  { color: '#66bb6a', bg: 'rgba(102,187,106,0.14)' },
+  { color: '#ffa726', bg: 'rgba(255,167,38,0.14)' },
+  { color: '#ab47bc', bg: 'rgba(171,71,188,0.14)' },
+  { color: '#26a69a', bg: 'rgba(38,166,154,0.14)' },
+  { color: '#ef5350', bg: 'rgba(239,83,80,0.14)' },
+];
+
+function tagColor(tag: string): { color: string; bg: string } {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
+  }
+  return TAG_PALETTE[hash % TAG_PALETTE.length];
+}
+
+/**
+ * "Editado <data>" label — PT-BR relative timestamp from an ISO date.
+ */
+function formatEdited(iso: string): string {
+  if (!iso || iso.length < 10) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return `Editado hoje, ${hhmm}`;
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  const isYest =
+    d.getFullYear() === yest.getFullYear() &&
+    d.getMonth() === yest.getMonth() &&
+    d.getDate() === yest.getDate();
+  if (isYest) return `Editado ontem, ${hhmm}`;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `Editado ${dd}/${mm}, ${hhmm}`;
+}
+
+/**
  * Replace ``[[title]]`` in markdown content with a clickable HTML link
  * so the preview renders them as navigable references.
  */
@@ -256,32 +306,46 @@ export function NoteEditor({
         </div>
       </div>
 
-      <div className="note-editor__tags">
-        {tags.map((t) => (
-          <span key={t} className="note-editor__tag">
-            {t}
-            <button
-              type="button"
-              className="note-editor__tag-remove"
-              onClick={() => removeTag(t)}
-              aria-label={`Remover tag ${t}`}
-              disabled={busy}
-            >
-              <XIcon size={12} />
-            </button>
-          </span>
-        ))}
-        <input
-          className="note-editor__tag-input"
-          type="text"
-          value={tagDraft}
-          onChange={(e) => setTagDraft(e.target.value)}
-          onKeyDown={handleTagKey}
-          onBlur={() => addTag(tagDraft)}
-          placeholder={tags.length === 0 ? 'Tags (Enter pra adicionar)' : '+ tag'}
-          disabled={busy}
-        />
+      <div className="note-editor__meta">
+        {formatEdited(note.updated_at) && (
+          <span className="note-editor__meta-edited">{formatEdited(note.updated_at)}</span>
+        )}
+        <div className="note-editor__tags">
+          {tags.map((t) => {
+            const c = tagColor(t);
+            return (
+              <span
+                key={t}
+                className="note-editor__tag"
+                style={{ color: c.color, background: c.bg }}
+              >
+                {t}
+                <button
+                  type="button"
+                  className="note-editor__tag-remove"
+                  onClick={() => removeTag(t)}
+                  aria-label={`Remover tag ${t}`}
+                  disabled={busy}
+                >
+                  <XIcon size={12} />
+                </button>
+              </span>
+            );
+          })}
+          <input
+            className="note-editor__tag-input"
+            type="text"
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={handleTagKey}
+            onBlur={() => addTag(tagDraft)}
+            placeholder={tags.length === 0 ? 'Tags (Enter pra adicionar)' : '+ tag'}
+            disabled={busy}
+          />
+        </div>
       </div>
+
+      <div className="note-editor__divider" aria-hidden />
 
       <div className="note-editor__split">
         <textarea

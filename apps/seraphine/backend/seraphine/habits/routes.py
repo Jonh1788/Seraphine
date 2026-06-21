@@ -62,6 +62,26 @@ async def today_progress(request: Request) -> dict[str, Any]:
     return await svc.get_today_progress()
 
 
+@router.get("/calendar")
+async def habits_calendar_batch(
+    request: Request,
+    month: int,
+    year: int,
+) -> dict[str, Any]:
+    """Calendar logs for all active habits in one fetch (weekly grid)."""
+    svc = _service_or_503(request)
+    try:
+        grouped = await svc.get_calendar_batch(month, year)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {
+        "logs": {
+            habit_id: [log.to_dict() for log in logs]
+            for habit_id, logs in grouped.items()
+        }
+    }
+
+
 @router.post("")
 async def create_habit(
     request: Request,

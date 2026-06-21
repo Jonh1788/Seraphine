@@ -15,7 +15,13 @@ from zoneinfo import ZoneInfo
 
 from core_db import Store
 
-from seraphine.focus.types import FocusAppLog, FocusDayStat, FocusSession, FocusStats
+from seraphine.focus.types import (
+    FocusAppLog,
+    FocusCategoryStat,
+    FocusDayStat,
+    FocusSession,
+    FocusStats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +31,10 @@ _VALID_TYPES = ("work", "short_break", "long_break")
 
 _SESSION_COLS = (
     "id, started_at, ended_at, duration_sec, type,"
-    " completed, interruptions, notes"
+    " completed, interruptions, notes, category"
 )
+
+_DEFAULT_CATEGORY = "Foco"
 
 _APP_LOG_COLS = "id, session_id, app_name, started_at, duration_sec"
 
@@ -49,6 +57,7 @@ def _row_to_session(row: tuple[Any, ...]) -> FocusSession:
         completed=bool(row[5]),
         interruptions=int(row[6]),
         notes=str(row[7]) if row[7] is not None else None,
+        category=str(row[8]) if len(row) > 8 and row[8] else _DEFAULT_CATEGORY,
     )
 
 
@@ -92,6 +101,7 @@ class FocusService:
         completed: bool,
         interruptions: int = 0,
         notes: str | None = None,
+        category: str | None = None,
     ) -> FocusSession:
         """Persist a finished focus session."""
         if type not in _VALID_TYPES:
@@ -110,12 +120,13 @@ class FocusService:
         duration_sec = max(0, int((t_end - t_start).total_seconds()))
         sid = str(uuid.uuid4())
         clean_notes = (notes or "").strip() or None
+        clean_category = (category or "").strip() or _DEFAULT_CATEGORY
 
         def _work() -> FocusSession:
             with self._store._connect() as conn:
                 conn.execute(
                     f"INSERT INTO focus_sessions ({_SESSION_COLS})"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         sid,
                         started_at,
@@ -125,6 +136,7 @@ class FocusService:
                         1 if completed else 0,
                         interruptions,
                         clean_notes,
+                        clean_category,
                     ),
                 )
                 row = conn.execute(
@@ -238,12 +250,19 @@ class FocusService:
         by_day_map: dict[str, dict[str, int]] = defaultdict(
             lambda: {"focus_sec": 0, "completed": 0, "cancelled": 0, "interruptions": 0}
         )
+        # Group focus minutes by category ("onde foi seu tempo").
+        by_cat_map: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"focus_sec": 0, "sessions": 0}
+        )
         completed_dates: set[str] = set()
 
         for s in sessions:
             # Only count 'work' sessions for focus minutes
             if s.type == "work":
                 total_focus_sec += s.duration_sec
+                cat = (s.category or _DEFAULT_CATEGORY).strip() or _DEFAULT_CATEGORY
+                by_cat_map[cat]["focus_sec"] += s.duration_sec
+                by_cat_map[cat]["sessions"] += 1
             if s.completed:
                 completed_count += 1
             else:
@@ -304,6 +323,17 @@ class FocusService:
                 ))
             d += timedelta(days=1)
 
+        # Build by_category list (descending by focus minutes).
+        by_category: list[FocusCategoryStat] = [
+            FocusCategoryStat(
+                category=cat,
+                focus_min=vals["focus_sec"] // 60,
+                sessions=vals["sessions"],
+            )
+            for cat, vals in by_cat_map.items()
+        ]
+        by_category.sort(key=lambda c: (-c.focus_min, c.category))
+
         return FocusStats(
             total_focus_min=total_focus_min,
             completed_sessions=completed_count,
@@ -312,6 +342,7 @@ class FocusService:
             streak_days=streak_days,
             interruption_rate=interruption_rate,
             by_day=by_day,
+            by_category=by_category,
         )
 
     async def _compute_streak(self) -> int:

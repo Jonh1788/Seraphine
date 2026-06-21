@@ -1,0 +1,803 @@
+/* =====================================================================
+   Dashboard — Obsidian reskin (scoped). Loaded after globals so equal
+   specificity wins. Reuses the shared obs-* layer; everything bespoke
+   is prefixed .dash-*.
+   ===================================================================== */
+
+/* --- Screen scaffold overrides ------------------------------------- */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+  background: var(--app);
+}
+
+.dashboard__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: 24px 32px 14px;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.dashboard__header-left {
+  min-width: 0;
+}
+
+.dashboard__greeting {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.dashboard__date {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.dashboard__header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dash-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border-radius: 20px;
+}
+
+.dash-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  animation: statusBlink 2.4s ease-in-out infinite;
+}
+
+.dash-talk-btn {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-talk-btn:hover {
+  background: var(--accent-hi);
+}
+
+/* --- Scrolling body ------------------------------------------------- */
+.dash-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* --- Hero card ------------------------------------------------------ */
+.dash-hero {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.dash-hero__avatar {
+  position: relative;
+  width: 120px;
+  height: 150px;
+  flex: none;
+}
+
+.dash-hero__avatar-glow {
+  position: absolute;
+  inset: -10px;
+  border-radius: 20px;
+  background: radial-gradient(circle at 50% 40%, var(--accent), transparent 70%);
+  filter: blur(14px);
+  opacity: 0.5;
+  animation: orbGlow 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.dash-hero__avatar-slot {
+  position: relative;
+  width: 120px;
+  height: 150px;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #1c1c26, #141420);
+}
+
+/* The real VrmAvatar renders a wrapper div + canvas; pin it to fill the
+   slot regardless of its intrinsic canvas size. */
+.dash-hero__avatar-slot #seraphine-avatar-root,
+.dash-hero__avatar-slot > div {
+  width: 100%;
+  height: 100%;
+}
+
+.dash-hero__avatar-slot canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  object-fit: cover;
+}
+
+.dash-hero__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-hero__greeting {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.dash-hero__summary {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-top: 6px;
+  max-width: 520px;
+}
+
+.dash-hero__summary strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dash-hero__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.dash-cta-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-cta-primary:hover {
+  background: var(--accent-hi);
+}
+
+.dash-cta-ghost {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-cta-ghost:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+/* --- 3-col grid ----------------------------------------------------- */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+/* Generic grid card — flat Obsidian surface (no glass). */
+.dash-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.dash-card--span2 {
+  grid-column: span 2;
+}
+
+.dash-card--span3 {
+  grid-column: span 3;
+}
+
+.dash-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.dash-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dash-card__link {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+
+.dash-card__chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* --- Hoje / agenda card -------------------------------------------- */
+.dash-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.dash-agenda__row {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+}
+
+.dash-agenda__time {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  width: 42px;
+  flex: none;
+}
+
+.dash-agenda__bar {
+  width: 3px;
+  height: 28px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.dash-agenda__text {
+  min-width: 0;
+}
+
+.dash-agenda__title {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.dash-agenda__sub {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.dash-agenda__empty {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* --- Tarefas card --------------------------------------------------- */
+.dash-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.dash-tasks__row {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+}
+
+.dash-tasks__box {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  flex: none;
+  box-sizing: border-box;
+}
+
+.dash-tasks__box--todo {
+  border: 2px solid var(--accent);
+}
+
+.dash-tasks__box--later {
+  border: 2px solid var(--text-faint);
+}
+
+.dash-tasks__box--done {
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dash-tasks__label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dash-tasks__label--done {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.dash-tasks__empty {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* --- Hábitos card --------------------------------------------------- */
+.dash-habit__streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #ff8a4c;
+  font-weight: 600;
+}
+
+.dash-habits {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dash-habit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dash-habit-row__label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dash-habit-row__dots {
+  display: flex;
+  gap: 4px;
+}
+
+.dash-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dash-dot--on {
+  background: var(--accent);
+}
+
+.dash-dot--off {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* --- Bem-estar card ------------------------------------------------- */
+.dash-wellness {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.dash-wellness__water-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.dash-wellness__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dash-wellness__water-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-wellness__amount {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dash-wellness__add {
+  font-size: 11px;
+  font-weight: 600;
+  color: #42a5f5;
+  background: rgba(66, 165, 245, 0.14);
+  border: none;
+  padding: 4px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dash-wellness__add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dash-wellness__track {
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(66, 165, 245, 0.16);
+  overflow: hidden;
+}
+
+.dash-wellness__fill {
+  height: 100%;
+  background: #42a5f5;
+  border-radius: 4px;
+  transition: width 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-wellness__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dash-wellness__value {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dash-wellness__value--strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* --- Finanças card -------------------------------------------------- */
+.dash-fin {
+  display: flex;
+  gap: 24px;
+  align-items: flex-end;
+}
+
+.dash-fin__balance {
+  flex: none;
+}
+
+.dash-fin__balance-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dash-fin__balance-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  margin-top: 2px;
+}
+
+.dash-fin__delta {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.dash-fin__delta--up {
+  color: #4ade80;
+}
+
+.dash-fin__delta--down {
+  color: var(--danger);
+}
+
+.dash-fin__budget {
+  flex: 1;
+}
+
+.dash-fin__budget-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+
+.dash-fin__track {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.dash-fin__fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 6px;
+  transition: width 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-fin__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.dash-fin__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dash-fin__legend-sq {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.dash-fin__legend-text {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dash-fin__legend-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* --- Foco / pomodoro card ------------------------------------------ */
+.dash-foco__head {
+  margin-bottom: 8px;
+}
+
+.dash-foco__chip {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dash-foco__timer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dash-foco__time {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-foco__time-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dash-foco__track {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.dash-foco__fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.dash-foco__btn {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-foco__btn:hover {
+  background: var(--bg-3);
+}
+
+/* --- Trabalho · Missão card ---------------------------------------- */
+.dash-work__chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f472b6;
+  background: rgba(244, 114, 182, 0.14);
+  padding: 2px 9px;
+  border-radius: 10px;
+}
+
+.dash-work__project {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.dash-work__next {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.dash-work__risk {
+  margin-top: auto;
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #ff8a4c;
+}
+
+/* --- Seraphine sugere card ----------------------------------------- */
+.dash-suggest {
+  grid-column: span 3;
+  background: linear-gradient(160deg, rgba(154, 147, 255, 0.16), rgba(154, 147, 255, 0.05));
+  border: 1px solid rgba(154, 147, 255, 0.25);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-suggest__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dash-suggest__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.dash-suggest__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dash-suggest__body {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+  flex: 1;
+}
+
+.dash-suggest__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dash-suggest__primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-suggest__primary:hover {
+  background: var(--accent-hi);
+}
+
+.dash-suggest__ghost {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-suggest__ghost:hover {
+  background: var(--bg-3);
+}
+
+/* Weekly report banner keeps its own component styling but sits in body */
+.dash-body > .weekly-report-card {
+  margin: 0;
+}
+
+/* Narrower viewports collapse the 3-col grid to keep cards readable. */
+@media (max-width: 1080px) {
+  .dash-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .dash-card--span3,
+  .dash-suggest {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+  .dash-card--span2,
+  .dash-card--span3,
+  .dash-suggest {
+    grid-column: span 1;
+  }
+  .dash-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

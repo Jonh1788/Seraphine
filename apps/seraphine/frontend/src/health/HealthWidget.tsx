@@ -203,7 +203,7 @@ export function HealthWidget(): JSX.Element {
             </div>
 
             <div className="health-widget__cell" title="Sono">
-              <span className="health-widget__metric-icon" style={{ color: '#a78bfa' }}>
+              <span className="health-widget__metric-icon" style={{ color: '#9a93ff' }}>
                 <BedIcon size={14} />
               </span>
               <div className="health-widget__cell-body">

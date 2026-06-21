@@ -25,6 +25,7 @@ from seraphine.memory.routes import router as memory_router
 from seraphine.ws.routes import router as ws_router
 from seraphine.recurring import schema as recurring_schema
 from seraphine.recurring.routes import router as recurring_router
+from seraphine.recurring.routine_service import RoutineService
 from seraphine.recurring.service import RecurringService
 from seraphine.habits import schema as habits_schema
 from seraphine.habits.routes import router as habits_router
@@ -235,14 +236,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Recurring tasks — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     recurring_service = None
+    routine_service = None
     try:
         store.register_migrator("seraphine_recurring", recurring_schema.migrate)
         await store.ensure_schema()  # idempotent
         if task_service is not None:
             recurring_service = RecurringService(store, task_service)
             logger.info("Recurring service wired")
+        # Routines (prompt launchers) share the recurring migrator. Seed the
+        # code-owned catalog once; seeding is idempotent (keyed by stable id).
+        routine_service = RoutineService(store)
+        seeded = await routine_service.seed_defaults()
+        logger.info("Routine service wired (seeded %d default routines)", seeded)
     except Exception as e:
-        logger.warning("Recurring service failed (non-critical): %s", e)
+        logger.warning("Recurring/routine service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
     # Habits — always enabled (SQLite-backed)
@@ -309,6 +316,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             store,
             chroma_path=settings.chroma_path,
             embeddings=embeddings,
+            llm=llm,
         )
         await journal_service.start()
         logger.info("Journal service wired")
@@ -770,6 +778,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.email_scanner = email_scanner
     app.state.reminder_scheduler = reminder_scheduler
     app.state.recurring_service = recurring_service
+    app.state.routine_service = routine_service
     app.state.habit_service = habit_service
     app.state.water_service = water_service
     app.state.health_service = health_service

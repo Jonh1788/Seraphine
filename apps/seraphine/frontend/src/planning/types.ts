@@ -13,6 +13,12 @@ export interface PlanContext {
   energy_estimate: 'high' | 'medium' | 'low';
   meetings_count: number;
   free_slots_min: number;
+  mood_valence: number | null;
+  mood_reason: string | null;
+  /** Model-written plan pitch. Null when the LLM was unavailable. */
+  summary?: string | null;
+  /** True only when the summary/reasons came from a real LLM pass. */
+  ai_generated?: boolean;
 }
 
 export interface DailyPlan {

@@ -14,7 +14,7 @@ interface WaveformProps {
 const MODE_COLORS: Record<WaveformMode, { main: string; glow: string }> = {
   idle: { main: 'rgba(155, 155, 176, 0.45)', glow: 'rgba(155, 155, 176, 0.15)' },
   mic:  { main: 'rgba(74, 222, 128, 0.95)',  glow: 'rgba(74, 222, 128, 0.35)' },
-  bot:  { main: 'rgba(167, 139, 250, 0.95)', glow: 'rgba(167, 139, 250, 0.35)' },
+  bot:  { main: 'rgba(154, 147, 255, 0.95)', glow: 'rgba(154, 147, 255, 0.35)' },
 };
 
 /**

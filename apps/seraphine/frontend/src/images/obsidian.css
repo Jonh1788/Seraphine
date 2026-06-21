@@ -1,0 +1,296 @@
+/* Obsidian reskin — Imagens screen.
+   Loaded after globals; scoped with .images- prefix. */
+
+.images-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--app);
+}
+
+/* Fixed header */
+.images-screen__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px 16px;
+  flex: none;
+  gap: 16px;
+}
+
+.images-screen__title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.images-screen__sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Header primary CTA — Obsidian flat accent button */
+.images-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.images-cta:hover {
+  background: var(--accent-hi);
+}
+
+/* Ghost icon refresh button — square */
+.images-refresh {
+  padding: 8px;
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+}
+
+/* Scrolling grid body */
+.images-screen__body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 32px 28px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 182px;
+  gap: 14px;
+  align-content: start;
+}
+
+/* Image tile */
+.images-tile {
+  position: relative;
+  background: var(--bg-2);
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: zoom-in;
+  height: 100%;
+}
+
+.images-tile__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.images-tile__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent 50%);
+  pointer-events: none;
+}
+
+.images-tile__caption {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  right: 12px;
+  font-size: 11px;
+  color: #fff;
+  line-height: 1.3;
+}
+
+/* Dashed "Gerar nova" CTA tile (last cell) */
+.images-tile--new {
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-faint);
+  cursor: pointer;
+  height: 100%;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.images-tile--new:hover {
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+}
+
+.images-tile--new span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Skeleton placeholder tile (fills auto-row) */
+.images-skeleton {
+  border-radius: 14px;
+  height: 100%;
+}
+
+/* Centered status states inside the grid body */
+.images-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 0;
+  text-align: center;
+}
+
+.images-state__msg {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.images-state__msg--error {
+  color: var(--danger);
+}
+
+/* Today's-spend chip in the sub-line */
+.images-spend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-tile model badge (top-left over the scrim) */
+.images-tile__badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Generation prompt modal */
+.images-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.images-modal {
+  width: min(480px, 92vw);
+  background: var(--bg-1, var(--app));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 16px);
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.images-modal__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.images-modal__textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.images-modal__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.images-modal__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.images-modal__label {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.images-modal__select {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.images-modal__error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.images-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Lightbox */
+.images-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  backdrop-filter: blur(4px);
+}
+
+.images-lightbox__img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}

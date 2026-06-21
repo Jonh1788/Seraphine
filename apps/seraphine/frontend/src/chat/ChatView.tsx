@@ -1,6 +1,8 @@
+import './obsidian.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import { SparkleIcon } from '../icons/Icons';
 import type { SeraphineWS } from '../ws/client';
 import type {
   McpApprovalRequestMessage,
@@ -330,6 +332,15 @@ function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Time-of-day greeting in PT-BR. */
+function timeGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return 'Boa madrugada';
+  if (h < 12) return 'Bom dia';
+  if (h < 18) return 'Boa tarde';
+  return 'Boa noite';
 }
 
 export function ChatView({
@@ -1144,13 +1155,17 @@ export function ChatView({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {turns.length > 0 && (
-        <div className="chat__toolbar">
+      <div className="chat__header">
+        <div className="chat__header-titles">
+          <div className="chat__greeting">{timeGreeting()}, João</div>
+          <div className="chat__greeting-sub">Tudo certo por aqui. Em que posso ajudar?</div>
+        </div>
+        {turns.length > 0 && (
           <button type="button" className="btn-new-chat" aria-label="Nova conversa" onClick={handleNewConversation}>
             Nova conversa
           </button>
-        </div>
-      )}
+        )}
+      </div>
       <div ref={messagesRef} className="chat__messages" role="log" aria-live="polite">
         {delayedHistoryLoading && turns.length === 0 && <ChatSkeleton />}
         {!delayedHistoryLoading && !historyLoading && turns.length === 0 && (
@@ -1166,11 +1181,12 @@ export function ChatView({
           return (
             <div key={t.id} className={`bubble bubble--${t.role}${t.briefing ? ' bubble--briefing' : ''}`}>
               <div className="bubble__avatar">
-                {t.role === 'user' ? 'V' : t.role === 'assistant' ? 'S' : '!'}
+                {t.role === 'assistant' ? <SparkleIcon size={16} /> : t.role === 'user' ? 'V' : '!'}
               </div>
               <div className="bubble__body">
                 <div className="bubble__name">
                   {t.role === 'user' ? 'Voce' : t.role === 'assistant' ? 'Seraphine' : 'Erro'}
+                  {t.role === 'assistant' && <span className="bubble__time">agora</span>}
                 </div>
                 <div className="bubble__content">
                   {t.images && t.images.length > 0 && (
@@ -1477,8 +1493,10 @@ export function ChatView({
               }
               disabled={!connected || isStreaming}
             />
-            <button type="button" className="btn btn-primary" aria-label="Enviar" onClick={send} disabled={!canSend}>
-              Enviar
+            <button type="button" className="btn-send" aria-label="Enviar" onClick={send} disabled={!canSend}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
             </button>
           </>
         )}

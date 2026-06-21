@@ -1,0 +1,232 @@
+/* ============================================================
+   Obsidian reskin — Rotinas screen
+   Scoped to .routines-view*. Loads after globals (styles.css)
+   so equal-specificity overrides win. Reuses obs-* where it fits.
+   ============================================================ */
+
+/* Header: title 24/700 + subtitle 13 dim + '+ Nova rotina' primary.
+   The shared .routines-view__header already provides flex/space-between. */
+.routines-view__title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.routines-view__subtitle {
+  margin-top: 2px;
+}
+
+.routines-view__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.routines-view__new:hover {
+  background: var(--accent-hi);
+}
+
+.routines-view__new:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Sections: AGENDADAS / MANUAIS */
+.routines-view__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.routines-section__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.routines-section__label--manual {
+  margin-top: 4px;
+}
+
+/* Fixed 2-col grid per section */
+.routines-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+/* Card: vertical flex column, static surface (no longer a button) */
+.routine-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+  text-align: left;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-1);
+  color: var(--text);
+}
+
+/* Card is a static surface now (not a button); kill the legacy
+   whole-card hover. Hover affordance lives on the Executar button. */
+.routine-card:hover {
+  border-color: var(--border);
+}
+
+/* Head row: tinted icon tile + (scheduled) active toggle */
+.routine-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/* 40px tinted icon tile (per-routine bg/color via inline style) */
+.routine-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.routine-card__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.routine-card__detail {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.routine-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* Trigger chip: clock + schedule text (scheduled) / 'manual' (manual) */
+.routine-card__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.routine-card__trigger--manual {
+  color: var(--text-faint);
+}
+
+/* Executar button: outlined (scheduled), filled accent (manual) */
+.routine-card__run {
+  margin-left: auto;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.routine-card__run:hover {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
+.routine-card__run--manual {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  padding: 7px 16px;
+}
+
+.routine-card__run--manual:hover {
+  background: var(--accent-hi);
+}
+
+/* Compact 38x22 active switch (scheduled card header).
+   Mockup-accurate bare pill — the global .toggle is a labeled
+   bordered row, so we use a scoped switch instead. */
+.routine-switch {
+  display: inline-flex;
+  flex: none;
+  cursor: pointer;
+}
+
+.routine-switch input {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.12);
+  position: relative;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.routine-switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #cfcfda;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms ease;
+}
+
+.routine-switch input:checked {
+  background: var(--accent);
+}
+
+.routine-switch input:checked::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+/* Mobile: stack cards single-column */
+@media (max-width: 760px) {
+  .routines-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,10 +3,16 @@ interface GoalProgressBarProps {
   endDate?: string | null;
   size?: 'sm' | 'md';
   showLabel?: boolean;
+  /**
+   * Explicit fill color (Obsidian: always the goal's category color).
+   * When omitted, falls back to the legacy threshold-based color logic so
+   * existing callers (detail panel / key results) keep working.
+   */
+  color?: string;
 }
 
 /**
- * Color logic:
+ * Legacy threshold color logic (used when no explicit `color` is passed):
  * - green (#10b981)  when progress > 75%
  * - accent (var)      when 25-75%
  * - red (#ef4444)     when < 25% AND end_date is approaching (<14 days)
@@ -30,25 +36,26 @@ export function GoalProgressBar({
   endDate,
   size = 'md',
   showLabel = true,
+  color,
 }: GoalProgressBarProps): JSX.Element {
   const clamped = Math.max(0, Math.min(100, Math.round(progress)));
-  const color = barColor(clamped, endDate);
-  const height = size === 'sm' ? 4 : 6;
+  const fillColor = color ?? barColor(clamped, endDate);
+  const height = size === 'sm' ? 6 : 9;
 
   return (
-    <div className="goal-progress-bar" style={{ height }}>
-      <div
-        className="goal-progress-bar__fill"
-        style={{
-          width: `${clamped}%`,
-          background: color,
-          height,
-        }}
-      />
+    <div className="goal-progress-bar-row">
+      <div className="goal-progress-bar" style={{ height }}>
+        <div
+          className="goal-progress-bar__fill"
+          style={{
+            width: `${clamped}%`,
+            background: fillColor,
+            height,
+          }}
+        />
+      </div>
       {showLabel && (
-        <span className="goal-progress-bar__label" style={{ color }}>
-          {clamped}%
-        </span>
+        <span className="goal-progress-bar__label">{clamped}%</span>
       )}
     </div>
   );

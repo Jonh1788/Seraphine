@@ -33,3 +33,20 @@ def migrate(conn: sqlite3.Connection) -> None:
           WHERE source != 'user';
         """
     )
+
+    # ------------------------------------------------------------------
+    # Non-destructive migrations for pre-existing DBs.
+    # ALTER TABLE ADD COLUMN is a no-op if the column already exists in
+    # SQLite >= 3.35; older versions raise a duplicate-column error which
+    # we swallow.  Every column carries a default so existing rows backfill
+    # automatically (mood stays NULL until snapshotted; reflection NULL).
+    # ------------------------------------------------------------------
+    for ddl in (
+        "ALTER TABLE journal_entries ADD COLUMN mood_label TEXT",
+        "ALTER TABLE journal_entries ADD COLUMN mood_valence REAL",
+        "ALTER TABLE journal_entries ADD COLUMN reflection TEXT",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # column already exists

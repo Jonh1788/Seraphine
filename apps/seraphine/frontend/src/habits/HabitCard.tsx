@@ -2,7 +2,8 @@ import { CheckIcon } from '../icons/Icons';
 import { habitIcon } from './HabitIconMap';
 import type { HabitWithStatus } from './types';
 
-const STREAK_MAX = 30;
+/** Fallback denominator only when a habit has no record streak yet. */
+const STREAK_FALLBACK = 30;
 
 interface HabitCardProps {
   habit: HabitWithStatus;
@@ -13,7 +14,10 @@ interface HabitCardProps {
 
 export function HabitCard({ habit, onToggle, onClick, busy }: HabitCardProps): JSX.Element {
   const color = habit.color || '#22d3ee';
-  const pct = Math.min(100, Math.round((habit.current_streak / STREAK_MAX) * 100));
+  // Progress toward the real record streak (best_streak) rather than a magic
+  // constant; when there is no record yet, fall back to a sensible default.
+  const denom = habit.best_streak > 0 ? habit.best_streak : STREAK_FALLBACK;
+  const pct = Math.min(100, Math.round((habit.current_streak / denom) * 100));
   const done = habit.today_completed;
 
   const handleToggle = (e: React.MouseEvent): void => {

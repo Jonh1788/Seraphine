@@ -223,7 +223,7 @@ function WeeklyHeatmap({ days }: { days: FocusDayStat[] }) {
     const intensity = Math.min(1, min / maxMin);
     // Purple gradient from dim to bright
     const alpha = 0.15 + intensity * 0.7;
-    return `rgba(167, 139, 250, ${alpha.toFixed(2)})`;
+    return `rgba(154, 147, 255, ${alpha.toFixed(2)})`;
   }
 
   return (

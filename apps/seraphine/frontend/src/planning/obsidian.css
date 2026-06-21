@@ -1,0 +1,555 @@
+/* ========================================================================
+   Planejamento — Obsidian reskin
+   Loaded after globals: equal-specificity overrides win.
+   Scoped with the .planning prefix.
+   ======================================================================== */
+
+.planning {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  background: var(--app);
+}
+
+/* ---- Header ---- */
+.planning__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 24px 32px 16px;
+}
+
+.planning__header-titles {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.planning__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__back:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.planning__title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.15;
+}
+
+.planning__subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 2px 0 0;
+}
+
+.planning__plan-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__plan-cta:hover:not(:disabled) {
+  background: var(--accent-hi);
+}
+
+.planning__plan-cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- Status messages ---- */
+.planning__loading,
+.planning__error {
+  margin: 0 32px;
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.planning__error {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ---- Two-column body ---- */
+.planning__layout {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 32px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+}
+
+/* ---- Timeline card (left) ---- */
+.planning__timeline-card {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px 18px;
+  overflow-y: auto;
+}
+
+.planning__hour-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-height: 56px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.planning__hour-row:last-child {
+  border-bottom: none;
+}
+
+.planning__hour-row--focus {
+  align-items: stretch;
+  min-height: 112px;
+}
+
+.planning__hour {
+  width: 46px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.planning__hour-row--focus .planning__hour {
+  padding-top: 8px;
+}
+
+.planning__hour-empty {
+  flex: 1;
+}
+
+/* Wrapper that stacks every block starting in the same hour. */
+.planning__hour-blocks {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---- Event chips ---- */
+.planning__event {
+  flex: 1;
+  min-width: 0;
+  border-left: 3px solid var(--text-faint);
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__event:hover {
+  background: var(--bg-3);
+}
+
+.planning__event--free {
+  cursor: default;
+}
+
+.planning__event--free:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.planning__event-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planning__event--free .planning__event-title {
+  color: var(--text-dim);
+}
+
+.planning__event-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+/* ---- Suggested focus block ---- */
+.planning__event--focus {
+  display: flex;
+  flex-direction: column;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 9px 12px;
+}
+
+.planning__event--focus:hover {
+  background: rgba(154, 147, 255, 0.2);
+}
+
+.planning__suggested {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+/* ---- Sidebar (right) ---- */
+.planning__sidebar {
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.planning__sidebar-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.planning__sidebar-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
+.planning__unscheduled {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.planning__task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 13px;
+  cursor: grab;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__task:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-2);
+}
+
+.planning__task:active {
+  cursor: grabbing;
+}
+
+.planning__task-grip {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.planning__task-label {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planning__task-empty {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ---- Suggested plan gradient card ---- */
+.planning__suggestion-card {
+  background: linear-gradient(
+    160deg,
+    rgba(154, 147, 255, 0.14),
+    rgba(154, 147, 255, 0.04)
+  );
+  border: 1px solid rgba(154, 147, 255, 0.22);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.planning__suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--accent);
+}
+
+.planning__suggestion-head span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.planning__suggestion-body {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.planning__apply {
+  margin-top: 14px;
+  width: 100%;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__apply:hover:not(:disabled) {
+  background: var(--accent-hi);
+}
+
+.planning__apply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.planning__apply--accepted {
+  background: var(--bg-2);
+  color: var(--user);
+  cursor: default;
+}
+
+.planning__adjust {
+  margin-top: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__adjust:hover {
+  color: var(--text);
+}
+
+/* ---- Edit modal ---- */
+.planning__edit-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 200;
+}
+
+.planning__edit-card {
+  width: min(420px, 90vw);
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.planning__edit-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.planning__edit-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 1;
+}
+
+.planning__edit-input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.3);
+}
+
+.planning__edit-row {
+  display: flex;
+  gap: 12px;
+}
+
+.planning__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.planning__btn {
+  border: none;
+  border-radius: 11px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.planning__btn--primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.planning__btn--primary:hover {
+  background: var(--accent-hi);
+}
+
+.planning__btn--secondary {
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.planning__btn--secondary:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+/* ---- Context strip (energy / sleep / mood) ---- */
+.planning__context {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planning__context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planning__context-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+}
+
+.planning__context-mood {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ---- Em risco hoje ---- */
+.planning__risk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.planning__risk-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 11px;
+  padding: 10px 13px;
+}
+
+.planning__risk-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planning__risk-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}

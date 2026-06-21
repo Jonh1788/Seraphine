@@ -30,6 +30,18 @@ async def due(request: Request, limit: int = 20) -> dict[str, Any]:
     return {"cards": cards}
 
 
+@router.get("/decks")
+async def deck_summaries(request: Request) -> dict[str, Any]:
+    """Read-only deck summary: one row per topic over the EXISTING flashcards
+    table (GROUP BY topic). Returns total card count, due count, avg ease/reps
+    and a derived mastery %, so the grid can show every deck (even with 0 due)
+    with real totals. Study queue stays on GET /due."""
+    store = request.app.state.store
+    llm = getattr(request.app.state, "llm", None)
+    decks = await FlashcardsService(store, llm).deck_summaries()
+    return {"decks": decks}
+
+
 @router.post("/decks")
 async def create_deck(payload: DeckIn, request: Request) -> dict[str, Any]:
     store = request.app.state.store

@@ -215,7 +215,7 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
     controller.resetAllBonesToRest();
 
     const skelHelper = new SkeletonHelper(vrm.scene);
-    (skelHelper.material as any).color.setHex(0xa78bfa);
+    (skelHelper.material as any).color.setHex(0x9a93ff);
     (skelHelper.material as any).opacity = 0.45;
     (skelHelper.material as any).transparent = true;
     (skelHelper.material as any).depthTest = false;
@@ -228,7 +228,7 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
       const boneNode = vrm.humanoid?.getRawBoneNode(boneName as any) as Object3D | null | undefined;
       if (!boneNode) continue;
       const mat = new MeshBasicMaterial({
-        color: 0xa78bfa,
+        color: 0x9a93ff,
         transparent: true,
         opacity: 0.6,
         depthTest: false,
@@ -333,7 +333,7 @@ export function AnimationLab({ controller, onClose }: Props): JSX.Element {
         mat.color.setHex(0xffffff);
         mat.opacity = 1.0;
       } else {
-        mat.color.setHex(0xa78bfa);
+        mat.color.setHex(0x9a93ff);
         mat.opacity = 0.6;
       }
     }
