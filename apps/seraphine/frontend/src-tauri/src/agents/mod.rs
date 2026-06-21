@@ -1,6 +1,7 @@
 #![cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod observer;
 pub mod policy;
+pub mod promptguard;
 pub mod proto;
 pub mod selfimprove;
 pub mod ssh;
@@ -70,8 +71,11 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, host: Option<
     if host.is_some() || !is_fake() {
         if let Some(si) = child.stdin.as_mut() {
             // initialize handshake, then the goal as the first user turn.
+            // Sandbox (self-improve) runs ingest untrusted reference material, so
+            // the goal is wrapped with a prompt-injection guard preamble.
             let _ = writeln!(si, r#"{{"type":"control_request","request_id":"maestro-init","request":{{"subtype":"initialize","hooks":{{}}}}}}"#);
-            let msg = serde_json::json!({"type":"user","message":{"role":"user","content":goal}});
+            let framed = crate::agents::promptguard::frame_goal(mode, goal);
+            let msg = serde_json::json!({"type":"user","message":{"role":"user","content":framed}});
             let _ = writeln!(si, "{}", msg);
         }
     }
