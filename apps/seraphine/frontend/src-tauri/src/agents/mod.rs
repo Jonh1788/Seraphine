@@ -25,6 +25,10 @@ struct AgentHandle {
     cwd: String,
     #[allow(dead_code)]
     mode: String,
+    // `host` is the ssh alias the agent runs on (None = local); stored for
+    // remote observability/handover in later milestones.
+    #[allow(dead_code)]
+    host: Option<String>,
 }
 static REGISTRY: OnceLock<Mutex<HashMap<String, AgentHandle>>> = OnceLock::new();
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -35,18 +39,29 @@ fn is_fake() -> bool { claude_bin().ends_with(".sh") }
 #[derive(Serialize, Clone)]
 struct AgentEvent { agent_id: String, kind: AgentEventKind, raw: Value }
 
-fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, extra_args: &[String]) -> Result<String, String> {
+fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, host: Option<&str>, extra_args: &[String]) -> Result<String, String> {
     let agent_id = format!("agent-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
-    let mut cmd = Command::new(claude_bin());
-    if is_fake() {
-        cmd.arg(std::env::var("MAESTRO_FAKE_FIXTURE").unwrap_or_default());
+    let mut cmd = if let Some(h) = host {
+        // Remote: ssh into the host; the remote command sets its own cwd.
+        let mut c = Command::new(crate::agents::ssh::ssh_bin());
+        c.args(remote_ssh_argv(h, cwd, extra_args));
+        c
+    } else if is_fake() {
+        // Fake harness: replay a captured fixture (no cwd needed).
+        let mut c = Command::new(claude_bin());
+        c.arg(std::env::var("MAESTRO_FAKE_FIXTURE").unwrap_or_default());
+        c
     } else {
-        cmd.args(CLAUDE_FLAGS.iter().map(|s| *s));
-        for a in extra_args { cmd.arg(a); }
-    }
-    cmd.current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Local real claude.
+        let mut c = Command::new(claude_bin());
+        c.args(CLAUDE_FLAGS.iter().map(|s| *s));
+        for a in extra_args { c.arg(a); }
+        c.current_dir(cwd);
+        c
+    };
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
-    if !is_fake() {
+    if host.is_some() || !is_fake() {
         if let Some(si) = child.stdin.as_mut() {
             // initialize handshake, then the goal as the first user turn.
             let _ = writeln!(si, r#"{{"type":"control_request","request_id":"maestro-init","request":{{"subtype":"initialize","hooks":{{}}}}}}"#);
@@ -86,13 +101,13 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, extra_args: &
         }
         let _ = app2.emit("maestro:agent-exit", id2.clone());
     });
-    registry().lock().unwrap().insert(agent_id.clone(), AgentHandle { child, stdin, cwd: cwd.to_string(), mode: mode.to_string() });
+    registry().lock().unwrap().insert(agent_id.clone(), AgentHandle { child, stdin, cwd: cwd.to_string(), mode: mode.to_string(), host: host.map(String::from) });
     Ok(agent_id)
 }
 
 #[tauri::command]
-pub fn maestro_spawn_agent(app: AppHandle, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
-    spawn_inner(&app, &cwd, &goal, &permission_mode, &[])
+pub fn maestro_spawn_agent(app: AppHandle, cwd: String, goal: String, permission_mode: String, host: Option<String>) -> Result<String, String> {
+    spawn_inner(&app, &cwd, &goal, &permission_mode, host.as_deref(), &[])
 }
 
 #[tauri::command]
@@ -135,12 +150,12 @@ pub fn maestro_respond_permission(agent_id: String, request_id: String, allow: b
 
 #[tauri::command]
 pub fn maestro_resume_session(app: AppHandle, session_id: String, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
-    spawn_inner(&app, &cwd, &goal, &permission_mode, &["--resume".into(), session_id])
+    spawn_inner(&app, &cwd, &goal, &permission_mode, None, &["--resume".into(), session_id])
 }
 
 #[tauri::command]
 pub fn maestro_fork_session(app: AppHandle, session_id: String, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
-    spawn_inner(&app, &cwd, &goal, &permission_mode, &["--resume".into(), session_id, "--fork-session".into()])
+    spawn_inner(&app, &cwd, &goal, &permission_mode, None, &["--resume".into(), session_id, "--fork-session".into()])
 }
 
 /// POSIX single-quote a string for safe embedding in a shell command.
