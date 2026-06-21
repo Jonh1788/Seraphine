@@ -26,3 +26,15 @@ fn fake_agent_permission_round_trip() {
     let total = std::fs::read_to_string(format!("{dir}/tests/fixtures/agent/permission_request.jsonl")).unwrap().lines().count();
     assert_eq!(n, total, "all fixture lines should stream (no line swallowed)");
 }
+
+#[test]
+fn fake_ssh_streams_result_line() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let mut c = Command::new(format!("{dir}/tests/fixtures/agent/fake_ssh.sh"))
+        .arg("-T").arg("anyhost").arg("bash -lc 'exec claude ...'")
+        .stdout(Stdio::piped()).spawn().unwrap();
+    let out = c.stdout.take().unwrap();
+    let n = BufReader::new(out).lines().map_while(Result::ok).filter(|l| l.contains("\"type\":\"result\"")).count();
+    c.wait().unwrap();
+    assert_eq!(n, 1, "fake_ssh should replay a result line");
+}
