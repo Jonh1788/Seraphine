@@ -172,6 +172,23 @@ def test_models_endpoint(client: TestClient):
     assert body["openrouter"] == []
 
 
+def test_chat_model_roundtrip(client: TestClient):
+    # Default when nothing was ever set.
+    r = client.get("/deepsearch/chat-model")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"chat_model": "cliproxy"}
+
+    put = client.put(
+        "/deepsearch/chat-model",
+        json={"chat_model": "openrouter:openai/gpt-4o-mini"},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json() == {"chat_model": "openrouter:openai/gpt-4o-mini"}
+
+    after = client.get("/deepsearch/chat-model")
+    assert after.json() == {"chat_model": "openrouter:openai/gpt-4o-mini"}
+
+
 def test_cancel_endpoint(client: TestClient):
     r = client.post("/deepsearch", json={"query": "pergunta?"})
     run_id = r.json()["id"]

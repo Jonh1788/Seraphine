@@ -149,6 +149,135 @@ class OpenRouterClient:
             ]
 
 
+def _stringify_content(content: Any) -> str:
+    """Coerce a ``ChatMessage.content`` into a plain string for OpenRouter.
+
+    OpenRouter's chat endpoint accepts string content (or a typed block list,
+    but we keep it simple). When the engine hands us a vision-style block list
+    (``[{"type":"text","text":..}, {"type":"image_url",..}]``), concatenate the
+    text blocks and drop the rest — images are not forwarded on the OpenRouter
+    chat path for v1.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content or "")
+
+
+class OpenRouterChatClient:
+    """OpenRouter chat client matching the engine's ``llm.chat`` contract.
+
+    Streams an OpenAI-compatible chat completion and yields ``Token`` objects
+    exactly like the cliproxy ``AnthropicClient.chat`` the engine normally uses:
+    text deltas stream as ``Token(text=...)`` and any tool calls are emitted as a
+    single terminal ``Token(done=True, tool_calls=[...])`` in OpenAI function
+    shape (directly consumable by the engine's ``_parse_tool_call``).
+    """
+
+    def __init__(self, api_key: str, *, timeout: float = 180.0) -> None:
+        self.api_key = api_key
+        self.timeout = timeout
+
+    async def chat(
+        self,
+        messages: list[Any],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        audio: Any = None,
+        tools: list[dict] | None = None,
+        think: bool = False,
+    ) -> AsyncIterator[Any]:
+        # Imported lazily so this module stays importable without the package.
+        from llm_adapters.types import Token
+
+        # ``audio`` and ``think`` are intentionally ignored for v1 — we don't
+        # forward reasoning/audio params; keep the request minimal and portable.
+        oai_messages = [
+            {"role": m.role, "content": _stringify_content(m.content)}
+            for m in messages
+        ]
+        body: dict[str, Any] = {
+            "model": model or "openai/gpt-4o-mini",
+            "messages": oai_messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+
+        # index -> accumulated tool call ({"id","name","arguments"}).
+        acc: dict[int, dict[str, str]] = {}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with client.stream(
+                "POST",
+                f"{OPENROUTER_BASE}/chat/completions",
+                headers=_or_headers(self.api_key),
+                json=body,
+            ) as r:
+                if r.status_code != 200:
+                    raw = (await r.aread()).decode("utf-8", "replace")
+                    raise RuntimeError(
+                        f"OpenRouter chat failed: {r.status_code} {raw[:500]}"
+                    )
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        # SSE comments (": ...") / blank keepalive lines.
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    try:
+                        delta = choices[0].get("delta") or {}
+                    except (IndexError, KeyError, AttributeError):
+                        continue
+                    content = delta.get("content")
+                    if content:
+                        yield Token(text=content)
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["arguments"] += fn["arguments"]
+
+        if acc:
+            tool_calls = [
+                {
+                    "id": slot["id"] or f"call_{idx}",
+                    "type": "function",
+                    "function": {
+                        "name": slot["name"],
+                        "arguments": slot["arguments"] or "{}",
+                    },
+                }
+                for idx, slot in sorted(acc.items())
+            ]
+            yield Token(text="", done=True, tool_calls=tool_calls)
+        else:
+            yield Token(text="", done=True)
+
+
 CLIPROXY_DEFAULT = "cliproxy:claude-haiku-4-5-20251001"
 
 
