@@ -2,6 +2,7 @@
 pub mod observer;
 pub mod policy;
 pub mod proto;
+pub mod selfimprove;
 pub mod ssh;
 
 use std::collections::HashMap;
