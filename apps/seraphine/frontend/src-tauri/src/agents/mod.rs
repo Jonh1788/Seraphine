@@ -40,7 +40,7 @@ struct AgentHandle {
 static REGISTRY: OnceLock<Mutex<HashMap<String, AgentHandle>>> = OnceLock::new();
 static COUNTER: AtomicU64 = AtomicU64::new(1);
 fn registry() -> &'static Mutex<HashMap<String, AgentHandle>> { REGISTRY.get_or_init(|| Mutex::new(HashMap::new())) }
-fn claude_bin() -> String { std::env::var("MAESTRO_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()) }
+pub(crate) fn claude_bin() -> String { std::env::var("MAESTRO_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()) }
 fn is_fake() -> bool { claude_bin().ends_with(".sh") }
 
 #[derive(Serialize, Clone)]

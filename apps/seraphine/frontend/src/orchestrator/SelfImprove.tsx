@@ -154,6 +154,9 @@ export function SelfImprove(): JSX.Element {
   const approve = useSelfImproveStore((s) => s.approve);
   const reject = useSelfImproveStore((s) => s.reject);
   const iterate = useSelfImproveStore((s) => s.iterate);
+  const review = useSelfImproveStore((s) => s.review);
+  const reviewing = useSelfImproveStore((s) => s.reviewing);
+  const runReview = useSelfImproveStore((s) => s.runReview);
 
   const events = useAgentStream();
   const [, setTick] = useState(0); // drives the elapsed-minutes re-render
@@ -388,6 +391,22 @@ export function SelfImprove(): JSX.Element {
                   );
                 })}
                 {diff.length === 0 && <div className="si-diffempty">Sem mudanças para mostrar.</div>}
+              </div>
+
+              <div className="si-review">
+                <div className="si-review__head">
+                  <span className="si-review__title"><IconSparkle /> Revisão da IA</span>
+                  <button type="button" className="si-review__refresh" disabled={reviewing} onClick={runReview}>
+                    {reviewing ? 'Revisando…' : review ? 'Revisar de novo' : 'Revisar'}
+                  </button>
+                </div>
+                {reviewing && !review ? (
+                  <div className="si-review__loading"><span className="si-spinner" aria-hidden /> Analisando as mudanças…</div>
+                ) : review ? (
+                  <div className="si-review__body">{review}</div>
+                ) : (
+                  <div className="si-review__empty">Um agente de IA revisa o que foi implementado — clique em Revisar.</div>
+                )}
               </div>
 
               <div className="si-actionbar">

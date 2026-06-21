@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { siCreate, siCommit, siDiffstat, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
+import { siCreate, siCommit, siDiffstat, siReview, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
 import { useAgentStreamStore } from './agentStreamStore';
 import type { AgentEvent, SiSession, DiffFile, GateResult } from './types';
 
@@ -73,6 +73,8 @@ interface SiState {
   iterFeedback: string;
   error: string | null;
   runStart: number | null;
+  review: string | null; // AI code-review of the diff (null = not run yet)
+  reviewing: boolean;
   // bookkeeping (persisted with the rest so the loop survives remounts)
   refCounter: number;
   lastGatedIdx: number; // index in the global events array of the last `result` we gated on
@@ -91,6 +93,8 @@ interface SiActions {
   reject: () => void;
   iterate: () => void;
   reset: () => void;
+  /** Run (or re-run) the AI code review over the current branch diff. */
+  runReview: () => void;
   /** Pumped on every agent-stream change (globally — see the subscribe below). */
   tickGate: (events: AgentEvent[]) => void;
 }
@@ -116,6 +120,8 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
   iterFeedback: '',
   error: null,
   runStart: null,
+  review: null,
+  reviewing: false,
   refCounter: 0,
   lastGatedIdx: -1,
   runId: 0,
@@ -134,8 +140,19 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
 
   reset: () => set((s) => ({
     session: null, agentId: null, phase: 'idle', gate: null, diff: [], attempts: 0,
-    iterFeedback: '', error: null, runStart: null, lastGatedIdx: -1, runId: s.runId + 1,
+    iterFeedback: '', error: null, runStart: null, review: null, reviewing: false,
+    lastGatedIdx: -1, runId: s.runId + 1,
   })),
+
+  runReview: () => {
+    const { session, repoRoot, runId } = get();
+    if (!session) return;
+    const myRun = runId;
+    set({ reviewing: true, review: null });
+    void siReview(repoRoot, session.branch)
+      .then((r) => { if (get().runId === myRun) set({ review: r, reviewing: false }); })
+      .catch((e) => { if (get().runId === myRun) set({ review: `Falha na revisão: ${String(e)}`, reviewing: false }); });
+  },
 
   startSI: () => {
     const { repoRoot, goal, refs, runId } = get();
@@ -175,7 +192,7 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     if (!agentId || !iterFeedback.trim()) return;
     void sendToAgent(agentId, iterFeedback.trim());
     const events = useAgentStreamStore.getState().events;
-    set({ iterFeedback: '', phase: 'working', attempts: 0, lastGatedIdx: events.length - 1, runId: runId + 1 });
+    set({ iterFeedback: '', phase: 'working', attempts: 0, review: null, reviewing: false, lastGatedIdx: events.length - 1, runId: runId + 1 });
   },
 
   // Gate-iterate loop: when the agent finishes a turn (a `result` event) while in
@@ -201,7 +218,12 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     const finalize = (next: Phase): void => {
       void siCommit(repoRoot, s.id, `self-improve: ${goal.slice(0, 72)}`)
         .then(() => siDiffstat(repoRoot, s.branch))
-        .then((d) => { if (get().runId === myRun) set({ diff: d }); })
+        .then((d) => {
+          if (get().runId !== myRun) return;
+          set({ diff: d });
+          // Auto-run the AI review so it's already there below the diff.
+          if (d.length) get().runReview();
+        })
         .catch(() => {});
       set({ phase: next });
     };

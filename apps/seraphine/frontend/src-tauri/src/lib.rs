@@ -178,6 +178,7 @@ fn run_desktop() {
             agents::selfimprove::maestro_si_list,
             agents::selfimprove::maestro_si_commit,
             agents::selfimprove::maestro_si_diffstat,
+            agents::selfimprove::maestro_si_review,
             agents::selfimprove::maestro_si_merge,
             agents::selfimprove::maestro_si_discard,
             agents::selfimprove::maestro_si_gate,

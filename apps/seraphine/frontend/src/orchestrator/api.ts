@@ -33,6 +33,7 @@ export const siCreate = (repoRoot: string, slug: string, id: string) => invoke<S
 export const siList = (repoRoot: string) => invoke<string[]>('maestro_si_list', { repoRoot });
 export const siCommit = (repoRoot: string, id: string, message: string) => invoke<boolean>('maestro_si_commit', { repoRoot, id, message });
 export const siDiffstat = (repoRoot: string, branch: string) => invoke<DiffFile[]>('maestro_si_diffstat', { repoRoot, branch });
+export const siReview = (repoRoot: string, branch: string) => invoke<string>('maestro_si_review', { repoRoot, branch });
 export const siMerge = (repoRoot: string, branch: string) => invoke<string>('maestro_si_merge', { repoRoot, branch });
 export const siDiscard = (repoRoot: string, id: string, branch: string) => invoke<void>('maestro_si_discard', { repoRoot, id, branch });
 export const siGate = (path: string, commands: string[]) => invoke<GateResult>('maestro_si_gate', { path, commands });

@@ -1,5 +1,6 @@
 //! Directed self-improvement: isolated worktrees on Seraphine's own repo.
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use serde::Serialize;
 
 fn git(repo_root: &str, args: &[&str]) -> Result<String, String> {
@@ -62,6 +63,42 @@ pub fn maestro_si_diffstat(repo_root: String, branch: String) -> Result<Vec<Diff
         let mut p = l.splitn(2, '|');
         DiffFile { path: p.next().unwrap_or("").trim().to_string(), changes: p.next().unwrap_or("").trim().to_string() }
     }).collect())
+}
+
+/// One-shot AI code review of the branch's changes. Runs `claude -p` (print mode)
+/// with the `git diff main...branch` embedded in the prompt (fed via stdin to dodge
+/// arg-length limits) and returns the reviewer's prose. Read-only: `-p` without a
+/// permission-prompt tool auto-denies any tool the model tries, so it reviews from
+/// the diff alone. Blocks for the model round-trip (the frontend shows a spinner).
+#[tauri::command]
+pub fn maestro_si_review(repo_root: String, branch: String) -> Result<String, String> {
+    let diff = git(&repo_root, &["diff", &format!("main...{branch}")])?;
+    let diff = diff.trim();
+    if diff.is_empty() { return Ok("Sem mudanças para revisar.".to_string()); }
+    // Bound the prompt: keep the head of the diff (where structure/intent lives).
+    const CAP: usize = 28000;
+    let body = if diff.len() > CAP {
+        let mut end = CAP;
+        while !diff.is_char_boundary(end) { end -= 1; }
+        format!("{}\n\n…(diff truncado em {CAP} caracteres)…", &diff[..end])
+    } else {
+        diff.to_string()
+    };
+    let prompt = format!(
+        "Você é um revisor de código sênior e cético. Revise o diff abaixo — são mudanças de uma auto-melhoria que a Seraphine fez no PRÓPRIO código dela. Baseie-se só no diff (não use ferramentas). Avalie correção, SEGURANÇA (fuga de sandbox, injeção de prompt, exfiltração), qualidade e se está pronto pra mesclar no `main`. Responda em PT-BR, conciso e direto, neste formato:\n\nVeredito: APROVAR | APROVAR COM RESSALVAS | NÃO MESCLAR\nResumo: 1-2 frases.\nPontos: bullets curtos (bug/risco/nit) citando o arquivo. Se algo bloquear o merge, deixe explícito.\n\n--- DIFF (git diff main...{branch}) ---\n{body}"
+    );
+    let mut child = Command::new(crate::agents::claude_bin())
+        .arg("-p").arg("--setting-sources").arg("")
+        .current_dir(&repo_root)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|e| format!("claude falhou ao iniciar: {e}"))?;
+    child.stdin.take().ok_or("sem stdin")?.write_all(prompt.as_bytes())
+        .map_err(|e| format!("write prompt: {e}"))?;
+    let out = child.wait_with_output().map_err(|e| format!("claude -p: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("claude -p erro: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 #[tauri::command]
