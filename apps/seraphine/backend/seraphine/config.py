@@ -97,6 +97,21 @@ class Settings(BaseSettings):
     # at /wa can list both side-by-side). Empty hides the second card.
     whatsapp_aura_bridge_url: str = "http://aura-whatsapp-bridge:3001"
 
+    # Email urgency triage → WhatsApp push (all-Seraphine).
+    # Background scanner classifies new unread Gmail and pushes a
+    # WhatsApp message for genuinely-urgent ("high") mail only.
+    email_urgency_enabled: bool = True
+    email_urgency_interval_s: int = 600  # 10 min
+    email_urgency_quiet_start: str = "22:00"  # America/Sao_Paulo, "HH:MM"
+    email_urgency_quiet_end: str = "07:00"
+    # Destination chat-id for the push. The user's own WhatsApp number
+    # (already referenced in whatsapp/_USER_MENTIONS). Override via
+    # SERAPHINE_OWNER_WHATSAPP_CHAT_ID. Empty disables the push (the
+    # scan still classifies + records).
+    owner_whatsapp_chat_id: str = "557388836445@c.us"
+    # Public base URL the deep-link points at (the web frontend).
+    app_public_url: str = "https://sera.jonhdev.io"
+
     # Browser automation — leave url empty to disable
     browser_agent_url: str = ""  # "http://localhost:3002"
 
