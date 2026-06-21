@@ -63,6 +63,25 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, extra_args: &
             if line.trim().is_empty() { continue; }
             let v: Value = match serde_json::from_str(&line) { Ok(v) => v, Err(_) => continue };
             let kind = classify(&v);
+            if let AgentEventKind::PermissionRequest { request_id, tool } = &kind {
+                // Decide using the agent's stored policy; auto-respond unless Escalate.
+                // SHORT registry lock: do not hold it across the emit below.
+                let mut reg = registry().lock().unwrap();
+                if let Some(h) = reg.get_mut(&id2) {
+                    let mode = crate::agents::policy::parse_mode(&h.mode);
+                    match crate::agents::policy::decide(mode, tool) {
+                        crate::agents::policy::Decision::Allow => {
+                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, true); }
+                        }
+                        crate::agents::policy::Decision::Deny => {
+                            if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, false); }
+                        }
+                        crate::agents::policy::Decision::Escalate => { /* leave for the UI via the emitted event */ }
+                    }
+                }
+                drop(reg);
+            }
+            // Emit in ALL cases so the UI reflects what happened (incl. auto allow/deny).
             let _ = app2.emit("maestro:agent-event", AgentEvent { agent_id: id2.clone(), kind, raw: v });
         }
         let _ = app2.emit("maestro:agent-exit", id2.clone());
@@ -91,4 +110,25 @@ pub fn maestro_send_to_agent(agent_id: String, text: String) -> Result<(), Strin
     writeln!(si, "{}", msg).map_err(|e| format!("write failed: {e}"))?;
     si.flush().map_err(|e| format!("flush failed: {e}"))?;
     Ok(())
+}
+
+/// Write a `control_response` answering a `can_use_tool` permission request.
+/// REAL shape (verified in M0): camelCase `behavior`, `subtype:"success"` for
+/// BOTH allow and deny — the decision lives in the nested `response.behavior`.
+fn write_permission_response(si: &mut ChildStdin, request_id: &str, allow: bool) -> Result<(), String> {
+    let resp = serde_json::json!({
+        "type":"control_response",
+        "response":{"subtype":"success","request_id":request_id,
+                    "response":{"behavior": if allow {"allow"} else {"deny"}}}
+    });
+    writeln!(si, "{}", resp).map_err(|e| format!("write failed: {e}"))?;
+    si.flush().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn maestro_respond_permission(agent_id: String, request_id: String, allow: bool) -> Result<(), String> {
+    let mut reg = registry().lock().unwrap();
+    let h = reg.get_mut(&agent_id).ok_or("unknown agent")?;
+    let si = h.stdin.as_mut().ok_or("agent stdin closed")?;
+    write_permission_response(si, &request_id, allow)
 }
