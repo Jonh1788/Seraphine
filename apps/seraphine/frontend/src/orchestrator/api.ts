@@ -1,16 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { SessionInfo, AgentEvent, PermissionMode } from './types';
+import type { SessionInfo, AgentEvent, PermissionMode, HostStatus } from './types';
 
 // Tauri v2 maps JS camelCase arg keys to Rust snake_case params (verified in
 // this repo: `whisper_transcribe_pcm` is invoked with `sampleRate` against the
 // Rust param `sample_rate`). Keep the keys below camelCase accordingly.
 
 export const listSessions = () => invoke<SessionInfo[]>('maestro_list_sessions');
-export const readTranscript = (slug: string, sessionId: string, tail = 200) =>
-  invoke<unknown[]>('maestro_read_transcript', { slug, sessionId, tail });
-export const spawnAgent = (cwd: string, goal: string, permissionMode: PermissionMode) =>
-  invoke<string>('maestro_spawn_agent', { cwd, goal, permissionMode });
+export const listHosts = () => invoke<string[]>('maestro_list_hosts');
+export const checkHost = (host: string) => invoke<HostStatus>('maestro_check_host', { host });
+export const listRemoteSessions = (host: string) => invoke<SessionInfo[]>('maestro_list_remote_sessions', { host });
+export const readTranscript = (slug: string, sessionId: string, tail = 200, host?: string) =>
+  invoke<unknown[]>('maestro_read_transcript', { slug, sessionId, tail, host: host ?? null });
+export const spawnAgent = (cwd: string, goal: string, permissionMode: PermissionMode, host?: string) =>
+  invoke<string>('maestro_spawn_agent', { cwd, goal, permissionMode, host: host ?? null });
 export const sendToAgent = (agentId: string, text: string) =>
   invoke('maestro_send_to_agent', { agentId, text });
 export const respondPermission = (agentId: string, requestId: string, allow: boolean) =>

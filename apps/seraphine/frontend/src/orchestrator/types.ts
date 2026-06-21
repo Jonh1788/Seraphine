@@ -1,5 +1,6 @@
 export type PermissionMode = 'ask_all' | 'auto_reads' | 'full_auto';
-export interface SessionInfo { session_id: string; slug: string; cwd: string; last_modified_ms: number; }
+export interface HostStatus { reachable: boolean; claude_version: string | null; error: string | null; }
+export interface SessionInfo { session_id: string; slug: string; host?: string | null; cwd: string; last_modified_ms: number; }
 export type AgentEventKind =
   | { kind: 'init'; session_id?: string }
   | { kind: 'assistant' }
