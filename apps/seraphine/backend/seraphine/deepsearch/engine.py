@@ -502,6 +502,25 @@ class DeepResearchEngine:
         report = await self._stream_complete(
             system=system, user=user, role=self.synth, emit=emit, max_tokens=8192
         )
+        # Resilience: the synthesis model commonly fails on a single Claude Max
+        # seat — opus/sonnet hit a rate-limit/cooldown after deepsearch's burst of
+        # fan-out (haiku) calls, while haiku has headroom. Rather than fail the run,
+        # fall back to the fan-out model for the report (with a note) when the
+        # synth model produced nothing AND it's a different (heavier) model.
+        if not report.strip() and getattr(self.synth, "model", None) != getattr(self.fanout, "model", None):
+            self._llm_error = None
+            report = await self._stream_complete(
+                system=system, user=user, role=self.fanout, emit=emit, max_tokens=8192
+            )
+            if report.strip():
+                note = (
+                    "> _Nota: a síntese usou o modelo de fan-out porque o modelo "
+                    "de síntese escolhido ficou indisponível (rate-limit/cooldown no "
+                    "cliproxy — comum com opus/sonnet num único seat Claude Max). Para "
+                    "síntese forte e confiável, configure uma chave OpenRouter em "
+                    '"Configurar modelos"._\n\n'
+                )
+                report = note + report
         return report
 
     # -- tool orchestration ------------------------------------------------

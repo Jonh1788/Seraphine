@@ -109,6 +109,41 @@ async def test_empty_report_surfaces_failure_with_detail():
     assert dones and dones[-1]["status"] == "failed"
 
 
+class _RateLimitedSynth(_FakeRole):
+    """Heavier synth model that fails like an opus/sonnet cooldown on a Max seat."""
+
+    model = "claude-opus-4-8"
+
+    async def complete(self, messages, **kw):
+        raise RuntimeError("Anthropic HTTP 429: cooldown")
+
+    async def stream(self, messages, **kw):
+        raise RuntimeError("Anthropic HTTP 429: cooldown")
+        yield ""  # pragma: no cover — makes this an async generator
+
+
+class _HaikuFanout(_FakeRole):
+    model = "claude-haiku-4-5-20251001"
+
+
+@pytest.mark.asyncio
+async def test_synth_cooldown_falls_back_to_fanout_with_note():
+    # The synth model (opus) is rate-limited, but the fan-out model (haiku) works
+    # → the run still produces a report (via fallback) with a note, not a failure.
+    events = []
+    eng = DeepResearchEngine(
+        fanout=_HaikuFanout(text="Relatório citado [1]"),
+        synth=_RateLimitedSynth(),
+        tools={"search": _FakeSearch(), "fetch": _FakeFetch()},
+    )
+    result = await eng.run(
+        "o que é X?", mode="quick", emit=lambda e: events.append(e)
+    )
+    assert result["status"] == "done"  # produced a report via fallback, not failed
+    assert "Nota:" in result["report"] and "OpenRouter" in result["report"]
+    assert "[1]" in result["report"]
+
+
 # ---------------------------------------------------------------------------
 # Deep mode fakes + tests (Task 3.2)
 # ---------------------------------------------------------------------------
