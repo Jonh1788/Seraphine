@@ -9,6 +9,8 @@ interface EmailInboxModalProps {
   open: boolean;
   onClose: () => void;
   ws: SeraphineWS | null;
+  /** Deep-link target: a Gmail message id to auto-open + expand. */
+  messageId?: string | null;
 }
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -18,7 +20,7 @@ const REFRESH_MS = 5 * 60 * 1000;
  * expand and fetch the full body. Actions trigger prefilled chat
  * messages via the WebSocket.
  */
-export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JSX.Element | null {
+export function EmailInboxModal({ open, onClose, ws, messageId }: EmailInboxModalProps): JSX.Element | null {
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,45 @@ export function EmailInboxModal({ open, onClose, ws }: EmailInboxModalProps): JS
     window.addEventListener('google-authed', handler);
     return () => window.removeEventListener('google-authed', handler);
   }, [open, fetchEmails]);
+
+  // Deep-link: when opened with a target messageId (from a WhatsApp
+  // urgency push, ?inbox=<id>), fetch that message and expand it — even
+  // if it isn't in the "important + unread" list.
+  useEffect(() => {
+    if (!open || !messageId) return;
+    let cancelled = false;
+    setExpandedId(messageId);
+    void (async () => {
+      try {
+        const full = await getEmail(messageId);
+        if (cancelled) return;
+        setFullById((prev) => {
+          const next = new Map(prev);
+          next.set(messageId, full);
+          return next;
+        });
+        setEmails((prev) => {
+          if (prev.some((m) => m.id === messageId)) return prev;
+          const row: EmailMessage = {
+            id: full.id,
+            threadId: '',
+            from: full.from,
+            subject: full.subject,
+            snippet: '',
+            date: full.date,
+            isUnread: true,
+            isImportant: false,
+          };
+          return [row, ...prev];
+        });
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, messageId]);
 
   const toggleExpand = async (email: EmailMessage) => {
     if (expandedId === email.id) {

@@ -107,6 +107,7 @@ export function AppLayout(): JSX.Element {
   const setCalendarOpen = useUiStore((s) => s.setCalendarOpen);
   const inboxOpen = useUiStore((s) => s.inboxOpen);
   const setInboxOpen = useUiStore((s) => s.setInboxOpen);
+  const inboxMessageId = useUiStore((s) => s.inboxMessageId);
   const clipboardAssist = useUiStore((s) => s.clipboardAssist);
   const setClipboardAssist = useUiStore((s) => s.setClipboardAssist);
   const pendingComposerText = useUiStore((s) => s.pendingComposerText);
@@ -643,7 +644,7 @@ export function AppLayout(): JSX.Element {
       </div>
 
       <CalendarModal open={calendarOpen} onClose={() => setCalendarOpen(false)} ws={wsRef.current} />
-      <EmailInboxModal open={inboxOpen} onClose={() => setInboxOpen(false)} ws={wsRef.current} />
+      <EmailInboxModal open={inboxOpen} onClose={() => setInboxOpen(false)} ws={wsRef.current} messageId={inboxMessageId} />
 
       {labOpen && (
         <AvatarLab controller={avatarCtrlRef.current} onClose={() => setLabOpen(false)} />

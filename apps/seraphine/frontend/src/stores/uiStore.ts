@@ -38,6 +38,7 @@ interface UiState {
   animLabOpen: boolean;
   calendarOpen: boolean;
   inboxOpen: boolean;
+  inboxMessageId: string | null;
   clipboardAssist: { open: boolean; content: string };
   pendingComposerText: string | null;
   pendingComposerAutoSend: boolean;
@@ -64,6 +65,7 @@ interface UiActions {
   toggleAnimLabOpen: () => void;
   setCalendarOpen: (v: boolean) => void;
   setInboxOpen: (v: boolean) => void;
+  setInboxMessageId: (v: string | null) => void;
   setClipboardAssist: (v: { open: boolean; content: string }) => void;
   setPendingComposerText: (v: string | null) => void;
   setPendingComposerAutoSend: (v: boolean) => void;
@@ -99,6 +101,27 @@ function computeOnboarded(): boolean {
   }
 }
 
+/**
+ * Read a `?inbox=<gmailId>` deep-link param (used by the email-urgency
+ * WhatsApp push). Strips the param so a refresh doesn't reopen the modal.
+ * Exported for testing.
+ */
+export function readInboxParam(): string | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get('inbox');
+    if (!id) return null;
+    url.searchParams.delete('inbox');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+const _inboxParam = readInboxParam();
+
 export const useUiStore = create<UiState & UiActions>()((set) => ({
   // State
   activeView: 'dashboard',
@@ -112,7 +135,8 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   labOpen: false,
   animLabOpen: false,
   calendarOpen: false,
-  inboxOpen: false,
+  inboxOpen: _inboxParam != null,
+  inboxMessageId: _inboxParam,
   clipboardAssist: { open: false, content: '' },
   pendingComposerText: null,
   pendingComposerAutoSend: false,
@@ -137,7 +161,8 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   setAnimLabOpen: (v) => set({ animLabOpen: v }),
   toggleAnimLabOpen: () => set((s) => ({ animLabOpen: !s.animLabOpen })),
   setCalendarOpen: (v) => set({ calendarOpen: v }),
-  setInboxOpen: (v) => set({ inboxOpen: v }),
+  setInboxOpen: (v) => set(v ? { inboxOpen: true } : { inboxOpen: false, inboxMessageId: null }),
+  setInboxMessageId: (v) => set({ inboxMessageId: v }),
   setClipboardAssist: (v) => set({ clipboardAssist: v }),
   setPendingComposerText: (v) => set({ pendingComposerText: v }),
   setPendingComposerAutoSend: (v) => set({ pendingComposerAutoSend: v }),
