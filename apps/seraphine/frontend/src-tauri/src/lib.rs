@@ -16,6 +16,8 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod agents;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod clipboard;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod cv_triage_zip;
@@ -160,6 +162,15 @@ fn run_desktop() {
             mac_tools::active_app_local,
             // CV Triage — Task 15: zip a folder of PDFs for upload.
             cv_triage_zip::zip_folder_pdfs,
+            // Maestro — agent orchestration (desktop only).
+            agents::observer::maestro_list_sessions,
+            agents::observer::maestro_read_transcript,
+            agents::maestro_spawn_agent,
+            agents::maestro_send_to_agent,
+            agents::maestro_respond_permission,
+            agents::maestro_stop_agent,
+            agents::maestro_resume_session,
+            agents::maestro_fork_session,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
