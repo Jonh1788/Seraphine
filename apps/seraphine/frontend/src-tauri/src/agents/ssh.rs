@@ -37,6 +37,31 @@ pub fn maestro_list_hosts() -> Result<Vec<String>, String> {
 #[derive(Serialize, Clone)]
 pub struct HostStatus { pub reachable: bool, pub claude_version: Option<String>, pub error: Option<String> }
 
+pub fn ssh_bin() -> String { std::env::var("MAESTRO_SSH_BIN").unwrap_or_else(|_| "ssh".into()) }
+
+#[tauri::command]
+pub fn maestro_check_host(host: String) -> Result<HostStatus, String> {
+    use std::process::Command;
+    let out = Command::new(ssh_bin())
+        .args(["-T", "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", &host,
+               "bash -lc 'command -v claude >/dev/null 2>&1 && claude --version'"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => Ok(HostStatus {
+            reachable: true,
+            claude_version: Some(String::from_utf8_lossy(&o.stdout).trim().to_string()),
+            error: None,
+        }),
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            let low = err.to_lowercase();
+            let reachable = !low.contains("connection") && !low.contains("timed out") && !low.contains("could not resolve");
+            Ok(HostStatus { reachable, claude_version: None, error: Some(if err.is_empty() { "claude não encontrado no host".into() } else { err }) })
+        }
+        Err(e) => Ok(HostStatus { reachable: false, claude_version: None, error: Some(format!("ssh falhou: {e}")) }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
