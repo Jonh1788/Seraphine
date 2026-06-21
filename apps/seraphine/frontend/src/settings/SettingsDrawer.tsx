@@ -4,6 +4,7 @@ import { CheckIcon, MicIcon, RefreshIcon, XIcon } from '../icons/Icons';
 import { useTheme } from '../theme';
 import type { ThemeDef, ThemeId } from '../theme';
 import { NotificationSettingsPanel } from './NotificationSettingsPanel';
+import { GoogleAuthPanel } from '../google';
 
 export interface SettingsDrawerProps {
   open: boolean;
@@ -29,6 +30,11 @@ export function SettingsDrawer({
 }: SettingsDrawerProps): JSX.Element {
   const { theme, setTheme, themes } = useTheme();
   const [statuses, setStatuses] = useState<IntegrationStatus[]>([]);
+  const [waQr, setWaQr] = useState<{ url: string | null; msg: string | null; loading: boolean }>({
+    url: null,
+    msg: null,
+    loading: false,
+  });
   const [checking, setChecking] = useState(false);
 
   const refreshStatus = useCallback(async () => {
@@ -99,6 +105,26 @@ export function SettingsDrawer({
     ]);
     setStatuses(next);
     setChecking(false);
+  }, []);
+
+  // WhatsApp pairing: fetch the bridge QR (data URL) so the user can scan it.
+  const loadWhatsAppQr = useCallback(async () => {
+    setWaQr({ url: null, msg: null, loading: true });
+    try {
+      const res = await fetch(`${API_BASE}/whatsapp/qr`);
+      if (!res.ok) {
+        setWaQr({ url: null, msg: `Bridge indisponivel (HTTP ${res.status})`, loading: false });
+        return;
+      }
+      const data = (await res.json()) as { qr?: string | null; message?: string };
+      if (data.qr) {
+        setWaQr({ url: data.qr, msg: null, loading: false });
+      } else {
+        setWaQr({ url: null, msg: data.message || 'Sem QR no momento (talvez ja conectado).', loading: false });
+      }
+    } catch {
+      setWaQr({ url: null, msg: 'Falha ao buscar o QR.', loading: false });
+    }
   }, []);
 
   // Close on Escape.
@@ -180,6 +206,51 @@ export function SettingsDrawer({
             <p className="settings-drawer__hint">
               Mantem o microfone em espera para ativar a conversa por voz quando o realtime estiver desligado.
             </p>
+          </section>
+
+          <section className="settings-drawer__section">
+            <h3 className="settings-drawer__section-title">Integracoes</h3>
+            <GoogleAuthPanel />
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ fontSize: 13, color: 'var(--text)' }}>WhatsApp</span>
+                <button
+                  type="button"
+                  className="obs-btn obs-btn--ghost"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => void loadWhatsAppQr()}
+                  disabled={waQr.loading}
+                >
+                  {waQr.loading ? 'Carregando...' : waQr.url ? 'Atualizar QR' : 'Mostrar QR'}
+                </button>
+              </div>
+              {waQr.url && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: 12,
+                    background: 'var(--bg-1)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                  }}
+                >
+                  <img
+                    src={waQr.url}
+                    alt="QR code do WhatsApp"
+                    width={200}
+                    height={200}
+                    style={{ borderRadius: 8, background: '#fff', padding: 8 }}
+                  />
+                  <p style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'center', margin: 0, lineHeight: 1.5 }}>
+                    No celular: WhatsApp &rarr; Aparelhos conectados &rarr; Conectar aparelho, e escaneie.
+                  </p>
+                </div>
+              )}
+              {waQr.msg && <p className="settings-drawer__placeholder">{waQr.msg}</p>}
+            </div>
           </section>
 
           <section className="settings-drawer__section">
