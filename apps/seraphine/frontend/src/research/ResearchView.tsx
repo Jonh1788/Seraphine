@@ -301,6 +301,9 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
       });
       setConfig(saved);
       setOrKey('');
+      // Re-fetch models: with an OpenRouter key now saved, /models returns the
+      // OpenRouter catalogue (it was empty before the key existed).
+      try { setModels(await listModels()); } catch { /* keep the current list */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
