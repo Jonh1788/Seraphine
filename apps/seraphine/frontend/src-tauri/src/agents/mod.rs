@@ -41,9 +41,7 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, extra_args: &
     if is_fake() {
         cmd.arg(std::env::var("MAESTRO_FAKE_FIXTURE").unwrap_or_default());
     } else {
-        cmd.args(["-p","--output-format","stream-json","--input-format","stream-json",
-                  "--permission-mode","default","--permission-prompt-tool","stdio",
-                  "--setting-sources","","--verbose"]);
+        cmd.args(CLAUDE_FLAGS.iter().map(|s| *s));
         for a in extra_args { cmd.arg(a); }
     }
     cmd.current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -143,4 +141,42 @@ pub fn maestro_resume_session(app: AppHandle, session_id: String, cwd: String, g
 #[tauri::command]
 pub fn maestro_fork_session(app: AppHandle, session_id: String, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
     spawn_inner(&app, &cwd, &goal, &permission_mode, &["--resume".into(), session_id, "--fork-session".into()])
+}
+
+/// POSIX single-quote a string for safe embedding in a shell command.
+fn shq(s: &str) -> String { format!("'{}'", s.replace('\'', "'\\''")) }
+
+/// The claude headless flags shared by local and remote spawns.
+const CLAUDE_FLAGS: &[&str] = &[
+    "-p", "--output-format", "stream-json", "--input-format", "stream-json",
+    "--permission-mode", "default", "--permission-prompt-tool", "stdio",
+    "--setting-sources", "", "--verbose",
+];
+
+/// Build the full ssh argv for a remote agent. The remote command runs under a
+/// login bash so the user's PATH (e.g. ~/.local/bin/claude) is set.
+fn remote_ssh_argv(host: &str, cwd: &str, extra: &[String]) -> Vec<String> {
+    let flags = CLAUDE_FLAGS.iter().map(|f| if f.is_empty() { "\"\"".to_string() } else { (*f).to_string() }).collect::<Vec<_>>().join(" ");
+    let extra_s = extra.join(" ");
+    let inner = format!("cd {} && exec claude {} {}", shq(cwd), flags, extra_s);
+    let remote = format!("bash -lc {}", shq(inner.trim_end()));
+    vec!["-T".into(), "-o".into(), "ControlMaster=auto".into(), "-o".into(), "ControlPersist=60s".into(), host.to_string(), remote]
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+    #[test]
+    fn builds_remote_argv() {
+        let argv = remote_ssh_argv("Cassino", "/srv/app", &["--resume".into(), "abc".into()]);
+        assert_eq!(argv[0], "-T");
+        assert_eq!(argv[5], "Cassino");
+        let remote = &argv[6];
+        assert!(remote.starts_with("bash -lc '"), "got {remote}");
+        // `inner` is single-quoted as one arg to `bash -lc`, so the cwd's own
+        // single-quotes are POSIX-escaped to '\'' inside the outer quoting.
+        assert!(remote.contains(r"cd '\''/srv/app'\'' && exec claude"), "got {remote}");
+        assert!(remote.contains("--resume abc"), "got {remote}");
+        assert!(remote.contains("--permission-prompt-tool stdio"), "got {remote}");
+    }
 }
