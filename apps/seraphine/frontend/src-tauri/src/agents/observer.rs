@@ -51,6 +51,15 @@ pub fn maestro_list_sessions() -> Result<Vec<SessionInfo>, String> {
     Ok(out)
 }
 
+#[tauri::command]
+pub fn maestro_read_transcript(slug: String, session_id: String, tail: usize) -> Result<Vec<serde_json::Value>, String> {
+    let path = projects_dir().join(&slug).join(format!("{session_id}.jsonl"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.len() > tail { lines = lines.split_off(lines.len() - tail); }
+    Ok(lines.iter().filter_map(|l| serde_json::from_str(l).ok()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
