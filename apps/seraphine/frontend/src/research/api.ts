@@ -73,6 +73,25 @@ export async function putConfig(cfg: PutConfigInput): Promise<DeepsearchConfig> 
   return data;
 }
 
+/**
+ * Read the model that powers the MAIN chat. `"cliproxy"` is the default
+ * Claude routing; `"openrouter:<id>"` routes chat through OpenRouter.
+ */
+export async function getChatModel(): Promise<{ chat_model: string }> {
+  const data = await request<{ chat_model: string }>('/deepsearch/chat-model');
+  if (!data) throw new Error('Empty response from GET /deepsearch/chat-model');
+  return data;
+}
+
+export async function putChatModel(chat_model: string): Promise<{ chat_model: string }> {
+  const data = await request<{ chat_model: string }>('/deepsearch/chat-model', {
+    method: 'PUT',
+    body: JSON.stringify({ chat_model }),
+  });
+  if (!data) throw new Error('Empty response from PUT /deepsearch/chat-model');
+  return data;
+}
+
 export async function listModels(): Promise<{
   cliproxy: ModelOption[];
   openrouter: ModelOption[];

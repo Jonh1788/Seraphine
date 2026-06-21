@@ -4,6 +4,7 @@ import { CheckIcon, MicIcon, RefreshIcon, XIcon } from '../icons/Icons';
 import { useTheme } from '../theme';
 import type { ThemeDef, ThemeId } from '../theme';
 import { NotificationSettingsPanel } from './NotificationSettingsPanel';
+import { ChatModelPanel } from './ChatModelPanel';
 import { GoogleAuthPanel } from '../google';
 
 export interface SettingsDrawerProps {
@@ -207,6 +208,8 @@ export function SettingsDrawer({
               Mantem o microfone em espera para ativar a conversa por voz quando o realtime estiver desligado.
             </p>
           </section>
+
+          <ChatModelPanel />
 
           <section className="settings-drawer__section">
             <h3 className="settings-drawer__section-title">Integracoes</h3>
