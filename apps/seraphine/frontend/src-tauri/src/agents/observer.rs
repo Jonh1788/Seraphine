@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use serde::Serialize;
 
-fn ssh_bin() -> String { std::env::var("MAESTRO_SSH_BIN").unwrap_or_else(|_| "ssh".into()) }
+use crate::agents::ssh::ssh_bin;
 
 /// `~/.claude/projects/<slug>/` for an absolute cwd: every `/` → `-`.
 pub fn project_slug(cwd: &str) -> String { cwd.replace('/', "-") }
