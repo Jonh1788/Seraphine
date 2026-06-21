@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
 import httpx
@@ -84,3 +85,81 @@ class OpenRouterClient:
                 {"id": m["id"], "name": m.get("name", m["id"])}
                 for m in r.json().get("data", [])
             ]
+
+
+CLIPROXY_DEFAULT = "cliproxy:claude-haiku-4-5-20251001"
+
+
+@dataclass
+class RoleLLM:
+    provider: str  # "cliproxy" | "openrouter"
+    model: str
+    _app_llm: Any = None  # AnthropicClient when cliproxy
+    _or: Any = None  # OpenRouterClient when openrouter
+
+    async def complete(
+        self, messages: list[dict[str, str]], *, max_tokens: int = 4096
+    ) -> str:
+        if self.provider == "openrouter":
+            return await self._or.complete(messages, model=self.model, max_tokens=max_tokens)
+        # cliproxy: collapse to a single chat() pass, accumulate tokens
+        from llm_adapters.types import ChatMessage
+
+        chat_msgs = [ChatMessage(role=m["role"], content=m["content"]) for m in messages]
+        out = []
+        async for tok in self._app_llm.chat(chat_msgs, model=self.model):
+            if tok.text:
+                out.append(tok.text)
+        return "".join(out)
+
+    async def complete_json(self, *, system: str, user: str, tool: dict) -> dict:
+        if self.provider == "openrouter":
+            # ask for raw JSON in the prompt; parse defensively
+            import json
+            import re
+
+            raw = await self._or.complete(
+                [
+                    {
+                        "role": "system",
+                        "content": system + "\nResponda SOMENTE com JSON válido.",
+                    },
+                    {"role": "user", "content": user},
+                ],
+                model=self.model,
+                max_tokens=1024,
+            )
+            m = re.search(r"\{.*\}", raw, re.S)
+            return json.loads(m.group(0)) if m else {}
+        return await self._app_llm.tool_call_json(
+            system=system, user=user, tool=tool, model=self.model
+        )
+
+    async def stream(
+        self, messages: list[dict[str, str]], *, max_tokens: int = 8192
+    ) -> AsyncIterator[str]:
+        if self.provider == "openrouter":
+            async for chunk in self._or.stream(
+                messages, model=self.model, max_tokens=max_tokens
+            ):
+                yield chunk
+            return
+        from llm_adapters.types import ChatMessage
+
+        chat_msgs = [ChatMessage(role=m["role"], content=m["content"]) for m in messages]
+        async for tok in self._app_llm.chat(chat_msgs, model=self.model):
+            if tok.text:
+                yield tok.text
+
+
+def resolve_role_model(spec: str, *, app_llm: Any, openrouter_key: str) -> RoleLLM:
+    provider, _, model = spec.partition(":")
+    if provider == "openrouter":
+        if not openrouter_key:
+            # fall back to cliproxy default — never hard-fail a run on a missing key
+            cp_model = CLIPROXY_DEFAULT.split(":", 1)[1]
+            return RoleLLM(provider="cliproxy", model=cp_model, _app_llm=app_llm)
+        return RoleLLM(
+            provider="openrouter", model=model, _or=OpenRouterClient(openrouter_key)
+        )
+    return RoleLLM(provider="cliproxy", model=model, _app_llm=app_llm)
