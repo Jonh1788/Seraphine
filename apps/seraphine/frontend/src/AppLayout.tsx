@@ -33,6 +33,7 @@ import { RoutinesView } from './routines';
 import { GoalsView } from './goals';
 import { SystemStatusView } from './system';
 import { PlanningView } from './planning';
+import { ResearchView } from './research';
 import { MaestroView } from './orchestrator';
 import {
   ChatIcon,
@@ -56,6 +57,7 @@ import {
   FlameIcon,
   LightbulbIcon,
   NotesIcon,
+  SearchIcon,
   TargetIcon,
   TimerIcon,
 } from './icons/Icons';
@@ -281,6 +283,7 @@ export function AppLayout(): JSX.Element {
     { id: 'goals', icon: <FlagIcon size={22} />, label: 'Objetivos', onClick: () => setActiveView(activeView === 'goals' ? 'chat' : 'goals'), active: activeView === 'goals' },
     { id: 'focus', icon: <TimerIcon size={22} />, label: 'Foco', onClick: () => setActiveView(activeView === 'focus' ? 'chat' : 'focus'), active: activeView === 'focus' },
     { id: 'insights', icon: <LightbulbIcon size={22} />, label: 'Insights', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
+    { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
     { id: 'inbox', icon: <InboxIcon size={22} />, label: 'Inbox', onClick: () => setActiveView(activeView === 'inbox' ? 'chat' : 'inbox'), active: activeView === 'inbox', badge: unreadCount > 0 || whatsappUnread > 0 },
     { id: 'routines', icon: <TargetIcon size={22} />, label: 'Rotinas', onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'), active: activeView === 'routines' },
     { id: 'notes', icon: <NotesIcon size={22} />, label: 'Notas', onClick: () => setActiveView(activeView === 'notes' ? 'chat' : 'notes'), active: activeView === 'notes' },
@@ -554,6 +557,9 @@ export function AppLayout(): JSX.Element {
                 )}
                 {activeView === 'insights' && (
                   <InsightsView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'research' && (
+                  <ResearchView onBack={() => setActiveView('chat')} />
                 )}
                 {activeView === 'notes' && (
                   <NotesView

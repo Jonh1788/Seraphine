@@ -22,6 +22,7 @@ export type ActiveView =
   | 'system'
   | 'focus'
   | 'planning'
+  | 'research'
   | 'maestro';
 
 interface UiState {
