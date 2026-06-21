@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAgentStream } from './useAgentStream';
 import { Timeline } from './Timeline';
-import { useSelfImproveStore, GATE_LABELS, type Phase } from './selfImproveStore';
+import { useSelfImproveStore, GATE_LABELS, type Phase, type HistoryEntry } from './selfImproveStore';
+
+const OUTCOME_LABEL: Record<HistoryEntry['outcome'], string> = { merged: 'mesclado', rejected: 'descartado', interrupted: 'interrompido' };
+function fmtDate(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // ---- diff-stat parsing (graceful degradation) -----------------------------
 // The backend returns DiffFile.changes as the right side of `git diff --stat`
@@ -175,6 +182,8 @@ export function SelfImprove(): JSX.Element {
   const review = useSelfImproveStore((s) => s.review);
   const reviewing = useSelfImproveStore((s) => s.reviewing);
   const runReview = useSelfImproveStore((s) => s.runReview);
+  const interrupted = useSelfImproveStore((s) => s.interrupted);
+  const history = useSelfImproveStore((s) => s.history);
 
   const events = useAgentStream();
   const [, setTick] = useState(0); // drives the elapsed-minutes re-render
@@ -454,7 +463,7 @@ export function SelfImprove(): JSX.Element {
                     <span className="si-actionbar__legend">aprovar funde <code className="si-mono">{branch}</code> → <code className="si-mono">main</code></span>
                   )}
                 </div>
-                {agentId && (
+                {agentId && !interrupted && (
                   <div className="si-iterate">
                     <span className="si-iterate__icon"><IconChat /></span>
                     <input
@@ -480,10 +489,14 @@ export function SelfImprove(): JSX.Element {
                   {live && phase === 'working' && attempts > 0 && <span className="si-livehead__try"> (tentativa {attempts + 1})</span>}
                 </span>
                 {branch && <span className="si-livehead__branch"><IconBranch size={11} /><code className="si-mono">{branch}</code></span>}
+                {interrupted && <span className="si-recovered">recuperada</span>}
                 <span className="si-livehead__seal"><IconShield size={11} stroke="currentColor" />sandbox</span>
               </div>
               <div className="si-livebody">
-                {showActions && diff.length === 0 && (
+                {interrupted && agentEvents.length === 0 && (
+                  <div className="si-nochanges">Run recuperada após reinício do app — a conversa ao vivo não foi preservada, mas o trabalho e o parecer (na <strong>Revisão</strong>) estão salvos. Aprove, ou <strong>Encerrar</strong>.</div>
+                )}
+                {!interrupted && showActions && diff.length === 0 && (
                   <div className="si-nochanges">O agente não fez mudanças no código — leia a conclusão dele abaixo. Use <strong>Iterar</strong> pra pedir que implemente, ou <strong>Encerrar</strong>.</div>
                 )}
                 <Timeline events={agentEvents} sepLabel="WORKTREE CRIADO" />
@@ -494,17 +507,19 @@ export function SelfImprove(): JSX.Element {
                   <div className="si-actionbar__row">
                     <button type="button" className="si-btn si-btn--reject" onClick={reject}><IconTrash />{diff.length === 0 ? 'Encerrar' : 'Rejeitar'}</button>
                   </div>
-                  <div className="si-iterate">
-                    <span className="si-iterate__icon"><IconChat /></span>
-                    <input
-                      className="si-iterate__input"
-                      placeholder="Pedir que implemente, ou um ajuste… (Iterar)"
-                      value={iterFeedback}
-                      onChange={(e) => setIterFeedback(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && iterFeedback.trim()) { e.preventDefault(); iterate(); } }}
-                    />
-                    <button type="button" className="si-iterate__btn" disabled={!iterFeedback.trim()} onClick={iterate}>Iterar</button>
-                  </div>
+                  {!interrupted && (
+                    <div className="si-iterate">
+                      <span className="si-iterate__icon"><IconChat /></span>
+                      <input
+                        className="si-iterate__input"
+                        placeholder="Pedir que implemente, ou um ajuste… (Iterar)"
+                        value={iterFeedback}
+                        onChange={(e) => setIterFeedback(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && iterFeedback.trim()) { e.preventDefault(); iterate(); } }}
+                      />
+                      <button type="button" className="si-iterate__btn" disabled={!iterFeedback.trim()} onClick={iterate}>Iterar</button>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -513,6 +528,23 @@ export function SelfImprove(): JSX.Element {
               <span className="si-mainempty__icon"><IconSparkle /></span>
               <div className="si-mainempty__title">Pronto para melhorar a Seraphine</div>
               <div className="si-mainempty__body">Defina a raiz do repositório e um objetivo, depois clique em Iniciar. O agente trabalha num worktree isolado e o gate roda build + testes antes de você revisar.</div>
+              {history.length > 0 && (
+                <div className="si-history">
+                  <div className="si-history__title">Histórico</div>
+                  {history.map((h) => (
+                    <details key={h.id} className="si-history__item">
+                      <summary className="si-history__row">
+                        <span className={`si-history__badge si-history__badge--${h.outcome}`}>{OUTCOME_LABEL[h.outcome]}</span>
+                        <span className="si-history__goal">{h.goal || '—'}</span>
+                        <span className="si-history__meta">{h.files} arq · <span className="si-add">+{h.added}</span> <span className="si-del">−{h.removed}</span> · {fmtDate(h.endedAt)}</span>
+                      </summary>
+                      {h.review
+                        ? <div className="si-history__review">{h.review}</div>
+                        : <div className="si-history__review si-dim">Sem parecer da IA registrado.</div>}
+                    </details>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

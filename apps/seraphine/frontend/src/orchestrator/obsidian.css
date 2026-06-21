@@ -476,6 +476,8 @@
 .si-livehead__branch code { font-size: 11px; }
 .si-livehead__seal { margin-left: auto; font-size: 11px; font-weight: 600; color: #ffce8a; background: rgba(255,167,38,0.14); padding: 4px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; }
 .si-livehead__seal svg { stroke: currentColor; flex: none; }
+.si-recovered { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 4px 10px; border-radius: 8px; }
+.si-diffhead .si-recovered { margin-left: 4px; }
 
 /* ---- Live body (shared Timeline) + progress bar (§8.2) ---- */
 .si-livebody { flex: 1; overflow-y: auto; padding: 18px 20px; }
@@ -489,6 +491,20 @@
 .si-mainempty__icon { width: 44px; height: 44px; border-radius: 13px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
 .si-mainempty__title { font-size: 15px; font-weight: 700; color: var(--text); }
 .si-mainempty__body { font-size: 13px; color: var(--dim); line-height: 1.6; max-width: 380px; }
+
+/* Persisted history of finished runs (shown when idle). */
+.si-history { width: 100%; max-width: 560px; margin-top: 22px; text-align: left; display: flex; flex-direction: column; gap: 7px; }
+.si-history__title { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+.si-history__item { background: var(--surface); border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+.si-history__row { display: flex; align-items: center; gap: 10px; padding: 11px 13px; cursor: pointer; list-style: none; }
+.si-history__row::-webkit-details-marker { display: none; }
+.si-history__badge { flex: none; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+.si-history__badge--merged { color: #4ade80; background: rgba(74, 222, 128, 0.14); }
+.si-history__badge--rejected { color: #ef6b6b; background: rgba(239, 107, 107, 0.12); }
+.si-history__badge--interrupted { color: #ffce8a; background: rgba(255, 167, 38, 0.14); }
+.si-history__goal { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-history__meta { flex: none; font-size: 11px; color: var(--faint); font-family: var(--font-mono); }
+.si-history__review { padding: 0 13px 13px; font-size: 12px; line-height: 1.6; color: var(--dim); white-space: pre-wrap; word-break: break-word; border-top: 1px solid var(--border); padding-top: 11px; }
 
 /* ---- Diff header (§9.1) ---- */
 .si-diffhead { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--border); flex: none; }

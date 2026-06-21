@@ -1,7 +1,21 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { siCreate, siCommit, siDiffstat, siReview, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
 import { useAgentStreamStore } from './agentStreamStore';
 import type { AgentEvent, SiSession, DiffFile, GateResult } from './types';
+
+/** A finished self-improve run, kept in a persisted history list. */
+export interface HistoryEntry {
+  id: string;
+  goal: string;
+  branch: string;
+  outcome: 'merged' | 'rejected' | 'interrupted';
+  files: number;
+  added: number;
+  removed: number;
+  review: string | null;
+  endedAt: number; // epoch ms
+}
 
 const DEFAULT_ROOT = '/Users/jonh1788/Dev/Projeto-Seraphine';
 const REPO_KEY = 'maestro.repoRoot';
@@ -75,6 +89,8 @@ interface SiState {
   runStart: number | null;
   review: string | null; // AI code-review of the diff (null = not run yet)
   reviewing: boolean;
+  interrupted: boolean; // true when the run's agent died (app restart) — review-only, no Iterar
+  history: HistoryEntry[]; // finished runs, most-recent first
   // bookkeeping (persisted with the rest so the loop survives remounts)
   refCounter: number;
   lastGatedIdx: number; // index in the global events array of the last `result` we gated on
@@ -97,16 +113,42 @@ interface SiActions {
   runReview: () => void;
   /** Pumped on every agent-stream change (globally — see the subscribe below). */
   tickGate: (events: AgentEvent[]) => void;
+  /** After an app restart: a 'working'/'gating' run's agent is dead — commit any
+   *  straggler work and move it to a reviewable state (review-only, no Iterar). */
+  reconcile: () => void;
+}
+
+/** Push the current run onto the persisted history list (most-recent first, capped). */
+function archiveCurrent(
+  get: () => SiState & SiActions,
+  set: (partial: Partial<SiState>) => void,
+  outcome: HistoryEntry['outcome'],
+): void {
+  const { session, goal, diff, review, history } = get();
+  if (!session) return;
+  let added = 0;
+  let removed = 0;
+  for (const d of diff) {
+    const plus = d.changes.match(/\+\s*(\d+)/);
+    const minus = d.changes.match(/[−-]\s*(\d+)/);
+    if (plus) added += Number(plus[1]);
+    if (minus) removed += Number(minus[1]);
+  }
+  const entry: HistoryEntry = {
+    id: session.id, goal, branch: session.branch, outcome,
+    files: diff.length, added, removed, review, endedAt: Date.now(),
+  };
+  set({ history: [entry, ...history].slice(0, 30) });
 }
 
 /**
  * Self-improvement run state + orchestration, lifted out of the SelfImprove
  * component so an in-flight run survives leaving and re-entering the Maestro
- * tab/view. The gate-iterate loop is driven by the global agent-event stream
- * (the `subscribe` at the bottom), so it keeps advancing even while the panel
- * is unmounted.
+ * tab/view AND a full app restart (persisted to localStorage). The gate-iterate
+ * loop is driven by the global agent-event stream (the `subscribe` at the
+ * bottom), so it keeps advancing even while the panel is unmounted.
  */
-export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
+export const useSelfImproveStore = create<SiState & SiActions>()(persist((set, get) => ({
   repoRoot: localStorage.getItem(REPO_KEY) || DEFAULT_ROOT,
   goal: '',
   refs: [],
@@ -122,6 +164,8 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
   runStart: null,
   review: null,
   reviewing: false,
+  interrupted: false,
+  history: [],
   refCounter: 0,
   lastGatedIdx: -1,
   runId: 0,
@@ -141,7 +185,7 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
   reset: () => set((s) => ({
     session: null, agentId: null, phase: 'idle', gate: null, diff: [], attempts: 0,
     iterFeedback: '', error: null, runStart: null, review: null, reviewing: false,
-    lastGatedIdx: -1, runId: s.runId + 1,
+    interrupted: false, lastGatedIdx: -1, runId: s.runId + 1,
   })),
 
   runReview: () => {
@@ -154,10 +198,24 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
       .catch((e) => { if (get().runId === myRun) set({ review: `Falha na revisão: ${String(e)}`, reviewing: false }); });
   },
 
+  reconcile: () => {
+    const { phase, session, repoRoot } = get();
+    // Only a run whose agent was mid-flight needs reconciling; a restart killed
+    // the agent process, so it can't continue — salvage it into a reviewable
+    // state from the worktree (which is on disk, committed by the auto-commit).
+    if ((phase !== 'working' && phase !== 'gating') || !session) return;
+    const s = session;
+    set({ interrupted: true, reviewing: false });
+    void siCommit(repoRoot, s.id, 'self-improve: estado recuperado após reinício')
+      .then(() => siDiffstat(repoRoot, s.branch))
+      .then((d) => { set({ diff: d, phase: 'ready' }); if (d.length) get().runReview(); })
+      .catch(() => set({ phase: 'failed', error: 'Run interrompida pelo reinício do app — o worktree foi preservado.' }));
+  },
+
   startSI: () => {
     const { repoRoot, goal, refs, runId } = get();
     const events = useAgentStreamStore.getState().events;
-    set({ error: null, gate: null, diff: [], attempts: 0, runStart: Date.now(), lastGatedIdx: events.length - 1, runId: runId + 1 });
+    set({ error: null, gate: null, diff: [], attempts: 0, review: null, reviewing: false, interrupted: false, runStart: Date.now(), lastGatedIdx: events.length - 1, runId: runId + 1 });
     const id = `si-${Date.now()}`;
     void siCreate(repoRoot, slugify(goal), id).then((s) => {
       set({ session: s, phase: 'working' });
@@ -172,6 +230,7 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     if (!session) return;
     const s = session;
     void siMerge(repoRoot, s.branch).then(() => {
+      archiveCurrent(get, set, 'merged');
       void siDiscard(repoRoot, s.id, s.branch).then(() => get().reset()).catch(() => get().reset());
     }).catch((err) => {
       // Merge conflict (Rust returns Err containing "abortado"): keep the
@@ -184,6 +243,7 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     const { session, repoRoot } = get();
     if (!session) return;
     const s = session;
+    archiveCurrent(get, set, 'rejected');
     void siDiscard(repoRoot, s.id, s.branch).then(() => get().reset()).catch(() => get().reset());
   },
 
@@ -261,6 +321,20 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
         set({ error: String(err), phase: 'failed' });
       });
   },
+}), {
+  name: 'maestro.selfimprove',
+  // Persist the run + history, NOT the transient/action fields. (`reviewing` is
+  // re-derived; `newRef`/`iterFeedback` are input drafts; actions aren't data.)
+  partialize: (s) => ({
+    repoRoot: s.repoRoot, goal: s.goal, refs: s.refs,
+    session: s.session, agentId: s.agentId, phase: s.phase,
+    gate: s.gate, diff: s.diff, attempts: s.attempts,
+    error: s.error, runStart: s.runStart, review: s.review,
+    interrupted: s.interrupted, history: s.history,
+    refCounter: s.refCounter, lastGatedIdx: s.lastGatedIdx, runId: s.runId,
+  }),
+  // On app start, salvage a run whose agent died with the process.
+  onRehydrateStorage: () => (state) => { state?.reconcile(); },
 }));
 
 // Drive the gate-iterate loop from the GLOBAL event stream so it advances even
