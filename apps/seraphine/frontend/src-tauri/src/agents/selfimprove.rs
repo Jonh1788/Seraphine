@@ -13,7 +13,8 @@ fn git(repo_root: &str, args: &[&str]) -> Result<String, String> {
 pub fn slugify(goal: &str) -> String {
     let s: String = goal.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
     let s = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
-    s.chars().take(40).collect::<String>().trim_matches('-').to_string()
+    let out: String = s.chars().take(40).collect::<String>().trim_matches('-').to_string();
+    if out.is_empty() { "session".to_string() } else { out }
 }
 
 #[derive(Serialize, Clone)]
@@ -91,6 +92,9 @@ mod tests {
     fn slugify_is_kebab() {
         assert_eq!(slugify("Melhore o parser de SSH!"), "melhore-o-parser-de-ssh");
         assert_eq!(slugify("  a/b  c  "), "a-b-c");
+        assert_eq!(slugify("你好"), "session");
+        assert_eq!(slugify("   "), "session");
+        assert_eq!(slugify(""), "session");
     }
 
     #[test]
