@@ -1,5 +1,5 @@
 import './obsidian.css';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import { ArrowLeftIcon, SearchIcon } from '../icons/Icons';
@@ -90,8 +90,14 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
 
   // Run lifecycle
   const [running, setRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Aborts the in-flight NDJSON stream on unmount or when a new run starts, so
+  // navigating away from the Pesquisa tab doesn't leak a reader / setState on an
+  // unmounted component.
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   // Live progress
   const [subQuestions, setSubQuestions] = useState<string[]>([]);
@@ -133,6 +139,9 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Abort any in-flight stream when the view unmounts.
+  useEffect(() => () => streamAbortRef.current?.abort(), []);
 
   // Reset all live + report state for a fresh run.
   const resetLive = useCallback(() => {
@@ -189,10 +198,13 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
           break;
         case 'error':
           setError(e.message);
+          setRunning(false);
+          setCancelling(false);
           break;
         case 'done':
           setFinished(true);
           setRunning(false);
+          setCancelling(false);
           void refresh();
           break;
         default:
@@ -207,6 +219,11 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
     if (!q || running) return;
     resetLive();
     setRunning(true);
+    setCancelling(false);
+    // Tear down any prior stream before starting a fresh one.
+    streamAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    streamAbortRef.current = ctrl;
     try {
       const { id } = await startRun(q, mode);
       setActiveId(id);
@@ -216,6 +233,7 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
         () => {
           setRunning(false);
         },
+        ctrl.signal,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -225,12 +243,14 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
 
   const handleCancel = useCallback(async (): Promise<void> => {
     if (!activeId) return;
+    // Keep `running` true until the terminal `done` (status `cancelled`) arrives,
+    // so the Pesquisar button stays disabled and a second run can't start mid-drain.
+    setCancelling(true);
     try {
       await cancelRun(activeId);
     } catch {
       // ignore
     }
-    setRunning(false);
   }, [activeId]);
 
   // Load a past run read-only (no live stream).
@@ -472,8 +492,9 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
               type="button"
               className="research-view__secondary"
               onClick={() => void handleCancel()}
+              disabled={cancelling}
             >
-              Cancelar
+              {cancelling ? 'Cancelando...' : 'Cancelar'}
             </button>
           ) : null}
           <button

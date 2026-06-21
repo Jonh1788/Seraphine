@@ -97,8 +97,9 @@ export async function streamRun(
   id: string,
   onEvent: (e: ResearchEvent) => void,
   onClose?: () => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/deepsearch/${encodeURIComponent(id)}/stream`);
+  const res = await fetch(`${API_BASE}/deepsearch/${encodeURIComponent(id)}/stream`, { signal });
   const reader = res.body?.getReader();
   if (!reader) {
     onClose?.();
@@ -133,6 +134,10 @@ export async function streamRun(
     // Flush any decoder remainder + a final line lacking a trailing newline.
     buffer += decoder.decode();
     flushLine(buffer);
+  } catch (err) {
+    // An abort (unmount / new run) is intentional, not a user-facing error.
+    if ((err as { name?: string })?.name === 'AbortError' || signal?.aborted) return;
+    throw err;
   } finally {
     onClose?.();
   }
