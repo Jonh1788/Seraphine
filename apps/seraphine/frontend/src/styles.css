@@ -59,6 +59,8 @@
 
   /* Fonte */
   --font-sans: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --elev: var(--bg-2);
 
   /* Obsidian — on-accent contrast + compat aliases (G1).
      --accent-contrast: text/icon color on top of an --accent fill.
