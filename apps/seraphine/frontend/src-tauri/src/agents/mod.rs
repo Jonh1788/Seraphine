@@ -133,3 +133,13 @@ pub fn maestro_respond_permission(agent_id: String, request_id: String, allow: b
     let si = h.stdin.as_mut().ok_or("agent stdin closed")?;
     write_permission_response(si, &request_id, allow)
 }
+
+#[tauri::command]
+pub fn maestro_resume_session(app: AppHandle, session_id: String, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
+    spawn_inner(&app, &cwd, &goal, &permission_mode, &["--resume".into(), session_id])
+}
+
+#[tauri::command]
+pub fn maestro_fork_session(app: AppHandle, session_id: String, cwd: String, goal: String, permission_mode: String) -> Result<String, String> {
+    spawn_inner(&app, &cwd, &goal, &permission_mode, &["--resume".into(), session_id, "--fork-session".into()])
+}
