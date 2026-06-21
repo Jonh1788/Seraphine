@@ -32,6 +32,8 @@ interface InboxItem {
 interface UnifiedInboxViewProps {
   onBack: () => void;
   onNavigate: (view: string) => void;
+  /** Open the Gmail reader modal (emails have no dedicated nav view). */
+  onOpenEmail: () => void;
 }
 
 /** Human label for the per-row source badge chip. */
@@ -154,7 +156,7 @@ function sourceIcon(source: InboxSource): JSX.Element {
   );
 }
 
-export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps): JSX.Element {
+export function UnifiedInboxView({ onBack, onNavigate, onOpenEmail }: UnifiedInboxViewProps): JSX.Element {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
@@ -472,15 +474,20 @@ export function UnifiedInboxView({ onBack, onNavigate }: UnifiedInboxViewProps):
       nextSet.add(item.id);
       return nextSet;
     });
+    // Emails have no dedicated nav view — open the Gmail reader modal instead
+    // of falling back to the chat view.
+    if (item.kind === 'email') {
+      onOpenEmail();
+      return;
+    }
     onNavigate(
-      item.kind === 'email' ? 'chat'
-        : item.kind === 'memory' ? 'memory'
+      item.kind === 'memory' ? 'memory'
         : item.kind === 'insight' ? 'insights'
         : item.kind === 'finance' ? 'finance'
         : item.kind === 'work' ? 'trabalhos'
         : 'tasks',
     );
-  }, [onNavigate]);
+  }, [onNavigate, onOpenEmail]);
 
   const sourceFilters: Array<{ key: SourceFilter; label: string; dot?: string }> = [
     { key: 'all', label: 'Tudo' },

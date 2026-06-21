@@ -522,6 +522,7 @@ export function AppLayout(): JSX.Element {
                   <UnifiedInboxView
                     onBack={() => setActiveView('chat')}
                     onNavigate={(view) => setActiveView(view as ActiveView)}
+                    onOpenEmail={() => setInboxOpen(true)}
                   />
                 )}
                 {activeView === 'routines' && (

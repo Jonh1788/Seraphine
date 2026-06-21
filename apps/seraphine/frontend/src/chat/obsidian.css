@@ -162,10 +162,42 @@
   font-size: 14px;
   line-height: 1.6;
   color: var(--text);
+  /* No bubble box here, so don't let the inherited overflow-x:auto create a
+     scroll container that clips text on the edges — children (pre/table)
+     manage their own scroll. */
+  overflow-x: visible;
+  max-width: 100%;
 }
 
 .bubble--assistant .bubble__content strong {
   color: var(--accent);
+}
+
+/* Code in Seraphine's replies — readable chip / card, not a cramped
+   near-black (--bg-0) box. */
+.bubble--assistant .bubble__content code {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.88em;
+  color: var(--accent-hi);
+}
+.bubble--assistant .bubble__content pre {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin: 0.6em 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.bubble--assistant .bubble__content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-size: 0.86em;
 }
 
 /* Briefing keeps a subtle treatment but flat (no glass blur) */
