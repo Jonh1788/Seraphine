@@ -1,0 +1,1 @@
+export { ResearchView } from './ResearchView';
