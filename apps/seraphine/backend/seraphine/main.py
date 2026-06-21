@@ -236,6 +236,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Task service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Email urgency triage → WhatsApp push (all-Seraphine)
+    # ------------------------------------------------------------------
+    email_urgency_service = None
+    if google_client is not None:
+        try:
+            from seraphine.email_urgency import schema as email_urgency_schema
+            from seraphine.email_urgency.service import EmailUrgencyService
+
+            store.register_migrator("email_urgency", email_urgency_schema.migrate)
+            await store.ensure_schema()  # idempotent
+            email_urgency_service = EmailUrgencyService(
+                store=store,
+                google_client=google_client,
+                llm=llm,
+                whatsapp_client=whatsapp_client,
+                owner_chat_id=settings.owner_whatsapp_chat_id,
+                public_url=settings.app_public_url,
+                quiet_start=settings.email_urgency_quiet_start,
+                quiet_end=settings.email_urgency_quiet_end,
+            )
+            logger.info("Email urgency scanner wired")
+        except Exception as e:
+            logger.warning("Email urgency scanner failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Recurring tasks — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     recurring_service = None
@@ -794,6 +819,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.finance_service = finance_service
     app.state.task_service = task_service
     app.state.email_scanner = email_scanner
+    app.state.email_urgency_service = email_urgency_service
     app.state.reminder_scheduler = reminder_scheduler
     app.state.recurring_service = recurring_service
     app.state.routine_service = routine_service
@@ -982,6 +1008,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         notif_flush_task = asyncio.create_task(_notif_flush_loop())
 
     # ------------------------------------------------------------------
+    # Email urgency scan loop — every email_urgency_interval_s seconds.
+    # Lists new unread mail, classifies urgency, pushes WhatsApp on high.
+    # ------------------------------------------------------------------
+    email_urgency_task: asyncio.Task[None] | None = None
+    if settings.email_urgency_enabled and email_urgency_service is not None:
+        async def _email_urgency_loop() -> None:
+            interval = max(60, int(settings.email_urgency_interval_s))
+            while True:
+                try:
+                    pushed = await email_urgency_service.scan()
+                    if pushed:
+                        logger.info("email urgency: %d push(es) sent", pushed)
+                except Exception:
+                    logger.exception("email urgency loop iteration failed")
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+
+        email_urgency_task = asyncio.create_task(_email_urgency_loop())
+
+    # ------------------------------------------------------------------
     # Background insights refresh loop — every 6 hours.
     # Runs once at startup so /insights is warm on first request.
     # ------------------------------------------------------------------
@@ -1099,6 +1147,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             notif_flush_task.cancel()
             try:
                 await notif_flush_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if email_urgency_task is not None:
+            email_urgency_task.cancel()
+            try:
+                await email_urgency_task
             except (asyncio.CancelledError, Exception):
                 pass
         if insights_refresh_task is not None:
