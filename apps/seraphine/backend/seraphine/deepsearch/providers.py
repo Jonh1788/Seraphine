@@ -18,6 +18,51 @@ def _or_headers(api_key: str) -> dict[str, str]:
     }
 
 
+def _parse_json_object(raw: str) -> dict:
+    """Best-effort parse of a JSON object out of an LLM completion.
+
+    Tries a strict parse of the whole string first, then a balanced-brace scan
+    from the first ``{``. Never raises — returns ``{}`` on any failure.
+    """
+    if not raw:
+        return {}
+    text = raw.strip()
+    try:
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else {}
+    except (json.JSONDecodeError, ValueError):
+        pass
+    start = text.find("{")
+    if start == -1:
+        return {}
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(text[start : i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    return {}
+                return obj if isinstance(obj, dict) else {}
+    return {}
+
+
 class OpenRouterClient:
     def __init__(self, api_key: str, *, timeout: float = 120.0) -> None:
         self.api_key = api_key
@@ -30,17 +75,21 @@ class OpenRouterClient:
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        response_format: dict | None = None,
     ) -> str:
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format is not None:
+            body["response_format"] = response_format
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(
                 f"{OPENROUTER_BASE}/chat/completions",
                 headers=_or_headers(self.api_key),
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
+                json=body,
             )
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"] or ""
@@ -71,11 +120,24 @@ class OpenRouterClient:
                     if not line or not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
-                    if not data or data == "[DONE]" or not data.startswith("{"):
+                    if not data or data == "[DONE]":
                         continue
-                    delta = json.loads(data)["choices"][0].get("delta", {})
-                    if delta.get("content"):
-                        yield delta["content"]
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        # Partial / non-JSON frame — skip, keep the stream alive.
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        # Usage-only / empty-choices chunk — nothing to yield.
+                        continue
+                    try:
+                        delta = choices[0].get("delta") or {}
+                    except (IndexError, KeyError, AttributeError):
+                        continue
+                    content = delta.get("content")
+                    if content:
+                        yield content
 
     async def list_models(self) -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -114,23 +176,24 @@ class RoleLLM:
 
     async def complete_json(self, *, system: str, user: str, tool: dict) -> dict:
         if self.provider == "openrouter":
-            # ask for raw JSON in the prompt; parse defensively
-            import json
-            import re
-
-            raw = await self._or.complete(
-                [
-                    {
-                        "role": "system",
-                        "content": system + "\nResponda SOMENTE com JSON válido.",
-                    },
-                    {"role": "user", "content": user},
-                ],
-                model=self.model,
-                max_tokens=1024,
-            )
-            m = re.search(r"\{.*\}", raw, re.S)
-            return json.loads(m.group(0)) if m else {}
+            # Ask for raw JSON in the prompt (+ request the json_object response
+            # format), then parse defensively — never raise on a malformed reply.
+            try:
+                raw = await self._or.complete(
+                    [
+                        {
+                            "role": "system",
+                            "content": system + "\nResponda SOMENTE com JSON válido.",
+                        },
+                        {"role": "user", "content": user},
+                    ],
+                    model=self.model,
+                    max_tokens=1024,
+                    response_format={"type": "json_object"},
+                )
+            except Exception:
+                return {}
+            return _parse_json_object(raw)
         return await self._app_llm.tool_call_json(
             system=system, user=user, tool=tool, model=self.model
         )

@@ -48,3 +48,38 @@ async def test_resolve_openrouter_with_key():
     )
     assert rl.provider == "openrouter"
     assert rl.model == "openai/gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_openrouter_stream_parses_and_tolerates_bad_frames():
+    """The SSE stream must skip keepalive comments, usage-only (empty-choices)
+    chunks and partial/non-JSON frames without tearing down the whole stream."""
+    body = "\n".join(
+        [
+            ": keepalive",  # SSE comment — ignored (not a data: line)
+            'data: {"choices":[{"delta":{"content":"he"}}]}',
+            'data: {"choices":[]}',  # usage-only chunk — no choices, skipped
+            "data: {not valid json",  # partial / malformed — skipped
+            'data: {"choices":[{"delta":{"content":"llo"}}]}',
+            "data: [DONE]",
+            "",
+        ]
+    )
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body.encode("utf-8"),
+        )
+    )
+    c = OpenRouterClient(api_key="sk-or-x")
+    out = "".join(
+        [
+            chunk
+            async for chunk in c.stream(
+                [{"role": "user", "content": "yo"}], model="openai/gpt-4o-mini"
+            )
+        ]
+    )
+    assert out == "hello"
