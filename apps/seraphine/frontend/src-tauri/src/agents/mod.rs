@@ -80,3 +80,14 @@ pub fn maestro_stop_agent(agent_id: String) -> Result<(), String> {
     if let Some(mut h) = registry().lock().unwrap().remove(&agent_id) { let _ = h.child.kill(); }
     Ok(())
 }
+
+#[tauri::command]
+pub fn maestro_send_to_agent(agent_id: String, text: String) -> Result<(), String> {
+    let mut reg = registry().lock().unwrap();
+    let h = reg.get_mut(&agent_id).ok_or("unknown agent")?;
+    let si = h.stdin.as_mut().ok_or("agent stdin closed")?;
+    let msg = serde_json::json!({"type":"user","message":{"role":"user","content":text}});
+    writeln!(si, "{}", msg).map_err(|e| format!("write failed: {e}"))?;
+    si.flush().map_err(|e| format!("flush failed: {e}"))?;
+    Ok(())
+}
