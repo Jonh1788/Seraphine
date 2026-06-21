@@ -2,37 +2,338 @@
 @keyframes barFlow { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
 @keyframes caretBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 
-.maestro__body { flex-direction: row; gap: 16px; min-height: 0; }
-.maestro__list { width: 320px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-.maestro__detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.maestro__new { display: flex; flex-direction: column; gap: 8px; }
-.maestro__input { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; }
-.maestro__row-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; gap: 8px; }
-.maestro__cwd { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.maestro__sid { font-size: 11px; color: var(--text-faint); font-family: "SF Mono", Menlo, monospace; flex: none; }
-.maestro__handover, .maestro__handover-actions, .maestro__perm-actions, .maestro__composer { display: flex; gap: 8px; margin-top: 8px; }
-.maestro__handover { flex-direction: column; }
-.maestro__detail-head, .maestro__perm { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.maestro__perm { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--text); }
+/* =====================================================================
+   Maestro — Obsidian reskin (list, detail, humanized timeline).
+   Maps onto the existing obs-screen chrome; only .maestro__* + .mst-tl__*
+   live here. Semantic colors as literals; core palette via tokens.
+   ===================================================================== */
+
+/* ---- Tabs (accent-underline) ---- */
+.maestro__tabs {
+  display: flex; gap: 4px; flex: none;
+  padding: 4px 32px 0; margin-top: -4px;
+  border-bottom: 1px solid var(--border);
+}
+.maestro__tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: none; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--dim);
+  padding: 9px 4px; margin: 0 10px -1px 0;
+  border-bottom: 2px solid transparent;
+}
+.maestro__tab:first-child { margin-left: 0; }
+.maestro__tab:hover { color: var(--text); }
+.maestro__tab--active { color: var(--accent); font-weight: 700; border-bottom-color: var(--accent); }
+.maestro__tab svg { stroke: currentColor; }
+
+/* ---- Body: two columns ---- */
+.maestro__body { flex-direction: row; gap: 16px; min-height: 0; padding-top: 12px; }
+.maestro__list { width: 316px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-bottom: 4px; }
+
+/* ---- Search field ---- */
+.maestro__search {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 11px; padding: 9px 12px; flex: none;
+}
+.maestro__search svg { stroke: var(--faint); flex: none; }
+.maestro__search-input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 13px; color: var(--text); font-family: inherit;
+}
+.maestro__search-input::placeholder { color: var(--faint); }
+
+/* ---- New-agent card ---- */
+.maestro__new {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 16px; flex: none;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.maestro__new-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.maestro__new-chip {
+  width: 26px; height: 26px; flex: none; border-radius: 8px;
+  background: var(--accent-soft); display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.maestro__new-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.maestro__field { display: flex; flex-direction: column; }
+.maestro__label { font-size: 11px; font-weight: 600; color: var(--faint); display: block; margin-bottom: 5px; letter-spacing: 0.02em; }
+.maestro__inputwrap {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: 9px; padding: 9px 11px;
+}
+.maestro__inputwrap-icon { color: var(--faint); flex: none; display: flex; }
+.maestro__field-input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 13px; color: var(--text); font-family: inherit;
+}
+.maestro__field-input::placeholder { color: var(--faint); }
+.maestro__field-input--mono { font-family: var(--font-mono); }
+.maestro__textarea {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
+  padding: 10px 11px; min-height: 62px; resize: vertical;
+  font-size: 13px; color: var(--text); line-height: 1.5; font-family: inherit; outline: none;
+}
+.maestro__textarea::placeholder { color: var(--faint); }
+.maestro__textarea:focus, .maestro__inputwrap:focus-within, .maestro__search:focus-within { border-color: var(--accent); }
+
+/* ---- Segmented radio (permissions) ---- */
+.maestro__seg { display: flex; flex-direction: column; gap: 5px; }
+.maestro__seg-opt {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 9px;
+  background: transparent; border: 1px solid var(--border); cursor: pointer;
+  font-size: 12px; color: var(--text); text-align: left; font-family: inherit;
+}
+.maestro__seg-opt .maestro__radio {
+  width: 15px; height: 15px; border-radius: 50%; flex: none;
+  border: 1.5px solid var(--border-strong); box-sizing: border-box;
+}
+.maestro__seg-opt--on { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
+.maestro__seg-opt--on .maestro__radio { border: 4px solid var(--accent); background: var(--bg-0); }
+
+/* ---- Host select (mockup-silent; styled to match) ---- */
+.maestro__select {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
+  padding: 9px 11px; font-size: 13px; color: var(--text); font-family: inherit; outline: none;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+}
+.maestro__select:focus { border-color: var(--accent); }
+.maestro__hoststatus { font-size: 11px; padding: 5px 9px; border-radius: 7px; margin-top: 6px; font-family: var(--font-mono); }
+.maestro__hoststatus--ok { color: #4ade80; background: rgba(74, 222, 128, 0.1); }
+.maestro__hoststatus--err { color: #ef6b6b; background: rgba(239, 107, 107, 0.1); }
+
+/* ---- Iniciar agente ---- */
+.maestro__start {
+  margin-top: 4px; border: none; background: var(--accent); color: var(--accent-contrast);
+  font-size: 13px; font-weight: 700; padding: 11px; border-radius: 11px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-family: inherit;
+}
+.maestro__start:hover:not(:disabled) { background: var(--accent-hi); }
+.maestro__start:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- Session card ---- */
+.maestro__row {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px; cursor: pointer; position: relative;
+}
+.maestro__row-status { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.maestro__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.maestro__statuslabel { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; color: var(--faint); }
+.maestro__row-repo { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.maestro__row-repo svg { stroke: var(--dim); flex: none; }
+.maestro__cwd { font-size: 13px; color: var(--text); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.maestro__row-meta { display: flex; align-items: center; gap: 8px; margin-top: 9px; font-size: 11px; }
+.maestro__sid { font-size: 11px; color: var(--faint); font-family: var(--font-mono); flex: none; }
+.maestro__row-warn { display: inline-flex; align-items: center; color: #ffa726; flex: none; }
+.maestro__row-warn svg { stroke: currentColor; }
+.maestro__handover-toggle {
+  margin-left: auto; font-size: 11px; font-weight: 600; color: var(--dim);
+  background: transparent; border: none; cursor: pointer; padding: 0; font-family: inherit;
+}
+.maestro__handover-toggle:hover { color: var(--accent); }
+
+/* status variants */
+.maestro__row--running .maestro__dot { background: var(--accent); animation: statusBlink 1.4s ease-in-out infinite; }
+.maestro__row--running .maestro__statuslabel { color: var(--accent); }
+.maestro__row--waiting { border-color: rgba(255, 167, 38, 0.4); }
+.maestro__row--waiting .maestro__dot { background: #ffa726; animation: statusBlink 1.4s ease-in-out infinite; }
+.maestro__row--waiting .maestro__statuslabel { color: #ffa726; }
+.maestro__row--done { opacity: 0.86; }
+.maestro__row--done .maestro__dot { background: #4ade80; }
+.maestro__row--done .maestro__statuslabel { color: #4ade80; }
+.maestro__row--idle { opacity: 0.7; }
+.maestro__row--idle .maestro__cwd { color: var(--dim); }
+.maestro__row--selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* progress bar (RODANDO) */
+.maestro__bar { margin-top: 10px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.06); overflow: hidden; position: relative; }
+.maestro__bar-fill { position: absolute; top: 0; left: 0; height: 100%; width: 25%; background: var(--accent); border-radius: 2px; animation: barFlow 1.6s ease-in-out infinite; }
+
+/* badges */
+.maestro__badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 7px; flex: none; margin-left: auto; }
+.maestro__badge--owned { color: var(--accent); background: var(--accent-soft); }
+.maestro__badge--observed { color: var(--dim); background: rgba(255, 255, 255, 0.06); }
+.maestro__badge--host { color: var(--dim); background: rgba(255, 255, 255, 0.06); margin-left: 0; }
+.maestro__activity { font-size: 11px; color: var(--dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* handover (assume) */
+.maestro__handover { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.maestro__handover-input {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
+  padding: 8px 11px; font-size: 13px; color: var(--text); font-family: inherit; outline: none;
+}
+.maestro__handover-input::placeholder { color: var(--faint); }
+.maestro__handover-input:focus { border-color: var(--accent); }
+.maestro__handover-actions { display: flex; gap: 8px; }
+
+/* ---- Detail panel ---- */
+.maestro__detail {
+  flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;
+}
+.maestro__detail-head { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--border); flex: none; }
+.maestro__detail-headmain { min-width: 0; flex: 1; }
+.maestro__detail-titlerow { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.maestro__detail-title { font-size: 15px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.maestro__detail-status {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: var(--accent-soft); padding: 3px 9px; border-radius: 8px;
+}
+.maestro__detail-statusdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: statusBlink 1.4s ease-in-out infinite; }
+.maestro__detail-meta { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+.maestro__detail-repo { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.maestro__detail-repo svg { stroke: var(--dim); flex: none; }
+.maestro__detail-hash { font-size: 11px; color: var(--faint); font-family: var(--font-mono); flex: none; }
+.maestro__detail-clock { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); flex: none; }
+.maestro__detail-clock svg { stroke: var(--dim); }
+.maestro__detail-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+.maestro__modechip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+  color: var(--dim); background: var(--elev); border: 1px solid var(--border);
+  padding: 6px 11px; border-radius: 9px;
+}
+.maestro__modechip svg { stroke: currentColor; }
+.maestro__iconbtn {
+  width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border);
+  background: transparent; color: var(--dim); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.maestro__iconbtn:hover { border-color: var(--border-strong); color: var(--text); }
+.maestro__iconbtn--danger { border-color: rgba(239, 107, 107, 0.35); background: rgba(239, 107, 107, 0.1); color: #ef6b6b; }
+.maestro__iconbtn--danger:hover { border-color: rgba(239, 107, 107, 0.55); color: #ef6b6b; }
+
+/* timeline body (scrolls) */
+.maestro__timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; }
+
+/* ---- Pending-permission card (amber) ---- */
+.maestro__perm {
+  margin: 0 20px 2px;
+  background: linear-gradient(160deg, rgba(255, 167, 38, 0.12), rgba(255, 167, 38, 0.04));
+  border: 1px solid rgba(255, 167, 38, 0.32); border-radius: 14px; padding: 16px; flex: none;
+}
+.maestro__perm-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.maestro__perm-chip {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; background: rgba(255, 167, 38, 0.18);
+  display: flex; align-items: center; justify-content: center; color: #ffa726;
+}
+.maestro__perm-title { font-size: 13px; font-weight: 700; color: #ffce8a; }
+.maestro__perm-tag { margin-left: auto; font-size: 11px; color: var(--faint); }
+.maestro__perm-cmd {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
+  padding: 11px 13px; font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.maestro__perm-prompt { color: var(--faint); }
+.maestro__perm-actions { display: flex; align-items: center; gap: 10px; margin-top: 13px; }
+.maestro__perm-approve {
+  border: none; background: #4ade80; color: #0d0d11; font-size: 13px; font-weight: 700;
+  padding: 9px 18px; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px; font-family: inherit;
+}
+.maestro__perm-approve:hover { background: #5fe592; }
+.maestro__perm-deny {
+  border: 1px solid var(--border-strong); background: transparent; color: var(--text);
+  font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+}
+.maestro__perm-deny:hover { background: rgba(255, 255, 255, 0.04); }
+.maestro__perm-remember {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--dim); cursor: pointer;
+}
+.maestro__perm-box { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--border-strong); flex: none; box-sizing: border-box; }
+
+/* ---- Composer ---- */
+.maestro__composer { padding: 14px 20px 18px; flex: none; border-top: 1px solid var(--border); }
+.maestro__composer-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: 13px; padding: 8px 8px 8px 15px;
+}
+.maestro__composer-bar:focus-within { border-color: var(--accent); }
+.maestro__composer-input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 14px; color: var(--text); font-family: inherit;
+}
+.maestro__composer-input::placeholder { color: var(--faint); }
+.maestro__composer-send {
+  width: 36px; height: 36px; border-radius: 10px; border: none; flex: none;
+  background: var(--accent); color: var(--accent-contrast); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.maestro__composer-send:hover:not(:disabled) { background: var(--accent-hi); }
+.maestro__composer-send:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- Empty state ---- */
+.maestro__empty {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; padding: 40px;
+}
+.maestro__empty-medallion {
+  width: 88px; height: 88px; border-radius: 24px; background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 22px; color: var(--accent);
+}
+.maestro__empty-title { font-size: 19px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.maestro__empty-body { font-size: 14px; color: var(--dim); margin-top: 8px; line-height: 1.6; max-width: 380px; }
+.maestro__empty-actions { display: flex; gap: 10px; margin-top: 22px; }
+
+/* =====================================================================
+   Humanized timeline (mst-tl-*) — shared Timeline.tsx component
+   ===================================================================== */
+.mst-tl { display: flex; flex-direction: column; gap: 14px; }
+.mst-tl--empty { color: var(--faint); font-size: 13px; }
+
+/* init separator */
+.mst-tl__sep { display: flex; align-items: center; gap: 10px; }
+.mst-tl__sep-line { flex: 1; height: 1px; background: var(--border); }
+.mst-tl__sep-label { font-size: 10px; color: var(--faint); font-weight: 700; letter-spacing: 0.08em; }
+
+/* result chip */
+.mst-tl__result { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; font-size: 12px; font-weight: 600; color: #4ade80; }
+
+/* assistant message */
+.mst-tl__msg { display: flex; gap: 11px; align-items: flex-start; }
+.mst-tl__avatar {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center;
+}
+.mst-tl__msg-body { flex: 1; min-width: 0; }
+.mst-tl__msg-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.mst-tl__msg-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.mst-tl__msg-time { font-size: 11px; color: var(--faint); }
+.mst-tl__msg-text { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+
+/* tool rows */
+.mst-tl__tools { display: flex; flex-direction: column; gap: 7px; padding-left: 37px; margin-top: 7px; }
+.mst-tl__tool {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--elev); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px;
+}
+.mst-tl__tool-icon { width: 22px; height: 22px; flex: none; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.mst-tl__verb { font-size: 12px; font-weight: 600; color: var(--text); flex: none; }
+.mst-tl__target { font-size: 12px; color: var(--dim); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.mst-tl__marker { margin-left: auto; flex: none; display: inline-flex; align-items: center; }
+.mst-tl__diff { margin-left: auto; flex: none; font-size: 11px; color: #4ade80; font-family: var(--font-mono); }
+.mst-tl__caret { margin-left: auto; flex: none; display: inline-block; width: 7px; height: 13px; background: var(--accent); animation: caretBlink 1s step-end infinite; }
+
+/* =====================================================================
+   Shared with SelfImprove ("Melhorar Seraphine") — generic input + raw
+   event stream. Kept (restyled to tokens) so the Improve tab is intact.
+   ===================================================================== */
+.maestro__input {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
+  padding: 9px 11px; color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+}
+.maestro__input::placeholder { color: var(--faint); }
+.maestro__input:focus { border-color: var(--accent); }
+.maestro__input:disabled { opacity: 0.6; }
 .maestro__stream { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .maestro__evt { border-left: 2px solid var(--border); padding-left: 8px; }
-.maestro__evt--permission_request { border-left-color: var(--warning); }
-.maestro__evt-kind { font-size: 10px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
-.maestro__evt-raw { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; white-space: pre-wrap; word-break: break-all; font-family: "SF Mono", Menlo, monospace; }
-.maestro__composer { margin-top: auto; }
-.maestro__composer .maestro__input { flex: 1; }
-.maestro__empty { color: var(--text-dim); font-size: 13px; margin: auto; }
-
-/* §54 — owned/observed badge + last-activity line on session rows */
-.maestro__badge { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 6px; flex: none; }
-.maestro__badge--owned { color: var(--accent); background: var(--accent-soft); }
-.maestro__badge--observed { color: var(--text-dim); background: rgba(255, 255, 255, 0.06); }
-.maestro__activity { font-size: 11px; color: var(--text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.maestro__row-head { gap: 8px; }
-.maestro__hoststatus { font-size: 11px; padding: 4px 8px; border-radius: 6px; margin-top: 4px; }
-.maestro__hoststatus--ok { color: var(--user); background: rgba(74,222,128,0.10); }
-.maestro__hoststatus--err { color: var(--danger); background: rgba(239,68,68,0.10); }
-.maestro__badge--host { color: var(--text-dim); background: rgba(255,255,255,0.06); }
+.maestro__evt--permission_request { border-left-color: #ffa726; }
+.maestro__evt-kind { font-size: 10px; font-weight: 700; color: var(--faint); text-transform: uppercase; }
+.maestro__evt-raw { font-size: 11px; color: var(--dim); margin: 2px 0 0; white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }
 
 /* Phase 3 — "Melhorar a Seraphine" panel + gate-iterate loop */
 .si-tabs { display: flex; gap: 6px; }
