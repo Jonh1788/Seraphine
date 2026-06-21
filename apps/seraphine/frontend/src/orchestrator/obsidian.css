@@ -340,6 +340,10 @@
 .si-stepper__seg { display: flex; align-items: center; flex: none; }
 .si-stepper__seg:not(:last-child) { flex: 1; }
 .si-step { display: flex; align-items: center; gap: 9px; flex: none; }
+.si-step--nav { cursor: pointer; border-radius: 9px; padding: 3px 8px; margin: -3px -8px; transition: background 140ms ease; }
+.si-step--nav:hover { background: rgba(255, 255, 255, 0.05); }
+.si-step--viewing { background: var(--accent-soft); }
+.si-step--viewing .si-step__label { color: var(--accent); }
 .si-step__circle { width: 26px; height: 26px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
 .si-step__circle--completed { background: #4ade80; }
 .si-step__circle--active { background: var(--accent-soft); border: 2px solid var(--accent); animation: siRingPulse 1.8s ease-in-out infinite; }
@@ -475,6 +479,8 @@
 
 /* ---- Live body (shared Timeline) + progress bar (§8.2) ---- */
 .si-livebody { flex: 1; overflow-y: auto; padding: 18px 20px; }
+.si-nochanges { margin-bottom: 14px; padding: 11px 13px; border-radius: 10px; background: rgba(255, 167, 38, 0.1); border: 1px solid rgba(255, 167, 38, 0.28); color: #ffce8a; font-size: 12px; line-height: 1.5; }
+.si-nochanges strong { color: var(--text); }
 .si-progress { flex: none; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
 .si-progress__bar { position: absolute; top: 0; left: 0; height: 100%; width: 25%; background: var(--accent); border-radius: 2px; animation: barFlow 1.6s ease-in-out infinite; }
 

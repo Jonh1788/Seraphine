@@ -91,7 +91,18 @@ function stepStates(phase: Phase): StepState[] {
   }
 }
 
-function Stepper({ phase }: { phase: Phase }): JSX.Element {
+/** Which content the main area is showing. Agente = the agent conversation
+ *  timeline; revisao = the gate result + diff + AI review. */
+type MainView = 'agente' | 'revisao' | 'empty';
+
+/** Step index → the main view it navigates to (null = not navigable). */
+function stepTarget(i: number): Exclude<MainView, 'empty'> | null {
+  if (i === 2) return 'agente';
+  if (i === 3 || i === 4) return 'revisao';
+  return null;
+}
+
+function Stepper({ phase, mainView, onNav }: { phase: Phase; mainView: MainView; onNav: (v: Exclude<MainView, 'empty'>) => void }): JSX.Element {
   const states = stepStates(phase);
   return (
     <div className="si-stepper">
@@ -104,9 +115,16 @@ function Stepper({ phase }: { phase: Phase }): JSX.Element {
           else if (st === 'completed' && (next === 'active' || next === 'fail')) connector = 'si-step-conn--grad';
           else connector = 'si-step-conn--pending';
         }
+        const target = stepTarget(i);
+        const reached = st === 'completed' || st === 'active' || st === 'fail';
+        const clickable = target !== null && reached;
+        const viewing = target !== null && target === mainView;
         return (
           <div className="si-stepper__seg" key={label}>
-            <div className="si-step">
+            <div
+              className={`si-step${clickable ? ' si-step--nav' : ''}${viewing ? ' si-step--viewing' : ''}`}
+              {...(clickable ? { role: 'button' as const, tabIndex: 0, title: `Ver ${label}`, onClick: () => onNav(target) } : {})}
+            >
               <span className={`si-step__circle si-step__circle--${st}`}>
                 {st === 'completed' && <IconCheck size={14} stroke="#0d0d11" sw={2.4} />}
                 {st === 'fail' && <IconCross />}
@@ -160,6 +178,10 @@ export function SelfImprove(): JSX.Element {
 
   const events = useAgentStream();
   const [, setTick] = useState(0); // drives the elapsed-minutes re-render
+  // Lets the user click the stepper to switch the main area between the agent
+  // conversation and the gate/diff/review (null = auto from phase). Reset on a
+  // new run so it doesn't leak across sessions.
+  const [navView, setNavView] = useState<Exclude<MainView, 'empty'> | null>(null);
 
   const agentEvents = useMemo(() => events.filter((e) => e.agent_id === agentId), [events, agentId]);
 
@@ -178,6 +200,18 @@ export function SelfImprove(): JSX.Element {
   const showSummary = phase === 'working' || phase === 'gating' || phase === 'ready';
   const live = phase === 'working' || phase === 'gating';
 
+  // Reset the manual view override whenever the run leaves the review state
+  // (e.g. a new run starts or it iterates back to working).
+  useEffect(() => { if (!showActions) setNavView(null); }, [showActions]);
+
+  // What the main area shows. In the review state, honor the user's stepper
+  // click; otherwise default to the diff — but when the agent made NO changes,
+  // default to the conversation so its explanation isn't hidden behind an empty
+  // diff. While live, always the conversation.
+  const mainView: MainView = showActions
+    ? (navView ?? (diff.length === 0 ? 'agente' : 'revisao'))
+    : agentId ? 'agente' : 'empty';
+
   // Diff totals (sum of parsed adds/removes across files).
   const diffTotals = useMemo(() => {
     let added = 0; let removed = 0;
@@ -190,7 +224,7 @@ export function SelfImprove(): JSX.Element {
 
   return (
     <div className="si-root">
-      <Stepper phase={phase} />
+      <Stepper phase={phase} mainView={mainView} onNav={setNavView} />
 
       <div className="si-content">
         {/* ---- Left column ---- */}
@@ -336,7 +370,7 @@ export function SelfImprove(): JSX.Element {
 
         {/* ---- Main area ---- */}
         <section className="si-main">
-          {showActions ? (
+          {mainView === 'revisao' ? (
             <>
               <div className="si-diffhead">
                 <span className="si-diffhead__title">Mudanças</span>
@@ -412,11 +446,11 @@ export function SelfImprove(): JSX.Element {
 
               <div className="si-actionbar">
                 <div className="si-actionbar__row">
-                  {phase === 'ready' && (
+                  {phase === 'ready' && diff.length > 0 && (
                     <button type="button" className="si-btn si-btn--merge" onClick={approve}><IconMerge />Aprovar &amp; mesclar</button>
                   )}
-                  <button type="button" className="si-btn si-btn--reject" onClick={reject}><IconTrash />Rejeitar</button>
-                  {phase === 'ready' && branch && (
+                  <button type="button" className="si-btn si-btn--reject" onClick={reject}><IconTrash />{diff.length === 0 ? 'Encerrar' : 'Rejeitar'}</button>
+                  {phase === 'ready' && diff.length > 0 && branch && (
                     <span className="si-actionbar__legend">aprovar funde <code className="si-mono">{branch}</code> → <code className="si-mono">main</code></span>
                   )}
                 </div>
@@ -435,21 +469,44 @@ export function SelfImprove(): JSX.Element {
                 )}
               </div>
             </>
-          ) : agentId ? (
+          ) : mainView === 'agente' ? (
             <>
               <div className="si-livehead">
                 <span className="si-livehead__status">
-                  <span className="si-spinner" aria-hidden />
-                  {phase === 'gating' ? 'Rodando o gate (build + testes)…' : 'Agente trabalhando…'}
-                  {phase === 'working' && attempts > 0 && <span className="si-livehead__try"> (tentativa {attempts + 1})</span>}
+                  {live && <span className="si-spinner" aria-hidden />}
+                  {live
+                    ? (phase === 'gating' ? 'Rodando o gate (build + testes)…' : 'Agente trabalhando…')
+                    : 'Conversa do agente'}
+                  {live && phase === 'working' && attempts > 0 && <span className="si-livehead__try"> (tentativa {attempts + 1})</span>}
                 </span>
                 {branch && <span className="si-livehead__branch"><IconBranch size={11} /><code className="si-mono">{branch}</code></span>}
                 <span className="si-livehead__seal"><IconShield size={11} stroke="currentColor" />sandbox</span>
               </div>
               <div className="si-livebody">
+                {showActions && diff.length === 0 && (
+                  <div className="si-nochanges">O agente não fez mudanças no código — leia a conclusão dele abaixo. Use <strong>Iterar</strong> pra pedir que implemente, ou <strong>Encerrar</strong>.</div>
+                )}
                 <Timeline events={agentEvents} sepLabel="WORKTREE CRIADO" />
               </div>
               {live && <div className="si-progress"><span className="si-progress__bar" /></div>}
+              {showActions && (
+                <div className="si-actionbar">
+                  <div className="si-actionbar__row">
+                    <button type="button" className="si-btn si-btn--reject" onClick={reject}><IconTrash />{diff.length === 0 ? 'Encerrar' : 'Rejeitar'}</button>
+                  </div>
+                  <div className="si-iterate">
+                    <span className="si-iterate__icon"><IconChat /></span>
+                    <input
+                      className="si-iterate__input"
+                      placeholder="Pedir que implemente, ou um ajuste… (Iterar)"
+                      value={iterFeedback}
+                      onChange={(e) => setIterFeedback(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && iterFeedback.trim()) { e.preventDefault(); iterate(); } }}
+                    />
+                    <button type="button" className="si-iterate__btn" disabled={!iterFeedback.trim()} onClick={iterate}>Iterar</button>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="si-mainempty">

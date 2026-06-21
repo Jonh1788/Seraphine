@@ -212,40 +212,54 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     const s = session;
     const aid = agentId;
     const myRun = runId;
-    // Commit the agent's (uncommitted) work in the worktree, THEN read the diff —
-    // without the commit, `git diff --stat main...branch` is empty and a merge
-    // would bring nothing, so the review screen shows nothing to approve.
-    const finalize = (next: Phase): void => {
-      void siCommit(repoRoot, s.id, `self-improve: ${goal.slice(0, 72)}`)
-        .then(() => siDiffstat(repoRoot, s.branch))
-        .then((d) => {
-          if (get().runId !== myRun) return;
-          set({ diff: d });
-          // Auto-run the AI review so it's already there below the diff.
-          if (d.length) get().runReview();
-        })
-        .catch(() => {});
-      set({ phase: next });
+
+    // Run the gate on the committed changes, then land in review (AI review
+    // auto-run). Used once there ARE changes to gate.
+    const gateThenReview = (): void => {
+      void siGate(s.path, GATE).then((g) => {
+        if (get().runId !== myRun) return; // a reset/new-run happened mid-gate; drop this stale result
+        set({ gate: g });
+        if (g.ok) {
+          set({ phase: 'ready' });
+          get().runReview();
+        } else if (attempts < MAX_ATTEMPTS) {
+          const last = g.steps.at(-1);
+          const reason = last?.timed_out
+            ? `O gate foi interrompido por tempo esgotado na etapa: ${last?.cmd}\nO comando travou (loop infinito, teste que não retorna, ou build pendurado).`
+            : `O gate falhou na etapa: ${last?.cmd}`;
+          void sendToAgent(aid, `${reason}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
+          set({ attempts: attempts + 1, phase: 'working' });
+        } else {
+          set({ phase: 'failed' });
+          get().runReview();
+        }
+      }).catch((err) => {
+        if (get().runId !== myRun) return; // stale: don't surface a dropped run's gate error
+        set({ error: String(err), phase: 'failed' });
+      });
     };
-    void siGate(s.path, GATE).then((g) => {
-      if (get().runId !== myRun) return; // a reset/new-run happened mid-gate; drop this stale result
-      set({ gate: g });
-      if (g.ok) {
-        finalize('ready');
-      } else if (attempts < MAX_ATTEMPTS) {
-        const last = g.steps.at(-1);
-        const reason = last?.timed_out
-          ? `O gate foi interrompido por tempo esgotado na etapa: ${last?.cmd}\nO comando travou (loop infinito, teste que não retorna, ou build pendurado).`
-          : `O gate falhou na etapa: ${last?.cmd}`;
-        void sendToAgent(aid, `${reason}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
-        set({ attempts: attempts + 1, phase: 'working' });
-      } else {
-        finalize('failed');
-      }
-    }).catch((err) => {
-      if (get().runId !== myRun) return; // stale: don't surface a dropped run's gate error
-      set({ error: String(err), phase: 'failed' });
-    });
+
+    // Commit the agent's (uncommitted) work FIRST — without it `git diff
+    // main...branch` is empty and a merge brings nothing. If the agent changed
+    // NOTHING, skip the gate entirely (nothing to build/test or merge) and land
+    // in review with an empty diff; the UI surfaces the agent's conversation
+    // instead. This also stops the gate from re-running every idle turn when the
+    // agent decides not to implement.
+    void siCommit(repoRoot, s.id, `self-improve: ${goal.slice(0, 72)}`)
+      .then(() => siDiffstat(repoRoot, s.branch))
+      .then((d) => {
+        if (get().runId !== myRun) return;
+        set({ diff: d });
+        if (d.length === 0) {
+          set({ gate: null, phase: 'ready' });
+        } else {
+          gateThenReview();
+        }
+      })
+      .catch((err) => {
+        if (get().runId !== myRun) return;
+        set({ error: String(err), phase: 'failed' });
+      });
   },
 }));
 
