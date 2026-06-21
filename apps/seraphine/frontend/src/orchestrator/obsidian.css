@@ -29,3 +29,37 @@
 .maestro__hoststatus--ok { color: var(--user); background: rgba(74,222,128,0.10); }
 .maestro__hoststatus--err { color: var(--danger); background: rgba(239,68,68,0.10); }
 .maestro__badge--host { color: var(--text-dim); background: rgba(255,255,255,0.06); }
+
+/* Phase 3 — "Melhorar a Seraphine" panel + gate-iterate loop */
+.si-tabs { display: flex; gap: 6px; }
+.si-tabs__btn--active { color: var(--accent); background: var(--accent-soft); }
+.si-panel { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; }
+.si-form { display: flex; flex-direction: column; gap: 8px; }
+.si-label { font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.si-textarea { resize: vertical; min-height: 64px; font-family: inherit; line-height: 1.5; }
+.si-refs { display: flex; flex-direction: column; gap: 6px; }
+.si-refs__row { display: flex; gap: 8px; align-items: center; }
+.si-refs__url { flex: 1; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SF Mono", Menlo, monospace; }
+.si-refs__input { flex: 1; }
+.si-phase { font-size: 13px; font-weight: 600; color: var(--text-dim); padding: 8px 12px; border-radius: 8px; background: var(--bg-2); }
+.si-phase--working, .si-phase--gating { color: var(--accent); background: var(--accent-soft); }
+.si-phase--ready { color: var(--user); background: rgba(74,222,128,0.10); }
+.si-phase--failed { color: var(--danger); background: rgba(239,68,68,0.10); }
+.si-error { font-size: 12px; color: var(--danger); background: rgba(239,68,68,0.10); border-radius: 8px; padding: 8px 12px; white-space: pre-wrap; }
+.si-stream { max-height: 280px; }
+.si-gate { display: flex; flex-direction: column; gap: 6px; background: var(--bg-2); border-radius: 10px; padding: 12px; }
+.si-gate__title { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+.si-gate__step { border-left: 2px solid var(--user); padding-left: 8px; }
+.si-gate__step--fail { border-left-color: var(--danger); }
+.si-gate__cmd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); }
+.si-gate__cmd code { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); }
+.si-gate__mark { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--user); flex: none; }
+.si-gate__step--fail .si-gate__mark { color: var(--danger); }
+.si-gate__tail { font-size: 11px; color: var(--text-dim); margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; font-family: "SF Mono", Menlo, monospace; max-height: 200px; overflow-y: auto; }
+.si-diff { display: flex; flex-direction: column; gap: 4px; background: var(--bg-2); border-radius: 10px; padding: 12px; }
+.si-diff__title { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+.si-diff__row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.si-diff__path { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SF Mono", Menlo, monospace; }
+.si-diff__changes { color: var(--text-dim); flex: none; font-family: "SF Mono", Menlo, monospace; }
+.si-actions { display: flex; gap: 8px; }
+.si-iterate { display: flex; flex-direction: column; gap: 8px; }
