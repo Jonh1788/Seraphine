@@ -84,8 +84,13 @@ fn spawn_inner(app: &AppHandle, cwd: &str, goal: &str, mode: &str, host: Option<
                 // SHORT registry lock: do not hold it across the emit below.
                 let mut reg = registry().lock().unwrap();
                 if let Some(h) = reg.get_mut(&id2) {
-                    let mode = crate::agents::policy::parse_mode(&h.mode);
-                    match crate::agents::policy::decide(mode, tool) {
+                    let decision = if h.mode == "sandbox" {
+                        let input = v.get("request").and_then(|r| r.get("input"));
+                        crate::agents::policy::decide_sandbox(&h.cwd, tool, input)
+                    } else {
+                        crate::agents::policy::decide(crate::agents::policy::parse_mode(&h.mode), tool)
+                    };
+                    match decision {
                         crate::agents::policy::Decision::Allow => {
                             if let Some(si) = h.stdin.as_mut() { let _ = write_permission_response(si, request_id, true); }
                         }
