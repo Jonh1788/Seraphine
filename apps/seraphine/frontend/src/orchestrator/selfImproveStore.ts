@@ -234,7 +234,10 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
         finalize('ready');
       } else if (attempts < MAX_ATTEMPTS) {
         const last = g.steps.at(-1);
-        void sendToAgent(aid, `O gate falhou na etapa: ${last?.cmd}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
+        const reason = last?.timed_out
+          ? `O gate foi interrompido por tempo esgotado na etapa: ${last?.cmd}\nO comando travou (loop infinito, teste que não retorna, ou build pendurado).`
+          : `O gate falhou na etapa: ${last?.cmd}`;
+        void sendToAgent(aid, `${reason}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
         set({ attempts: attempts + 1, phase: 'working' });
       } else {
         finalize('failed');

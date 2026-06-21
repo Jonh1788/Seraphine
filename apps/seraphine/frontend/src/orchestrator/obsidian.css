@@ -450,6 +450,7 @@
 .si-gate__row svg { flex: none; }
 .si-gate__cmd { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .si-gate__cmd--fail { color: #ef6b6b; }
+.si-gate__timeout { flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: #f0a24b; background: rgba(240, 162, 75, 0.12); border: 1px solid rgba(240, 162, 75, 0.3); border-radius: 6px; padding: 1px 6px; }
 .si-gate__tail { margin: 0 0 0 24px; background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px; padding: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
 
 /* ---- "Seguro pra mesclar" seal (§7.3) ---- */

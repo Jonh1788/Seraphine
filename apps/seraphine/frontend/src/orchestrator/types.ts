@@ -10,5 +10,5 @@ export type AgentEventKind =
 export interface AgentEvent { agent_id: string; kind: AgentEventKind; raw: unknown; }
 export interface SiSession { id: string; path: string; branch: string; }
 export interface DiffFile { path: string; changes: string; }
-export interface GateStep { cmd: string; ok: boolean; tail: string; }
+export interface GateStep { cmd: string; ok: boolean; tail: string; timed_out: boolean; }
 export interface GateResult { ok: boolean; steps: GateStep[]; }
