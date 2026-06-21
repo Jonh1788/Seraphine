@@ -350,7 +350,7 @@ export function AppLayout(): JSX.Element {
         </div>
       </header>
 
-      <div className="layout">
+      <div className={`layout${activeView === 'maestro' ? ' layout--maestro' : ''}`}>
         {/* Navigation Rail */}
         <nav className="nav-rail">
           <div className="nav-rail__scroll">

@@ -272,6 +272,23 @@ button:disabled {
   overflow: hidden;
 }
 
+/* Maestro is a full-width orchestration view — drop the avatar sidebar and
+   give the column back to the content. The VRM is kept mounted + sized but
+   pushed off-screen (same trick as the tablet `.sidebar--hidden`) so the
+   shared avatar controller / WebGL context survives the view switch. */
+.layout--maestro {
+  grid-template-columns: 64px 1fr;
+}
+.layout--maestro .sidebar {
+  position: absolute !important;
+  left: -99999px !important;
+  top: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  width: 288px !important;
+  height: 240px !important;
+}
+
 /* Mobile 880px breakpoint moved after component definitions — see end of nav-rail section */
 
 /* ---------- Navigation Rail ---------- */
