@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { siCreate, siDiffstat, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
+import { siCreate, siCommit, siDiffstat, siMerge, siDiscard, siGate, spawnAgent, sendToAgent } from './api';
 import { useAgentStreamStore } from './agentStreamStore';
 import type { AgentEvent, SiSession, DiffFile, GateResult } from './types';
 
@@ -183,7 +183,7 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
   // agent and only acts when it advances past the last index we processed, so the
   // gate fires exactly once per finished turn even though this runs on every event.
   tickGate: (events) => {
-    const { phase, agentId, session, lastGatedIdx, attempts, repoRoot, runId } = get();
+    const { phase, agentId, session, lastGatedIdx, attempts, repoRoot, runId, goal } = get();
     if (phase !== 'working' || !agentId || !session) return;
     let newestResultIdx = -1;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -195,18 +195,27 @@ export const useSelfImproveStore = create<SiState & SiActions>((set, get) => ({
     const s = session;
     const aid = agentId;
     const myRun = runId;
+    // Commit the agent's (uncommitted) work in the worktree, THEN read the diff —
+    // without the commit, `git diff --stat main...branch` is empty and a merge
+    // would bring nothing, so the review screen shows nothing to approve.
+    const finalize = (next: Phase): void => {
+      void siCommit(repoRoot, s.id, `self-improve: ${goal.slice(0, 72)}`)
+        .then(() => siDiffstat(repoRoot, s.branch))
+        .then((d) => { if (get().runId === myRun) set({ diff: d }); })
+        .catch(() => {});
+      set({ phase: next });
+    };
     void siGate(s.path, GATE).then((g) => {
       if (get().runId !== myRun) return; // a reset/new-run happened mid-gate; drop this stale result
       set({ gate: g });
       if (g.ok) {
-        void siDiffstat(repoRoot, s.branch).then((d) => set({ diff: d })).catch(() => {});
-        set({ phase: 'ready' });
+        finalize('ready');
       } else if (attempts < MAX_ATTEMPTS) {
         const last = g.steps.at(-1);
         void sendToAgent(aid, `O gate falhou na etapa: ${last?.cmd}\n\n${last?.tail}\n\nCorrija e me avise quando terminar.`);
         set({ attempts: attempts + 1, phase: 'working' });
       } else {
-        set({ phase: 'failed' });
+        finalize('failed');
       }
     }).catch((err) => {
       if (get().runId !== myRun) return; // stale: don't surface a dropped run's gate error

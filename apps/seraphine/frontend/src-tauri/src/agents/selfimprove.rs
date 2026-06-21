@@ -37,6 +37,21 @@ pub fn maestro_si_list(repo_root: String) -> Result<Vec<String>, String> {
     Ok(out.lines().filter_map(|l| l.strip_prefix("worktree ")).filter(|p| p.contains("/.worktrees/selfimprove-")).map(String::from).collect())
 }
 
+/// Stage (`add -A`) and commit everything in the worktree so the agent's work —
+/// which it makes via Edit/Write WITHOUT committing — becomes real commits on the
+/// branch. Without this, `git diff --stat main...branch` shows nothing (no commits)
+/// and a merge would bring nothing. Returns false when there was nothing to commit
+/// (agent already committed, or no changes). Idempotent.
+#[tauri::command]
+pub fn maestro_si_commit(repo_root: String, id: String, message: String) -> Result<bool, String> {
+    let wt = format!("{repo_root}/.worktrees/selfimprove-{id}");
+    git(&wt, &["add", "-A"])?;
+    if git(&wt, &["status", "--porcelain"])?.trim().is_empty() { return Ok(false); }
+    let msg = if message.trim().is_empty() { "self-improve: alterações do agente".to_string() } else { message };
+    git(&wt, &["commit", "-m", &msg])?;
+    Ok(true)
+}
+
 #[derive(Serialize, Clone)]
 pub struct DiffFile { pub path: String, pub changes: String }
 
@@ -107,5 +122,39 @@ mod tests {
         assert!(!r.ok); assert_eq!(r.steps.len(), 2); assert!(r.steps[0].ok); assert!(!r.steps[1].ok);
         let g = maestro_si_gate(p, vec!["true".into(), "true".into()]).unwrap();
         assert!(g.ok); assert_eq!(g.steps.len(), 2);
+    }
+
+    #[test]
+    fn commit_captures_uncommitted_work_so_diffstat_shows_it() {
+        let tmp = std::env::temp_dir().join(format!("si-commit-{}", std::process::id()));
+        let root = tmp.to_str().unwrap().to_string();
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let g = |args: &[&str]| git(&root, args).unwrap();
+        g(&["init", "-q", "-b", "main"]);
+        g(&["config", "user.email", "t@t"]);
+        g(&["config", "user.name", "t"]);
+        std::fs::write(tmp.join("a.txt"), "one\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "init"]);
+
+        let s = maestro_si_create(root.clone(), "test".into(), "x".into()).unwrap();
+        // Agent makes UNCOMMITTED changes in the worktree (Edit + a new file).
+        std::fs::write(format!("{}/a.txt", s.path), "one\ntwo\n").unwrap();
+        std::fs::write(format!("{}/new.rs", s.path), "fn x() {}\n").unwrap();
+
+        // The bug: before committing, the commit-to-commit diffstat is empty.
+        assert!(maestro_si_diffstat(root.clone(), s.branch.clone()).unwrap().is_empty());
+
+        // The fix: commit captures both files (returns true = something committed).
+        assert!(maestro_si_commit(root.clone(), "x".into(), "agent work".into()).unwrap());
+        let diff = maestro_si_diffstat(root.clone(), s.branch.clone()).unwrap();
+        assert!(diff.iter().any(|d| d.path.contains("a.txt")), "modified file shows");
+        assert!(diff.iter().any(|d| d.path.contains("new.rs")), "new file shows");
+
+        // Idempotent: nothing left to commit → false.
+        assert!(!maestro_si_commit(root.clone(), "x".into(), "noop".into()).unwrap());
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

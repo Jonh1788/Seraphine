@@ -176,6 +176,7 @@ fn run_desktop() {
             agents::maestro_fork_session,
             agents::selfimprove::maestro_si_create,
             agents::selfimprove::maestro_si_list,
+            agents::selfimprove::maestro_si_commit,
             agents::selfimprove::maestro_si_diffstat,
             agents::selfimprove::maestro_si_merge,
             agents::selfimprove::maestro_si_discard,

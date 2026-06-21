@@ -31,6 +31,7 @@ export const onAgentExit = (cb: (agentId: string) => void): Promise<UnlistenFn> 
 // Maestro Phase 3 — directed self-improvement (isolated worktrees).
 export const siCreate = (repoRoot: string, slug: string, id: string) => invoke<SiSession>('maestro_si_create', { repoRoot, slug, id });
 export const siList = (repoRoot: string) => invoke<string[]>('maestro_si_list', { repoRoot });
+export const siCommit = (repoRoot: string, id: string, message: string) => invoke<boolean>('maestro_si_commit', { repoRoot, id, message });
 export const siDiffstat = (repoRoot: string, branch: string) => invoke<DiffFile[]>('maestro_si_diffstat', { repoRoot, branch });
 export const siMerge = (repoRoot: string, branch: string) => invoke<string>('maestro_si_merge', { repoRoot, branch });
 export const siDiscard = (repoRoot: string, id: string, branch: string) => invoke<void>('maestro_si_discard', { repoRoot, id, branch });
