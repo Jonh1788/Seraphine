@@ -55,12 +55,23 @@ pub fn maestro_list_sessions() -> Result<Vec<SessionInfo>, String> {
 }
 
 #[tauri::command]
-pub fn maestro_read_transcript(slug: String, session_id: String, tail: usize) -> Result<Vec<serde_json::Value>, String> {
-    let path = projects_dir().join(&slug).join(format!("{session_id}.jsonl"));
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
-    let mut lines: Vec<&str> = text.lines().collect();
-    if lines.len() > tail { lines = lines.split_off(lines.len() - tail); }
-    Ok(lines.iter().filter_map(|l| serde_json::from_str(l).ok()).collect())
+pub fn maestro_read_transcript(slug: String, session_id: String, tail: usize, host: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+    let rel = format!("~/.claude/projects/{slug}/{session_id}.jsonl");
+    let text = if let Some(h) = host {
+        let out = Command::new(ssh_bin())
+            .args(["-T", "-o", "ControlMaster=auto", "-o", "ControlPersist=60s",
+                   "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", &h, &format!("tail -n {tail} {rel}")])
+            .output().map_err(|e| format!("ssh falhou: {e}"))?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        String::from_utf8_lossy(&out.stdout).to_string()
+    } else {
+        let path = projects_dir().join(&slug).join(format!("{session_id}.jsonl"));
+        let mut s = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+        let lines: Vec<&str> = s.lines().collect();
+        if lines.len() > tail { s = lines[lines.len() - tail..].join("\n"); }
+        s
+    };
+    Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
 }
 
 #[tauri::command]
