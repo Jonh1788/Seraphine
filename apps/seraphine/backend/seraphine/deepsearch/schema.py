@@ -32,7 +32,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS deepsearch_config (
           id            INTEGER PRIMARY KEY CHECK (id = 1),
           fanout_model  TEXT NOT NULL DEFAULT 'cliproxy:claude-haiku-4-5-20251001',
-          synth_model   TEXT NOT NULL DEFAULT 'cliproxy:claude-opus-4-8',
+          synth_model   TEXT NOT NULL DEFAULT 'cliproxy:claude-haiku-4-5-20251001',
           openrouter_key TEXT NOT NULL DEFAULT ''
         );
         INSERT OR IGNORE INTO deepsearch_config (id) VALUES (1);
