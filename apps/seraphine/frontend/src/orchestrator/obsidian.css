@@ -1,3 +1,7 @@
+/* Maestro / Melhorar — local keyframes (statusBlink, ringPulse, spin are global). */
+@keyframes barFlow { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+@keyframes caretBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
 .maestro__body { flex-direction: row; gap: 16px; min-height: 0; }
 .maestro__list { width: 320px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .maestro__detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
