@@ -72,7 +72,7 @@ THINK_GAP_SYSTEM = (
     "Você é um pesquisador. Com base no que já foi encontrado, gere cerca de 3 "
     "consultas de busca que preencham as LACUNAS restantes. "
     "NÃO repita consultas já usadas. "
-    'Responda em JSON: {"queries": ["...", "..."]}.'
+    'Responda em JSON: {"queries": ["...", "..."]}.\n' + UNTRUSTED_RULE
 )
 
 EXTRACT_SYSTEM = (
@@ -90,7 +90,8 @@ SYNTHESIZE_SYSTEM = (
 DECIDE_SYSTEM = (
     "Você avalia se a pesquisa já tem evidências suficientes para responder à "
     "pergunta segundo os critérios de sucesso. "
-    'Responda em JSON: {"stop": true} se já é suficiente, senão {"stop": false}.'
+    'Responda em JSON: {"stop": true} se já é suficiente, senão {"stop": false}.\n'
+    + UNTRUSTED_RULE
 )
 
 FINAL_QUICK_SYSTEM = (
@@ -241,12 +242,16 @@ class DeepResearchEngine:
         except Exception as exc:  # fatal — salvage what we have
             await _emit({"type": "error", "message": str(exc)})
             await _emit({"type": "done", "status": "failed"})
-            return {"report": "", "sources": ledger.sources()}
+            return {
+                "report": "",
+                "sources": ledger.sources(),
+                "status": "failed",
+            }
 
         sources = ledger.sources()
         await _emit({"type": "report", "markdown": report, "sources": sources})
         await _emit({"type": "done", "status": "done"})
-        return {"report": report, "sources": sources}
+        return {"report": report, "sources": sources, "status": "done"}
 
     # -- Quick mode --------------------------------------------------------
 
@@ -329,9 +334,9 @@ class DeepResearchEngine:
                 used_queries.add(q)
 
             # SEARCH + EXTRACT.
-            results = await self._search_many(queries, emit)
+            batches = await self._search_batches(queries, emit)
             # cap to MAX_URLS_PER_ROUND new URLs per query, skip already-seen.
-            new = self._select_new_urls(results, ledger)
+            new = self._select_new_urls(batches, ledger)
             if not new:
                 empty_rounds += 1
                 if empty_rounds >= MAX_EMPTY_ROUNDS:
@@ -481,9 +486,12 @@ class DeepResearchEngine:
 
     # -- tool orchestration ------------------------------------------------
 
-    async def _search_many(
+    async def _search_batches(
         self, queries: list[str], emit: Callable[[dict], Awaitable[None]]
-    ) -> list[dict[str, Any]]:
+    ) -> list[list[dict[str, Any]]]:
+        """Search each query in parallel, returning one result batch per query
+        (in ``queries`` order). The per-query structure lets the caller apply a
+        per-query URL cap (see ``_select_new_urls``)."""
         for q in queries:
             await emit({"type": "query", "q": q})
 
@@ -498,9 +506,14 @@ class DeepResearchEngine:
                 return []
             return list((res.metadata or {}).get("results") or [])
 
-        batches = await asyncio.gather(*[_one(q) for q in queries])
+        return list(await asyncio.gather(*[_one(q) for q in queries]))
+
+    async def _search_many(
+        self, queries: list[str], emit: Callable[[dict], Awaitable[None]]
+    ) -> list[dict[str, Any]]:
+        """Flattened search results across all queries (in query order)."""
         flat: list[dict[str, Any]] = []
-        for b in batches:
+        for b in await self._search_batches(queries, emit):
             flat.extend(b)
         return flat
 
@@ -518,19 +531,26 @@ class DeepResearchEngine:
         return out
 
     def _select_new_urls(
-        self, results: list[dict[str, Any]], ledger: _SourceLedger
+        self, batches: list[list[dict[str, Any]]], ledger: _SourceLedger
     ) -> list[dict[str, Any]]:
-        """Dedup, drop already-known URLs, cap to MAX_URLS_PER_ROUND."""
+        """Select up to ``MAX_URLS_PER_ROUND`` NEW URLs *per query*, then union
+        across queries (deduped). "New" = not already in the ledger and not
+        already picked this round. The round is thus bounded by
+        ``len(queries) * MAX_URLS_PER_ROUND``.
+        """
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for r in self._dedup_results(results):
-            url = r["url"]
-            if url in seen or url in ledger._by_url:
-                continue
-            seen.add(url)
-            out.append(r)
-            if len(out) >= MAX_URLS_PER_ROUND:
-                break
+        for batch in batches:
+            picked = 0
+            for r in self._dedup_results(batch):
+                url = r["url"]
+                if url in seen or url in ledger._by_url:
+                    continue
+                seen.add(url)
+                out.append(r)
+                picked += 1
+                if picked >= MAX_URLS_PER_ROUND:
+                    break
         return out
 
     async def _extract_many(
@@ -542,6 +562,13 @@ class DeepResearchEngine:
         deadline: float,
     ) -> list[dict[str, Any]]:
         sem = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
+
+        # Pre-register every target IN ORDER so citation numbers [n] are fixed
+        # deterministically by display order (the source-card / targets order),
+        # NOT by which concurrent fetch happens to finish first. ``register`` is
+        # idempotent, so the in-_one call below just returns this pre-assigned n.
+        for target in targets:
+            ledger.register(target["url"], target.get("title") or target["url"])
 
         async def _one(target: dict[str, Any]) -> dict[str, Any] | None:
             if time.monotonic() >= deadline:
@@ -557,7 +584,7 @@ class DeepResearchEngine:
                     await emit({"type": "source_read", "url": url, "ok": False})
                     return None
                 title = (res.metadata or {}).get("title") or target.get("title") or url
-                # register -> assign citation number now (first referenced).
+                # idempotent — returns the citation number pre-assigned above.
                 n = ledger.register(url, title)
                 passage = await self._extract_passage(
                     question, res.output or "", n
