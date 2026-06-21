@@ -18,3 +18,10 @@
 .maestro__composer { margin-top: auto; }
 .maestro__composer .maestro__input { flex: 1; }
 .maestro__empty { color: var(--text-dim); font-size: 13px; margin: auto; }
+
+/* §54 — owned/observed badge + last-activity line on session rows */
+.maestro__badge { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 6px; flex: none; }
+.maestro__badge--owned { color: var(--accent); background: var(--accent-soft); }
+.maestro__badge--observed { color: var(--text-dim); background: rgba(255, 255, 255, 0.06); }
+.maestro__activity { font-size: 11px; color: var(--text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro__row-head { gap: 8px; }
