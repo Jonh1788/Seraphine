@@ -217,6 +217,7 @@ export function SelfImprove(): JSX.Element {
                         <div className="si-gate__row">
                           {st.ok ? <IconCheck size={15} /> : <IconCross />}
                           <code className={`si-gate__cmd${st.ok ? '' : ' si-gate__cmd--fail'}`}>{GATE_LABELS[i] ?? st.cmd}</code>
+                          {st.timed_out && <span className="si-gate__timeout">tempo esgotado</span>}
                         </div>
                         {!st.ok && st.tail && <pre className="si-gate__tail">{st.tail}</pre>}
                       </div>
