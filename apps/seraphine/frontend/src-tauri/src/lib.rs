@@ -16,6 +16,8 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod agents;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod clipboard;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod cv_triage_zip;
