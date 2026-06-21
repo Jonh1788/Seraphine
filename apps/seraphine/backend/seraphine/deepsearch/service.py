@@ -144,6 +144,21 @@ class DeepSearchService:
 
         await asyncio.to_thread(_work)
 
+    # -- main-chat model selection (kv-backed) -----------------------------
+
+    async def get_chat_model(self) -> str:
+        """Return the selected main-chat model spec.
+
+        ``"cliproxy"`` (the default) routes chat through cliproxy/Claude;
+        ``"openrouter:<model id>"`` routes it through OpenRouter. Stored in the
+        shared ``kv`` table so the conversation engine reads the same setting.
+        """
+        return (await self.store.get_kv("chat_model")) or "cliproxy"
+
+    async def set_chat_model(self, chat_model: str) -> str:
+        await self.store.set_kv("chat_model", chat_model)
+        return await self.get_chat_model()
+
     async def list_models(self) -> dict[str, list[dict[str, str]]]:
         """Return selectable models grouped by provider.
 

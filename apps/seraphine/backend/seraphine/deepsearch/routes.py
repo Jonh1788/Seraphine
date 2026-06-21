@@ -59,6 +59,10 @@ class ConfigBody(BaseModel):
     openrouter_key: Optional[str] = None
 
 
+class ChatModelBody(BaseModel):
+    chat_model: str = Field(min_length=1)
+
+
 # -- config + models (static paths first) ----------------------------------
 
 
@@ -81,6 +85,17 @@ async def put_config(request: Request, body: ConfigBody) -> dict[str, Any]:
 @router.get("/models")
 async def list_models(request: Request) -> dict[str, Any]:
     return await _service_or_503(request).list_models()
+
+
+@router.get("/chat-model")
+async def get_chat_model(request: Request) -> dict[str, str]:
+    return {"chat_model": await _service_or_503(request).get_chat_model()}
+
+
+@router.put("/chat-model")
+async def put_chat_model(request: Request, body: ChatModelBody) -> dict[str, str]:
+    svc = _service_or_503(request)
+    return {"chat_model": await svc.set_chat_model(body.chat_model)}
 
 
 # -- runs: collection ------------------------------------------------------

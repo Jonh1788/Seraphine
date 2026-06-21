@@ -953,18 +953,26 @@ class ConversationEngine:
         # cleanup in the real adapters, releasing the httpx connection
         # deterministically instead of waiting for garbage collection.
         active_stream: AsyncIterator[Token] | None = None
+        # Resolve the chat LLM ONCE per user turn (not per tool-iteration).
+        # cliproxy is the default; ``or_model`` is set only when the user opted
+        # into an OpenRouter model AND a key is configured. Resolution never
+        # raises — it falls back to (self.llm, None) on any error.
+        chat_llm, or_model = await self._resolve_chat_llm()
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
                 _raise_if_cancelled()
-                model_override = self._pick_model(
+                # On the cliproxy path, keep the per-iteration smart-model
+                # escalation; on the OpenRouter path the user-chosen model id
+                # is fixed for the whole turn.
+                model_override = or_model if or_model else self._pick_model(
                     think=think,
                     has_images=bool(images),
                     tool_iteration=_iteration,
                 )
                 if self.tools is not None:
-                    stream = self.llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think, model=model_override)  # type: ignore[call-arg]
+                    stream = chat_llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think, model=model_override)  # type: ignore[call-arg]
                 else:
-                    stream = self.llm.chat(messages, think=think, model=model_override)
+                    stream = chat_llm.chat(messages, think=think, model=model_override)
                 active_stream = stream
 
                 pending_tool_calls: list[dict[str, Any]] | None = None
@@ -1298,6 +1306,53 @@ class ConversationEngine:
             # 026-A: narrative summary of the current conversation.
             if conversation_id is not None and self._turn_counter % AUTO_NARRATIVE_EVERY_N_TURNS == 0:
                 _fire_and_log(self._auto_narrative(conversation_id), name="auto_narrative")
+
+    def _read_openrouter_key(self) -> str:
+        """Sync read of the single deepsearch_config OpenRouter key (id=1).
+
+        Returns ``""`` when the table/row/key is absent or empty. Reuses the
+        store's ``_connect()`` context manager — called inside ``to_thread``.
+        """
+        try:
+            with self.store._connect() as conn:
+                row = conn.execute(
+                    "SELECT openrouter_key FROM deepsearch_config WHERE id = 1"
+                ).fetchone()
+        except Exception:  # noqa: BLE001 — table may not exist yet
+            return ""
+        return (row[0] if row and row[0] else "") or ""
+
+    async def _resolve_chat_llm(self) -> tuple[Any, str | None]:
+        """Resolve the LLM + model override for the MAIN chat stream this turn.
+
+        Reads the ``chat_model`` kv setting:
+          - absent / ``"cliproxy"`` (or any non-openrouter value) → the default
+            cliproxy ``self.llm`` with no override (caller applies _pick_model).
+          - ``"openrouter:<model id>"`` AND a key set in ``deepsearch_config`` →
+            an ``OpenRouterChatClient`` bound to that key, plus ``<model id>``.
+
+        Never raises: any failure (bad kv, missing key/table) falls back to the
+        cliproxy default so the chat can never break on a misconfiguration.
+        """
+        try:
+            setting = await self.store.get_kv("chat_model")
+            if not setting or not setting.startswith("openrouter:"):
+                return (self.llm, None)
+            model_id = setting.split(":", 1)[1].strip()
+            if not model_id:
+                return (self.llm, None)
+            key = await asyncio.to_thread(self._read_openrouter_key)
+            if not key:
+                logger.warning(
+                    "chat_model=openrouter but no openrouter key set; using cliproxy"
+                )
+                return (self.llm, None)
+            from seraphine.deepsearch.providers import OpenRouterChatClient
+
+            return (OpenRouterChatClient(key), model_id)
+        except Exception as e:  # noqa: BLE001 — chat must never break on this
+            logger.warning("chat-model resolution failed, using cliproxy: %s", e)
+            return (self.llm, None)
 
     def _pick_model(
         self,
