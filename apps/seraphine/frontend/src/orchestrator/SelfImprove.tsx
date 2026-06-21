@@ -198,6 +198,8 @@ export function SelfImprove(): JSX.Element {
   const [attempts, setAttempts] = useState(0);
   const [iterFeedback, setIterFeedback] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [runStart, setRunStart] = useState<number | null>(null);
+  const [, setTick] = useState(0); // drives the elapsed-minutes re-render
 
   const events = useAgentStream();
   // Index (in the global events array) of the last `result` event we already
@@ -255,6 +257,15 @@ export function SelfImprove(): JSX.Element {
     });
   }, [events, phase, agentId, session, attempts, repoRoot]);
 
+  // Tick every 30s while a run is in flight so the elapsed-minutes clock line
+  // re-renders. Cleared when the run ends or runStart resets.
+  useEffect(() => {
+    if (runStart === null) return;
+    if (phase !== 'working' && phase !== 'gating' && phase !== 'ready' && phase !== 'failed') return;
+    const t = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(t);
+  }, [runStart, phase]);
+
   const reset = (): void => {
     setSession(null);
     setAgentId(null);
@@ -264,6 +275,7 @@ export function SelfImprove(): JSX.Element {
     setAttempts(0);
     setIterFeedback('');
     setError(null);
+    setRunStart(null);
     lastGatedIdx.current = -1;
     runId.current += 1; // invalidate any in-flight gate (covers reject + approve-reset)
   };
@@ -273,6 +285,7 @@ export function SelfImprove(): JSX.Element {
     setGate(null);
     setDiff([]);
     setAttempts(0);
+    setRunStart(Date.now());
     lastGatedIdx.current = events.length - 1; // ignore any pre-existing results
     runId.current += 1; // invalidate any in-flight gate from a prior session
     const id = `si-${Date.now()}`;
@@ -339,6 +352,7 @@ export function SelfImprove(): JSX.Element {
   }, [diff]);
 
   const branch = session?.branch ?? '';
+  const mins = runStart ? Math.floor((Date.now() - runStart) / 60000) : 0;
 
   return (
     <div className="si-root">
@@ -355,7 +369,7 @@ export function SelfImprove(): JSX.Element {
                 <div className="si-summary__meta">
                   <span className="si-meta-row"><IconBranch />{<code className="si-mono">{branch || 'si/…'}</code>}</span>
                   <span className="si-meta-row"><span className="si-meta-icon si-meta-icon--amber"><IconShield size={14} stroke="#ffa726" /></span>worktree sandbox · isolado do main</span>
-                  <span className="si-meta-row"><IconClock />{attempts} {attempts === 1 ? 'tentativa' : 'tentativas'}</span>
+                  <span className="si-meta-row"><IconClock />{mins} min · {attempts} {attempts === 1 ? 'tentativa' : 'tentativas'}</span>
                 </div>
               </div>
 
@@ -575,14 +589,14 @@ export function SelfImprove(): JSX.Element {
               <div className="si-livehead">
                 <span className="si-livehead__status">
                   <span className="si-spinner" aria-hidden />
-                  {phase === 'gating' ? 'Rodando o gate…' : 'Agente trabalhando…'}
+                  {phase === 'gating' ? 'Rodando o gate (build + testes)…' : 'Agente trabalhando…'}
                   {phase === 'working' && attempts > 0 && <span className="si-livehead__try"> (tentativa {attempts + 1})</span>}
                 </span>
                 {branch && <span className="si-livehead__branch"><IconBranch size={11} /><code className="si-mono">{branch}</code></span>}
                 <span className="si-livehead__seal"><IconShield size={11} stroke="currentColor" />sandbox</span>
               </div>
               <div className="si-livebody">
-                <Timeline events={agentEvents} />
+                <Timeline events={agentEvents} sepLabel="WORKTREE CRIADO" />
               </div>
               {live && <div className="si-progress"><span className="si-progress__bar" /></div>}
             </>

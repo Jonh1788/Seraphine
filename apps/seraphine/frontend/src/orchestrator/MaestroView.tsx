@@ -34,6 +34,7 @@ const IconLock = (): JSX.Element => <svg width="15" height="15" viewBox="0 0 24 
 const IconCheck = (): JSX.Element => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
 const IconX = (): JSX.Element => <svg width="14" height="14" viewBox="0 0 24 24" {...svg}><path d="M18 6 6 18M6 6l12 12" /></svg>;
 const IconSend = (): JSX.Element => <svg width="18" height="18" viewBox="0 0 24 24" {...svg}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></svg>;
+const IconPaperclip = (): JSX.Element => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21.4 11.05l-9 9a5 5 0 0 1-7.07-7.07l9-9a3.33 3.33 0 0 1 4.71 4.71l-8.3 8.3a1.67 1.67 0 0 1-2.36-2.36l7.6-7.6" /></svg>;
 const IconWarn = (): JSX.Element => <svg width="12" height="12" viewBox="0 0 24 24" {...svg} strokeWidth={1.6}><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>;
 const IconGraph = (p: { size?: number; sw?: number }): JSX.Element => (
   <svg width={p.size ?? 42} height={p.size ?? 42} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={p.sw ?? 1.5} strokeLinecap="round" strokeLinejoin="round">
@@ -416,6 +417,7 @@ function Composer({ onSend }: { onSend: (t: string) => void }): JSX.Element {
   return (
     <div className="maestro__composer">
       <div className="maestro__composer-bar">
+        <span className="maestro__composer-attach"><IconPaperclip /></span>
         <input className="maestro__composer-input" placeholder={'Orientar o agente… (ex.: "commita e abre um PR")'} value={t}
           onChange={(e) => setT(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && t) { onSend(t); setT(''); } }} />

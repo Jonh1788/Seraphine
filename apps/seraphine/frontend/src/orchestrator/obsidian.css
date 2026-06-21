@@ -1,6 +1,7 @@
 /* Maestro / Melhorar — local keyframes (statusBlink, ringPulse, spin are global). */
 @keyframes barFlow { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
 @keyframes caretBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes siRingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(154, 147, 255, 0.45); } 50% { box-shadow: 0 0 0 5px rgba(154, 147, 255, 0); } }
 
 /* =====================================================================
    Maestro — Obsidian reskin (list, detail, humanized timeline).
@@ -156,6 +157,7 @@
 .maestro__badge--observed { color: var(--dim); background: rgba(255, 255, 255, 0.06); }
 .maestro__badge--host { color: var(--dim); background: rgba(255, 255, 255, 0.06); margin-left: 0; }
 .maestro__activity { font-size: 11px; color: var(--dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro__row--idle .maestro__activity { color: var(--text-faint); }
 
 /* handover (assume) */
 .maestro__handover { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
@@ -253,6 +255,7 @@
   border-radius: 13px; padding: 8px 8px 8px 15px;
 }
 .maestro__composer-bar:focus-within { border-color: var(--accent); }
+.maestro__composer-attach { flex: none; display: inline-flex; align-items: center; }
 .maestro__composer-input {
   flex: 1; min-width: 0; background: transparent; border: none; outline: none;
   font-size: 14px; color: var(--text); font-family: inherit;
@@ -319,29 +322,12 @@
 .mst-tl__caret { margin-left: auto; flex: none; display: inline-block; width: 7px; height: 13px; background: var(--accent); animation: caretBlink 1s step-end infinite; }
 
 /* =====================================================================
-   Shared with SelfImprove ("Melhorar Seraphine") — generic input + raw
-   event stream. Kept (restyled to tokens) so the Improve tab is intact.
-   ===================================================================== */
-.maestro__input {
-  background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px;
-  padding: 9px 11px; color: var(--text); font-size: 13px; font-family: inherit; outline: none;
-}
-.maestro__input::placeholder { color: var(--faint); }
-.maestro__input:focus { border-color: var(--accent); }
-.maestro__input:disabled { opacity: 0.6; }
-.maestro__stream { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.maestro__evt { border-left: 2px solid var(--border); padding-left: 8px; }
-.maestro__evt--permission_request { border-left-color: #ffa726; }
-.maestro__evt-kind { font-size: 10px; font-weight: 700; color: var(--faint); text-transform: uppercase; }
-.maestro__evt-raw { font-size: 11px; color: var(--dim); margin: 2px 0 0; white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }
-
-/* =====================================================================
    "Melhorar Seraphine" (SelfImprove) — Obsidian reskin.
    Pipeline stepper + two-column (config / run-summary | live | diff).
    Sits below the MaestroView header+tabs. Semantic colors as literals
    (#4ade80 green, #ffa726/#ffce8a amber, #ef6b6b red); palette via tokens.
-   Reuses .mst-tl-* (shared Timeline), barFlow + caretBlink (this file),
-   and the global statusBlink / ringPulse / spin keyframes.
+   Reuses .mst-tl-* (shared Timeline), barFlow + caretBlink + siRingPulse
+   (this file), and the global statusBlink / spin keyframes.
    ===================================================================== */
 .si-root { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0; }
 .si-mono { font-family: var(--font-mono); }
@@ -356,13 +342,13 @@
 .si-step { display: flex; align-items: center; gap: 9px; flex: none; }
 .si-step__circle { width: 26px; height: 26px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
 .si-step__circle--completed { background: #4ade80; }
-.si-step__circle--active { background: var(--accent-soft); border: 2px solid var(--accent); }
+.si-step__circle--active { background: var(--accent-soft); border: 2px solid var(--accent); animation: siRingPulse 1.8s ease-in-out infinite; }
 .si-step__circle--fail { background: rgba(239,107,107,0.16); border: 2px solid rgba(239,107,107,0.55); }
 .si-step__circle--pending { background: transparent; border: 1.5px solid var(--border-strong); }
 .si-step__num { font-size: 12px; font-weight: 700; color: var(--faint); }
 .si-step__num--active { font-size: 12px; font-weight: 700; color: var(--accent); }
 .si-step__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: statusBlink 1.2s ease-in-out infinite; }
-.si-step__ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent); animation: ringPulse 1.8s ease-in-out infinite; pointer-events: none; }
+.si-step__ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; }
 .si-step__label { font-size: 12px; font-weight: 600; }
 .si-step__label--completed { color: var(--text); }
 .si-step__label--active { color: var(--accent); font-weight: 700; }

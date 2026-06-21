@@ -234,7 +234,7 @@ function Marker({ marker }: { marker: ToolRow['marker'] }): JSX.Element {
 }
 
 /** Shared humanized timeline. */
-export function Timeline({ events }: { events: AgentEvent[] }): JSX.Element {
+export function Timeline({ events, sepLabel = 'SESSÃO INICIADA' }: { events: AgentEvent[]; sepLabel?: string }): JSX.Element {
   const items = humanizeEvents(events);
   if (!items.length) return <div className="mst-tl mst-tl--empty">Aguardando atividade do agente…</div>;
   return (
@@ -244,7 +244,7 @@ export function Timeline({ events }: { events: AgentEvent[] }): JSX.Element {
           return (
             <div className="mst-tl__sep" key={it.key}>
               <div className="mst-tl__sep-line" />
-              <span className="mst-tl__sep-label">SESSÃO INICIADA{it.time ? ` · ${it.time}` : ''}</span>
+              <span className="mst-tl__sep-label">{sepLabel}{it.time ? ` · ${it.time}` : ''}</span>
               <div className="mst-tl__sep-line" />
             </div>
           );
