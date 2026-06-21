@@ -165,6 +165,9 @@ fn run_desktop() {
             // Maestro — agent orchestration (desktop only).
             agents::observer::maestro_list_sessions,
             agents::observer::maestro_read_transcript,
+            agents::ssh::maestro_list_hosts,
+            agents::ssh::maestro_check_host,
+            agents::observer::maestro_list_remote_sessions,
             agents::maestro_spawn_agent,
             agents::maestro_send_to_agent,
             agents::maestro_respond_permission,
