@@ -30,6 +30,14 @@ services:
       dockerfile: apps/seraphine/backend/Dockerfile
     image: seraphine-backend:latest
     restart: unless-stopped
+    # LOAD-BEARING — do not remove. The Google OAuth token file at
+    # /data/google-token.json is Fernet-encrypted with a key derived from
+    # socket.gethostname() (packages/google-integration/_crypto.py). Without
+    # a pinned hostname, Docker assigns a fresh container-ID hostname on every
+    # `up --build`, which changes the key and makes the persisted token
+    # undecryptable → Google silently shows "disconnected" after each rebuild.
+    # Pinning keeps the key stable so the token survives rebuilds.
+    hostname: seraphine-backend
     # Run as root so the keychain.py fallback can still read the
     # 0600-permissioned credentials file if SERAPHINE_LLM_BACKEND is
     # ever flipped back to claude_max. Container is network-isolated.
