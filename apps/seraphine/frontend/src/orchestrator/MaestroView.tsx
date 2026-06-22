@@ -11,7 +11,31 @@ import { useSelfImproveStore } from './selfImproveStore';
 import { useSkillsStore } from './skillsStore';
 import { Timeline } from './Timeline';
 import { NewAgentDialog } from './NewAgentDialog';
-import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
+import type { SessionInfo, PermissionMode, AgentEvent, AgentEventKind, HostStatus } from './types';
+
+/**
+ * Classify a persisted-transcript JSONL line into an AgentEventKind — the JS
+ * mirror of the Rust `proto::classify` (agents/proto.rs), so an OBSERVED past
+ * session's transcript can feed the same <Timeline> as a live agent stream.
+ */
+export function classifyTranscriptLine(line: unknown): AgentEventKind {
+  const v = line as {
+    type?: string; subtype?: string; session_id?: string;
+    request_id?: string; request?: { subtype?: string; tool_name?: string };
+  } | null;
+  if (!v || typeof v !== 'object') return { kind: 'other' };
+  if (v.type === 'system' && v.subtype === 'init') return { kind: 'init', session_id: v.session_id };
+  if (v.type === 'assistant') return { kind: 'assistant' };
+  if (v.type === 'result') return { kind: 'result' };
+  if (v.type === 'control_request' && v.request?.subtype === 'can_use_tool') {
+    return { kind: 'permission_request', request_id: String(v.request_id ?? ''), tool: String(v.request?.tool_name ?? '') };
+  }
+  return { kind: 'other' };
+}
+
+export function transcriptToEvents(sessionId: string, lines: unknown[]): AgentEvent[] {
+  return (lines || []).map((line) => ({ agent_id: sessionId, kind: classifyTranscriptLine(line), raw: line }));
+}
 
 const MODES: { v: PermissionMode; label: string }[] = [
   { v: 'ask_all', label: 'Perguntar tudo' },
@@ -77,6 +101,11 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [remoteSessions, setRemoteSessions] = useState<SessionInfo[]>([]);
   const [query, setQuery] = useState('');
   const [newOpen, setNewOpen] = useState(false);
+  // Read-only "observe" of a past (non-owned) session: no live agent, so we
+  // load its transcript and render it in the same detail timeline.
+  const [observed, setObserved] = useState<SessionInfo | null>(null);
+  const [observedEvents, setObservedEvents] = useState<AgentEvent[]>([]);
+  const [takeoverGoal, setTakeoverGoal] = useState('');
   const events = useAgentStream();
 
   const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
@@ -86,6 +115,17 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onBack(); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [onBack]);
+
+  // Load the observed session's transcript (read-only) when it changes.
+  useEffect(() => {
+    if (!observed) { setObservedEvents([]); return; }
+    let live = true;
+    setObservedEvents([]); setTakeoverGoal('');
+    void readTranscript(observed.slug, observed.session_id, 200, observed.host ?? undefined)
+      .then((lines) => { if (live) setObservedEvents(transcriptToEvents(observed.session_id, lines)); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [observed]);
 
   const agentEvents = useMemo(() => events.filter((e) => e.agent_id === selected), [events, selected]);
   const pending = useMemo(() => {
@@ -211,31 +251,24 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
               <SessionRow key={s.slug + s.session_id} s={s}
                 status={statusBySession[s.session_id] ?? 'idle'}
                 owned={ownedSessionIds.has(s.session_id)} activity={activity[s.session_id]}
-                selected={!!agentId && agentId === selected}
-                onSelect={() => { if (agentId) setSelected(agentId); }}
-                onResume={(g) => { void resumeSession(s.session_id, s.cwd, g, mode).then(setSelected); }}
-                onFork={(g) => { void forkSession(s.session_id, s.cwd, g, mode).then(setSelected); }} />
+                selected={agentId ? agentId === selected : observed?.session_id === s.session_id}
+                onSelect={() => { if (agentId) { setSelected(agentId); setObserved(null); } else { setSelected(null); setObserved(s); } }}
+                onResume={(g) => { void resumeSession(s.session_id, s.cwd, g, mode).then((id) => { setSelected(id); setObserved(null); }); }}
+                onFork={(g) => { void forkSession(s.session_id, s.cwd, g, mode).then((id) => { setSelected(id); setObserved(null); }); }} />
               );
             })}
             {remoteSessions.map((s) => (
               <SessionRow key={s.host + s.slug + s.session_id} s={s}
-                status="idle" owned={false} activity={undefined} selected={false}
-                onSelect={() => {}} onResume={() => {}} onFork={() => {}} />
+                status="idle" owned={false} activity={undefined}
+                selected={observed?.session_id === s.session_id}
+                onSelect={() => { setSelected(null); setObserved(s); }}
+                onResume={(g) => { void resumeSession(s.session_id, s.cwd, g, mode).then((id) => { setSelected(id); setObserved(null); }); }}
+                onFork={(g) => { void forkSession(s.session_id, s.cwd, g, mode).then((id) => { setSelected(id); setObserved(null); }); }} />
             ))}
           </aside>
 
           <section className="maestro__detail">
-            {!selected ? (
-              <div className="maestro__empty">
-                <div className="maestro__empty-medallion"><IconGraph size={42} sw={1.5} /></div>
-                <div className="maestro__empty-title">Nenhuma sessão selecionada</div>
-                <div className="maestro__empty-body">Inicie um novo agente com um objetivo, ou selecione uma sessão na lista para acompanhar e assumir o controle.</div>
-                <div className="maestro__empty-actions">
-                  <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlay size={15} />Iniciar agente</button>
-                  <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}>Ver sessões recentes</button>
-                </div>
-              </div>
-            ) : (
+            {selected ? (
               <>
                 <div className="maestro__detail-head">
                   <div className="maestro__detail-headmain">
@@ -278,6 +311,44 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
 
                 <Composer onSend={(t) => { void sendToAgent(selected, t); }} />
               </>
+            ) : observed ? (
+              <>
+                <div className="maestro__detail-head">
+                  <div className="maestro__detail-headmain">
+                    <div className="maestro__detail-titlerow">
+                      <span className="maestro__detail-title">{observed.cwd.split('/').filter(Boolean).pop() || observed.cwd}</span>
+                      <span className="maestro__detail-status maestro__detail-status--observing">observando</span>
+                    </div>
+                    <div className="maestro__detail-meta">
+                      <span className="maestro__detail-repo"><IconFolder size={11} />{observed.cwd}</span>
+                      <span className="maestro__detail-hash">{observed.session_id.slice(0, 8)}</span>
+                      <span className="maestro__detail-clock"><IconClock />{sinceLabel(observed.last_modified_ms)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="maestro__timeline">
+                  {observedEvents.length > 0
+                    ? <Timeline events={observedEvents} />
+                    : <div className="maestro__empty-body" style={{ padding: '20px' }}>Carregando transcript… (ou sessão sem histórico)</div>}
+                </div>
+
+                <div className="maestro__takeover">
+                  <input className="maestro__composer-input" placeholder={'Assumir — objetivo (ex.: "continua e abre um PR")'} value={takeoverGoal} onChange={(e) => setTakeoverGoal(e.target.value)} />
+                  <button type="button" className="obs-btn obs-btn--primary" disabled={!takeoverGoal.trim()} onClick={() => { void resumeSession(observed.session_id, observed.cwd, takeoverGoal.trim(), mode).then((id) => { setSelected(id); setObserved(null); }); }}>Retomar</button>
+                  <button type="button" className="obs-btn obs-btn--ghost" disabled={!takeoverGoal.trim()} onClick={() => { void forkSession(observed.session_id, observed.cwd, takeoverGoal.trim(), mode).then((id) => { setSelected(id); setObserved(null); }); }}>Forkar</button>
+                </div>
+              </>
+            ) : (
+              <div className="maestro__empty">
+                <div className="maestro__empty-medallion"><IconGraph size={42} sw={1.5} /></div>
+                <div className="maestro__empty-title">Nenhuma sessão selecionada</div>
+                <div className="maestro__empty-body">Inicie um novo agente com um objetivo, ou selecione uma sessão na lista para acompanhar e assumir o controle.</div>
+                <div className="maestro__empty-actions">
+                  <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlay size={15} />Iniciar agente</button>
+                  <button type="button" className="obs-btn obs-btn--ghost" onClick={() => setTab('improve')}>Ver auto-melhorias</button>
+                </div>
+              </div>
             )}
           </section>
         </div>

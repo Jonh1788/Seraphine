@@ -267,6 +267,10 @@
 
 /* ---- Composer ---- */
 .maestro__composer { padding: 14px 20px 18px; flex: none; border-top: 1px solid var(--border); }
+/* Read-only observe: "Assumir" takeover bar (Retomar/Forkar a past session) */
+.maestro__takeover { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); flex: none; }
+.maestro__takeover .maestro__composer-input { flex: 1; min-width: 0; }
+.maestro__detail-status--observing { color: var(--faint); background: rgba(255, 255, 255, 0.06); }
 .maestro__composer-bar {
   display: flex; align-items: center; gap: 10px;
   background: var(--bg-0); border: 1px solid var(--border);
