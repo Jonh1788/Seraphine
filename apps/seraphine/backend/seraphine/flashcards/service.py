@@ -165,6 +165,28 @@ class FlashcardsService:
             topic, pairs, tags=tags, source_url=source_url, source_title=source_title,
         )
 
+    async def create_deck_from_research(
+        self, topic: str, *, count: int = 10, engine: Any,
+    ) -> list[dict[str, Any]]:
+        topic = (topic or "").strip()
+        if not topic:
+            raise FlashcardsGenerationError("tópico vazio")
+        result = await engine.run(topic, "quick", emit=lambda e: None)
+        if (result or {}).get("status") != "done":
+            raise FlashcardsGenerationError(
+                "a pesquisa falhou (verifique o backend de LLM)"
+            )
+        report = (result.get("report") or "").strip()
+        if not report:
+            raise FlashcardsGenerationError("a pesquisa não retornou conteúdo")
+        sources = result.get("sources") or []
+        pairs = await self.generate_cards(f"Relatório citado:\n{report}", count=count)
+        primary = sources[0] if sources else {}
+        return await self.insert_cards(
+            topic, pairs, tags=["pesquisa"],
+            source_url=primary.get("url"), source_title=primary.get("title"),
+        )
+
     async def list_due(self, limit: int = 20) -> list[dict[str, Any]]:
         def _work() -> list[dict[str, Any]]:
             now = datetime.now(timezone.utc).isoformat()
