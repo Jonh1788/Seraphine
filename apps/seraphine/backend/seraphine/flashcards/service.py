@@ -144,6 +144,56 @@ class FlashcardsService:
         await asyncio.to_thread(_work)
         return created
 
+    async def create_card(
+        self, *, topic: str, front: str, back: str,
+        tags: list[str] | None = None,
+        source_url: str | None = None, source_title: str | None = None,
+    ) -> dict[str, Any]:
+        front = (front or "").strip()
+        back = (back or "").strip()
+        if not (3 <= len(front) <= 200 and 3 <= len(back) <= 500):
+            raise FlashcardsGenerationError("front/back fora dos limites")
+        created = await self.insert_cards(
+            (topic or "").strip() or "Sem título",
+            [{"front": front, "back": back}],
+            tags=tags, source_url=source_url, source_title=source_title,
+        )
+        return created[0]
+
+    async def edit_card(self, card_id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {"front", "back", "topic", "source_url", "source_title", "image_url"}
+        sets: list[str] = []
+        vals: list[Any] = []
+        for k, v in fields.items():
+            if k == "tags" and v is not None:
+                sets.append("tags = ?")
+                vals.append(json.dumps(list(v)))
+            elif k in allowed and v is not None:
+                sets.append(f"{k} = ?")
+                vals.append(v)
+        if not sets:
+            sets.append("topic = topic")  # no-op update so we still return the row
+        vals.append(card_id)
+
+        def _work() -> dict[str, Any] | None:
+            with self.store._connect() as conn:
+                cur = conn.execute(
+                    f"UPDATE flashcards SET {', '.join(sets)} WHERE id = ?", vals,
+                )
+                if cur.rowcount == 0:
+                    return None
+                r = conn.execute(
+                    "SELECT id, topic, front, back, tags, source_url, source_title,"
+                    " image_url FROM flashcards WHERE id = ?", (card_id,),
+                ).fetchone()
+            return {
+                "id": r[0], "topic": r[1], "front": r[2], "back": r[3],
+                "tags": json.loads(r[4] or "[]"), "source_url": r[5],
+                "source_title": r[6], "image_url": r[7],
+            }
+
+        return await asyncio.to_thread(_work)
+
     async def create_deck(self, topic: str, count: int = 10) -> list[dict[str, Any]]:
         topic = (topic or "").strip()
         if not topic:
