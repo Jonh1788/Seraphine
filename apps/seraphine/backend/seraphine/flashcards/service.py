@@ -154,6 +154,17 @@ class FlashcardsService:
         logger.info("flashcards: deck '%s' × %d", topic, len(created))
         return created
 
+    async def create_deck_from_text(
+        self, *, topic: str, text: str, count: int = 10,
+        tags: list[str] | None = None,
+        source_url: str | None = None, source_title: str | None = None,
+    ) -> list[dict[str, Any]]:
+        topic = (topic or "").strip() or "Sem título"
+        pairs = await self.generate_cards(text, count=count)
+        return await self.insert_cards(
+            topic, pairs, tags=tags, source_url=source_url, source_title=source_title,
+        )
+
     async def list_due(self, limit: int = 20) -> list[dict[str, Any]]:
         def _work() -> list[dict[str, Any]]:
             now = datetime.now(timezone.utc).isoformat()
