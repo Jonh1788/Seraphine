@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -136,6 +137,27 @@ _CONTRADICTION_PROMPT = (
     ' JSON: {"contradictions": [{"existing_id": "...", "new_index": N,'
     ' "reason": "..."}]}. If none contradict, return {"contradictions": []}.'
 )
+
+# Whole-store consolidation/audit pass. Coarser complement to the
+# per-write dedup: merges true paraphrases, drops clear junk. Conservative
+# by design — when unsure, leave the fact alone.
+_AUDIT_PROMPT = (
+    "You audit a user's long-term memory store. You are given a numbered list"
+    " of facts, each with an id. Propose two kinds of cleanups, conservatively:\n"
+    "1. MERGES: two facts that are TRUE PARAPHRASES / duplicates stating the"
+    " same thing. Keep the clearer/more-complete one and drop the other. NEVER"
+    " merge facts that add distinct information — only exact restatements.\n"
+    "2. DROPS: facts that are CLEARLY junk — empty, gibberish, test noise, or"
+    " content-free. Do NOT drop a fact merely because it seems unimportant.\n"
+    "When in doubt, do nothing. Return STRICT JSON ONLY, no prose:\n"
+    '{"merges": [{"keep_id": "<id-to-keep>", "drop_id": "<id-to-remove>"}],'
+    ' "drops": ["<junk-id>", ...]}\n'
+    'If there is nothing to do, return {"merges": [], "drops": []}.'
+)
+
+# Refuse any audit proposal whose total removals (merges + drops) exceed
+# this fraction of the active fact set — runaway/hallucination guard.
+AUDIT_MAX_REMOVAL_FRACTION = 0.5
 
 # Greeting/ack prefixes that disqualify assistant turns from observation mining.
 _ASSISTANT_SKIP_PREFIXES = (
@@ -1015,6 +1037,189 @@ class MemoryManager:
                 superseded += 1
         return superseded
 
+    async def audit(self) -> dict:
+        """Scheduled whole-store consolidation/audit pass.
+
+        Sibling of :meth:`reflect`, but operating over the ENTIRE active
+        fact set rather than recent turns. Asks the LLM to propose
+        paraphrase MERGES (applied via ``supersede_fact`` — history
+        preserved) and clear-junk DROPS (hard ``delete_fact`` +
+        ``delete_fact_embedding``), then re-embeds merged survivors and
+        refreshes ``_fact_embedding_cache``.
+
+        Two safety mechanisms:
+
+        * **Fingerprint short-circuit** — a sha256 of the sorted
+          ``id:text`` lines is compared to the last successful run's
+          fingerprint (KV ``memory_audit_fingerprint``). If unchanged the
+          LLM is never called and ``{"skipped": True}`` is returned.
+        * **>50% removal guard** — if proposed removals (merges + drops)
+          exceed half the active facts, NOTHING is applied, a warning is
+          logged and ``{"refused": True, "proposed_removed": n}`` is
+          returned. The fingerprint is deliberately NOT persisted on
+          refusal, so once the underlying fact set changes (e.g. the user
+          adds/edits facts) the audit re-triggers and gets a fresh chance
+          rather than freezing on a rejected proposal forever.
+
+        On a successful applied run the new fingerprint is persisted so
+        an unchanged store short-circuits next time. All LLM/embedding
+        work is wrapped in try/except — a failure logs and returns
+        gracefully so it never crashes the scheduler. Returns a dict of
+        counts (``{"merged": int, "dropped": int}``) or a marker.
+        """
+        if self.llm is None:
+            return {"skipped": True}
+
+        try:
+            facts = await self.store.list_facts_for_decay()
+        except Exception as e:
+            logger.warning("audit: list_facts_for_decay failed: %s", e)
+            return {"skipped": True}
+        if not facts:
+            return {"skipped": True}
+
+        # --- fingerprint short-circuit ---------------------------------
+        fingerprint = hashlib.sha256(
+            ("\n".join(
+                f"{f.id}:{f.text}"
+                for f in sorted(facts, key=lambda x: x.id)
+            )).encode()
+        ).hexdigest()
+        try:
+            last = await self.store.get_kv("memory_audit_fingerprint")
+        except Exception as e:  # pragma: no cover - best-effort
+            logger.warning("audit: get_kv failed: %s", e)
+            last = None
+        if last is not None and last == fingerprint:
+            return {"skipped": True}
+
+        # --- LLM proposal ----------------------------------------------
+        try:
+            fact_lines = "\n".join(
+                f"{i}. id={f.id}: \"{f.text}\"" for i, f in enumerate(facts)
+            )
+            messages = [
+                ChatMessage(role="system", content=_AUDIT_PROMPT),
+                ChatMessage(role="user", content=fact_lines),
+            ]
+            accumulated: list[str] = []
+            async for tok in self.llm.chat(messages, temperature=0.1):
+                if tok.text:
+                    accumulated.append(tok.text)
+            raw = "".join(accumulated).strip()
+        except Exception as e:
+            logger.warning("audit: llm chat failed: %s", e)
+            await self._log_warning("audit.llm", e)
+            return {"skipped": True}
+
+        merges, drops = _parse_audit_json(raw)
+
+        # Keep only proposals that reference currently-active facts.
+        active_ids = {f.id for f in facts}
+        merges = [
+            (keep, drop) for (keep, drop) in merges
+            if keep in active_ids and drop in active_ids
+        ]
+        drops = [d for d in drops if d in active_ids]
+        # If a fact is both merged-away and dropped, the merge wins
+        # (preserves history); don't also hard-delete it.
+        merge_drop_ids = {drop for (_keep, drop) in merges}
+        drops = [d for d in drops if d not in merge_drop_ids]
+
+        if not merges and not drops:
+            # Nothing to do — record the fingerprint so an unchanged store
+            # short-circuits next time without re-calling the LLM.
+            try:
+                await self.store.set_kv("memory_audit_fingerprint", fingerprint)
+            except Exception:  # pragma: no cover
+                pass
+            return {"merged": 0, "dropped": 0}
+
+        # --- >50% removal guard ----------------------------------------
+        removed = len(merges) + len(drops)
+        if removed > AUDIT_MAX_REMOVAL_FRACTION * len(facts):
+            logger.warning(
+                "audit: REFUSED — proposal would remove %d of %d active "
+                "facts (>%.0f%%); leaving store unchanged",
+                removed, len(facts), AUDIT_MAX_REMOVAL_FRACTION * 100,
+            )
+            # Do NOT persist the fingerprint: a corrected fact set must be
+            # able to re-trigger the audit rather than freeze here.
+            return {"refused": True, "proposed_removed": removed}
+
+        # --- apply -----------------------------------------------------
+        merged = 0
+        dropped = 0
+        try:
+            # Merges: supersede the dropped fact by the survivor, then
+            # re-embed the survivor and refresh the cache.
+            survivor_ids = {keep for (keep, _drop) in merges}
+            for keep_id, drop_id in merges:
+                await self.store.supersede_fact(drop_id, keep_id)
+                self._fact_embedding_cache.pop(drop_id, None)
+                try:
+                    await self.store.delete_fact_embedding(drop_id)
+                except Exception:  # pragma: no cover
+                    pass
+                merged += 1
+
+            # Re-embed merged survivors so the cache reflects the kept text.
+            survivors = [f for f in facts if f.id in survivor_ids]
+            if survivors:
+                try:
+                    vecs = await self.embeddings.embed(
+                        [f.text for f in survivors]
+                    )
+                    for fact, vec in zip(survivors, vecs):
+                        self._fact_embedding_cache[fact.id] = vec
+                        try:
+                            await self.store.save_fact_embedding(
+                                fact.id, vec, model=self.embedding_model,
+                            )
+                        except Exception:  # pragma: no cover
+                            pass
+                except Exception as e:
+                    logger.warning("audit: re-embed survivors failed: %s", e)
+                    await self._log_warning("audit.reembed", e)
+
+            # Junk drops: hard delete fact + embedding.
+            for drop_id in drops:
+                if await self.store.delete_fact(drop_id):
+                    dropped += 1
+                self._fact_embedding_cache.pop(drop_id, None)
+                try:
+                    await self.store.delete_fact_embedding(drop_id)
+                except Exception:  # pragma: no cover
+                    pass
+        except Exception as e:
+            logger.warning("audit: apply failed: %s", e)
+            await self._log_warning("audit.apply", e)
+            # Partial application may have occurred; do NOT persist the
+            # fingerprint so the next run reconciles.
+            return {"merged": merged, "dropped": dropped}
+
+        # Persist the fingerprint only after a successful applied run.
+        try:
+            await self.store.set_kv("memory_audit_fingerprint", fingerprint)
+        except Exception:  # pragma: no cover
+            pass
+
+        try:
+            await self.store.add_event(
+                event_type="audit_success",
+                summary=f"audit: merged {merged}, dropped {dropped}",
+                source="memory",
+                metadata={
+                    "merged": merged,
+                    "dropped": dropped,
+                    "active_before": len(facts),
+                },
+            )
+        except Exception:  # pragma: no cover
+            pass
+
+        return {"merged": merged, "dropped": dropped}
+
 
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -1084,3 +1289,37 @@ def _parse_contradictions_json(raw: str) -> list[dict[str, Any]]:
         and "existing_id" in item
         and "new_index" in item
     ]
+
+
+def _parse_audit_json(raw: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """Extract (merges, drops) from an audit LLM response.
+
+    Returns ``([(keep_id, drop_id), ...], [drop_id, ...])``. Tolerant:
+    pulls the first JSON object, ignores malformed entries.
+    """
+    if not raw:
+        return [], []
+    match = _JSON_OBJ_RE.search(raw)
+    if not match:
+        return [], []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return [], []
+    if not isinstance(data, dict):
+        return [], []
+    merges: list[tuple[str, str]] = []
+    for m in data.get("merges") or []:
+        if not isinstance(m, dict):
+            continue
+        keep = m.get("keep_id")
+        drop = m.get("drop_id")
+        if (
+            isinstance(keep, str) and isinstance(drop, str)
+            and keep and drop and keep != drop
+        ):
+            merges.append((keep, drop))
+    drops: list[str] = [
+        d for d in (data.get("drops") or []) if isinstance(d, str) and d
+    ]
+    return merges, drops

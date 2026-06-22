@@ -1030,6 +1030,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         email_urgency_task = asyncio.create_task(_email_urgency_loop())
 
     # ------------------------------------------------------------------
+    # Scheduled memory consolidation/audit loop — every
+    # memory_audit_interval_s seconds (default 24h). Whole-store pass that
+    # merges paraphrased facts and drops junk; cheap via a fingerprint
+    # short-circuit. Wrapped so a failure never crashes the scheduler.
+    # ------------------------------------------------------------------
+    memory_audit_task: asyncio.Task[None] | None = None
+    if memory is not None:
+        async def _memory_audit_loop() -> None:
+            interval = max(60, int(settings.memory_audit_interval_s))
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    raise
+                try:
+                    result = await memory.audit()
+                    if result.get("merged") or result.get("dropped"):
+                        logger.info(
+                            "memory audit: merged %s, dropped %s",
+                            result.get("merged", 0), result.get("dropped", 0),
+                        )
+                except Exception:
+                    logger.exception("memory audit loop iteration failed")
+
+        memory_audit_task = asyncio.create_task(_memory_audit_loop())
+
+    # ------------------------------------------------------------------
     # Background insights refresh loop — every 6 hours.
     # Runs once at startup so /insights is warm on first request.
     # ------------------------------------------------------------------
@@ -1153,6 +1180,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             email_urgency_task.cancel()
             try:
                 await email_urgency_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if memory_audit_task is not None:
+            memory_audit_task.cancel()
+            try:
+                await memory_audit_task
             except (asyncio.CancelledError, Exception):
                 pass
         if insights_refresh_task is not None:

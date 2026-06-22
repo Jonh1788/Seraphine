@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     # Public base URL the deep-link points at (the web frontend).
     app_public_url: str = "https://sera.jonhdev.io"
 
+    # Scheduled whole-store memory consolidation/audit pass. Merges
+    # paraphrased facts and drops clear junk across the WHOLE store
+    # (coarser complement to per-write dedup). Cheap to run thanks to a
+    # fingerprint short-circuit, so a daily cadence is plenty.
+    memory_audit_interval_s: int = 86400  # 24h
+
     # Browser automation — leave url empty to disable
     browser_agent_url: str = ""  # "http://localhost:3002"
 
