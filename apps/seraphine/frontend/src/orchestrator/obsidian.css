@@ -26,6 +26,12 @@
 .maestro__tab:hover { color: var(--text); }
 .maestro__tab--active { color: var(--accent); font-weight: 700; border-bottom-color: var(--accent); }
 .maestro__tab svg { stroke: currentColor; }
+.maestro__tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--accent); color: var(--bg-0);
+  font-size: 10px; font-weight: 700; line-height: 1;
+}
 
 /* ---- Body: two columns ---- */
 .maestro__body { flex-direction: row; gap: 16px; min-height: 0; padding-top: 12px; }
@@ -505,6 +511,19 @@
 .si-history__goal { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-history__meta { flex: none; font-size: 11px; color: var(--faint); font-family: var(--font-mono); }
 .si-history__review { padding: 0 13px 13px; font-size: 12px; line-height: 1.6; color: var(--dim); white-space: pre-wrap; word-break: break-word; border-top: 1px solid var(--border); padding-top: 11px; }
+
+/* ---- Skills aprendidas (self-authoring v1) — expanded draft body ---- */
+.maestro__body--skills { overflow-y: auto; }
+.si-mainempty--skills { justify-content: flex-start; padding-top: 28px; }
+.sk-body { padding: 11px 13px 13px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 11px; }
+.sk-md { margin: 0; max-height: 340px; overflow: auto; background: var(--bg-0); border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.sk-foot { font-size: 11px; color: var(--faint); }
+.sk-foot code { font-size: 11px; }
+.sk-actions { display: flex; align-items: center; gap: 10px; }
+.sk-actions .si-btn:disabled { opacity: 0.6; cursor: default; }
+.sk-published { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #4ade80; word-break: break-all; }
+.sk-published svg { flex: none; }
+.sk-published code { font-size: 12px; color: var(--dim); }
 
 /* ---- Diff header (§9.1) ---- */
 .si-diffhead { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--border); flex: none; }

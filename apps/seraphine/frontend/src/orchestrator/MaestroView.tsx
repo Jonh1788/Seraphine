@@ -6,7 +6,9 @@ import {
 } from './api';
 import { useAgentStream } from './useAgentStream';
 import { SelfImprove } from './SelfImprove';
+import { SkillsPanel } from './SkillsPanel';
 import { useSelfImproveStore } from './selfImproveStore';
+import { useSkillsStore } from './skillsStore';
 import { Timeline } from './Timeline';
 import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
 
@@ -54,9 +56,11 @@ const STATUS_META: Record<SessionStatus, { label: string; cls: string }> = {
 export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   // Land on the Melhorar tab when a self-improve run is already in flight, so
   // returning to Maestro after leaving mid-run shows the run instead of resetting.
-  const [tab, setTab] = useState<'agents' | 'improve'>(
+  const [tab, setTab] = useState<'agents' | 'improve' | 'skills'>(
     () => (useSelfImproveStore.getState().phase !== 'idle' ? 'improve' : 'agents'),
   );
+  // Count of unreviewed drafts — a small badge on the Skills tab.
+  const unreviewedSkills = useSkillsStore((s) => s.drafts.filter((d) => d.status === 'draft').length);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
@@ -178,10 +182,16 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
         <button type="button" className={`maestro__tab${tab === 'improve' ? ' maestro__tab--active' : ''}`} onClick={() => setTab('improve')}>
           <IconSparkle />Melhorar Seraphine
         </button>
+        <button type="button" className={`maestro__tab${tab === 'skills' ? ' maestro__tab--active' : ''}`} onClick={() => setTab('skills')}>
+          <IconSparkle />Skills
+          {unreviewedSkills > 0 && <span className="maestro__tab-badge">{unreviewedSkills}</span>}
+        </button>
       </div>
 
       {tab === 'improve' ? (
         <div className="obs-screen__body maestro__body"><SelfImprove /></div>
+      ) : tab === 'skills' ? (
+        <SkillsPanel />
       ) : (
         <div className="obs-screen__body maestro__body">
           <aside className="maestro__list">
