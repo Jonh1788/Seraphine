@@ -98,6 +98,85 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+# --- category-aware retrieval boost (Task 3) -------------------------------
+# When the user's query is clearly about identity / contact / preference, we
+# nudge facts in the matching category up the ranking. The category labels
+# below MUST match the uppercase eyebrow vocabulary produced by
+# ``store._derive_fact_category`` / ``_FACT_CATEGORY_RULES`` (PESSOAS, LOCAL,
+# PREFERENCIA, ...), since we compare against the fact's persisted
+# ``category``. This is intentionally narrow: only the high-value
+# "who/where/what-do-I-like" intents earn a boost. First match per rule
+# contributes its label; multiple rules may fire (the result is a set).
+#
+# Patterns mirror the style of ``store._FACT_CATEGORY_RULES`` and cover both
+# PT-BR and EN phrasings. Anchored on query cues, not arbitrary keywords, so
+# a neutral query ("resumo do projeto X") matches nothing → empty set → no
+# boost at all.
+_QUERY_CATEGORY_RULES: list[tuple[str, re.Pattern[str]]] = [
+    # Identity + relationships → PESSOAS. "meu nome", "quem sou eu",
+    # "who am I", "my name", and relationship questions ("minha esposa",
+    # "meu filho", "who is my brother").
+    (
+        "PESSOAS",
+        re.compile(
+            r"\b(meu nome|qual.{0,12}\bnome\b|como me chamo|quem sou eu|"
+            r"my name|who am i|what.{0,8}my name|"
+            r"minha (esposa|mulher|namorada|m[ãa]e|irm[ãa]|filha)|"
+            r"meu (marido|namorado|pai|irm[ãa]o|filho)|"
+            r"quem [ée] (minha|meu|a minha|o meu)|"
+            r"who is my|my (wife|husband|son|daughter|mother|father|"
+            r"brother|sister|girlfriend|boyfriend|partner))\b"
+        ),
+    ),
+    # Where the user lives / their address → LOCAL.
+    (
+        "LOCAL",
+        re.compile(
+            r"\b(onde (eu )?moro|onde (eu )?vivo|minha casa|meu endere[çc]o|"
+            r"em que cidade|que cidade.{0,12}\bmoro\b|"
+            r"where do i live|where i live|my home|my address|"
+            r"what city|which city)\b"
+        ),
+    ),
+    # Tastes / preferences → PREFERENCIA.
+    (
+        "PREFERENCIA",
+        re.compile(
+            r"\b(do que eu gosto|o que eu gosto|eu gosto de|eu prefiro|"
+            r"meu favorito|minha favorita|meu preferido|minha preferida|"
+            r"what do i like|what i like|do i like|i prefer|my favorite|"
+            r"my favourite|my preference)\b"
+        ),
+    ),
+]
+
+
+def _classify_query_categories(query: str) -> set[str]:
+    """Classify a recall query into the fact-category labels it is asking
+    about (identity/contact/preference intents only).
+
+    Returns the set of matching uppercase category labels (PESSOAS / LOCAL /
+    PREFERENCIA). A neutral query that matches no rule returns an EMPTY set,
+    which the reranker treats as "apply no boost". Labels are drawn from the
+    same vocabulary as ``store._derive_fact_category`` so they compare
+    directly against a fact's persisted ``category``.
+    """
+    q = (query or "").lower()
+    targets: set[str] = set()
+    for label, pattern in _QUERY_CATEGORY_RULES:
+        if pattern.search(q):
+            targets.add(label)
+    return targets
+
+
+# Bounded multiplicative bump applied to a fact whose category matches the
+# query intent. Small by design: it nudges ordering. The hard clamp in the
+# reranker (boosted score may never reach the strongest non-boosted hit) is
+# what actually guarantees a weak category match can't invert a strong
+# direct semantic/FTS hit — the multiplier alone is just the nudge.
+_CATEGORY_BOOST_FACTOR = 1.15
+
+
 _FACTS_PROMPT = (
     "Extract ONLY information worth remembering long-term about the user from"
     " the conversation excerpts below.\n\n"
@@ -538,6 +617,10 @@ class MemoryManager:
                                 "source": fact.source,
                                 "confidence": fact.confidence,
                                 "created_at": fact.created_at,
+                                # Surfaced for the category-aware rerank boost
+                                # (Task 3) — must be present to match against
+                                # _classify_query_categories(query).
+                                "category": fact.category,
                             },
                             "dist": None,
                         }
@@ -555,7 +638,10 @@ class MemoryManager:
 
         # --- time-weight reranking ---
         now = datetime.now(timezone.utc)
-        ranked: list[tuple[str, float]] = []
+        # Which fact categories is this query asking about? Empty set => no
+        # category boost is applied at all (the common case). Computed once.
+        boost_targets = _classify_query_categories(query)
+        scored: list[tuple[str, float, bool]] = []  # (id, post-decay score, boostable)
         for sid in sorted_ids:
             base = rrf_scores[sid]
             meta = info.get(sid, {}).get("metadata", {})
@@ -569,7 +655,38 @@ class MemoryManager:
                     base = base * math.exp(-age / decay_days)
                 except (ValueError, TypeError):
                     pass
-            ranked.append((sid, base))
+            boostable = bool(
+                boost_targets
+                and meta.get("kind") == "fact"
+                and meta.get("category") in boost_targets
+            )
+            scored.append((sid, base, boostable))
+
+        # --- category-aware bounded boost (Task 3) ---
+        # A fact whose category matches the query intent gets a small
+        # multiplicative bump, but is HARD-CLAMPED so its boosted score can
+        # never reach the strongest non-boosted entry's score. Consequence:
+        # a strong direct semantic/FTS hit (turn, window, or off-category
+        # fact) always stays on top — the boost can reorder among the
+        # weaker tail but can never invert a strong hit. When nothing is
+        # boostable (neutral query, or no on-category facts) the ranking is
+        # byte-for-byte identical to the un-boosted path.
+        ranked: list[tuple[str, float]] = []
+        if boost_targets and any(b for _, _, b in scored):
+            non_boost_scores = [s for _, s, b in scored if not b]
+            cap = max(non_boost_scores) if non_boost_scores else None
+            for sid, base, boostable in scored:
+                if boostable:
+                    boosted = base * _CATEGORY_BOOST_FACTOR
+                    if cap is not None:
+                        # Strictly below the best non-boosted hit so a boost
+                        # can lift a fact up the tail but never overtake the
+                        # top direct hit. nextafter() keeps determinism.
+                        boosted = min(boosted, math.nextafter(cap, 0.0))
+                    base = boosted
+                ranked.append((sid, base))
+        else:
+            ranked = [(sid, base) for sid, base, _ in scored]
         ranked.sort(key=lambda x: -x[1])
 
         # --- window / turn dedup ---
