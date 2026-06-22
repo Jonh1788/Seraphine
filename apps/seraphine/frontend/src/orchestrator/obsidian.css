@@ -40,7 +40,9 @@
    the detail/empty-state stays pinned in the viewport — otherwise a long
    session list grows the body and pushes the centered "Nenhuma sessão
    selecionada" empty state off-screen. */
-.maestro__body--agents { overflow: hidden; }
+/* Two classes (0-2-0) so this beats `.obs-screen__body { overflow-y: auto }`,
+   which is bundled LATER at equal specificity and would otherwise override it. */
+.maestro__body.maestro__body--agents { overflow: hidden; }
 .maestro__list { width: 316px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-bottom: 4px; }
 
 /* ---- Search field ---- */
