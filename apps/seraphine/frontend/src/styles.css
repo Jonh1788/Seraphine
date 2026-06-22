@@ -10035,6 +10035,14 @@ body.qc-window .quick-capture {
 
 /* ── Focus Analytics ────────────────────────────────────────────── */
 
+/* ── Focus Analytics ──────────────────────────────────────────────
+   Substitui o bloco antigo `.focus-analytics*` (linhas ~10038–10209
+   do styles.css). Reutiliza os tokens Obsidian já definidos no :root
+   (--accent #9a93ff, --glass-bg, --accent-gradient, etc.).
+   Disciplina de acento: gradiente lilás usado UMA vez (herói);
+   verde é estritamente semântico; demais números em --text neutro.
+   ─────────────────────────────────────────────────────────────────── */
+
 .focus-analytics {
   background: var(--bg-0);
 }
@@ -10049,45 +10057,7 @@ body.qc-window .quick-capture {
   gap: var(--space-4);
 }
 
-.focus-analytics__stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: var(--space-3);
-}
-
-.focus-analytics__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-4);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--r-lg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-}
-
-.focus-analytics__stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text);
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.focus-analytics__stat-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
-}
-
-.focus-analytics__stat-sub {
-  font-size: 11px;
-  color: var(--text-faint);
-  margin-top: 2px;
-}
-
+/* Cartão glass base (reutilizado por herói, gráficos e resumo) */
 .focus-analytics__chart-card {
   display: flex;
   flex-direction: column;
@@ -10102,111 +10072,356 @@ body.qc-window .quick-capture {
 
 .focus-analytics__chart-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
 }
 
-.focus-analytics__bar-chart {
-  overflow-x: auto;
-  padding-bottom: var(--space-1);
+/* ── Hero row ─────────────────────────────────────────────────────── */
+.fa-hero-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: var(--space-4);
 }
 
-.focus-analytics__empty-hint {
+.fa-hero {
+  position: relative;
+  overflow: hidden;
+  gap: 10px;
+  background:
+    radial-gradient(700px 220px at 100% 0%, rgba(154, 147, 255, 0.10), transparent 70%),
+    var(--glass-bg);
+}
+
+/* O ÚNICO gradiente lilás da tela */
+.fa-hero-value {
+  font-family: var(--font-mono);
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.fa-hero-value small {
+  font-size: 24px;
+  font-weight: 600;
+  margin-left: 4px;
+  letter-spacing: 0;
+  -webkit-text-fill-color: var(--text-dim);
+  color: var(--text-dim);
+}
+
+.fa-hero-meta {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.fa-hero-meta b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.fa-spark {
+  margin-top: 2px;
+}
+
+/* ── Mini stat cluster (neutro) ───────────────────────────────────── */
+.fa-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.fa-mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--space-4);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.fa-mini-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.fa-mini-value {
+  font-family: var(--font-mono);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.fa-mini-value small {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 3px;
+}
+
+.fa-mini-sub {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.fa-mini-sub--pos {
+  color: #86efac; /* verde semântico — apenas deltas positivos */
+}
+
+/* ── Bar chart ────────────────────────────────────────────────────── */
+.fa-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fa-chart-note {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.fa-chart-note b {
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+
+.fa-bars svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.fa-bar-fill {
+  transition: y 0.5s cubic-bezier(0.16, 1, 0.3, 1), height 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fa-bar:hover .fa-bar-fill {
+  filter: brightness(1.18);
+}
+.fa-bar-day {
+  fill: var(--text-faint);
+  font-family: var(--font-sans);
+}
+.fa-bar-val {
+  fill: var(--text);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.fa-bar:hover .fa-bar-val {
+  opacity: 1;
+}
+
+/* ── Two-column row ───────────────────────────────────────────────── */
+.fa-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+/* ── Heatmap ──────────────────────────────────────────────────────── */
+.fa-hm-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  padding-bottom: 2px;
+}
+.fa-hm-col {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.fa-hm-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.fa-hm-cell {
+  aspect-ratio: 1;
+  min-height: 26px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.fa-hm-cell:hover {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 2px rgba(154, 147, 255, 0.35);
+}
+.fa-hm-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.fa-hm-scale {
+  display: flex;
+  gap: 4px;
+}
+.fa-hm-scale i {
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+}
+
+/* ── Top apps ─────────────────────────────────────────────────────── */
+.fa-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.fa-app-row {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  align-items: center;
+  gap: 11px;
+}
+.fa-app-rank {
+  text-align: center;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+.fa-app-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fa-app-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+}
+.fa-app-name span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fa-app-badge {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-hi);
+  background: rgba(154, 147, 255, 0.18);
+}
+.fa-app-badge--lead {
+  color: var(--accent-contrast);
+  background: var(--accent-hi);
+}
+.fa-app-track {
+  height: 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.fa-app-fill {
+  height: 100%;
+  border-radius: 7px;
+  background: rgba(154, 147, 255, 0.32);
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fa-app-fill--lead {
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+}
+.fa-app-meta {
+  min-width: 74px;
+  text-align: right;
+}
+.fa-app-time {
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+.fa-app-pct {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+
+.fa-empty-hint {
   font-size: 12px;
   color: var(--text-faint);
   padding: var(--space-4) 0;
 }
 
-/* Horizontal bar chart (top apps) */
-.focus-analytics__hbar-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+/* ── Insight / resumo ─────────────────────────────────────────────── */
+.fa-insight {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 14px;
+  background: linear-gradient(120deg, rgba(154, 147, 255, 0.07), var(--glass-bg) 55%);
 }
-
-.focus-analytics__hbar-row {
+.fa-insight-ico {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
   display: grid;
-  grid-template-columns: 120px 1fr 60px;
-  align-items: center;
-  gap: var(--space-2);
+  place-items: center;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(154, 147, 255, 0.2);
 }
-
-.focus-analytics__hbar-label {
-  font-size: 12px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.focus-analytics__hbar-track {
-  height: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.focus-analytics__hbar-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 7px;
-  min-width: 2px;
-  transition: width 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.focus-analytics__hbar-value {
-  font-size: 11px;
+.fa-insight-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
   color: var(--text-dim);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
-
-/* Weekly heatmap */
-.focus-analytics__heatmap {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.focus-analytics__heatmap-header {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 3px;
-  padding-bottom: var(--space-1);
-}
-
-.focus-analytics__heatmap-col {
-  text-align: center;
-  font-size: 10px;
+.fa-insight-body b {
+  color: var(--text);
   font-weight: 600;
-  color: var(--text-faint);
+}
+.fa-insight-body .fa-hl {
+  color: var(--accent-hi);
+  font-weight: 600;
 }
 
-.focus-analytics__heatmap-row {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 3px;
+/* ── Responsivo ───────────────────────────────────────────────────── */
+@media (max-width: 880px) {
+  .fa-hero-row { grid-template-columns: 1fr; }
+  .fa-two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .fa-hero-value { font-size: 46px; }
+  .fa-app-row { grid-template-columns: 22px 1fr auto; }
 }
 
-.focus-analytics__heatmap-cell {
-  aspect-ratio: 1;
-  border-radius: 4px;
-  min-height: 20px;
-  transition: background 200ms;
+/* ── Movimento reduzido ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .fa-bar-fill,
+  .fa-app-fill,
+  .fa-hm-cell { transition: none !important; }
 }
 
-@media (max-width: 768px) {
-  .focus-analytics__stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .focus-analytics__hbar-row {
-    grid-template-columns: 80px 1fr 50px;
-  }
-}
 
 /* ── Habits ──────────────────────────────────────────────────────── */
 
