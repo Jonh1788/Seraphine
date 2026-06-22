@@ -46,6 +46,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-bdd>=7",
+    "pytest-timeout>=2.3",
     "anyio>=4",
     "ruff>=0.6",
 ]
@@ -55,6 +56,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-bdd>=7",
+    "pytest-timeout>=2.3",
     "anyio>=4",
     "ruff>=0.6",
     "respx>=0.23.1",
@@ -70,6 +72,15 @@ packages = ["seraphine"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Fail-fast on a hung test instead of stalling the whole suite forever.
+# The ~15 integration tests that boot the app via TestClient run the real
+# lifespan, which blocks on startup when backing services (cliproxy:8317,
+# ollama:11434) are unreachable. Without a timeout a single such hang
+# freezes the entire run (observed: 57 min wall, 8s CPU). 60s is generous
+# for legitimate tests when services are up; true hangs now die fast and
+# name the offending test. Thread method so it interrupts blocking I/O.
+timeout = 60
+timeout_method = "thread"
 
 [tool.ruff]
 line-length = 100
