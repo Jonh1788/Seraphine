@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTranscriptLine, transcriptToEvents } from '../MaestroView';
+import { classifyTranscriptLine, transcriptToEvents, transcriptEndedCleanly } from '../MaestroView';
 
 describe('classifyTranscriptLine (JS mirror of proto::classify)', () => {
   it('classifies the stream-json line types', () => {
@@ -32,5 +32,26 @@ describe('transcriptToEvents', () => {
   it('tolerates an empty / nullish list', () => {
     expect(transcriptToEvents('s1', [])).toEqual([]);
     expect(transcriptToEvents('s1', undefined as unknown as unknown[])).toEqual([]);
+  });
+});
+
+describe('transcriptEndedCleanly (concluída vs ociosa heuristic)', () => {
+  it('true when the last assistant message ended with end_turn', () => {
+    expect(transcriptEndedCleanly([{ type: 'assistant', message: { stop_reason: 'end_turn', content: [] } }])).toBe(true);
+  });
+  it('false when the last assistant ended on tool_use (interrupted)', () => {
+    expect(transcriptEndedCleanly([{ type: 'assistant', message: { stop_reason: 'tool_use', content: [] } }])).toBe(false);
+  });
+  it('scans backward past trailing non-assistant lines (mode/summary)', () => {
+    expect(transcriptEndedCleanly([
+      { type: 'assistant', message: { stop_reason: 'end_turn' } },
+      { type: 'mode', mode: 'x' },
+      { type: 'summary', summary: 'y' },
+    ])).toBe(true);
+  });
+  it('false when no assistant message / empty / garbage', () => {
+    expect(transcriptEndedCleanly([{ type: 'user', message: {} }])).toBe(false);
+    expect(transcriptEndedCleanly([])).toBe(false);
+    expect(transcriptEndedCleanly([null, 'x'])).toBe(false);
   });
 });

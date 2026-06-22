@@ -106,6 +106,9 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [observed, setObserved] = useState<SessionInfo | null>(null);
   const [observedEvents, setObservedEvents] = useState<AgentEvent[]>([]);
   const [takeoverGoal, setTakeoverGoal] = useState('');
+  // Per past-session: did its transcript end cleanly (last assistant end_turn)?
+  // Used to derive concluída vs ociosa for sessions with no live stream.
+  const [cleanEnd, setCleanEnd] = useState<Record<string, boolean>>({});
   const events = useAgentStream();
 
   const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
@@ -176,10 +179,14 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
       if (hasPending) map[s.session_id] = 'waiting';
       else if (finished) map[s.session_id] = 'done';
       else if (owned && evs.length > 0 && recent) map[s.session_id] = 'running';
+      // Past (non-owned) sessions have no live stream — derive from the
+      // transcript: ended cleanly (last assistant `end_turn`) AND recent (<6h)
+      // → concluída; interrupted or old/dormant → ociosa.
+      else if (!owned && cleanEnd[s.session_id] && now - s.last_modified_ms < 6 * 60 * 60 * 1000) map[s.session_id] = 'done';
       else map[s.session_id] = 'idle';
     }
     return map;
-  }, [events, sessions, ownedSessionIds, agentToSession]);
+  }, [events, sessions, ownedSessionIds, agentToSession, cleanEnd]);
 
   // Last-activity summary per session (read from the transcript tail).
   const [activity, setActivity] = useState<Record<string, string>>({});
@@ -187,11 +194,15 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     let live = true;
     void (async () => {
       const next: Record<string, string> = {};
+      const ends: Record<string, boolean> = {};
       await Promise.allSettled(sessions.slice(0, 40).map(async (s) => {
-        try { next[s.session_id] = summarizeTranscript(await readTranscript(s.slug, s.session_id, 4)); }
-        catch { /* ignore unreadable */ }
+        try {
+          const lines = await readTranscript(s.slug, s.session_id, 10);
+          next[s.session_id] = summarizeTranscript(lines);
+          ends[s.session_id] = transcriptEndedCleanly(lines);
+        } catch { /* ignore unreadable */ }
       }));
-      if (live) setActivity(next);
+      if (live) { setActivity(next); setCleanEnd(ends); }
     })();
     return () => { live = false; };
   }, [sessions]);
@@ -401,6 +412,21 @@ function permCommand(events: AgentEvent[], tool: string): string {
 }
 
 /** Best-effort one-line summary of a transcript's most recent meaningful line. */
+/**
+ * Did this transcript end cleanly? True when the LAST assistant message stopped
+ * with `end_turn` (the agent gave a final response and finished its turn) rather
+ * than being cut off mid-tool / interrupted. Used to label a past session
+ * "concluída" vs "ociosa" (it has no live stream to read status from).
+ */
+export function transcriptEndedCleanly(lines: unknown[]): boolean {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const v = lines[i] as Record<string, unknown> | null;
+    if (!v || typeof v !== 'object' || v.type !== 'assistant') continue;
+    return (v.message as { stop_reason?: unknown } | undefined)?.stop_reason === 'end_turn';
+  }
+  return false;
+}
+
 function summarizeTranscript(lines: unknown[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const v = lines[i] as Record<string, unknown> | null;
