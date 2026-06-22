@@ -2,6 +2,17 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { SessionInfo, AgentEvent, PermissionMode, HostStatus, SiSession, DiffFile, GateResult } from './types';
 
+/** Raw `maestro:permission-pending` event payload (snake_case, as Rust emits).
+ *  The listener forwards this verbatim; the approvals store maps it to the
+ *  camelCase `PendingPermission`. */
+export interface RawPendingPermission {
+  id: string;
+  session_id: string;
+  cwd: string;
+  tool_name: string;
+  tool_input: string;
+}
+
 // Tauri v2 maps JS camelCase arg keys to Rust snake_case params (verified in
 // this repo: `whisper_transcribe_pcm` is invoked with `sampleRate` against the
 // Rust param `sample_rate`). Keep the keys below camelCase accordingly.
@@ -27,6 +38,18 @@ export const onAgentEvent = (cb: (e: AgentEvent) => void): Promise<UnlistenFn> =
   listen<AgentEvent>('maestro:agent-event', (ev) => cb(ev.payload));
 export const onAgentExit = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
   listen<string>('maestro:agent-exit', (ev) => cb(ev.payload));
+
+// Maestro — global permission interception (local approval server + Claude Code
+// hook). Toggling installs/removes the global hook; resolving unblocks a session
+// the hook has paused. `onPermissionPending` mirrors the `onAgentEvent` wrapper.
+export const setPermissionInterception = (enable: boolean) =>
+  invoke<boolean>('maestro_set_permission_interception', { enable });
+export const resolvePermission = (id: string, allow: boolean, reason = '') =>
+  invoke<void>('maestro_resolve_permission', { id, allow, reason });
+export const approvalsStatus = () =>
+  invoke<{ enabled: boolean; port: number }>('maestro_approvals_status');
+export const onPermissionPending = (cb: (p: RawPendingPermission) => void): Promise<UnlistenFn> =>
+  listen<RawPendingPermission>('maestro:permission-pending', (ev) => cb(ev.payload));
 
 // Maestro Phase 3 — directed self-improvement (isolated worktrees).
 export const siCreate = (repoRoot: string, slug: string, id: string) => invoke<SiSession>('maestro_si_create', { repoRoot, slug, id });

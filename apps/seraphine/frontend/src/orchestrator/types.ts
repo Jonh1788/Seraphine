@@ -13,6 +13,20 @@ export interface DiffFile { path: string; changes: string; }
 export interface GateStep { cmd: string; ok: boolean; tail: string; timed_out: boolean; }
 export interface GateResult { ok: boolean; steps: GateStep[]; }
 
+/**
+ * A pending permission request surfaced by the global Claude Code hook
+ * (Maestro permission interception). The Rust event payload is snake_case
+ * (`session_id`/`tool_name`/`tool_input`); the listener in `api.ts` maps it to
+ * this camelCase shape so the rest of the app never sees snake_case.
+ */
+export interface PendingPermission {
+  id: string;
+  sessionId: string;
+  cwd: string;
+  toolName: string;
+  toolInput: string;
+}
+
 /** A distilled, reviewable skill awaiting publish (skills self-authoring v1). */
 export interface SkillDraft {
   id: string;

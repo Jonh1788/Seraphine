@@ -9,6 +9,7 @@ import { SelfImprove } from './SelfImprove';
 import { SkillsPanel } from './SkillsPanel';
 import { useSelfImproveStore } from './selfImproveStore';
 import { useSkillsStore } from './skillsStore';
+import { useApprovalsStore } from './approvalsStore';
 import { Timeline } from './Timeline';
 import { NewAgentDialog } from './NewAgentDialog';
 import type { SessionInfo, PermissionMode, AgentEvent, AgentEventKind, HostStatus } from './types';
@@ -90,6 +91,14 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   });
   // Count of unreviewed drafts — a small badge on the Skills tab.
   const unreviewedSkills = useSkillsStore((s) => s.drafts.filter((d) => d.status === 'draft').length);
+  // Permission interception: the global-hook toggle + the queue of BLOCKED
+  // requests (any Claude session the hook has parked, awaiting allow/deny).
+  const interceptEnabled = useApprovalsStore((s) => s.enabled);
+  const pendingApprovals = useApprovalsStore((s) => s.pending);
+  const approvalsBusy = useApprovalsStore((s) => s.busy);
+  const setInterceptEnabled = useApprovalsStore((s) => s.setEnabled);
+  const resolveApproval = useApprovalsStore((s) => s.resolve);
+  const initApprovals = useApprovalsStore((s) => s.init);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
@@ -114,6 +123,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
   useEffect(() => { refresh(); }, []);
   useEffect(() => { void listHosts().then(setHosts).catch(() => {}); }, []);
+  useEffect(() => { void initApprovals(); }, [initApprovals]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onBack(); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
@@ -212,6 +222,14 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     ? sessions.filter((s) => s.cwd.toLowerCase().includes(q) || (activity[s.session_id] ?? '').toLowerCase().includes(q))
     : sessions;
 
+  // Sessions the global hook has BLOCKED on a pending permission. A row for one
+  // of these is forced to AGUARDANDO (the per-row derived status doesn't see the
+  // hook's parked state — it only reads the live agent-event stream).
+  const blockedSessionIds = useMemo(
+    () => new Set(pendingApprovals.map((p) => p.sessionId)),
+    [pendingApprovals],
+  );
+
   const selectedSessionId = selected ? agentToSession.get(selected) : undefined;
   const selectedSession = selectedSessionId ? sessions.find((s) => s.session_id === selectedSessionId) : undefined;
   const runningCount = Object.values(statusBySession).filter((st) => st === 'running').length;
@@ -227,6 +245,15 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
         </div>
         {tab === 'agents' && (
           <div className="obs-screen__actions">
+            <button
+              type="button"
+              className={`obs-btn obs-btn--ghost maestro__approve-toggle${interceptEnabled ? ' maestro__approve-toggle--on' : ''}`}
+              aria-pressed={interceptEnabled}
+              title="Instala um hook global no Claude Code — intercepta permissões de TODAS as sessões. Reversível."
+              onClick={() => { void setInterceptEnabled(!interceptEnabled); }}
+            >
+              <IconLock />Aprovar permissões
+            </button>
             <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}><IconRefresh />Atualizar</button>
             <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlus size={14} />Novo agente</button>
           </div>
@@ -249,6 +276,31 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
       ) : tab === 'skills' ? (
         <SkillsPanel />
       ) : (
+        <>
+        {pendingApprovals.length > 0 && (
+          <div className="maestro__pending">
+            {pendingApprovals.map((p) => (
+              <div className="maestro__perm" key={p.id}>
+                <div className="maestro__perm-head">
+                  <span className="maestro__perm-chip"><IconLock /></span>
+                  <span className="maestro__perm-title">Permissão necessária</span>
+                  <span className="maestro__perm-tag">{p.toolName}</span>
+                </div>
+                <div className="maestro__perm-cmd"><span className="maestro__perm-prompt">$</span> {p.toolInput || p.toolName}</div>
+                <div className="maestro__perm-meta">
+                  <span className="maestro__perm-repo"><IconFolder size={11} />{basename(p.cwd)}</span>
+                  <span className="maestro__perm-sid">sessão {p.sessionId.slice(0, 8)}</span>
+                </div>
+                <div className="maestro__perm-actions">
+                  <button type="button" className="maestro__perm-approve" disabled={approvalsBusy === p.id}
+                    onClick={() => { void resolveApproval(p.id, true); }}><IconCheck />Aprovar</button>
+                  <button type="button" className="maestro__perm-deny" disabled={approvalsBusy === p.id}
+                    onClick={() => { void resolveApproval(p.id, false); }}><IconX />Negar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="obs-screen__body maestro__body maestro__body--agents">
           <aside className="maestro__list">
             <div className="maestro__search">
@@ -260,7 +312,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
               const agentId = sessionToAgent.get(s.session_id);
               return (
               <SessionRow key={s.slug + s.session_id} s={s}
-                status={statusBySession[s.session_id] ?? 'idle'}
+                status={blockedSessionIds.has(s.session_id) ? 'waiting' : (statusBySession[s.session_id] ?? 'idle')}
                 owned={ownedSessionIds.has(s.session_id)} activity={activity[s.session_id]}
                 selected={agentId ? agentId === selected : observed?.session_id === s.session_id}
                 onSelect={() => { if (agentId) { setSelected(agentId); setObserved(null); } else { setSelected(null); setObserved(s); } }}
@@ -270,7 +322,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             })}
             {remoteSessions.map((s) => (
               <SessionRow key={s.host + s.slug + s.session_id} s={s}
-                status="idle" owned={false} activity={undefined}
+                status={blockedSessionIds.has(s.session_id) ? 'waiting' : 'idle'} owned={false} activity={undefined}
                 selected={observed?.session_id === s.session_id}
                 onSelect={() => { setSelected(null); setObserved(s); }}
                 onResume={(g) => { void resumeSession(s.session_id, s.cwd, g, mode).then((id) => { setSelected(id); setObserved(null); }); }}
@@ -363,6 +415,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             )}
           </section>
         </div>
+        </>
       )}
 
       {newOpen && (
@@ -381,6 +434,12 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
       )}
     </div>
   );
+}
+
+/** Last path segment of a cwd (the repo/folder name), falling back to the whole
+ *  string when there's no separator. Used in the pending-approval card. */
+function basename(p: string): string {
+  return p.split('/').filter(Boolean).pop() || p;
 }
 
 /** Human elapsed-time label for the detail clock chip. */
