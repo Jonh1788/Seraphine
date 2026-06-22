@@ -188,6 +188,8 @@ fn run_desktop() {
             agents::approvals::maestro_set_permission_interception,
             agents::approvals::maestro_resolve_permission,
             agents::approvals::maestro_approvals_status,
+            agents::approvals::maestro_get_rules,
+            agents::approvals::maestro_set_rules,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -260,8 +262,14 @@ fn run_desktop() {
                     Ok(port) => log::info!("maestro approval server on 127.0.0.1:{port}"),
                     Err(e) => log::warn!("maestro approval server failed to start: {e}"),
                 }
-                // Clear any stale hook from a previous run (the port just changed).
-                let _ = agents::approvals::remove_hook();
+                // start_server restored `enabled` from ~/.maestro/config.json.
+                // If interception was on, reinstall the hook with this run's
+                // fresh port; otherwise clear any stale hook from a prior run.
+                if agents::approvals::is_enabled() {
+                    let _ = agents::approvals::reinstall_hook();
+                } else {
+                    let _ = agents::approvals::remove_hook();
+                }
             }
 
             // Kick off Whisper model download + context warmup in the

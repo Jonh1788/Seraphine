@@ -31,7 +31,7 @@
 //! still-uncalled `handle`, so the compiler flags it until startup wires it in.)
 #![allow(dead_code, unused_imports)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -39,6 +39,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
@@ -62,6 +63,36 @@ pub struct Decision {
     pub reason: String,
 }
 
+/// A persisted auto-decision rule. `pattern` is a tested SUBSET of Claude's
+/// permission syntax (bare tool name or `Tool(prefix *)` prefix-glob — see
+/// [`rule_matches`]); `action` is `"allow"` or `"deny"`. Anything that doesn't
+/// match any rule falls through to a human prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionRule {
+    pub pattern: String,
+    pub action: String,
+}
+
+/// The outcome of the dynamic (rule + remember aware) decision. `AskHuman` is
+/// the only branch that parks a worker on a channel; everything else answers
+/// the hook immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision3 {
+    Defer,
+    Allow,
+    Deny,
+    AskHuman,
+}
+
+/// A parked permission request: the channel to unpark the worker plus the
+/// session/tool it belongs to, so resolving with `remember` can record an
+/// always-allow for that exact (session, tool) pair.
+pub struct PendingEntry {
+    pub tx: Sender<Decision>,
+    pub session_id: String,
+    pub tool_name: String,
+}
+
 /// Shared server state. Behind `Arc`, stored in the [`STATE`] global so the
 /// Tauri commands and the accept/worker threads see the same instance.
 pub struct ApprovalState {
@@ -70,8 +101,15 @@ pub struct ApprovalState {
     pub enabled: AtomicBool,
     /// Bearer token Claude must present (`Authorization: Bearer <token>`).
     pub token: String,
-    /// id -> Sender for requests currently parked awaiting a human decision.
-    pub pending: Mutex<HashMap<String, Sender<Decision>>>,
+    /// id -> parked worker for requests currently awaiting a human decision.
+    pub pending: Mutex<HashMap<String, PendingEntry>>,
+    /// Persisted auto-decision rules, loaded from `~/.maestro/config.json` at
+    /// startup and editable via the UI commands.
+    pub rules: Mutex<Vec<PermissionRule>>,
+    /// `(session_id, tool_name)` pairs the user chose to "remember" — every
+    /// later call of that tool in that session auto-allows. In-memory only
+    /// (per process run), not persisted.
+    pub remembered: Mutex<HashSet<(String, String)>>,
     /// Monotonic counter for request ids (paired with the tool name).
     counter: AtomicU64,
     /// Bound port, filled in by [`start_server`]; 0 until the server starts.
@@ -87,6 +125,8 @@ impl ApprovalState {
             enabled: AtomicBool::new(false),
             token,
             pending: Mutex::new(HashMap::new()),
+            rules: Mutex::new(Vec::new()),
+            remembered: Mutex::new(HashSet::new()),
             counter: AtomicU64::new(1),
             port: AtomicU64::new(0),
         }
@@ -116,6 +156,14 @@ pub fn state() -> Option<Arc<ApprovalState>> {
     STATE.get().cloned()
 }
 
+/// Whether interception is currently enabled (false if the server hasn't
+/// started). Read by `lib.rs` startup to decide whether to (re)install the hook.
+pub fn is_enabled() -> bool {
+    state()
+        .map(|s| s.enabled.load(Ordering::Relaxed))
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Pure decision logic (unit-tested) — no I/O, no Tauri.
 // ---------------------------------------------------------------------------
@@ -128,6 +176,72 @@ pub fn decide_static(tool_name: &str, enabled: bool) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Does `pattern` match this `(tool_name, summary)`? This is a deliberately
+/// small, TESTED SUBSET of Claude's permission syntax — not a full grammar:
+///
+/// - Bare `"Bash"` → matches when `tool_name == pattern` (case-sensitive),
+///   regardless of summary.
+/// - `"Bash(git *)"` → prefix-glob: matches when `tool_name == "Bash"` AND the
+///   summary starts with `"git "` (the literal before ` *`, trimmed).
+/// - `"Bash(make build)"` (no `*`) → exact-summary: matches when the tool name
+///   is `Bash` AND `summary == "make build"`.
+///
+/// Tool name comparison is case-sensitive. Anything more elaborate (regex,
+/// nested globs, multiple args) is intentionally unsupported and falls through
+/// to a human prompt.
+pub fn rule_matches(pattern: &str, tool_name: &str, summary: &str) -> bool {
+    match pattern.split_once('(') {
+        // Parenthesized form: `Tool(arg)` or `Tool(prefix *)`.
+        Some((tool, rest)) => {
+            let Some(inner) = rest.strip_suffix(')') else {
+                // Malformed (no closing paren) — never matches.
+                return false;
+            };
+            if tool != tool_name {
+                return false;
+            }
+            let inner = inner.trim();
+            match inner.strip_suffix('*') {
+                // Prefix-glob: summary must start with the literal before `*`.
+                Some(prefix) => summary.starts_with(prefix.trim_end()),
+                // Exact-summary match.
+                None => summary == inner,
+            }
+        }
+        // Bare tool name: matches purely on the tool name.
+        None => pattern == tool_name,
+    }
+}
+
+/// Dynamic decision: static fast-paths first (disabled / safe tool → defer),
+/// then a per-session remembered allow, then the first matching rule, else
+/// `AskHuman`. First-match-wins across `rules` (so an allow rule placed before
+/// a deny rule that also matches yields `Allow`).
+pub fn decide_dynamic(
+    tool_name: &str,
+    summary: &str,
+    enabled: bool,
+    rules: &[PermissionRule],
+    remembered: bool,
+) -> Decision3 {
+    if !enabled || SAFE_TOOLS.contains(&tool_name) {
+        return Decision3::Defer;
+    }
+    if remembered {
+        return Decision3::Allow;
+    }
+    for rule in rules {
+        if rule_matches(&rule.pattern, tool_name, summary) {
+            return if rule.action == "allow" {
+                Decision3::Allow
+            } else {
+                Decision3::Deny
+            };
+        }
+    }
+    Decision3::AskHuman
 }
 
 /// Build the `hookSpecificOutput` body for one decision. `reason` is omitted
@@ -188,25 +302,43 @@ fn summarize_input(tool_input: &Value) -> String {
 // ---------------------------------------------------------------------------
 
 /// Core of `maestro_resolve_permission`, factored out so it's unit-testable
-/// without a Tauri runtime: pop the parked sender for `id` and deliver the
-/// decision, unparking the waiting worker. Err if the id is unknown (already
-/// resolved, timed out, or never existed).
-pub fn resolve(state: &ApprovalState, id: &str, decision: Decision) -> Result<(), String> {
-    let tx = {
+/// without a Tauri runtime: pop the parked entry for `id` and deliver the
+/// decision, unparking the waiting worker. When `remember && decision.allow`,
+/// also record `(session_id, tool_name)` so every later call of that tool in
+/// that session auto-allows. Err if the id is unknown (already resolved, timed
+/// out, or never existed).
+pub fn resolve(
+    state: &ApprovalState,
+    id: &str,
+    decision: Decision,
+    remember: bool,
+) -> Result<(), String> {
+    let entry = {
         let mut pending = state.pending.lock().map_err(|e| e.to_string())?;
         pending.remove(id)
     };
-    match tx {
-        Some(tx) => tx.send(decision).map_err(|_| "worker gone".to_string()),
-        None => Err("unknown id".to_string()),
+    let Some(entry) = entry else {
+        return Err("unknown id".to_string());
+    };
+    if remember && decision.allow {
+        if let Ok(mut r) = state.remembered.lock() {
+            r.insert((entry.session_id.clone(), entry.tool_name.clone()));
+        }
     }
+    entry.tx.send(decision).map_err(|_| "worker gone".to_string())
 }
 
-/// UI-driven decision for a parked permission request.
+/// UI-driven decision for a parked permission request. `remember` (with an
+/// allow) records an always-allow for this tool in this session.
 #[tauri::command]
-pub fn maestro_resolve_permission(id: String, allow: bool, reason: String) -> Result<(), String> {
+pub fn maestro_resolve_permission(
+    id: String,
+    allow: bool,
+    reason: String,
+    remember: bool,
+) -> Result<(), String> {
     let state = state().ok_or("approval server not running")?;
-    resolve(&state, &id, Decision { allow, reason })
+    resolve(&state, &id, Decision { allow, reason }, remember)
 }
 
 /// Whether approvals are on + the bound port (0 if the server isn't running).
@@ -393,8 +525,10 @@ pub fn remove_hook() -> Result<(), String> {
 
 /// Toggle whole-machine permission interception. Flips the in-memory master
 /// switch AND (un)installs the global `PreToolUse` hook in `~/.claude/settings.json`
-/// so the change takes effect for every Claude session, not just ones we spawned.
-/// Errs when the approval server isn't running (no port/token to bind the hook to).
+/// so the change takes effect for every Claude session, not just ones we spawned,
+/// AND persists the new `enabled` state to `~/.maestro/config.json` so it sticks
+/// across restarts. Errs when the approval server isn't running (no port/token to
+/// bind the hook to).
 #[tauri::command]
 pub fn maestro_set_permission_interception(enable: bool) -> Result<bool, String> {
     let state = state().ok_or("approval server not running")?;
@@ -405,7 +539,95 @@ pub fn maestro_set_permission_interception(enable: bool) -> Result<bool, String>
     } else {
         remove_hook()?;
     }
+    let rules = state.rules.lock().map(|r| r.clone()).unwrap_or_default();
+    save_config(enable, &rules)?;
     Ok(enable)
+}
+
+// ---------------------------------------------------------------------------
+// Persisted config in ~/.maestro/config.json
+// ---------------------------------------------------------------------------
+
+/// `~/.maestro/config.json`. Home is resolved the same way as
+/// [`settings_path`]: `HOME` env var first (so tests can redirect it), then
+/// `dirs::home_dir()`, then `/`.
+fn config_path() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".maestro/config.json")
+}
+
+/// Load `{ "enabled": bool, "rules": [{pattern, action}] }` from
+/// `~/.maestro/config.json`. Missing/unparseable degrades to `(false, [])` —
+/// interception is opt-in and we never fail startup on a bad config file.
+pub fn load_config() -> (bool, Vec<PermissionRule>) {
+    let raw = match std::fs::read_to_string(config_path()) {
+        Ok(s) => s,
+        Err(_) => return (false, Vec::new()),
+    };
+    let v: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return (false, Vec::new()),
+    };
+    let enabled = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+    let rules = v
+        .get("rules")
+        .cloned()
+        .and_then(|r| serde_json::from_value::<Vec<PermissionRule>>(r).ok())
+        .unwrap_or_default();
+    (enabled, rules)
+}
+
+/// Atomically persist `{ "enabled", "rules" }` to `~/.maestro/config.json`:
+/// pretty-print, write a pid-scoped temp file in the same dir, then rename over
+/// the destination (mirrors [`write_settings`]/[`write_server_json`]). Creates
+/// `~/.maestro` if missing.
+pub fn save_config(enabled: bool, rules: &[PermissionRule]) -> Result<(), String> {
+    let path = config_path();
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("config path has no parent: {path:?}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create_dir_all {dir:?}: {e}"))?;
+    let payload = json!({ "enabled": enabled, "rules": rules });
+    let pretty =
+        serde_json::to_string_pretty(&payload).map_err(|e| format!("serialize config: {e}"))?;
+    let tmp = dir.join(format!(".config.json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, pretty.as_bytes()).map_err(|e| format!("write {tmp:?}: {e}"))?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("rename {tmp:?} -> {path:?}: {e}"));
+    }
+    Ok(())
+}
+
+/// Read state's port + token and (re)install the global hook. Lets `lib.rs`
+/// re-enable on startup without needing the token itself.
+pub fn reinstall_hook() -> Result<(), String> {
+    let state = state().ok_or("approval server not running")?;
+    let port = state.port.load(Ordering::Relaxed) as u16;
+    install_hook(port, &state.token)
+}
+
+/// Current rules (clone), empty if the server isn't running.
+#[tauri::command]
+pub fn maestro_get_rules() -> Vec<PermissionRule> {
+    state()
+        .and_then(|s| s.rules.lock().ok().map(|r| r.clone()))
+        .unwrap_or_default()
+}
+
+/// Replace the rule set in memory and persist it (keeping the current `enabled`
+/// flag) to `~/.maestro/config.json`.
+#[tauri::command]
+pub fn maestro_set_rules(rules: Vec<PermissionRule>) -> Result<(), String> {
+    let state = state().ok_or("approval server not running")?;
+    if let Ok(mut r) = state.rules.lock() {
+        *r = rules.clone();
+    }
+    let enabled = state.enabled.load(Ordering::Relaxed);
+    save_config(enabled, &rules)
 }
 
 // ---------------------------------------------------------------------------
@@ -442,16 +664,25 @@ fn write_server_json(port: u16, token: &str) -> std::io::Result<()> {
 /// has to compile and be self-contained.
 pub fn start_server(app: AppHandle, state: Arc<ApprovalState>) -> std::io::Result<u16> {
     let server = tiny_http::Server::http("127.0.0.1:0")
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     let port = match server.server_addr() {
         tiny_http::ListenAddr::IP(addr) => addr.port(),
         // tiny_http can bind a unix socket; we always ask for an IP, so this
         // arm is unreachable in practice but must be handled for the match.
-        _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "non-IP listen addr")),
+        _ => return Err(std::io::Error::other("non-IP listen addr")),
     };
 
     write_server_json(port, &state.token)?;
     state.port.store(port as u64, Ordering::Relaxed);
+
+    // Restore persisted enabled + rules from ~/.maestro/config.json. The hook
+    // itself is (re)installed by lib.rs startup based on `is_enabled()`.
+    let (en, rules) = load_config();
+    state.enabled.store(en, Ordering::Relaxed);
+    if let Ok(mut r) = state.rules.lock() {
+        *r = rules;
+    }
+
     let state = init_state(state);
 
     std::thread::spawn(move || {
@@ -517,9 +748,23 @@ fn handle(mut request: tiny_http::Request, app: AppHandle, state: Arc<ApprovalSt
     let cwd = v.get("cwd").and_then(|x| x.as_str()).unwrap_or("");
     let tool_input = v.get("tool_input").cloned().unwrap_or_else(|| json!({}));
 
-    // Static fast path: disabled or safe tool → defer.
-    if decide_static(tool_name, state.enabled.load(Ordering::Relaxed)).is_some() {
-        return respond_json(request, defer_body());
+    // Compute the summary once (reused by both the decision and the UI emit).
+    let summary = summarize_input(&tool_input);
+    let enabled = state.enabled.load(Ordering::Relaxed);
+    let remembered = state
+        .remembered
+        .lock()
+        .map(|r| r.contains(&(session_id.to_string(), tool_name.to_string())))
+        .unwrap_or(false);
+    let rules = state.rules.lock().map(|r| r.clone()).unwrap_or_default();
+
+    // Dynamic decision: defer / auto-allow / auto-deny answer immediately;
+    // only AskHuman parks a worker.
+    match decide_dynamic(tool_name, &summary, enabled, &rules, remembered) {
+        Decision3::Defer => return respond_json(request, defer_body()),
+        Decision3::Allow => return respond_json(request, allow_body("")),
+        Decision3::Deny => return respond_json(request, deny_body("Negado por regra.")),
+        Decision3::AskHuman => {}
     }
 
     // Needs a human. Park on a channel keyed by a fresh id.
@@ -530,7 +775,14 @@ fn handle(mut request: tiny_http::Request, app: AppHandle, state: Arc<ApprovalSt
             Ok(p) => p,
             Err(_) => return respond_json(request, defer_body()),
         };
-        pending.insert(id.clone(), tx);
+        pending.insert(
+            id.clone(),
+            PendingEntry {
+                tx,
+                session_id: session_id.to_string(),
+                tool_name: tool_name.to_string(),
+            },
+        );
     }
 
     let _ = app.emit(
@@ -540,7 +792,7 @@ fn handle(mut request: tiny_http::Request, app: AppHandle, state: Arc<ApprovalSt
             "session_id": session_id,
             "cwd": cwd,
             "tool_name": tool_name,
-            "tool_input": summarize_input(&tool_input),
+            "tool_input": summary,
         }),
     );
 
@@ -585,6 +837,116 @@ mod tests {
         assert_eq!(decide_static("Bash", true), None);
         assert_eq!(decide_static("Write", true), None);
         assert_eq!(decide_static("Edit", true), None);
+    }
+
+    // ---- rule_matches (pure) ---------------------------------------------
+
+    #[test]
+    fn rule_matches_bare_tool_name() {
+        // Bare name matches on tool name, irrespective of summary.
+        assert!(rule_matches("Bash", "Bash", "anything at all"));
+        assert!(rule_matches("Bash", "Bash", ""));
+        // Different tool → no match.
+        assert!(!rule_matches("Bash", "Write", "anything"));
+        // Case-sensitive.
+        assert!(!rule_matches("bash", "Bash", "x"));
+    }
+
+    #[test]
+    fn rule_matches_prefix_glob() {
+        // `Bash(git *)` matches Bash calls whose summary starts with "git ".
+        assert!(rule_matches("Bash(git *)", "Bash", "git status"));
+        assert!(rule_matches("Bash(git *)", "Bash", "git push origin"));
+        // Not a `git ` prefix.
+        assert!(!rule_matches("Bash(git *)", "Bash", "rm -rf /"));
+        // Right summary, wrong tool.
+        assert!(!rule_matches("Bash(git *)", "Write", "git status"));
+    }
+
+    #[test]
+    fn rule_matches_exact_summary() {
+        // No `*` inside the parens → exact-summary match.
+        assert!(rule_matches("Bash(make build)", "Bash", "make build"));
+        assert!(!rule_matches("Bash(make build)", "Bash", "make build clean"));
+        assert!(!rule_matches("Bash(make build)", "Bash", "make"));
+    }
+
+    #[test]
+    fn rule_matches_malformed_pattern_never_matches() {
+        // Open paren with no close → no match (rather than a panic).
+        assert!(!rule_matches("Bash(git *", "Bash", "git status"));
+    }
+
+    // ---- decide_dynamic truth table --------------------------------------
+
+    fn rule(pattern: &str, action: &str) -> PermissionRule {
+        PermissionRule { pattern: pattern.into(), action: action.into() }
+    }
+
+    #[test]
+    fn decide_dynamic_disabled_defers() {
+        assert_eq!(
+            decide_dynamic("Bash", "rm -rf", false, &[rule("Bash", "deny")], false),
+            Decision3::Defer
+        );
+    }
+
+    #[test]
+    fn decide_dynamic_safe_tool_defers() {
+        // Even enabled + a matching deny rule, a SAFE tool defers.
+        assert_eq!(
+            decide_dynamic("Read", "/etc/passwd", true, &[rule("Read", "deny")], false),
+            Decision3::Defer
+        );
+    }
+
+    #[test]
+    fn decide_dynamic_remembered_allows() {
+        // Remembered beats rules (no rule needed).
+        assert_eq!(
+            decide_dynamic("Bash", "anything", true, &[], true),
+            Decision3::Allow
+        );
+    }
+
+    #[test]
+    fn decide_dynamic_matching_allow_and_deny_rules() {
+        assert_eq!(
+            decide_dynamic("Bash", "git status", true, &[rule("Bash(git *)", "allow")], false),
+            Decision3::Allow
+        );
+        assert_eq!(
+            decide_dynamic("Bash", "rm -rf /", true, &[rule("Bash", "deny")], false),
+            Decision3::Deny
+        );
+    }
+
+    #[test]
+    fn decide_dynamic_first_match_wins() {
+        // An allow rule placed BEFORE a deny rule that also matches → Allow.
+        let rules = [rule("Bash(git *)", "allow"), rule("Bash", "deny")];
+        assert_eq!(
+            decide_dynamic("Bash", "git status", true, &rules, false),
+            Decision3::Allow
+        );
+        // A different command falls through the allow rule and hits the deny.
+        assert_eq!(
+            decide_dynamic("Bash", "rm -rf /", true, &rules, false),
+            Decision3::Deny
+        );
+    }
+
+    #[test]
+    fn decide_dynamic_no_match_asks_human() {
+        assert_eq!(
+            decide_dynamic("Bash", "rm -rf /", true, &[rule("Bash(git *)", "allow")], false),
+            Decision3::AskHuman
+        );
+        // No rules at all → AskHuman.
+        assert_eq!(
+            decide_dynamic("Write", "/tmp/x", true, &[], false),
+            Decision3::AskHuman
+        );
     }
 
     #[test]
@@ -637,16 +999,29 @@ mod tests {
         assert!(s.ends_with('…'));
     }
 
+    /// Insert a parked entry the way `handle()` does, for resolve tests.
+    fn park(state: &ApprovalState, id: &str, session: &str, tool: &str) -> mpsc::Receiver<Decision> {
+        let (tx, rx) = mpsc::channel::<Decision>();
+        state.pending.lock().unwrap().insert(
+            id.to_string(),
+            PendingEntry {
+                tx,
+                session_id: session.to_string(),
+                tool_name: tool.to_string(),
+            },
+        );
+        rx
+    }
+
     #[test]
     fn resolve_delivers_decision_and_removes_id() {
         let state = ApprovalState::new("tok".into());
-        let (tx, rx) = mpsc::channel::<Decision>();
-        state.pending.lock().unwrap().insert("req-1".into(), tx);
+        let rx = park(&state, "req-1", "sess", "Bash");
 
         // A worker parked on the channel, mirroring handle()'s wait.
         let handle = std::thread::spawn(move || rx.recv_timeout(WAIT_TIMEOUT));
 
-        resolve(&state, "req-1", Decision { allow: true, reason: "ok".into() }).unwrap();
+        resolve(&state, "req-1", Decision { allow: true, reason: "ok".into() }, false).unwrap();
 
         let got = handle.join().unwrap().expect("decision delivered");
         assert!(got.allow);
@@ -658,9 +1033,50 @@ mod tests {
     #[test]
     fn resolve_unknown_id_errs() {
         let state = ApprovalState::new("tok".into());
-        let err = resolve(&state, "nope", Decision { allow: false, reason: String::new() })
-            .unwrap_err();
+        let err = resolve(
+            &state,
+            "nope",
+            Decision { allow: false, reason: String::new() },
+            false,
+        )
+        .unwrap_err();
         assert_eq!(err, "unknown id");
+    }
+
+    #[test]
+    fn resolve_with_remember_records_session_tool_and_then_allows() {
+        let state = ApprovalState::new("tok".into());
+        let rx = park(&state, "req-1", "sess-A", "Bash");
+        let worker = std::thread::spawn(move || rx.recv_timeout(WAIT_TIMEOUT));
+
+        resolve(&state, "req-1", Decision { allow: true, reason: String::new() }, true).unwrap();
+        worker.join().unwrap().expect("decision delivered");
+
+        // (session, tool) was recorded.
+        assert!(state
+            .remembered
+            .lock()
+            .unwrap()
+            .contains(&("sess-A".to_string(), "Bash".to_string())));
+
+        // A subsequent dynamic decision for that pair auto-allows.
+        assert_eq!(
+            decide_dynamic("Bash", "anything", true, &[], true),
+            Decision3::Allow
+        );
+    }
+
+    #[test]
+    fn resolve_remember_with_deny_does_not_record() {
+        let state = ApprovalState::new("tok".into());
+        let rx = park(&state, "req-1", "sess-B", "Bash");
+        let worker = std::thread::spawn(move || rx.recv_timeout(WAIT_TIMEOUT));
+
+        // remember=true but DENY → must not record an always-allow.
+        resolve(&state, "req-1", Decision { allow: false, reason: String::new() }, true).unwrap();
+        worker.join().unwrap().expect("decision delivered");
+
+        assert!(state.remembered.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -893,6 +1309,73 @@ mod tests {
         install_hook(11, "t").unwrap();
         assert!(settings_path().is_file(), "settings.json should be created");
         assert_eq!(our_group_count(&read_settings()), 1);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // ---- config.json save/load round-trip (temp HOME) --------------------
+
+    #[test]
+    fn config_save_load_round_trip() {
+        let _g = HOME_LOCK.lock().unwrap();
+        let tmp = unique_tmp("config-rt");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let _home = HomeGuard::set(&tmp);
+
+        let rules = vec![
+            PermissionRule { pattern: "Bash(git *)".into(), action: "allow".into() },
+            PermissionRule { pattern: "Bash".into(), action: "deny".into() },
+        ];
+        save_config(true, &rules).unwrap();
+        assert!(config_path().is_file(), "config.json should be created");
+
+        let (enabled, loaded) = load_config();
+        assert!(enabled);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].pattern, "Bash(git *)");
+        assert_eq!(loaded[0].action, "allow");
+        assert_eq!(loaded[1].pattern, "Bash");
+        assert_eq!(loaded[1].action, "deny");
+
+        // No temp files left behind by the atomic write.
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.join(".maestro"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "atomic write must leave no temp files");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn config_missing_is_disabled_empty() {
+        let _g = HOME_LOCK.lock().unwrap();
+        let tmp = unique_tmp("config-missing");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap(); // no .maestro/config.json
+        let _home = HomeGuard::set(&tmp);
+
+        let (enabled, rules) = load_config();
+        assert!(!enabled);
+        assert!(rules.is_empty());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn config_unparseable_is_disabled_empty() {
+        let _g = HOME_LOCK.lock().unwrap();
+        let tmp = unique_tmp("config-garbage");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".maestro")).unwrap();
+        let _home = HomeGuard::set(&tmp);
+        std::fs::write(config_path(), b"{ not valid json").unwrap();
+
+        let (enabled, rules) = load_config();
+        assert!(!enabled);
+        assert!(rules.is_empty());
 
         std::fs::remove_dir_all(&tmp).ok();
     }
