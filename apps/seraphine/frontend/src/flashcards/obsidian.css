@@ -23,11 +23,15 @@
   letter-spacing: 0.02em;
 }
 .fcd-banner__headline {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text);
-  margin-top: 4px;
-  letter-spacing: -0.01em;
+  font-size: 26px;
+  font-weight: 800;
+  margin-top: 6px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .fcd-banner__meta {
   font-size: 13px;
@@ -107,9 +111,9 @@
   transition: border-color 200ms ease, background 200ms ease, transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fcd-deck:hover {
-  border-color: var(--border-strong);
+  border-color: rgba(154, 147, 255, 0.4);
   background: var(--bg-2);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
 }
 .fcd-deck__head {
   display: flex;
@@ -321,46 +325,88 @@
 }
 .fcd-back:hover { background: var(--bg-2); border-color: var(--border-strong); }
 
-.fcd-card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 40px 32px;
-  min-height: 260px;
-  display: flex;
-  flex-direction: column;
-}
-.fcd-card__head {
+/* Persistent action bar above the flip card */
+.fcd-card__bar {
   display: flex;
   align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.fcd-card__topic {
   font-size: 11px;
   color: var(--text-faint);
-  margin-bottom: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 .fcd-card__actions {
   margin-left: auto;
   display: flex;
   gap: 4px;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .fcd-card__action {
   background: var(--bg-2);
   border: 1px solid var(--border);
   color: var(--text-dim);
-  padding: 3px 9px;
+  padding: 4px 10px;
   border-radius: 7px;
   cursor: pointer;
+  font: inherit;
   font-size: 11px;
   transition: background 200ms ease, color 200ms ease;
 }
 .fcd-card__action:hover { background: var(--bg-3); color: var(--text); }
-.fcd-card__front { font-size: 20px; line-height: 1.4; font-weight: 500; color: var(--text); }
-.fcd-card__divider { margin: 24px 0; border: 0; border-top: 1px solid var(--border-strong); }
-.fcd-card__back { font-size: 16px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
+
+/* 3D flip card */
+.fcd-flip {
+  perspective: 1800px;
+  min-height: 320px;
+}
+.fcd-flip__inner {
+  position: relative;
+  min-height: 320px;
+  transform-style: preserve-3d;
+  transition: transform 550ms cubic-bezier(0.2, 0, 0, 1);
+}
+.fcd-flip--flipped .fcd-flip__inner { transform: rotateY(180deg); }
+.fcd-face {
+  position: absolute;
+  inset: 0;
+  min-height: 320px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 32px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: auto;
+  box-shadow: var(--shadow-lg, 0 18px 50px rgba(0, 0, 0, 0.45));
+}
+.fcd-face--back { transform: rotateY(180deg); }
+.fcd-card__front {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--text);
+}
+.fcd-card__back { font-size: 16px; line-height: 1.55; white-space: pre-wrap; color: var(--text); }
 .fcd-card__hint { margin-top: auto; color: var(--text-faint); font-size: 12px; text-align: center; }
+
+/* Reduced motion: drop the 3D rotation, crossfade the faces instead */
+@media (prefers-reduced-motion: reduce) {
+  .fcd-flip__inner { transition: none; }
+  .fcd-flip--flipped .fcd-flip__inner { transform: none; }
+  .fcd-face { backface-visibility: visible; -webkit-backface-visibility: visible; transition: opacity 120ms ease; }
+  .fcd-face--back { transform: none; opacity: 0; }
+  .fcd-flip--flipped .fcd-face--front { opacity: 0; pointer-events: none; }
+  .fcd-flip--flipped .fcd-face--back { opacity: 1; }
+}
 
 .fcd-ratings { display: flex; gap: 10px; margin-top: 32px; flex-wrap: wrap; }
 .fcd-rating {
@@ -416,22 +462,23 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 3px 8px 3px 6px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(154, 147, 255, 0.35);
+  color: var(--accent-hi);
+  padding: 3px 9px 3px 7px;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
-  transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
+  transition: background 200ms ease, color 200ms ease, border-color 200ms ease, transform 100ms ease;
 }
 .fcd-deck__add:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
-  color: var(--accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
+.fcd-deck__add:active { transform: scale(0.94); }
 
 /* ---- Card editor (modal) ---- */
 .fce-backdrop {

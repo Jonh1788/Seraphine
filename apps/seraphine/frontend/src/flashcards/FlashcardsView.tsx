@@ -75,22 +75,22 @@ const RATINGS: Array<{ value: number; label: string; color: string; hint: string
   { value: 5, label: 'Easy',   color: 'var(--accent)',  hint: 'facil demais' },
 ];
 
-// Deterministic per-deck accent (cycles the Obsidian category palette).
-const DECK_COLORS = ['#ff7043', '#42a5f5', 'var(--accent)', '#4ade80', '#ab47bc', '#26a69a'];
+// Deterministic per-deck accent, DERIVED from the theme --accent via an
+// OKLCH hue rotation (relative color syntax). This keeps each deck visually
+// distinct while still tracking the active theme (midnight/aurora/sakura) —
+// no hardcoded hexes that ignore theme switches.
+const DECK_HUE_SHIFTS = [0, 38, -46, 92, 158, -108];
 
 function deckColor(topic: string): string {
   let h = 0;
   for (let i = 0; i < topic.length; i++) h = (h * 31 + topic.charCodeAt(i)) >>> 0;
-  return DECK_COLORS[h % DECK_COLORS.length];
+  const shift = DECK_HUE_SHIFTS[h % DECK_HUE_SHIFTS.length];
+  return `oklch(from var(--accent) clamp(0.62, l, 0.78) c calc(h + ${shift}))`;
 }
 
-// rgba tint for the icon tile bg from the deck color (named tokens map to accent-soft).
+// Low-alpha tint for the icon tile bg, mixed from the deck color itself.
 function deckTint(color: string): string {
-  if (color.startsWith('var(')) return 'var(--accent-soft)';
-  const m = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!m) return 'rgba(154,147,255,0.16)';
-  const n = parseInt(m[1], 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.16)`;
+  return `color-mix(in oklab, ${color} 16%, transparent)`;
 }
 
 // Row from GET /flashcards/decks — a real GROUP BY topic over the whole
@@ -647,95 +647,92 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
           )}
 
           {current && (
-            <div
-              className="fcd-card"
-              style={{ cursor: flipped ? 'default' : 'pointer' }}
-              onClick={() => !flipped && setFlipped(true)}
-            >
-              <div className="fcd-card__head">
-                <span>{current.topic}</span>
+            <>
+              {/* Persistent action bar (outside the flip so it stays put) */}
+              <div className="fcd-card__bar">
+                <span className="fcd-card__topic">{current.topic}</span>
                 <div className="fcd-card__actions">
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); openEditExisting(current); }}
+                    onClick={() => openEditExisting(current)}
                     className="fcd-card__action"
                     title="editar esse card"
                   >editar</button>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); skip(); }}
+                    onClick={() => skip()}
                     className="fcd-card__action"
                     title="pular (-> ou S)"
                   >pular</button>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); void forget(); }}
+                    onClick={() => void forget()}
                     className="fcd-card__action"
                     title="apagar esse card (Delete)"
                   >apagar</button>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); void forgetTopic(); }}
+                    onClick={() => void forgetTopic()}
                     className="fcd-card__action"
                     title="apagar todo o deck deste topico"
                   >apagar deck</button>
                 </div>
               </div>
-              <div className="fcd-card__front">
-                {current.front}
+
+              {/* 3D flip card: front (question) -> back (answer) */}
+              <div
+                className={`fcd-flip${flipped ? ' fcd-flip--flipped' : ''}`}
+                style={{ cursor: flipped ? 'default' : 'pointer' }}
+                onClick={() => !flipped && setFlipped(true)}
+                role="group"
+                aria-label="Cartão de estudo"
+              >
+                <div className="fcd-flip__inner">
+                  <div className="fcd-face fcd-face--front">
+                    <div className="fcd-card__front">{current.front}</div>
+                    <div className="fcd-card__hint">espaço ou clique pra ver a resposta</div>
+                  </div>
+                  <div className="fcd-face fcd-face--back">
+                    <div className="fcd-card__back">{current.back}</div>
+                    {current.image_url && (
+                      <img className="flashcards__card-img" src={current.image_url} alt="" />
+                    )}
+                    {current.source_url && (
+                      <a
+                        className="flashcards__source-link"
+                        href={current.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {current.source_title || 'Abrir fonte'}
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {flipped && (
-                <>
-                  <hr className="fcd-card__divider" />
-                  <div className="fcd-card__back">
-                    {current.back}
-                  </div>
-
-                  {current.image_url && (
-                    <img className="flashcards__card-img" src={current.image_url} alt="" />
-                  )}
-
-                  {current.source_url && (
-                    <a
-                      className="flashcards__source-link"
-                      href={current.source_url}
-                      target="_blank"
-                      rel="noreferrer"
+                <div className="fcd-ratings">
+                  {RATINGS.map((r, idx) => (
+                    <button
+                      key={r.value}
+                      type="button"
+                      onClick={() => void rate(r.value)}
+                      className="fcd-rating"
+                      style={{ background: r.color }}
+                      onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.97)')}
+                      onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                      title={`${r.hint} -- tecla ${idx + 1}`}
                     >
-                      {current.source_title || 'Abrir fonte'}
-                    </a>
-                  )}
-
-                  <div className="fcd-ratings">
-                    {RATINGS.map((r, idx) => (
-                      <button
-                        key={r.value}
-                        type="button"
-                        onClick={() => void rate(r.value)}
-                        className="fcd-rating"
-                        style={{ background: r.color }}
-                        onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.97)')}
-                        onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                        title={`${r.hint} -- tecla ${idx + 1}`}
-                      >
-                        {r.label}
-                        <div className="fcd-rating__hint">
-                          {r.hint}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {!flipped && (
-                <div className="fcd-card__hint">
-                  espaco ou clique pra ver resposta
+                      {r.label}
+                      <div className="fcd-rating__hint">{r.hint}</div>
+                    </button>
+                  ))}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 
