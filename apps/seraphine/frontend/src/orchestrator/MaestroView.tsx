@@ -198,16 +198,12 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
       ) : tab === 'skills' ? (
         <SkillsPanel />
       ) : (
-        <div className="obs-screen__body maestro__body">
+        <div className="obs-screen__body maestro__body maestro__body--agents">
           <aside className="maestro__list">
             <div className="maestro__search">
               <IconSearch />
               <input className="maestro__search-input" placeholder="Buscar sessão…" value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
-
-            <button type="button" className="maestro__start" onClick={() => setNewOpen(true)}>
-              <IconPlus size={15} />Novo agente
-            </button>
 
             {visibleSessions.map((s) => {
               const agentId = sessionToAgent.get(s.session_id);

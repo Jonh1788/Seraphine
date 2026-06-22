@@ -35,6 +35,12 @@
 
 /* ---- Body: two columns ---- */
 .maestro__body { flex-direction: row; gap: 16px; min-height: 0; padding-top: 12px; }
+/* Agents tab: the row must NOT scroll as a whole (it inherits overflow-y:auto
+   from .obs-screen__body). Bound it so the session LIST scrolls internally and
+   the detail/empty-state stays pinned in the viewport — otherwise a long
+   session list grows the body and pushes the centered "Nenhuma sessão
+   selecionada" empty state off-screen. */
+.maestro__body--agents { overflow: hidden; }
 .maestro__list { width: 316px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-bottom: 4px; }
 
 /* ---- Search field ---- */
