@@ -55,11 +55,15 @@ const STATUS_META: Record<SessionStatus, { label: string; cls: string }> = {
 };
 
 export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
-  // Land on the Melhorar tab when a self-improve run is already in flight, so
-  // returning to Maestro after leaving mid-run shows the run instead of resetting.
-  const [tab, setTab] = useState<'agents' | 'improve' | 'skills'>(
-    () => (useSelfImproveStore.getState().phase !== 'idle' ? 'improve' : 'agents'),
-  );
+  // Land on the Melhorar tab only while a self-improve run is ACTIVELY in flight
+  // (working/gating), so returning mid-run shows the run. A finished/awaiting-review
+  // run (ready/failed) or idle must NOT hijack the default tab — its phase is
+  // persisted to localStorage, so otherwise a single past run would permanently
+  // hide the Sessões view (and its "Nenhuma sessão selecionada" empty state).
+  const [tab, setTab] = useState<'agents' | 'improve' | 'skills'>(() => {
+    const phase = useSelfImproveStore.getState().phase;
+    return phase === 'working' || phase === 'gating' ? 'improve' : 'agents';
+  });
   // Count of unreviewed drafts — a small badge on the Skills tab.
   const unreviewedSkills = useSkillsStore((s) => s.drafts.filter((d) => d.status === 'draft').length);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
