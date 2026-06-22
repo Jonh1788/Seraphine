@@ -79,10 +79,12 @@ pub struct ApprovalState {
 }
 
 impl ApprovalState {
-    /// Fresh state with a random-ish token and approvals enabled.
+    /// Fresh state. Interception is OFF by default — it is opt-in: the user
+    /// flips it on (which also installs the global hook). A `true` default would
+    /// make the UI read "on" with no hook actually installed.
     pub fn new(token: String) -> Self {
         ApprovalState {
-            enabled: AtomicBool::new(true),
+            enabled: AtomicBool::new(false),
             token,
             pending: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(1),
@@ -368,7 +370,24 @@ fn install_hook(port: u16, token: &str) -> Result<(), String> {
 }
 
 /// Read settings, strip our hook, write back atomically. No-op-safe.
-fn remove_hook() -> Result<(), String> {
+/// Generate a random-ish Bearer token (16 bytes from /dev/urandom, hex; falls
+/// back to time+pid). Modest threat model — the server binds 127.0.0.1 only.
+pub fn generate_token() -> String {
+    let mut buf = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read as _;
+        if f.read_exact(&mut buf).is_ok() {
+            return buf.iter().map(|b| format!("{b:02x}")).collect();
+        }
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("maestro{nanos:x}{:x}", std::process::id())
+}
+
+pub fn remove_hook() -> Result<(), String> {
     write_settings(&remove_hook_json(read_settings()))
 }
 

@@ -185,6 +185,9 @@ fn run_desktop() {
             agents::skills::maestro_skill_extract,
             agents::skills::maestro_skill_publish,
             agents::skills::maestro_skill_list,
+            agents::approvals::maestro_set_permission_interception,
+            agents::approvals::maestro_resolve_permission,
+            agents::approvals::maestro_approvals_status,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -246,6 +249,20 @@ fn run_desktop() {
             app.global_shortcut().register(capture_shortcut)?;
             app.global_shortcut().register(avatar_shortcut)?;
             app.global_shortcut().register(clipboard_shortcut)?;
+
+            // Maestro global permission-approval server (opt-in). Binds
+            // 127.0.0.1, publishes ~/.maestro/server.json; the user approves/
+            // denies tool calls for ANY claude session via a global PreToolUse hook.
+            {
+                let token = agents::approvals::generate_token();
+                let state = std::sync::Arc::new(agents::approvals::ApprovalState::new(token));
+                match agents::approvals::start_server(app.handle().clone(), state) {
+                    Ok(port) => log::info!("maestro approval server on 127.0.0.1:{port}"),
+                    Err(e) => log::warn!("maestro approval server failed to start: {e}"),
+                }
+                // Clear any stale hook from a previous run (the port just changed).
+                let _ = agents::approvals::remove_hook();
+            }
 
             // Kick off Whisper model download + context warmup in the
             // background so the first voice input is instant. Errors are
