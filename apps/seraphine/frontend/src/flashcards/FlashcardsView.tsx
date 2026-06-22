@@ -15,6 +15,23 @@ import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE } from '../api';
 import { useConfirm } from '../ui';
+import {
+  createDeck as apiCreateDeck,
+  listArticlePickers,
+  listNotePickers,
+  type CreateDeckBody,
+  type DeckSource,
+  type PickerOption,
+} from './api';
+
+// PT-BR labels for the 5 deck sources, in display order.
+const SOURCE_OPTIONS: Array<{ value: DeckSource; label: string }> = [
+  { value: 'topic', label: 'Tópico' },
+  { value: 'research', label: 'Tópico + pesquisa web' },
+  { value: 'note', label: 'Da minha nota' },
+  { value: 'article', label: 'Do artigo' },
+  { value: 'chat', label: 'Colar texto' },
+];
 
 interface Card {
   id: string;
@@ -104,6 +121,14 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   const [createError, setCreateError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [deckTopic, setDeckTopic] = useState('');
+  const [deckSource, setDeckSource] = useState<DeckSource>('topic');
+  const [deckCount, setDeckCount] = useState(10);
+  const [deckText, setDeckText] = useState('');
+  const [deckNoteId, setDeckNoteId] = useState('');
+  const [deckArticleId, setDeckArticleId] = useState('');
+  const [notePickers, setNotePickers] = useState<PickerOption[]>([]);
+  const [articlePickers, setArticlePickers] = useState<PickerOption[]>([]);
+  const [pickersLoaded, setPickersLoaded] = useState(false);
   const [stats, setStats] = useState<{ reviewed: number; correct: number }>({
     reviewed: 0, correct: 0,
   });
@@ -250,28 +275,56 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     setFlipped(false);
   }, [current, queue]);
 
-  const createDeck = useCallback(async () => {
+  // Build the source-discriminated POST body, or null if the required
+  // input for the chosen source is missing (keeps the submit guard simple).
+  const buildDeckBody = useCallback((): CreateDeckBody | null => {
     const topic = deckTopic.trim();
-    if (!topic || creating) return;
+    const count = deckCount;
+    switch (deckSource) {
+      case 'topic':
+      case 'research':
+        if (!topic) return null;
+        return { source: deckSource, topic, count };
+      case 'note':
+        if (!deckNoteId) return null;
+        return { source: 'note', note_id: deckNoteId, count };
+      case 'article':
+        if (!deckArticleId) return null;
+        return { source: 'article', reading_item_id: deckArticleId, count };
+      case 'chat': {
+        const text = deckText.trim();
+        if (!text) return null;
+        // topic is optional for chat -> backend derives one when empty.
+        return { source: 'chat', text, ...(topic ? { topic } : {}), count };
+      }
+      default:
+        return null;
+    }
+  }, [deckSource, deckTopic, deckCount, deckNoteId, deckArticleId, deckText]);
+
+  const createDeck = useCallback(async () => {
+    if (creating) return;
+    const body = buildDeckBody();
+    if (!body) return;
     setCreating(true);
     setCreateError('');
     try {
-      const res = await fetch(`${API_BASE}/flashcards/decks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, count: 10 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await apiCreateDeck(body);
       setDeckTopic('');
+      setDeckText('');
+      setDeckNoteId('');
+      setDeckArticleId('');
       setCreateOpen(false);
       await fetchDue();
       await fetchSummaries();
-    } catch {
-      setCreateError('Falha ao criar deck. Tente de novo.');
+    } catch (err) {
+      // Surface the backend `detail` (e.g. 502 generation failure) — never a
+      // silent empty deck.
+      setCreateError(err instanceof Error ? err.message : 'Falha ao criar deck. Tente de novo.');
     } finally {
       setCreating(false);
     }
-  }, [deckTopic, creating, fetchDue, fetchSummaries]);
+  }, [creating, buildDeckBody, fetchDue, fetchSummaries]);
 
   // Enter study mode. If a topic is given, study that deck first by
   // ordering its cards to the front of the queue.
@@ -335,7 +388,13 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   const openCreate = useCallback(() => {
     setCreateError('');
     setCreateOpen(true);
-  }, []);
+    // Lazy-load the note/article pickers on first open (non-fatal on failure).
+    if (!pickersLoaded) {
+      setPickersLoaded(true);
+      void listNotePickers().then(setNotePickers);
+      void listArticlePickers().then(setArticlePickers);
+    }
+  }, [pickersLoaded]);
 
   // Preview card front for the banner (first due card, or a fallback).
   const previewCard = queue[0];
@@ -349,24 +408,133 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
     </div>
   );
 
+  // Submit is allowed only when the chosen source has its required input.
+  const canSubmit = buildDeckBody() !== null && !creating;
+
+  const onCreateKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void createDeck();
+    } else if (e.key === 'Escape') {
+      setCreateOpen(false);
+    }
+  };
+
   const renderCreatePanel = (): JSX.Element => (
     <div className="fcd-create">
-      <div className="fcd-create__row">
+      <div className="fcd-create__field">
+        <label className="fcd-create__label" htmlFor="fcd-source">Fonte</label>
+        <select
+          id="fcd-source"
+          className="fcd-create__select"
+          value={deckSource}
+          onChange={(e) => {
+            setDeckSource(e.target.value as DeckSource);
+            setCreateError('');
+          }}
+        >
+          {SOURCE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Per-source input(s) */}
+      {(deckSource === 'topic' || deckSource === 'research') && (
         <input
           type="text"
           autoFocus
           value={deckTopic}
           onChange={(e) => setDeckTopic(e.target.value)}
           placeholder="novo baralho sobre... (ex: Rust ownership)"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void createDeck();
-            else if (e.key === 'Escape') setCreateOpen(false);
-          }}
+          onKeyDown={onCreateKeyDown}
           className="fcd-create__input"
         />
+      )}
+
+      {deckSource === 'note' && (
+        <div className="fcd-create__field">
+          <label className="fcd-create__label" htmlFor="fcd-note">Nota</label>
+          <select
+            id="fcd-note"
+            className="fcd-create__select"
+            value={deckNoteId}
+            onChange={(e) => setDeckNoteId(e.target.value)}
+          >
+            <option value="">
+              {notePickers.length ? 'selecione uma nota...' : 'nenhuma nota encontrada'}
+            </option>
+            {notePickers.map((n) => (
+              <option key={n.id} value={n.id}>{n.title}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {deckSource === 'article' && (
+        <div className="fcd-create__field">
+          <label className="fcd-create__label" htmlFor="fcd-article">Artigo</label>
+          <select
+            id="fcd-article"
+            className="fcd-create__select"
+            value={deckArticleId}
+            onChange={(e) => setDeckArticleId(e.target.value)}
+          >
+            <option value="">
+              {articlePickers.length ? 'selecione um artigo...' : 'nenhum artigo encontrado'}
+            </option>
+            {articlePickers.map((a) => (
+              <option key={a.id} value={a.id}>{a.title}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {deckSource === 'chat' && (
+        <>
+          <input
+            type="text"
+            value={deckTopic}
+            onChange={(e) => setDeckTopic(e.target.value)}
+            placeholder="tópico (opcional)"
+            className="fcd-create__input"
+          />
+          <textarea
+            value={deckText}
+            onChange={(e) => setDeckText(e.target.value)}
+            placeholder="cole o texto aqui..."
+            className="fcd-create__textarea"
+          />
+        </>
+      )}
+
+      <div className="fcd-create__field">
+        <label className="fcd-create__label" htmlFor="fcd-count">Quantidade de cartões</label>
+        <input
+          id="fcd-count"
+          type="number"
+          min={3}
+          max={20}
+          value={deckCount}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            if (!Number.isNaN(n)) setDeckCount(Math.max(3, Math.min(20, n)));
+          }}
+          className="fcd-create__count"
+        />
+      </div>
+
+      {deckSource === 'research' && (
+        <div className="fcd-create__hint">
+          {creating && <span className="fcd-create__spinner" aria-hidden="true" />}
+          <span>Pode levar ~90s (pesquisa web)</span>
+        </div>
+      )}
+
+      <div className="fcd-create__row">
         <button
           type="button" onClick={() => void createDeck()}
-          disabled={!deckTopic.trim() || creating}
+          disabled={!canSubmit}
           className="obs-btn obs-btn--primary"
         >
           {creating ? 'gerando...' : '+ Criar'}
