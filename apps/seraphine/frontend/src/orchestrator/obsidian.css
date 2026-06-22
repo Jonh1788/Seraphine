@@ -264,6 +264,7 @@
   font-size: 12px; color: var(--dim); cursor: pointer;
 }
 .maestro__perm-box { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--border-strong); flex: none; box-sizing: border-box; }
+.maestro__perm-check { width: 16px; height: 16px; flex: none; accent-color: var(--accent); cursor: pointer; margin: 0; }
 .maestro__perm-approve:disabled, .maestro__perm-deny:disabled { opacity: 0.5; cursor: default; }
 /* repo + session line under the command in a pending-approval card */
 .maestro__perm-meta { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 11px; }
@@ -280,6 +281,43 @@
   background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
 }
 .obs-btn.maestro__approve-toggle--on:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+
+/* ---- Rules disclosure (header action) ---- */
+/* Two-class selector for the same source-order reason as the approve toggle. */
+.obs-btn.maestro__rules-toggle svg { stroke: currentColor; flex: none; }
+.obs-btn.maestro__rules-toggle--on {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+}
+.obs-btn.maestro__rules-toggle--on:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+
+/* ---- Rules editor panel (collapsible, under the header) ---- */
+.maestro__rules {
+  flex: none; display: flex; flex-direction: column; gap: 9px;
+  margin: 10px 32px 0; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+}
+.maestro__rules-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.maestro__rules-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.maestro__rules-hint { font-size: 11px; color: var(--faint); }
+.maestro__rules-hint code { font-size: 11px; font-family: var(--font-mono); color: var(--dim); }
+.maestro__rules-empty { font-size: 12px; color: var(--dim); padding: 2px 0; }
+.maestro__rules-row { display: flex; align-items: center; gap: 8px; }
+.maestro__rules-pattern {
+  flex: 1; min-width: 0; background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: 9px; padding: 9px 11px; font-family: var(--font-mono);
+}
+.maestro__rules-pattern:focus { border-color: var(--accent); }
+.maestro__rules-action { flex: none; padding: 9px 11px; }
+.maestro__rules-rm {
+  flex: none; width: 32px; height: 32px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--faint);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.maestro__rules-rm:hover { border-color: rgba(239, 107, 107, 0.45); color: #ef6b6b; }
+.maestro__rules-rm svg { stroke: currentColor; }
+.maestro__rules-actions { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.obs-btn.maestro__rules-save { margin-left: auto; }
+.obs-btn.maestro__rules-add svg, .obs-btn.maestro__rules-save svg { flex: none; }
 
 /* ---- Pending-approval queue (banner above the agents body) ---- */
 /* A scrollable stack of `.maestro__perm` cards, visible regardless of which

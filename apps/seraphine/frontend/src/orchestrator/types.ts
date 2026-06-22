@@ -27,6 +27,17 @@ export interface PendingPermission {
   toolInput: string;
 }
 
+/**
+ * A persisted allow/deny rule for Maestro permission interception. `pattern` is
+ * a bare tool name (`Bash`) — matches that tool — or a tool with a
+ * command-prefix (`Bash(git *)`) — matches a Bash call whose command starts with
+ * `git `. First matching rule wins on the Rust side.
+ */
+export interface PermissionRule {
+  pattern: string;
+  action: 'allow' | 'deny';
+}
+
 /** A distilled, reviewable skill awaiting publish (skills self-authoring v1). */
 export interface SkillDraft {
   id: string;

@@ -12,7 +12,7 @@ import { useSkillsStore } from './skillsStore';
 import { useApprovalsStore } from './approvalsStore';
 import { Timeline } from './Timeline';
 import { NewAgentDialog } from './NewAgentDialog';
-import type { SessionInfo, PermissionMode, AgentEvent, AgentEventKind, HostStatus } from './types';
+import type { SessionInfo, PermissionMode, AgentEvent, AgentEventKind, HostStatus, PermissionRule } from './types';
 
 /**
  * Classify a persisted-transcript JSONL line into an AgentEventKind — the JS
@@ -96,9 +96,19 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const interceptEnabled = useApprovalsStore((s) => s.enabled);
   const pendingApprovals = useApprovalsStore((s) => s.pending);
   const approvalsBusy = useApprovalsStore((s) => s.busy);
+  const rules = useApprovalsStore((s) => s.rules);
   const setInterceptEnabled = useApprovalsStore((s) => s.setEnabled);
   const resolveApproval = useApprovalsStore((s) => s.resolve);
+  const saveRules = useApprovalsStore((s) => s.saveRules);
   const initApprovals = useApprovalsStore((s) => s.init);
+  // Per-card "Lembrar nesta sessão" — ids the user ticked before Aprovar, so the
+  // server auto-allows that session+tool from then on.
+  const [rememberIds, setRememberIds] = useState<Set<string>>(new Set());
+  // Rules editor: a collapsible panel with a local editable copy of `rules`
+  // (synced from the store each time it opens), saved back via `saveRules`.
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [draftRules, setDraftRules] = useState<PermissionRule[]>([]);
+  const openRules = (): void => { setDraftRules(rules.map((r) => ({ ...r }))); setRulesOpen(true); };
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
@@ -254,11 +264,75 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             >
               <IconLock />Aprovar permissões
             </button>
+            <button
+              type="button"
+              className={`obs-btn obs-btn--ghost maestro__rules-toggle${rulesOpen ? ' maestro__rules-toggle--on' : ''}`}
+              aria-pressed={rulesOpen}
+              aria-expanded={rulesOpen}
+              title="Regras que aprovam/negam automaticamente certas ferramentas (ex.: Bash(git *))."
+              onClick={() => { if (rulesOpen) setRulesOpen(false); else openRules(); }}
+            >
+              <IconShield />Regras{rules.length > 0 ? ` (${rules.length})` : ''}
+            </button>
             <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}><IconRefresh />Atualizar</button>
             <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlus size={14} />Novo agente</button>
           </div>
         )}
       </div>
+
+      {tab === 'agents' && rulesOpen && (
+        <div className="maestro__rules">
+          <div className="maestro__rules-head">
+            <span className="maestro__rules-title">Regras de permissão</span>
+            <span className="maestro__rules-hint">A primeira regra que casar vence · ex.: <code>Bash(git *)</code></span>
+          </div>
+          {draftRules.length === 0 ? (
+            <div className="maestro__rules-empty">Nenhuma regra ainda. Adicione uma para aprovar/negar ferramentas automaticamente.</div>
+          ) : (
+            draftRules.map((r, i) => (
+              <div className="maestro__rules-row" key={i}>
+                <input
+                  className="maestro__field-input maestro__rules-pattern"
+                  placeholder="Bash(git *)"
+                  value={r.pattern}
+                  onChange={(e) => setDraftRules((d) => d.map((x, j) => (j === i ? { ...x, pattern: e.target.value } : x)))}
+                />
+                <select
+                  className="maestro__select maestro__rules-action"
+                  value={r.action}
+                  onChange={(e) => setDraftRules((d) => d.map((x, j) => (j === i ? { ...x, action: e.target.value as PermissionRule['action'] } : x)))}
+                >
+                  <option value="allow">Aprovar</option>
+                  <option value="deny">Negar</option>
+                </select>
+                <button
+                  type="button"
+                  className="maestro__rules-rm"
+                  title="Remover regra"
+                  onClick={() => setDraftRules((d) => d.filter((_, j) => j !== i))}
+                ><IconX /></button>
+              </div>
+            ))
+          )}
+          <div className="maestro__rules-actions">
+            <button
+              type="button"
+              className="obs-btn obs-btn--ghost maestro__rules-add"
+              onClick={() => setDraftRules((d) => [...d, { pattern: '', action: 'allow' }])}
+            ><IconPlus size={13} />Adicionar regra</button>
+            <button
+              type="button"
+              className="obs-btn obs-btn--primary maestro__rules-save"
+              onClick={() => {
+                const cleaned = draftRules
+                  .map((r) => ({ ...r, pattern: r.pattern.trim() }))
+                  .filter((r) => r.pattern !== '');
+                void saveRules(cleaned).then(() => { setDraftRules(cleaned); setRulesOpen(false); });
+              }}
+            ><IconCheck />Salvar</button>
+          </div>
+        </div>
+      )}
 
       <div className="maestro__tabs">
         <button type="button" className={`maestro__tab${tab === 'agents' ? ' maestro__tab--active' : ''}`} onClick={() => setTab('agents')}>Sessões</button>
@@ -293,9 +367,22 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
                 </div>
                 <div className="maestro__perm-actions">
                   <button type="button" className="maestro__perm-approve" disabled={approvalsBusy === p.id}
-                    onClick={() => { void resolveApproval(p.id, true); }}><IconCheck />Aprovar</button>
+                    onClick={() => { void resolveApproval(p.id, true, rememberIds.has(p.id)); }}><IconCheck />Aprovar</button>
                   <button type="button" className="maestro__perm-deny" disabled={approvalsBusy === p.id}
                     onClick={() => { void resolveApproval(p.id, false); }}><IconX />Negar</button>
+                  <label className="maestro__perm-remember">
+                    <input
+                      type="checkbox"
+                      className="maestro__perm-check"
+                      checked={rememberIds.has(p.id)}
+                      onChange={(e) => setRememberIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(p.id); else next.delete(p.id);
+                        return next;
+                      })}
+                    />
+                    Lembrar nesta sessão
+                  </label>
                 </div>
               </div>
             ))}

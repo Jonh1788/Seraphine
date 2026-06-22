@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { SessionInfo, AgentEvent, PermissionMode, HostStatus, SiSession, DiffFile, GateResult } from './types';
+import type { SessionInfo, AgentEvent, PermissionMode, HostStatus, SiSession, DiffFile, GateResult, PermissionRule } from './types';
 
 /** Raw `maestro:permission-pending` event payload (snake_case, as Rust emits).
  *  The listener forwards this verbatim; the approvals store maps it to the
@@ -44,12 +44,19 @@ export const onAgentExit = (cb: (agentId: string) => void): Promise<UnlistenFn> 
 // the hook has paused. `onPermissionPending` mirrors the `onAgentEvent` wrapper.
 export const setPermissionInterception = (enable: boolean) =>
   invoke<boolean>('maestro_set_permission_interception', { enable });
-export const resolvePermission = (id: string, allow: boolean, reason = '') =>
-  invoke<void>('maestro_resolve_permission', { id, allow, reason });
+export const resolvePermission = (id: string, allow: boolean, reason = '', remember = false) =>
+  invoke<void>('maestro_resolve_permission', { id, allow, reason, remember });
 export const approvalsStatus = () =>
   invoke<{ enabled: boolean; port: number }>('maestro_approvals_status');
 export const onPermissionPending = (cb: (p: RawPendingPermission) => void): Promise<UnlistenFn> =>
   listen<RawPendingPermission>('maestro:permission-pending', (ev) => cb(ev.payload));
+
+// Maestro — persisted allow/deny rules. A rule auto-resolves matching
+// permission prompts (first match wins; safe read-only tools are never
+// intercepted). `pattern` is a bare tool name (`Bash`) or a tool+command-prefix
+// (`Bash(git *)`); `action` is allow or deny.
+export const getRules = () => invoke<PermissionRule[]>('maestro_get_rules');
+export const setRules = (rules: PermissionRule[]) => invoke<void>('maestro_set_rules', { rules });
 
 // Maestro Phase 3 — directed self-improvement (isolated worktrees).
 export const siCreate = (repoRoot: string, slug: string, id: string) => invoke<SiSession>('maestro_si_create', { repoRoot, slug, id });
