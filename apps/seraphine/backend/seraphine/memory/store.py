@@ -555,6 +555,20 @@ def _seraphine_episode_windows_migrator(conn: sqlite3.Connection) -> None:
     )
 
 
+def _seraphine_flashcards_v2_migrator(conn: sqlite3.Connection) -> None:
+    """Additive columns for flashcards v2: tags + source link + image. Each ALTER
+    is guarded so re-running (ensure_schema re-runs all migrators) is a no-op."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(flashcards)")}
+    if "tags" not in cols:
+        conn.execute("ALTER TABLE flashcards ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+    if "source_url" not in cols:
+        conn.execute("ALTER TABLE flashcards ADD COLUMN source_url TEXT")
+    if "source_title" not in cols:
+        conn.execute("ALTER TABLE flashcards ADD COLUMN source_title TEXT")
+    if "image_url" not in cols:
+        conn.execute("ALTER TABLE flashcards ADD COLUMN image_url TEXT")
+
+
 class MemoryStore(Store):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
@@ -569,6 +583,7 @@ class MemoryStore(Store):
         self.register_migrator("seraphine_reflect_cursor", _seraphine_reflect_cursor_migrator)
         self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
         self.register_migrator("seraphine_kv", _seraphine_kv_migrator)
+        self.register_migrator("seraphine_flashcards_v2", _seraphine_flashcards_v2_migrator)
 
     async def set_kv(self, key: str, value: str) -> None:
         """Upsert a key/value pair. value is opaque text — caller JSON-
