@@ -101,6 +101,12 @@ class Fact(BaseModel):
     # PREFERENCIA/OUTROS). Persisted on the facts table; backfilled for
     # rows that predate the column.
     category: str | None = None
+    # Pinned identity facts (name, location, core relationships) are
+    # ALWAYS injected into context as a distinct "Core facts" block,
+    # independent of query similarity, so they can't fall out of top-k
+    # RAG retrieval. Identity-category facts (PESSOAS/LOCAL) auto-pin on
+    # write; persisted as INTEGER 0/1 on the facts table.
+    pinned: int = 0
 
 
 def _now() -> str:
@@ -449,6 +455,28 @@ def _seraphine_facts_category_migrator(conn: sqlite3.Connection) -> None:
             )
 
 
+def _seraphine_facts_pinned_migrator(conn: sqlite3.Connection) -> None:
+    """Add a `pinned` column to facts (idempotent ALTER) and backfill it.
+
+    Identity facts — the user's name, location, core relationships — can
+    fall out of the top-k RAG retrieval, so the assistant "forgets" them.
+    Pinning marks a fact for unconditional injection as a "Core facts"
+    block. Identity-category rows (PESSOAS/LOCAL) are backfilled to
+    pinned=1 on the first run that adds the column; the WHERE clause makes
+    a re-run a no-op. Runs AFTER `seraphine_facts_category`, so the
+    `category` column is already populated when this backfill executes.
+    """
+    try:
+        conn.execute("ALTER TABLE facts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Idempotent backfill: identity-class facts are always pinned. Safe to
+    # re-run — it only ever sets the same rows to the same value.
+    conn.execute(
+        "UPDATE facts SET pinned = 1 WHERE category IN ('PESSOAS','LOCAL')"
+    )
+
+
 def _seraphine_fts5_migrator(conn: sqlite3.Connection) -> None:
     """Create FTS5 virtual table over turns.content + sync triggers."""
     conn.executescript(
@@ -536,6 +564,7 @@ class MemoryStore(Store):
         self.register_migrator("seraphine_core", _seraphine_core_migrator)
         self.register_migrator("seraphine_facts_decay", _seraphine_facts_decay_migrator)
         self.register_migrator("seraphine_facts_category", _seraphine_facts_category_migrator)
+        self.register_migrator("seraphine_facts_pinned", _seraphine_facts_pinned_migrator)
         self.register_migrator("seraphine_fts5", _seraphine_fts5_migrator)
         self.register_migrator("seraphine_reflect_cursor", _seraphine_reflect_cursor_migrator)
         self.register_migrator("seraphine_episode_windows", _seraphine_episode_windows_migrator)
@@ -867,6 +896,9 @@ class MemoryStore(Store):
         # Derive the category eyebrow server-side when the caller doesn't
         # supply one, so every fact lands with a persisted category.
         resolved_category = category or _derive_fact_category(text)
+        # Identity-class facts auto-pin so they're always injected as a
+        # "Core facts" block and can't fall out of top-k RAG retrieval.
+        pinned = 1 if resolved_category in ("PESSOAS", "LOCAL") else 0
         fact = Fact(
             id=str(uuid.uuid4()),
             text=text,
@@ -874,16 +906,17 @@ class MemoryStore(Store):
             confidence=confidence,
             created_at=_now(),
             category=resolved_category,
+            pinned=pinned,
         )
 
         def _work() -> None:
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO facts(id, text, source, confidence, created_at,"
-                    " superseded_by, category)"
-                    " VALUES (?, ?, ?, ?, ?, NULL, ?)",
+                    " superseded_by, category, pinned)"
+                    " VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
                     (fact.id, fact.text, fact.source, fact.confidence,
-                     fact.created_at, fact.category),
+                     fact.created_at, fact.category, fact.pinned),
                 )
 
         await asyncio.to_thread(_work)
@@ -909,7 +942,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at, category"
+                    " superseded_by, last_used_at, category, pinned"
                     " FROM facts WHERE superseded_by IS NULL"
                     " ORDER BY created_at ASC",
                 ).fetchall()
@@ -918,6 +951,7 @@ class MemoryStore(Store):
                     id=r[0], text=r[1], source=r[2],
                     confidence=r[3], created_at=r[4],
                     superseded_by=r[5], last_used_at=r[6], category=r[7],
+                    pinned=r[8],
                 )
                 for r in rows
             ]
@@ -952,7 +986,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 sql = (
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at, category"
+                    " superseded_by, last_used_at, category, pinned"
                     " FROM facts"
                     f"{where} ORDER BY created_at DESC LIMIT ?"
                 )
@@ -967,11 +1001,50 @@ class MemoryStore(Store):
                     superseded_by=r[5],
                     last_used_at=r[6],
                     category=r[7],
+                    pinned=r[8],
                 )
                 for r in rows
             ]
 
         return await asyncio.to_thread(_work)
+
+    async def list_pinned_facts(self) -> list[Fact]:
+        """Return active (non-superseded) pinned facts — the "Core facts"
+        about the user that are ALWAYS injected into context, independent
+        of query similarity. Newest first so a cap keeps the freshest."""
+
+        def _work() -> list[Fact]:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, text, source, confidence, created_at,"
+                    " superseded_by, last_used_at, category, pinned"
+                    " FROM facts WHERE pinned = 1 AND superseded_by IS NULL"
+                    " ORDER BY created_at DESC",
+                ).fetchall()
+            return [
+                Fact(
+                    id=r[0], text=r[1], source=r[2],
+                    confidence=r[3], created_at=r[4],
+                    superseded_by=r[5], last_used_at=r[6], category=r[7],
+                    pinned=r[8],
+                )
+                for r in rows
+            ]
+
+        return await asyncio.to_thread(_work)
+
+    async def set_fact_pinned(self, fact_id: str, pinned: bool) -> None:
+        """Pin/unpin a fact. Pinned facts are unconditionally injected as
+        a "Core facts" block."""
+
+        def _work() -> None:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE facts SET pinned = ? WHERE id = ?",
+                    (1 if pinned else 0, fact_id),
+                )
+
+        await asyncio.to_thread(_work)
 
     async def supersede_fact(self, old_id: str, new_id: str | None = None) -> None:
         def _work() -> None:
@@ -1018,7 +1091,7 @@ class MemoryStore(Store):
                 )
                 row = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at, category"
+                    " superseded_by, last_used_at, category, pinned"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -1027,7 +1100,7 @@ class MemoryStore(Store):
             return Fact(
                 id=row[0], text=row[1], source=row[2],
                 confidence=row[3], created_at=row[4], superseded_by=row[5],
-                last_used_at=row[6], category=row[7],
+                last_used_at=row[6], category=row[7], pinned=row[8],
             )
 
         return await asyncio.to_thread(_work)
@@ -1311,7 +1384,7 @@ class MemoryStore(Store):
             with self._connect() as conn:
                 row = conn.execute(
                     "SELECT id, text, source, confidence, created_at,"
-                    " superseded_by, last_used_at, category"
+                    " superseded_by, last_used_at, category, pinned"
                     " FROM facts WHERE id = ?",
                     (fact_id,),
                 ).fetchone()
@@ -1326,6 +1399,7 @@ class MemoryStore(Store):
                 superseded_by=row[5],
                 last_used_at=row[6],
                 category=row[7],
+                pinned=row[8],
             )
 
         return await asyncio.to_thread(_work)

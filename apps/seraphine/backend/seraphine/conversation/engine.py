@@ -544,12 +544,37 @@ class ConversationEngine:
         except Exception as e:  # pragma: no cover
             logger.warning("list_facts failed: %s", e)
             facts = []
-        if not recalled and not facts:
+        try:
+            # Pinned identity facts (name, location, core relationships) are
+            # ALWAYS injected as a distinct "Core facts" block, independent
+            # of query similarity — they must never fall out of top-k RAG.
+            # Not freshness-filtered: identity is durable by definition.
+            pinned = await self.memory.store.list_pinned_facts()
+        except Exception as e:  # pragma: no cover
+            logger.warning("list_pinned_facts failed: %s", e)
+            pinned = []
+        if not recalled and not facts and not pinned:
             return None
         lines: list[str] = []
-        if facts:
+        if pinned:
+            lines.append("Core facts about the user (always true):")
+            # Cap so a large identity set can't crowd out the rest of the
+            # context; list_pinned_facts returns newest-first.
+            for f in pinned[:15]:
+                lines.append(f"- {f.text}")
+        # Don't duplicate a pinned fact in the "may be relevant" block —
+        # it's already in the Core block above.
+        pinned_ids = {f.id for f in pinned}
+        pinned_texts = {f.text for f in pinned}
+        relevant = [
+            f for f in facts
+            if f.id not in pinned_ids and f.text not in pinned_texts
+        ]
+        if relevant:
+            if lines:
+                lines.append("")
             lines.append("The following facts about the user may be relevant:")
-            for f in facts:
+            for f in relevant:
                 lines.append(f"- {f.text}")
         if recalled:
             if lines:
