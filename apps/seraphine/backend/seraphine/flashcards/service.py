@@ -5,30 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from llm_adapters.types import ChatMessage
-
 logger = logging.getLogger("seraphine.flashcards")
-
-_DECK_PROMPT = """Gere um deck de flashcards pra ajudar o usuário a
-aprender "{topic}". {count} cartões.
-
-Cada cartão é JSON {{"front": "pergunta curta", "back": "resposta direta"}}.
-
-Regras:
-- Front é pergunta específica (não "o que é X" vago).
-- Back é 1-3 linhas, concreto, exemplo se cabe.
-- PT-BR.
-- Dificuldade gradual: primeiros 3 são base, últimos 3 são aprofundamento.
-
-Output APENAS um array JSON. Sem prosa.
-"""
-
-_JSON_ARR_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 MAKE_CARDS_TOOL = {
     "name": "make_cards",
@@ -85,25 +66,6 @@ class FlashcardsGenerationError(RuntimeError):
     pass
 
 
-def _parse_cards(raw: str) -> list[dict[str, str]]:
-    match = _JSON_ARR_RE.search(raw)
-    if not match:
-        return []
-    try:
-        items = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
-    out: list[dict[str, str]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        front = (it.get("front") or "").strip()
-        back = (it.get("back") or "").strip()
-        if 3 <= len(front) <= 200 and 3 <= len(back) <= 500:
-            out.append({"front": front, "back": back})
-    return out
-
-
 def sm2_next_interval(
     ease: float, reps: int, interval_days: int, rating: int,
 ) -> tuple[float, int, int]:
@@ -152,28 +114,13 @@ class FlashcardsService:
             raise FlashcardsGenerationError("nenhum card válido foi gerado")
         return cards[:count]
 
-    async def create_deck(self, topic: str, count: int = 10) -> list[dict[str, Any]]:
-        topic = topic.strip()
-        if not topic:
-            return []
-        count = max(3, min(count, 20))
-        messages = [
-            ChatMessage(role="system", content=_DECK_PROMPT.format(topic=topic, count=count)),
-            ChatMessage(role="user", content="Gere agora."),
-        ]
-        acc: list[str] = []
-        try:
-            async for tok in self.llm.chat(messages, temperature=0.5):
-                if tok.text:
-                    acc.append(tok.text)
-        except Exception as e:
-            logger.warning("deck gen failed: %s", e)
-            return []
-        pairs = _parse_cards("".join(acc))
-        if not pairs:
-            return []
-
+    async def insert_cards(
+        self, topic: str, pairs: list[dict[str, str]], *,
+        tags: list[str] | None = None,
+        source_url: str | None = None, source_title: str | None = None,
+    ) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc).isoformat()
+        tags_json = json.dumps(list(tags or []))
         created: list[dict[str, Any]] = []
 
         def _work() -> None:
@@ -182,16 +129,28 @@ class FlashcardsService:
                     cid = str(uuid.uuid4())
                     conn.execute(
                         "INSERT INTO flashcards"
-                        " (id, topic, front, back, next_due_at, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?)",
-                        (cid, topic, p["front"], p["back"], now, now),
+                        " (id, topic, front, back, tags, source_url, source_title,"
+                        "  next_due_at, created_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (cid, topic, p["front"], p["back"], tags_json,
+                         source_url, source_title, now, now),
                     )
                     created.append({
-                        "id": cid, "topic": topic,
-                        "front": p["front"], "back": p["back"],
+                        "id": cid, "topic": topic, "front": p["front"],
+                        "back": p["back"], "tags": list(tags or []),
+                        "source_url": source_url, "source_title": source_title,
                     })
 
         await asyncio.to_thread(_work)
+        return created
+
+    async def create_deck(self, topic: str, count: int = 10) -> list[dict[str, Any]]:
+        topic = (topic or "").strip()
+        if not topic:
+            raise FlashcardsGenerationError("tópico vazio")
+        seed = f"Explique de forma didática o tópico: {topic}"
+        pairs = await self.generate_cards(seed, count=count)
+        created = await self.insert_cards(topic, pairs)
         logger.info("flashcards: deck '%s' × %d", topic, len(created))
         return created
 
