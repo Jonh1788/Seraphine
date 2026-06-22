@@ -575,3 +575,132 @@
 .si-iterate__btn { border: 1px solid var(--border-strong); background: transparent; color: var(--text); font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 9px; cursor: pointer; flex: none; }
 .si-iterate__btn:hover:not(:disabled) { background: var(--bg-2); }
 .si-iterate__btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ============================================================
+   New-agent dialog (NewAgentDialog.tsx) — fluxo "Novo agente"
+   em tela cheia. Prefixo .na-* para não colidir com .maestro__*.
+   ============================================================ */
+.na-overlay { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 32px;
+  background: rgba(6, 6, 9, 0.62); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); }
+.na-panel { width: min(1080px, 100%); height: min(700px, calc(100vh - 64px)); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--r-xl); overflow: hidden;
+  display: grid; grid-template-columns: 1fr 384px; box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  animation: na-rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes na-rise { from { opacity: 0; transform: translateY(12px) scale(0.99); } to { opacity: 1; transform: none; } }
+
+.na-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.na-head { padding: 22px 28px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.na-eyebrow { font: 600 11px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 9px; }
+.na-h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+.na-sub { color: var(--text-dim); font-size: 13px; margin-top: 4px; max-width: 46ch; line-height: 1.5; }
+.na-x { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: transparent;
+  color: var(--text-dim); cursor: pointer; display: grid; place-items: center; transition: 0.18s; }
+.na-x:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-2); }
+
+.na-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 26px; }
+.na-field { margin-bottom: 22px; }
+.na-flabel { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.na-flabel > span:first-child { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.na-req { color: var(--accent); margin-left: 3px; }
+.na-opt { font: 500 11px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--text-faint); }
+.na-count { font: 500 11px/1 var(--font-mono); color: var(--text-faint); }
+
+.na-inputwrap { display: flex; align-items: center; gap: 10px; background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 0 13px; transition: 0.18s; }
+.na-inputwrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.12); }
+.na-inputwrap svg { color: var(--text-faint); flex: none; }
+.na-input { flex: 1; background: none; border: 0; outline: none; color: var(--text); font: 500 13px/1 var(--font-mono); padding: 12px 0; }
+.na-input::placeholder { color: var(--text-faint); font-weight: 400; }
+
+.na-textarea { width: 100%; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text); font: 400 13.5px/1.55 var(--font-sans); padding: 13px; resize: vertical; min-height: 92px; outline: none; transition: 0.18s; }
+.na-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.12); }
+.na-textarea::placeholder { color: var(--text-faint); }
+
+.na-fhint { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; letter-spacing: 0.01em; }
+.na-fhint--err { color: #ffb4a8; }
+
+.na-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.na-chip { font: 500 12px/1 var(--font-sans); color: var(--text-dim); background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 7px 12px; cursor: pointer; transition: 0.16s; display: inline-flex; align-items: center; gap: 6px; appearance: none; }
+.na-chip:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-3); }
+.na-chip svg { color: var(--text-faint); }
+
+.na-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.na-segopt { cursor: pointer; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-0);
+  padding: 13px; transition: 0.18s; font-family: var(--font-sans); color: var(--text); text-align: left; width: 100%; display: block; appearance: none; }
+.na-segopt:hover { border-color: var(--border-strong); }
+.na-segopt--on { border-color: var(--accent); background: var(--accent-soft); }
+.na-segtop { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.na-segtop b { font-size: 12.5px; font-weight: 600; }
+.na-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.na-segopt small { font-size: 11px; color: var(--text-faint); line-height: 1.4; display: block; }
+
+.na-select { width: 100%; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text); font: 500 13px/1 var(--font-sans); padding: 12px 13px; outline: none; }
+.na-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.12); }
+
+.na-error { font-size: 12.5px; color: #ffb4a8; background: rgba(239, 107, 107, 0.1); border: 1px solid rgba(239, 107, 107, 0.3);
+  border-radius: var(--r-md); padding: 11px 13px; }
+
+/* coluna direita — preview */
+.na-right { background: var(--bg-0); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.na-right-h { padding: 20px 22px 0; }
+.na-lab { font: 600 11px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+.na-preview { padding: 16px 22px; flex: 1; min-height: 0; overflow-y: auto; }
+.na-pvcard { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; position: relative; overflow: hidden; }
+.na-pvcard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bg-3); }
+.na-pvcard--ready::before { background: var(--accent); }
+.na-pvstatus { display: inline-flex; align-items: center; gap: 7px; font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-faint); margin-bottom: 13px; }
+.na-pvdot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.na-pvcard--ready .na-pvstatus { color: var(--accent); }
+.na-pvcard--ready .na-pvdot { background: var(--accent); animation: na-blink 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+@keyframes na-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.na-pvrepo { display: flex; align-items: center; gap: 8px; font: 500 11.5px/1 var(--font-mono); color: var(--text-dim); margin-bottom: 10px; }
+.na-pvrepo svg { color: var(--text-faint); flex: none; }
+.na-pvobj { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text); margin-bottom: 14px; min-height: 20px; }
+.na-pvobj--empty { color: var(--text-faint); font-weight: 400; font-style: italic; }
+.na-pvmeta { display: flex; flex-wrap: wrap; gap: 7px; }
+.na-pvchip { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--text-dim); background: var(--elev);
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px; display: inline-flex; align-items: center; gap: 5px; }
+.na-pvchip svg { color: var(--text-faint); }
+
+.na-summary { margin-top: 20px; }
+.na-summary .na-lab { margin-bottom: 11px; }
+.na-check { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-dim); padding: 7px 0; border-bottom: 1px solid var(--border); }
+.na-check:last-child { border-bottom: 0; }
+.na-checkic { width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  border: 1.5px solid var(--border-strong); color: transparent; transition: 0.2s; }
+.na-check--done { color: var(--text); }
+.na-check--done .na-checkic { border-color: var(--accent); background: var(--accent); color: var(--accent-contrast); }
+
+.na-foot { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.na-start { display: flex; align-items: center; justify-content: center; gap: 9px; border: 0; border-radius: var(--r-md);
+  background: var(--accent); color: var(--accent-contrast); font: 700 14px/1 var(--font-sans); padding: 14px; cursor: pointer; transition: 0.18s; width: 100%; }
+.na-start:hover:not(:disabled) { background: var(--accent-hi); }
+.na-start:disabled { background: var(--bg-2); color: var(--text-faint); cursor: default; }
+.na-ghost { display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: transparent; color: var(--text-dim); font: 600 13px/1 var(--font-sans); padding: 11px; cursor: pointer; transition: 0.18s; width: 100%; }
+.na-ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-2); }
+.na-kbd { text-align: center; font: 500 11px/1 var(--font-mono); color: var(--text-faint); }
+.na-kbd kbd { background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; color: var(--text-dim); font-size: 10.5px; }
+
+.na-spin { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: na-spin 0.7s linear infinite; flex: none; }
+@keyframes na-spin { to { transform: rotate(360deg); } }
+
+.na-x:focus-visible, .na-chip:focus-visible, .na-segopt:focus-visible, .na-start:focus-visible, .na-ghost:focus-visible, .na-select:focus-visible {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.32); }
+
+@media (prefers-reduced-motion: reduce) {
+  .na-panel { animation: none; }
+  .na-pvcard--ready .na-pvdot { animation: none; }
+  .na-spin { animation-duration: 0.001ms; }
+}
+
+@media (max-height: 640px), (max-width: 760px) {
+  .na-overlay { place-items: start; overflow-y: auto; padding: 16px; }
+  .na-panel { grid-template-columns: 1fr; height: auto; max-height: none; width: min(620px, 100%); }
+  .na-right { border-left: 0; border-top: 1px solid var(--border); }
+  .na-body, .na-preview { overflow: visible; }
+}

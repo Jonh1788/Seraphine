@@ -1,8 +1,8 @@
 import './obsidian.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  listSessions, readTranscript, spawnAgent, sendToAgent, stopAgent, respondPermission, resumeSession, forkSession,
-  listHosts, checkHost, listRemoteSessions,
+  listSessions, readTranscript, sendToAgent, stopAgent, respondPermission, resumeSession, forkSession,
+  listHosts,
 } from './api';
 import { useAgentStream } from './useAgentStream';
 import { SelfImprove } from './SelfImprove';
@@ -10,6 +10,7 @@ import { SkillsPanel } from './SkillsPanel';
 import { useSelfImproveStore } from './selfImproveStore';
 import { useSkillsStore } from './skillsStore';
 import { Timeline } from './Timeline';
+import { NewAgentDialog } from './NewAgentDialog';
 import type { SessionInfo, PermissionMode, AgentEvent, HostStatus } from './types';
 
 const MODES: { v: PermissionMode; label: string }[] = [
@@ -71,7 +72,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [hostStatus, setHostStatus] = useState<HostStatus | null>(null);
   const [remoteSessions, setRemoteSessions] = useState<SessionInfo[]>([]);
   const [query, setQuery] = useState('');
-  const goalRef = useRef<HTMLTextAreaElement>(null);
+  const [newOpen, setNewOpen] = useState(false);
   const events = useAgentStream();
 
   const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
@@ -172,7 +173,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
         {tab === 'agents' && (
           <div className="obs-screen__actions">
             <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}><IconRefresh />Atualizar</button>
-            <button type="button" className="obs-btn obs-btn--primary" onClick={() => goalRef.current?.focus()}><IconPlus size={14} />Novo agente</button>
+            <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlus size={14} />Novo agente</button>
           </div>
         )}
       </div>
@@ -200,60 +201,9 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
               <input className="maestro__search-input" placeholder="Buscar sessão…" value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
 
-            <div className="maestro__new">
-              <div className="maestro__new-head">
-                <span className="maestro__new-chip"><IconPlus size={15} /></span>
-                <span className="maestro__new-title">Novo agente</span>
-              </div>
-              <div className="maestro__field">
-                <label className="maestro__label">REPOSITÓRIO</label>
-                <div className="maestro__inputwrap">
-                  <span className="maestro__inputwrap-icon"><IconFolder size={14} /></span>
-                  <input className="maestro__field-input maestro__field-input--mono" placeholder="~/code/seraphine" value={cwd} onChange={(e) => setCwd(e.target.value)} />
-                </div>
-              </div>
-              <div className="maestro__field">
-                <label className="maestro__label">OBJETIVO</label>
-                <textarea ref={goalRef} className="maestro__textarea" placeholder="O que o agente deve fazer…" value={goal} onChange={(e) => setGoal(e.target.value)} />
-              </div>
-              <div className="maestro__field">
-                <label className="maestro__label">PERMISSÕES</label>
-                <div className="maestro__seg" role="radiogroup">
-                  {MODES.map((m) => (
-                    <button
-                      key={m.v}
-                      type="button"
-                      role="radio"
-                      aria-checked={mode === m.v}
-                      className={`maestro__seg-opt${mode === m.v ? ' maestro__seg-opt--on' : ''}`}
-                      onClick={() => setMode(m.v)}
-                    >
-                      <span className="maestro__radio" />
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="maestro__field">
-                <label className="maestro__label">HOST</label>
-                <select className="maestro__select" value={host} onChange={(e) => {
-                  const h = e.target.value; setHost(h); setHostStatus(null); setRemoteSessions([]);
-                  if (h) { void checkHost(h).then((st) => { setHostStatus(st); if (st.reachable) void listRemoteSessions(h).then(setRemoteSessions).catch(() => {}); }); }
-                }}>
-                  <option value="">Local</option>
-                  {hosts.map((h) => <option key={h} value={h}>{h}</option>)}
-                </select>
-                {host && hostStatus && (
-                  <div className={`maestro__hoststatus maestro__hoststatus--${hostStatus.reachable ? 'ok' : 'err'}`}>
-                    {hostStatus.reachable ? (hostStatus.claude_version || 'acessível') : (hostStatus.error || 'inacessível')}
-                  </div>
-                )}
-              </div>
-              <button type="button" className="maestro__start" disabled={!cwd || !goal}
-                onClick={() => { void spawnAgent(cwd, goal, mode, host || undefined).then((id) => { setSelected(id); setGoal(''); }); }}>
-                <IconPlay size={15} />Iniciar agente
-              </button>
-            </div>
+            <button type="button" className="maestro__start" onClick={() => setNewOpen(true)}>
+              <IconPlus size={15} />Novo agente
+            </button>
 
             {visibleSessions.map((s) => {
               const agentId = sessionToAgent.get(s.session_id);
@@ -281,7 +231,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
                 <div className="maestro__empty-title">Nenhuma sessão selecionada</div>
                 <div className="maestro__empty-body">Inicie um novo agente com um objetivo, ou selecione uma sessão na lista para acompanhar e assumir o controle.</div>
                 <div className="maestro__empty-actions">
-                  <button type="button" className="obs-btn obs-btn--primary" onClick={() => goalRef.current?.focus()}><IconPlay size={15} />Iniciar agente</button>
+                  <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlay size={15} />Iniciar agente</button>
                   <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}>Ver sessões recentes</button>
                 </div>
               </div>
@@ -331,6 +281,21 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             )}
           </section>
         </div>
+      )}
+
+      {newOpen && (
+        <NewAgentDialog
+          cwd={cwd} setCwd={setCwd}
+          goal={goal} setGoal={setGoal}
+          mode={mode} setMode={setMode}
+          host={host} setHost={setHost}
+          hosts={hosts}
+          hostStatus={hostStatus} setHostStatus={setHostStatus}
+          setRemoteSessions={setRemoteSessions}
+          recentRepos={[...new Set(sessions.map((s) => s.cwd))].filter(Boolean).slice(0, 3)}
+          onClose={() => setNewOpen(false)}
+          onCreated={(id) => { setSelected(id); setGoal(''); setNewOpen(false); refresh(); }}
+        />
       )}
     </div>
   );
