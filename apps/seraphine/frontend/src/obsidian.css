@@ -81,12 +81,32 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-soft);
-  padding: 3px 9px;
+  padding: 5px 11px;
   border-radius: 8px;
+}
+/* Chip variants — override only color + background; base provides size/padding/radius. */
+.obs-chip--neutral { color: var(--text-dim); background: rgba(255, 255, 255, 0.06); }
+.obs-chip--success { color: var(--user); background: rgba(74, 222, 128, 0.12); }
+.obs-chip--warning { color: var(--warning); background: rgba(255, 167, 38, 0.14); }
+
+/* Counter badge — small numeric pill */
+.obs-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* ---- Buttons ---- */
@@ -95,6 +115,9 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
+  /* Touch guideline is 44px; applied here as 38px to keep desktop toolbar
+     density (segmented controls / icon buttons sit at this height). */
+  min-height: 38px;
   font-size: 13px;
   font-weight: 600;
   padding: 9px 16px;
@@ -106,8 +129,12 @@
 }
 .obs-btn--primary { background: var(--accent); color: var(--accent-contrast); }
 .obs-btn--primary:hover:not(:disabled) { background: var(--accent-hi); }
-.obs-btn--ghost { background: transparent; border-color: var(--border); color: var(--text); }
+.obs-btn--ghost { background: transparent; border-color: var(--border-strong); color: var(--text); }
 .obs-btn--ghost:hover:not(:disabled) { background: var(--bg-2); border-color: var(--border-strong); }
+.obs-btn--danger { background: rgba(239, 107, 107, 0.08); border: 1px solid rgba(239, 107, 107, 0.35); color: var(--danger); }
+.obs-btn--danger:hover:not(:disabled) { background: rgba(239, 107, 107, 0.14); }
+.obs-btn--success { background: var(--user); color: #0d0d11; font-weight: 700; border: none; }
+.obs-btn--success:hover:not(:disabled) { background: #6ee79a; }
 .obs-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ---- Segmented control (Kanban/Lista, Mês/Semana/Dia, períodos) ---- */
@@ -140,28 +167,33 @@
   color: var(--text-dim);
   background: var(--bg-1);
   border: 1px solid var(--border);
-  padding: 7px 12px;
+  padding: 6px 12px;
   border-radius: 20px;
 }
 .obs-status__dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #3fbf6a;
+  background: #4ade80;
   animation: statusBlink 2.4s ease-in-out infinite;
 }
+/* Status pill variants — recolor text + dot to signal run state. */
+.obs-status--running { color: var(--accent); }
+.obs-status--running .obs-status__dot { background: var(--accent); }
+.obs-status--waiting { color: var(--warning); }
+.obs-status--waiting .obs-status__dot { background: var(--warning); }
 
 /* ---- Progress bar ---- */
 .obs-progress {
-  height: 6px;
-  border-radius: 4px;
+  height: 8px;
+  border-radius: 5px;
   background: var(--accent-soft);
   overflow: hidden;
 }
 .obs-progress__fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 /* ---- Filter pill (colored dot + label) ---- */
@@ -182,6 +214,21 @@
 .obs-filter:hover { color: var(--text); }
 .obs-filter--active { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 .obs-filter__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* ---- Input field ---- */
+.obs-input {
+  width: 100%;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+}
+.obs-input::placeholder { color: var(--faint); }
+.obs-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.30); }
 
 /* ---- Accessible focus ring ---- */
 .obs-focusable:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(154, 147, 255, 0.30); }
