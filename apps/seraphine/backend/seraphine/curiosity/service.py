@@ -112,25 +112,21 @@ class CuriosityService:
             tool = self.tools.get("web_search") if hasattr(self.tools, "get") else None
             if tool is None:
                 return []
-            result = await tool.run(query=query, max_results=_MAX_RESULTS_PER_TOPIC)
+            result = await tool.execute(
+                {"query": query, "num_results": _MAX_RESULTS_PER_TOPIC}
+            )
         except Exception as e:
             logger.debug("curiosity search failed for '%s': %s", query, e)
             return []
-        if hasattr(result, "content"):
-            raw = result.content
-        elif isinstance(result, dict):
-            raw = result.get("content") or result
-        else:
-            raw = result
-        if isinstance(raw, list):
-            return raw
-        if isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    return parsed
-            except Exception:
-                pass
+        # WebSearchTool returns a ToolResult whose structured list lives under
+        # metadata["results"] ([{title,url,snippet}]). The old code called a
+        # nonexistent `tool.run` + read `.content`, so every search threw and was
+        # swallowed → tick() inserted 0 discoveries forever.
+        meta = getattr(result, "metadata", None)
+        if isinstance(meta, dict):
+            results = meta.get("results")
+            if isinstance(results, list):
+                return results
         return []
 
     async def _score(self, topic: str, candidates: list[dict]) -> list[dict]:
