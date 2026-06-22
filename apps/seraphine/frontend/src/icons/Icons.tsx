@@ -47,7 +47,8 @@ export function InboxIcon({ size = 24, className = '' }: IconProps) {
 export function WhatsAppIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+      <path d="M4.6 19.4l1.3-3.7A8 8 0 1 1 9.8 18.5L4.6 19.4z" />
+      <path d="M9.6 8.9c-.25 0-.5.15-.62.4-.5 1.05-.18 2.45 1.05 3.7 1.23 1.25 2.6 1.6 3.65 1.1.25-.12.4-.37.4-.62l-.02-.86c0-.3-.24-.5-.52-.5l-.95.02c-.2 0-.38.1-.5.27l-.27.38c-.55-.3-1-.75-1.3-1.3l.38-.28c.16-.12.25-.3.25-.5l.02-.95c0-.28-.2-.52-.5-.52z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -315,9 +316,7 @@ export function FlaskIcon({ size = 24, className = '' }: IconProps) {
 export function FlameIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
-      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 17c1.5 0 3-1 3-3 0-1-1-2-2-2s-2 1-2 2" />
-      <path d="M12 2c1 3 3 5 3 8 0 1.5-1 3-3 3s-3-1.5-3-3c0-1 .5-2 1-3" />
-      <path d="M12 2c-1 4-4 6-4 10a6 6 0 0 0 12 0c0-3-2-5-4-8" />
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
     </svg>
   );
 }

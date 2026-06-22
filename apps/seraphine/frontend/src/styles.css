@@ -310,6 +310,33 @@ button:disabled {
   overflow: hidden;
 }
 
+/* Brand mark at the top of the rail (real Seraphine app icon). */
+.nav-rail__brand {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  margin-bottom: 8px;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-1);
+  border: 1px solid rgba(154, 147, 255, 0.28);
+  box-shadow: var(--accent-glow);
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.nav-rail__brand:hover { transform: translateY(-1px); box-shadow: 0 0 26px rgba(154, 147, 250, 0.3); }
+.nav-rail__brand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Hairline divider between nav groups. */
+.nav-rail__divider {
+  width: 26px;
+  height: 1px;
+  flex-shrink: 0;
+  background: var(--border);
+  margin: 3px 0;
+}
+
 /* Scrollable region that holds the main nav buttons. Overflows on iPad
    portrait / iPhone where 14 items don't fit vertically. Scrollbar
    hidden because the rail is 60 px wide — a visible track would
@@ -368,10 +395,13 @@ button:disabled {
   content: '';
   position: absolute;
   left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 3px;
-  height: 20px;
+  height: 22px;
   background: var(--accent);
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px rgba(154, 147, 255, 0.5);
 }
 
 .nav-rail__badge {
@@ -382,7 +412,7 @@ button:disabled {
   height: 8px;
   background: var(--danger);
   border-radius: 50%;
-  border: 2px solid var(--bg-0);
+  border: 2px solid var(--nav);
 }
 
 .nav-rail__spacer {
@@ -8483,7 +8513,7 @@ button:disabled {
   right: 2px;
   padding: 0 4px;
   border-radius: 999px;
-  background: #ef5350;
+  background: var(--danger);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -8491,7 +8521,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   line-height: 1;
-  border: 2px solid var(--bg-0);
+  border: 2px solid var(--nav);
 }
 
 /* Mobile: stack kanban columns vertically */

@@ -2,7 +2,7 @@
  * AppLayout — shell with nav rail, top bar, overlays, always-mounted
  * ChatView, and view switching via activeView state.
  */
-import { useCallback, useRef } from 'react';
+import { Fragment, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
@@ -61,6 +61,7 @@ import {
   TargetIcon,
   TimerIcon,
 } from './icons/Icons';
+import seraphineLogo from '../src-tauri/icons/128x128.png';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
 import { VoiceMemoModal } from './voice-memo/VoiceMemoModal';
@@ -272,34 +273,41 @@ export function AppLayout(): JSX.Element {
     id: string;
     icon: JSX.Element;
     label: string;
+    group: string;
     onClick: () => void;
     active?: boolean;
     badge?: boolean;
     badgeCount?: number;
   }[] = [
-    { id: 'dashboard', icon: <DashboardIcon size={22} />, label: 'Dashboard', onClick: () => setActiveView('dashboard'), active: activeView === 'dashboard' },
-    { id: 'chat', icon: <ChatIcon size={22} />, label: 'Chat', onClick: () => setActiveView('chat'), active: activeView === 'chat' },
-    { id: 'tasks', icon: <TasksIcon size={22} />, label: 'Tarefas', onClick: () => setActiveView(activeView === 'tasks' ? 'chat' : 'tasks'), active: activeView === 'tasks', badge: tasksPendingCount > 0, badgeCount: tasksPendingCount },
-    { id: 'habits', icon: <FlameIcon size={22} />, label: 'Habitos', onClick: () => setActiveView(activeView === 'habits' ? 'chat' : 'habits'), active: activeView === 'habits' },
-    { id: 'goals', icon: <FlagIcon size={22} />, label: 'Objetivos', onClick: () => setActiveView(activeView === 'goals' ? 'chat' : 'goals'), active: activeView === 'goals' },
-    { id: 'focus', icon: <TimerIcon size={22} />, label: 'Foco', onClick: () => setActiveView(activeView === 'focus' ? 'chat' : 'focus'), active: activeView === 'focus' },
-    { id: 'insights', icon: <LightbulbIcon size={22} />, label: 'Insights', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
-    { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
-    { id: 'inbox', icon: <InboxIcon size={22} />, label: 'Inbox', onClick: () => setActiveView(activeView === 'inbox' ? 'chat' : 'inbox'), active: activeView === 'inbox', badge: unreadCount > 0 || whatsappUnread > 0 },
-    { id: 'routines', icon: <TargetIcon size={22} />, label: 'Rotinas', onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'), active: activeView === 'routines' },
-    { id: 'notes', icon: <NotesIcon size={22} />, label: 'Notas', onClick: () => setActiveView(activeView === 'notes' ? 'chat' : 'notes'), active: activeView === 'notes' },
-    { id: 'journal', icon: <BookIcon size={22} />, label: 'Diario', onClick: () => setActiveView(activeView === 'journal' ? 'chat' : 'journal'), active: activeView === 'journal' },
-    { id: 'trabalhos', icon: <BriefcaseIcon size={22} />, label: 'Trabalhos', onClick: () => setActiveView(activeView === 'trabalhos' ? 'chat' : 'trabalhos'), active: activeView === 'trabalhos' },
-    { id: 'calendar', icon: <CalendarIcon size={22} />, label: 'Calendario', onClick: () => setActiveView(activeView === 'calendar' ? 'chat' : 'calendar'), active: activeView === 'calendar' },
-    { id: 'planning', icon: <ClockIcon size={22} />, label: 'Planejamento', onClick: () => setActiveView(activeView === 'planning' ? 'chat' : 'planning'), active: activeView === 'planning' },
-    { id: 'whatsapp', icon: <WhatsAppIcon size={22} />, label: 'WhatsApp', onClick: () => { setActiveView(activeView === 'whatsapp' ? 'chat' : 'whatsapp'); setWhatsappUnread(0); }, active: activeView === 'whatsapp', badge: whatsappUnread > 0 },
-    { id: 'finance', icon: <FinanceIcon size={22} />, label: 'Financas', onClick: () => setActiveView(activeView === 'finance' ? 'chat' : 'finance'), active: activeView === 'finance' },
-    { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
-    { id: 'images', icon: <ImagesIcon size={22} />, label: 'Imagens', onClick: () => setActiveView(activeView === 'images' ? 'chat' : 'images'), active: activeView === 'images' },
-    { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
-    { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
-    { id: 'system', icon: <SettingsIcon size={22} />, label: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
-    { id: 'maestro', icon: <FlaskIcon size={22} />, label: 'Maestro', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
+    // Núcleo
+    { id: 'chat', icon: <ChatIcon size={22} />, label: 'Chat', group: 'Núcleo', onClick: () => setActiveView('chat'), active: activeView === 'chat' },
+    { id: 'dashboard', icon: <DashboardIcon size={22} />, label: 'Dashboard', group: 'Núcleo', onClick: () => setActiveView('dashboard'), active: activeView === 'dashboard' },
+    // Produtividade
+    { id: 'tasks', icon: <TasksIcon size={22} />, label: 'Tarefas', group: 'Produtividade', onClick: () => setActiveView(activeView === 'tasks' ? 'chat' : 'tasks'), active: activeView === 'tasks', badge: tasksPendingCount > 0, badgeCount: tasksPendingCount },
+    { id: 'habits', icon: <FlameIcon size={22} />, label: 'Habitos', group: 'Produtividade', onClick: () => setActiveView(activeView === 'habits' ? 'chat' : 'habits'), active: activeView === 'habits' },
+    { id: 'goals', icon: <FlagIcon size={22} />, label: 'Objetivos', group: 'Produtividade', onClick: () => setActiveView(activeView === 'goals' ? 'chat' : 'goals'), active: activeView === 'goals' },
+    { id: 'focus', icon: <TimerIcon size={22} />, label: 'Foco', group: 'Produtividade', onClick: () => setActiveView(activeView === 'focus' ? 'chat' : 'focus'), active: activeView === 'focus' },
+    { id: 'routines', icon: <TargetIcon size={22} />, label: 'Rotinas', group: 'Produtividade', onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'), active: activeView === 'routines' },
+    { id: 'planning', icon: <ClockIcon size={22} />, label: 'Planejamento', group: 'Produtividade', onClick: () => setActiveView(activeView === 'planning' ? 'chat' : 'planning'), active: activeView === 'planning' },
+    { id: 'calendar', icon: <CalendarIcon size={22} />, label: 'Calendario', group: 'Produtividade', onClick: () => setActiveView(activeView === 'calendar' ? 'chat' : 'calendar'), active: activeView === 'calendar' },
+    // Conhecimento
+    { id: 'notes', icon: <NotesIcon size={22} />, label: 'Notas', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'notes' ? 'chat' : 'notes'), active: activeView === 'notes' },
+    { id: 'journal', icon: <BookIcon size={22} />, label: 'Diario', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'journal' ? 'chat' : 'journal'), active: activeView === 'journal' },
+    { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
+    { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
+    { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
+    { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
+    { id: 'insights', icon: <LightbulbIcon size={22} />, label: 'Insights', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
+    // Comunicação
+    { id: 'inbox', icon: <InboxIcon size={22} />, label: 'Inbox', group: 'Comunicação', onClick: () => setActiveView(activeView === 'inbox' ? 'chat' : 'inbox'), active: activeView === 'inbox', badge: unreadCount > 0 || whatsappUnread > 0 },
+    { id: 'whatsapp', icon: <WhatsAppIcon size={22} />, label: 'WhatsApp', group: 'Comunicação', onClick: () => { setActiveView(activeView === 'whatsapp' ? 'chat' : 'whatsapp'); setWhatsappUnread(0); }, active: activeView === 'whatsapp', badge: whatsappUnread > 0 },
+    // Trabalho
+    { id: 'trabalhos', icon: <BriefcaseIcon size={22} />, label: 'Trabalhos', group: 'Trabalho', onClick: () => setActiveView(activeView === 'trabalhos' ? 'chat' : 'trabalhos'), active: activeView === 'trabalhos' },
+    { id: 'finance', icon: <FinanceIcon size={22} />, label: 'Financas', group: 'Trabalho', onClick: () => setActiveView(activeView === 'finance' ? 'chat' : 'finance'), active: activeView === 'finance' },
+    { id: 'images', icon: <ImagesIcon size={22} />, label: 'Imagens', group: 'Trabalho', onClick: () => setActiveView(activeView === 'images' ? 'chat' : 'images'), active: activeView === 'images' },
+    { id: 'maestro', icon: <FlaskIcon size={22} />, label: 'Maestro', group: 'Trabalho', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
+    // Sistema
+    { id: 'system', icon: <SettingsIcon size={22} />, label: 'Sistema', group: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
   ];
 
   return (
@@ -356,27 +364,47 @@ export function AppLayout(): JSX.Element {
 
       <div className={`layout${activeView === 'maestro' ? ' layout--maestro' : ''}`}>
         {/* Navigation Rail */}
-        <nav className="nav-rail">
+        <nav className="nav-rail" aria-label="Navegação principal">
+          <button
+            type="button"
+            className="nav-rail__brand"
+            title="Seraphine"
+            aria-label="Seraphine — início"
+            onClick={() => setActiveView('chat')}
+          >
+            <img src={seraphineLogo} alt="" aria-hidden="true" />
+          </button>
           <div className="nav-rail__scroll">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`nav-rail__btn${item.active ? ' nav-rail__btn--active' : ''}`}
-                title={item.label}
-                aria-label={item.label}
-                onClick={item.onClick}
-              >
-                {item.icon}
-                {item.badgeCount && item.badgeCount > 0 ? (
-                  <span className="nav-rail__badge nav-rail__badge--count">
-                    {item.badgeCount > 99 ? '99+' : item.badgeCount}
-                  </span>
-                ) : item.badge ? (
-                  <span className="nav-rail__badge" />
-                ) : null}
-              </button>
-            ))}
+            {navItems.map((item, i) => {
+              const isCount = item.badgeCount !== undefined && item.badgeCount > 0;
+              const aria = isCount
+                ? `${item.label}, ${item.badgeCount} pendentes`
+                : item.badge ? `${item.label}, com novidades` : item.label;
+              return (
+                <Fragment key={item.id}>
+                  {i > 0 && navItems[i - 1].group !== item.group && (
+                    <div className="nav-rail__divider" role="separator" aria-label={item.group} />
+                  )}
+                  <button
+                    type="button"
+                    className={`nav-rail__btn${item.active ? ' nav-rail__btn--active' : ''}`}
+                    {...(item.active ? { 'aria-current': 'page' as const } : {})}
+                    title={item.label}
+                    aria-label={aria}
+                    onClick={item.onClick}
+                  >
+                    {item.icon}
+                    {isCount ? (
+                      <span className="nav-rail__badge nav-rail__badge--count" aria-hidden="true">
+                        {item.badgeCount! > 99 ? '99+' : item.badgeCount}
+                      </span>
+                    ) : item.badge ? (
+                      <span className="nav-rail__badge" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                </Fragment>
+              );
+            })}
           </div>
           <button
             type="button"
