@@ -385,3 +385,153 @@
   padding: 40px 32px;
   min-height: 260px;
 }
+
+/* ---- Per-card image + source link (study mode) ---- */
+.flashcards__card-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  margin: 16px 0 0;
+  border: 1px solid var(--border);
+}
+.flashcards__source-link {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 200ms ease;
+}
+.flashcards__source-link:hover { color: var(--accent-hi); text-decoration: underline; }
+
+/* ---- Deck "+ card" affordance (dashboard tile) ---- */
+.fcd-deck__head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fcd-deck__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 3px 8px 3px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+.fcd-deck__add:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ---- Card editor (modal) ---- */
+.fce-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 20px;
+  overflow-y: auto;
+}
+.fce-modal {
+  width: 100%;
+  max-width: 560px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 96px);
+}
+.fce-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.fce-modal__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.fce-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 200ms ease, color 200ms ease;
+}
+.fce-modal__close:hover { background: var(--bg-2); color: var(--text); }
+.fce-modal__body {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.fce-field { display: flex; flex-direction: column; gap: 6px; }
+.fce-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.fce-input,
+.fce-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 200ms ease;
+}
+.fce-input:focus,
+.fce-textarea:focus { border-color: var(--accent-dim); }
+.fce-input::placeholder,
+.fce-textarea::placeholder { color: var(--text-faint); }
+.fce-textarea {
+  min-height: 80px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.fce-image { margin: 0 0 4px; }
+.fce-image__row { display: flex; flex-wrap: wrap; gap: 8px; }
+.fce-image__row .obs-btn { display: inline-flex; align-items: center; gap: 6px; }
+.fce-hint { font-size: 12px; color: var(--text-faint); }
+.fce-error { color: var(--danger); font-size: 13px; }
+.fce-error--foot { margin-bottom: 8px; }
+.fce-modal__foot {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+.fce-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

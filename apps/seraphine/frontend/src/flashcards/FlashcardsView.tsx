@@ -15,10 +15,12 @@ import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE } from '../api';
 import { useConfirm } from '../ui';
+import { CardEditor } from './CardEditor';
 import {
   createDeck as apiCreateDeck,
   listArticlePickers,
   listNotePickers,
+  type Card as ApiCard,
   type CreateDeckBody,
   type DeckSource,
   type PickerOption,
@@ -42,6 +44,24 @@ interface Card {
   ease: number;
   reps: number;
   next_due_at?: string;
+  tags?: string[];
+  source_url?: string | null;
+  source_title?: string | null;
+  image_url?: string | null;
+}
+
+// Project the review `Card` (SM-2 fields) onto the editor's `ApiCard` shape.
+function toApiCard(c: Card): ApiCard {
+  return {
+    id: c.id,
+    topic: c.topic,
+    front: c.front,
+    back: c.back,
+    tags: c.tags,
+    source_url: c.source_url,
+    source_title: c.source_title,
+    image_url: c.image_url,
+  };
 }
 
 interface FlashcardsViewProps {
@@ -132,6 +152,9 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   const [stats, setStats] = useState<{ reviewed: number; correct: number }>({
     reviewed: 0, correct: 0,
   });
+  // Card editor: null = closed. `{ card: null }` = new-card mode; the topic
+  // seeds createCard for a brand-new card.
+  const [editorState, setEditorState] = useState<{ card: Card | null; topic: string } | null>(null);
   const loadedRef = useRef(false);
 
   // Real per-deck summary (total/due/mastery over ALL cards, not just due).
@@ -349,14 +372,18 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
   // the effect was re-binding window.addEventListener on every card —
   // `rate`/`forget`/`skip` are useCallbacks that depend on `queue`,
   // which mutates after every review.
-  const handlersRef = useRef({ rate, forget, skip, current, flipped, mode, onBack });
-  handlersRef.current = { rate, forget, skip, current, flipped, mode, onBack };
+  const handlersRef = useRef({ rate, forget, skip, current, flipped, mode, onBack, editorOpen: editorState !== null });
+  handlersRef.current = { rate, forget, skip, current, flipped, mode, onBack, editorOpen: editorState !== null };
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent): void => {
-      const { current: card, flipped: isFlipped, rate: r, forget: f, skip: s, mode: m, onBack: back } = handlersRef.current;
+      const { current: card, flipped: isFlipped, rate: r, forget: f, skip: s, mode: m, onBack: back, editorOpen } = handlersRef.current;
       const target = ev.target as HTMLElement;
-      if (target && target.tagName === 'INPUT') return;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+      // While the card editor is open, it owns the keyboard (its own Escape/
+      // typing). Don't let study shortcuts flip/rate the card behind it.
+      if (editorOpen) return;
       // Escape: study -> dashboard, dashboard -> back to previous view (chat).
       if (ev.key === 'Escape') {
         if (m === 'study') setMode('dashboard');
@@ -395,6 +422,25 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
       void listArticlePickers().then(setArticlePickers);
     }
   }, [pickersLoaded]);
+
+  // Open the card editor: an existing card (study mode) or a new card seeded
+  // with a deck topic ("+ card" affordance).
+  const openEditExisting = useCallback((card: Card) => {
+    setEditorState({ card, topic: card.topic });
+  }, []);
+  const openNewCard = useCallback((topic: string) => {
+    setEditorState({ card: null, topic });
+  }, []);
+  const closeEditor = useCallback(() => setEditorState(null), []);
+
+  // After save: merge the edited card back into the live queue (preserving its
+  // SM-2 fields) and refresh the deck summary so counts/mastery stay correct.
+  const handleCardSaved = useCallback((saved: ApiCard) => {
+    setQueue((prev) => prev.map((c) => (c.id === saved.id ? { ...c, ...saved } : c)));
+    setCurrent((c) => (c && c.id === saved.id ? { ...c, ...saved } : c));
+    setEditorState(null);
+    void fetchSummaries();
+  }, [fetchSummaries]);
 
   // Preview card front for the banner (first due card, or a fallback).
   const previewCard = queue[0];
@@ -611,6 +657,12 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                 <div className="fcd-card__actions">
                   <button
                     type="button"
+                    onClick={(e) => { e.stopPropagation(); openEditExisting(current); }}
+                    className="fcd-card__action"
+                    title="editar esse card"
+                  >editar</button>
+                  <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); skip(); }}
                     className="fcd-card__action"
                     title="pular (-> ou S)"
@@ -639,6 +691,21 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                   <div className="fcd-card__back">
                     {current.back}
                   </div>
+
+                  {current.image_url && (
+                    <img className="flashcards__card-img" src={current.image_url} alt="" />
+                  )}
+
+                  {current.source_url && (
+                    <a
+                      className="flashcards__source-link"
+                      href={current.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {current.source_title || 'Abrir fonte'}
+                    </a>
+                  )}
 
                   <div className="fcd-ratings">
                     {RATINGS.map((r, idx) => (
@@ -671,6 +738,15 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
             </div>
           )}
         </div>
+
+        {editorState && (
+          <CardEditor
+            card={editorState.card ? toApiCard(editorState.card) : null}
+            newTopic={editorState.topic}
+            onSaved={handleCardSaved}
+            onClose={closeEditor}
+          />
+        )}
       </div>
     );
   }
@@ -746,11 +822,18 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
             {decks.map((deck) => {
               const masteryPct = Math.max(0, Math.min(100, deck.mastery));
               return (
-                <button
+                <div
                   key={deck.topic}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className="fcd-deck"
                   onClick={() => startStudy(deck.topic)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      startStudy(deck.topic);
+                    }
+                  }}
                   title={`Estudar ${deck.topic}`}
                 >
                   <div className="fcd-deck__head">
@@ -761,11 +844,23 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                         <path d="M17 7l4 1.2v9.6L17 19" />
                       </svg>
                     </span>
-                    {deck.dueCount > 0 ? (
-                      <span className="fcd-deck__chip fcd-deck__chip--due">{deck.dueCount} hoje</span>
-                    ) : (
-                      <span className="fcd-deck__chip fcd-deck__chip--clear">em dia</span>
-                    )}
+                    <div className="fcd-deck__head-right">
+                      {deck.dueCount > 0 ? (
+                        <span className="fcd-deck__chip fcd-deck__chip--due">{deck.dueCount} hoje</span>
+                      ) : (
+                        <span className="fcd-deck__chip fcd-deck__chip--clear">em dia</span>
+                      )}
+                      <button
+                        type="button"
+                        className="fcd-deck__add"
+                        title={`Adicionar card em ${deck.topic}`}
+                        aria-label={`Adicionar card em ${deck.topic}`}
+                        onClick={(e) => { e.stopPropagation(); openNewCard(deck.topic); }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+                        card
+                      </button>
+                    </div>
                   </div>
                   <div className="fcd-deck__title">{deck.topic}</div>
                   <div className="fcd-deck__meta">
@@ -774,7 +869,7 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
                   <div className="fcd-deck__bar">
                     <div className="fcd-deck__fill" style={{ width: `${masteryPct}%`, background: deck.color }} />
                   </div>
-                </button>
+                </div>
               );
             })}
 
@@ -791,6 +886,15 @@ export function FlashcardsView({ onBack }: FlashcardsViewProps): JSX.Element {
           </div>
         )}
       </div>
+
+      {editorState && (
+        <CardEditor
+          card={editorState.card ? toApiCard(editorState.card) : null}
+          newTopic={editorState.topic}
+          onSaved={handleCardSaved}
+          onClose={closeEditor}
+        />
+      )}
     </div>
   );
 }
