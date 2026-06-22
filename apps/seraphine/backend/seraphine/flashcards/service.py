@@ -194,6 +194,29 @@ class FlashcardsService:
 
         return await asyncio.to_thread(_work)
 
+    async def generate_card_image(self, card_id: str, *, image_service: Any) -> dict[str, Any]:
+        def _read() -> tuple[str, str] | None:
+            with self.store._connect() as conn:
+                r = conn.execute(
+                    "SELECT front, back FROM flashcards WHERE id = ?", (card_id,)
+                ).fetchone()
+            return (r[0], r[1]) if r else None
+
+        pair = await asyncio.to_thread(_read)
+        if pair is None:
+            raise FlashcardsGenerationError("card não encontrado")
+        front, back = pair
+        prompt = (
+            f"Ilustração educativa, limpa, sem texto, para um flashcard. "
+            f"Tema: {front} — {back}"
+        )[:500]
+        result = await image_service.generate(prompt=prompt)  # raises over-budget
+        url = (result or {}).get("url") or (result or {}).get("local_path")
+        if not url:
+            raise FlashcardsGenerationError("a geração de imagem não retornou URL")
+        updated = await self.edit_card(card_id, image_url=url)
+        return updated or {"image_url": url}
+
     async def create_deck(self, topic: str, count: int = 10) -> list[dict[str, Any]]:
         topic = (topic or "").strip()
         if not topic:
