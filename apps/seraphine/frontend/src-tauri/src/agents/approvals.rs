@@ -220,6 +220,176 @@ pub fn maestro_approvals_status() -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// Global PreToolUse hook in ~/.claude/settings.json
+// ---------------------------------------------------------------------------
+//
+// Toggling interception ON installs ONE matcher-group under `hooks.PreToolUse`
+// that routes every session's tool calls to this process's approval server:
+//
+// ```json
+// { "matcher": "*", "hooks": [ { "type": "http",
+//     "url": "http://127.0.0.1:<PORT>/hooks/pre-tool-use",
+//     "headers": { "Authorization": "Bearer <TOKEN>" },
+//     "timeout": 600 } ] }
+// ```
+//
+// The token is written LITERALLY (not `$VAR`): Claude spawns hooks from arbitrary
+// terminal sessions where our process env never propagates. We own a group by the
+// inner `hooks[].url` containing `/hooks/pre-tool-use` — that marker lets us
+// reinstall (replacing a stale port) and remove without touching the user's own
+// hooks. All existing settings keys and other hook events are preserved verbatim.
+
+/// The path of the route segment that marks a matcher-group as OURS, regardless
+/// of port (the port changes per server start).
+const HOOK_URL_MARKER: &str = "/hooks/pre-tool-use";
+
+/// `~/.claude/settings.json`. Resolves home the same way `observer.rs` /
+/// `skills.rs` reach `~/.claude`: `HOME` env var first (so tests can redirect it),
+/// then `dirs::home_dir()`, then `/`.
+fn settings_path() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".claude/settings.json")
+}
+
+/// True when this matcher-group is ours, i.e. one of its inner hooks targets a
+/// URL containing [`HOOK_URL_MARKER`]. Tolerant of malformed groups (returns
+/// false rather than panicking on unexpected shapes).
+fn group_is_ours(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|hooks| {
+            hooks.iter().any(|h| {
+                h.get("url")
+                    .and_then(|u| u.as_str())
+                    .is_some_and(|u| u.contains(HOOK_URL_MARKER))
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// The matcher-group routing tool calls to our server on `port` with `token`.
+fn our_group(port: u16, token: &str) -> Value {
+    json!({
+        "matcher": "*",
+        "hooks": [ {
+            "type": "http",
+            "url": format!("http://127.0.0.1:{port}{HOOK_URL_MARKER}"),
+            "headers": { "Authorization": format!("Bearer {token}") },
+            "timeout": 600,
+        } ]
+    })
+}
+
+/// Pure, testable: return `settings` with our PreToolUse matcher-group installed
+/// (replacing any prior one of ours, so reinstalling updates the port instead of
+/// duplicating). Coerces `settings`, `hooks`, and `hooks.PreToolUse` to the
+/// required object/array shapes; every other key and hook event is preserved.
+pub fn install_hook_json(mut settings: Value, port: u16, token: &str) -> Value {
+    if !settings.is_object() {
+        settings = json!({});
+    }
+    let root = settings.as_object_mut().expect("coerced to object above");
+    let hooks = root.entry("hooks").or_insert_with(|| json!({}));
+    if !hooks.is_object() {
+        *hooks = json!({});
+    }
+    let hooks = hooks.as_object_mut().expect("coerced to object above");
+    let pre = hooks.entry("PreToolUse").or_insert_with(|| json!([]));
+    if !pre.is_array() {
+        *pre = json!([]);
+    }
+    let pre = pre.as_array_mut().expect("coerced to array above");
+    // Drop any prior group of ours so re-install never duplicates and a changed
+    // port replaces the stale entry; foreign groups are left in place.
+    pre.retain(|g| !group_is_ours(g));
+    pre.push(our_group(port, token));
+    settings
+}
+
+/// Pure, testable inverse of [`install_hook_json`]: strip our PreToolUse
+/// matcher-group(s). Idempotent — a no-op when none of ours (or no `PreToolUse`)
+/// is present. Empties are tidied: if `PreToolUse` becomes empty the key is
+/// removed; an emptied `hooks` object is left as-is (no over-cleaning).
+pub fn remove_hook_json(mut settings: Value) -> Value {
+    let Some(root) = settings.as_object_mut() else {
+        return settings;
+    };
+    let Some(hooks) = root.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return settings;
+    };
+    let Some(pre) = hooks.get_mut("PreToolUse").and_then(|p| p.as_array_mut()) else {
+        return settings;
+    };
+    pre.retain(|g| !group_is_ours(g));
+    if pre.is_empty() {
+        hooks.remove("PreToolUse");
+    }
+    settings
+}
+
+/// Read `~/.claude/settings.json` as JSON, defaulting to `{}` when the file is
+/// missing or unparseable (so an absent/corrupt settings file degrades to a
+/// clean install rather than an error).
+fn read_settings() -> Value {
+    std::fs::read_to_string(settings_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Atomically write `settings.json`: pretty-print, write a pid-scoped temp file
+/// in the SAME dir (so `rename` stays on one filesystem), then rename over the
+/// destination — a reader never sees a half-written file. Creates `~/.claude`
+/// if missing.
+fn write_settings(v: &Value) -> Result<(), String> {
+    let path = settings_path();
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("settings path has no parent: {path:?}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create_dir_all {dir:?}: {e}"))?;
+    let pretty =
+        serde_json::to_string_pretty(v).map_err(|e| format!("serialize settings: {e}"))?;
+    let tmp = dir.join(format!(".settings.json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, pretty.as_bytes()).map_err(|e| format!("write {tmp:?}: {e}"))?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("rename {tmp:?} -> {path:?}: {e}"));
+    }
+    Ok(())
+}
+
+/// Read settings, install our hook for `port`/`token`, write back atomically.
+fn install_hook(port: u16, token: &str) -> Result<(), String> {
+    write_settings(&install_hook_json(read_settings(), port, token))
+}
+
+/// Read settings, strip our hook, write back atomically. No-op-safe.
+fn remove_hook() -> Result<(), String> {
+    write_settings(&remove_hook_json(read_settings()))
+}
+
+/// Toggle whole-machine permission interception. Flips the in-memory master
+/// switch AND (un)installs the global `PreToolUse` hook in `~/.claude/settings.json`
+/// so the change takes effect for every Claude session, not just ones we spawned.
+/// Errs when the approval server isn't running (no port/token to bind the hook to).
+#[tauri::command]
+pub fn maestro_set_permission_interception(enable: bool) -> Result<bool, String> {
+    let state = state().ok_or("approval server not running")?;
+    state.enabled.store(enable, Ordering::Relaxed);
+    if enable {
+        let port = state.port.load(Ordering::Relaxed) as u16;
+        install_hook(port, &state.token)?;
+    } else {
+        remove_hook()?;
+    }
+    Ok(enable)
+}
+
+// ---------------------------------------------------------------------------
 // HTTP server
 // ---------------------------------------------------------------------------
 
@@ -481,5 +651,230 @@ mod tests {
         let v = maestro_approvals_status();
         assert!(v.get("enabled").is_some());
         assert!(v.get("port").is_some());
+    }
+
+    // ---- settings.json hook install/remove (pure json) -------------------
+
+    /// Count matcher-groups in `hooks.PreToolUse` that are ours (by url marker).
+    fn our_group_count(settings: &Value) -> usize {
+        settings["hooks"]["PreToolUse"]
+            .as_array()
+            .map(|a| a.iter().filter(|g| group_is_ours(g)).count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn install_preserves_existing_keys_and_writes_our_group() {
+        let s = json!({ "env": { "X": "1" }, "skipAutoPermissionPrompt": true });
+        let out = install_hook_json(s, 54321, "secret-tok");
+
+        // Untouched siblings.
+        assert_eq!(out["env"]["X"], "1");
+        assert_eq!(out["skipAutoPermissionPrompt"], true);
+
+        // Our group is present and well-formed.
+        let group = &out["hooks"]["PreToolUse"][0];
+        assert_eq!(group["matcher"], "*");
+        let inner = &group["hooks"][0];
+        assert_eq!(inner["type"], "http");
+        assert_eq!(inner["timeout"], 600);
+        assert!(
+            inner["url"].as_str().unwrap().contains("54321"),
+            "url must carry the port: {inner}"
+        );
+        assert!(inner["url"].as_str().unwrap().contains(HOOK_URL_MARKER));
+        assert_eq!(inner["headers"]["Authorization"], "Bearer secret-tok");
+    }
+
+    #[test]
+    fn install_is_idempotent_and_replaces_on_port_change() {
+        let once = install_hook_json(json!({}), 1, "t");
+        let twice = install_hook_json(once, 1, "t");
+        // Re-installing the SAME port/token leaves exactly one group of ours.
+        assert_eq!(our_group_count(&twice), 1, "no duplicate on re-install");
+
+        // A different port REPLACES (still exactly one group, now the new port).
+        let changed = install_hook_json(twice, 2, "t");
+        assert_eq!(our_group_count(&changed), 1, "changed port replaces, no dupe");
+        let url = changed["hooks"]["PreToolUse"][0]["hooks"][0]["url"]
+            .as_str()
+            .unwrap();
+        assert!(url.contains(":2/"), "port updated to 2: {url}");
+        assert!(!url.contains(":1/"), "stale port 1 gone: {url}");
+    }
+
+    #[test]
+    fn install_preserves_unrelated_hook_events() {
+        let post = json!([ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo hi" } ] } ]);
+        let s = json!({ "hooks": { "PostToolUse": post.clone() } });
+        let out = install_hook_json(s, 9, "t");
+
+        // The foreign event is byte-for-byte intact.
+        assert_eq!(out["hooks"]["PostToolUse"], post);
+        // And ours was added under PreToolUse.
+        assert_eq!(our_group_count(&out), 1);
+    }
+
+    #[test]
+    fn install_coerces_non_object_hooks() {
+        // A pre-existing `hooks` that isn't an object (or PreToolUse not an array)
+        // is coerced rather than panicking, and our group still lands.
+        let s = json!({ "hooks": "garbage" });
+        let out = install_hook_json(s, 7, "t");
+        assert_eq!(our_group_count(&out), 1);
+
+        let s2 = json!({ "hooks": { "PreToolUse": 42 } });
+        let out2 = install_hook_json(s2, 7, "t");
+        assert_eq!(our_group_count(&out2), 1);
+    }
+
+    #[test]
+    fn remove_strips_ours_keeps_other_keys_and_events() {
+        let installed = install_hook_json(
+            json!({ "env": { "X": "1" }, "hooks": { "PostToolUse": [ { "matcher": "Bash", "hooks": [] } ] } }),
+            5,
+            "t",
+        );
+        let out = remove_hook_json(installed);
+
+        // Sibling key + foreign event survive.
+        assert_eq!(out["env"]["X"], "1");
+        assert!(out["hooks"]["PostToolUse"].is_array());
+        // Ours is gone, and since it was the only PreToolUse group, the key is removed.
+        assert_eq!(our_group_count(&out), 0);
+        assert!(
+            out["hooks"].get("PreToolUse").is_none(),
+            "empty PreToolUse key should be removed: {out}"
+        );
+    }
+
+    #[test]
+    fn remove_preserves_foreign_pre_tool_use_groups() {
+        let foreign = json!({ "matcher": "Write", "hooks": [ { "type": "command", "command": "fmt" } ] });
+        let installed = install_hook_json(
+            json!({ "hooks": { "PreToolUse": [ foreign.clone() ] } }),
+            5,
+            "t",
+        );
+        // Sanity: both ours and the foreign group are present after install.
+        assert_eq!(installed["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+
+        let out = remove_hook_json(installed);
+        let pre = out["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 1, "only ours removed");
+        assert_eq!(pre[0], foreign, "foreign group untouched");
+    }
+
+    #[test]
+    fn remove_is_noop_when_absent() {
+        // No hooks at all.
+        let s = json!({ "env": { "X": "1" } });
+        assert_eq!(remove_hook_json(s.clone()), s);
+
+        // hooks present but no PreToolUse.
+        let s2 = json!({ "hooks": { "PostToolUse": [] } });
+        assert_eq!(remove_hook_json(s2.clone()), s2);
+
+        // Non-object settings: returned unchanged.
+        let s3 = json!("not an object");
+        assert_eq!(remove_hook_json(s3.clone()), s3);
+    }
+
+    // ---- settings.json read/write round-trip (temp HOME) -----------------
+
+    // Serialize HOME-mutating tests behind a lock (same rationale as skills.rs).
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct HomeGuard {
+        prev: Option<std::ffi::OsString>,
+    }
+    impl HomeGuard {
+        fn set(tmp: &std::path::Path) -> Self {
+            let prev = std::env::var_os("HOME");
+            std::env::set_var("HOME", tmp);
+            HomeGuard { prev }
+        }
+    }
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    fn unique_tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "approvals-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
+    #[test]
+    fn install_remove_round_trip_on_disk_preserves_user_keys() {
+        let _g = HOME_LOCK.lock().unwrap();
+        let tmp = unique_tmp("roundtrip");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".claude")).unwrap();
+        let _home = HomeGuard::set(&tmp);
+
+        // Seed a realistic settings.json (matches the real one's keys).
+        let seed = json!({
+            "env": { "DISABLE_ADAPTIVE_THINKING": "1" },
+            "effortLevel": "medium",
+            "skipAutoPermissionPrompt": true,
+        });
+        std::fs::write(
+            settings_path(),
+            serde_json::to_string_pretty(&seed).unwrap(),
+        )
+        .unwrap();
+
+        // Install → file gains our hook, keeps user keys, stays valid JSON.
+        install_hook(45678, "round-tok").unwrap();
+        let after_install = read_settings();
+        assert_eq!(after_install["env"]["DISABLE_ADAPTIVE_THINKING"], "1");
+        assert_eq!(after_install["effortLevel"], "medium");
+        assert_eq!(after_install["skipAutoPermissionPrompt"], true);
+        assert_eq!(our_group_count(&after_install), 1);
+        let url = after_install["hooks"]["PreToolUse"][0]["hooks"][0]["url"]
+            .as_str()
+            .unwrap();
+        assert!(url.contains("45678"));
+
+        // No temp files left behind by the atomic write.
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.join(".claude"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "atomic write must leave no temp files");
+
+        // Remove → our hook gone, user keys intact.
+        remove_hook().unwrap();
+        let after_remove = read_settings();
+        assert_eq!(after_remove["env"]["DISABLE_ADAPTIVE_THINKING"], "1");
+        assert_eq!(after_remove["skipAutoPermissionPrompt"], true);
+        assert_eq!(our_group_count(&after_remove), 0);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn install_creates_settings_when_file_absent() {
+        let _g = HOME_LOCK.lock().unwrap();
+        let tmp = unique_tmp("absent");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap(); // no .claude dir yet
+        let _home = HomeGuard::set(&tmp);
+
+        // read_settings on a missing file degrades to {} and install creates it.
+        install_hook(11, "t").unwrap();
+        assert!(settings_path().is_file(), "settings.json should be created");
+        assert_eq!(our_group_count(&read_settings()), 1);
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
