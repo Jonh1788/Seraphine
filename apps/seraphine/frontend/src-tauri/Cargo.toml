@@ -39,6 +39,11 @@ base64 = "0.22"
 # backend (see Task 15). Default features (bzip2, zstd, time) are disabled
 # because we only need deflate.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Maestro approval server — a minimal synchronous HTTP server that receives
+# Claude Code's global `PreToolUse` http-hook POSTs and blocks each request
+# until the human (or the static safe-tool rule) returns a permission
+# decision. Synchronous = no async runtime; one worker thread per request.
+tiny_http = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
