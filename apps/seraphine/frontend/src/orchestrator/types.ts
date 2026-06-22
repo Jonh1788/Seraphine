@@ -12,3 +12,16 @@ export interface SiSession { id: string; path: string; branch: string; }
 export interface DiffFile { path: string; changes: string; }
 export interface GateStep { cmd: string; ok: boolean; tail: string; timed_out: boolean; }
 export interface GateResult { ok: boolean; steps: GateStep[]; }
+
+/** A distilled, reviewable skill awaiting publish (skills self-authoring v1). */
+export interface SkillDraft {
+  id: string;
+  name: string;
+  slug: string;
+  skillMd: string;
+  confidence: number;
+  sourceAgentId: string;
+  createdAt: number; // epoch ms
+  status: 'draft' | 'published' | 'discarded';
+  publishedPath?: string;
+}

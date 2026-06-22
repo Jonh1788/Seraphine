@@ -37,3 +37,11 @@ export const siReview = (repoRoot: string, branch: string) => invoke<string>('ma
 export const siMerge = (repoRoot: string, branch: string) => invoke<string>('maestro_si_merge', { repoRoot, branch });
 export const siDiscard = (repoRoot: string, id: string, branch: string) => invoke<void>('maestro_si_discard', { repoRoot, id, branch });
 export const siGate = (path: string, commands: string[]) => invoke<GateResult>('maestro_si_gate', { path, commands });
+
+// Maestro — skills self-authoring. The Rust params are snake_case
+// (`transcript`, `slug`+`skill_md`); Tauri maps these camelCase keys to them
+// (same convention as `maestro_si_create` above; verified against
+// `skills.rs::maestro_skill_publish(slug, skill_md)`).
+export const skillExtract = (transcript: string) => invoke<string>('maestro_skill_extract', { transcript });
+export const skillPublish = (slug: string, skillMd: string) => invoke<string>('maestro_skill_publish', { slug, skillMd });
+export const skillListPublished = () => invoke<string[]>('maestro_skill_list');
