@@ -40,9 +40,13 @@
    the detail/empty-state stays pinned in the viewport — otherwise a long
    session list grows the body and pushes the centered "Nenhuma sessão
    selecionada" empty state off-screen. */
-/* Two classes (0-2-0) so this beats `.obs-screen__body { overflow-y: auto }`,
-   which is bundled LATER at equal specificity and would otherwise override it. */
-.maestro__body.maestro__body--agents { overflow: hidden; }
+/* Two classes (0-2-0) so this beats `.obs-screen__body` (0-1-0), which is
+   bundled LATER and at equal specificity would otherwise win — it sets BOTH
+   `flex-direction: column` (stacking the list above the detail instead of
+   side-by-side) AND `overflow-y: auto` (making the body scroll instead of the
+   list). Re-assert both here so the agents tab is a proper two-column row with
+   an internally-scrolling list and the detail/empty pinned in the viewport. */
+.maestro__body.maestro__body--agents { flex-direction: row; overflow: hidden; }
 .maestro__list { width: 316px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-bottom: 4px; }
 
 /* ---- Search field ---- */
