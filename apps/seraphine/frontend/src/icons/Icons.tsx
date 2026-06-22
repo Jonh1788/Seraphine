@@ -607,3 +607,65 @@ export function SparkleIcon({ size = 24, className = '' }: IconProps) {
     </svg>
   );
 }
+
+/* ── Nav-rail dedicated glyphs (purpose-built so they don't reuse the
+   generic Target/Clock/Lightbulb/Flask/Settings icons elsewhere). ── */
+
+export function RoutinesIcon({ size = 24, className = '' }: IconProps) {
+  // Repeating cycle — distinct from the bullseye TargetIcon.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
+      <path d="M20 4v4h-4" />
+      <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
+      <path d="M4 20v-4h4" />
+    </svg>
+  );
+}
+
+export function PlanningIcon({ size = 24, className = '' }: IconProps) {
+  // Timeline with milestones — distinct from the literal ClockIcon.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M4 5h9" />
+      <path d="M4 12h13" />
+      <path d="M4 19h7" />
+      <circle cx="16" cy="5" r="1.6" />
+      <circle cx="20" cy="12" r="1.6" />
+      <circle cx="14" cy="19" r="1.6" />
+    </svg>
+  );
+}
+
+export function InsightsIcon({ size = 24, className = '' }: IconProps) {
+  // Rising bars — distinct from the LightbulbIcon used on insight cards.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M4 19h16" />
+      <rect x="5.5" y="12" width="3" height="5" rx="1" />
+      <rect x="10.5" y="8.5" width="3" height="8.5" rx="1" />
+      <rect x="15.5" y="5" width="3" height="12" rx="1" />
+    </svg>
+  );
+}
+
+export function MaestroIcon({ size = 24, className = '' }: IconProps) {
+  // Orchestrator hub with radiating spokes — distinct from the lab FlaskIcon.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <circle cx="12" cy="12" r="2.4" />
+      <path d="M12 4.5v2M12 17.5v2M19.5 12h-2M6.5 12h-2M17.3 6.7l-1.4 1.4M8.1 15.9l-1.4 1.4M17.3 17.3l-1.4-1.4M8.1 8.1L6.7 6.7" />
+    </svg>
+  );
+}
+
+export function SystemIcon({ size = 24, className = '' }: IconProps) {
+  // Activity line chart — distinct from the SettingsIcon gear.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M4 4.5v12" />
+      <path d="M4 20.5h16" />
+      <path d="M4 17.5l4-4 3 2.6 4.5-5L20 14" />
+    </svg>
+  );
+}

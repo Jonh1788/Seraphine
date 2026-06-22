@@ -38,7 +38,6 @@ import { MaestroView } from './orchestrator';
 import {
   ChatIcon,
   CalendarIcon,
-  ClockIcon,
   InboxIcon,
   WhatsAppIcon,
   FinanceIcon,
@@ -55,12 +54,11 @@ import {
   DashboardIcon,
   FlagIcon,
   FlameIcon,
-  LightbulbIcon,
   NotesIcon,
   SearchIcon,
-  TargetIcon,
   TimerIcon,
 } from './icons/Icons';
+import { RoutinesIcon, PlanningIcon, InsightsIcon, MaestroIcon, SystemIcon } from './icons/Icons';
 import seraphineLogo from '../src-tauri/icons/128x128.png';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
@@ -287,8 +285,8 @@ export function AppLayout(): JSX.Element {
     { id: 'habits', icon: <FlameIcon size={22} />, label: 'Habitos', group: 'Produtividade', onClick: () => setActiveView(activeView === 'habits' ? 'chat' : 'habits'), active: activeView === 'habits' },
     { id: 'goals', icon: <FlagIcon size={22} />, label: 'Objetivos', group: 'Produtividade', onClick: () => setActiveView(activeView === 'goals' ? 'chat' : 'goals'), active: activeView === 'goals' },
     { id: 'focus', icon: <TimerIcon size={22} />, label: 'Foco', group: 'Produtividade', onClick: () => setActiveView(activeView === 'focus' ? 'chat' : 'focus'), active: activeView === 'focus' },
-    { id: 'routines', icon: <TargetIcon size={22} />, label: 'Rotinas', group: 'Produtividade', onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'), active: activeView === 'routines' },
-    { id: 'planning', icon: <ClockIcon size={22} />, label: 'Planejamento', group: 'Produtividade', onClick: () => setActiveView(activeView === 'planning' ? 'chat' : 'planning'), active: activeView === 'planning' },
+    { id: 'routines', icon: <RoutinesIcon size={22} />, label: 'Rotinas', group: 'Produtividade', onClick: () => setActiveView(activeView === 'routines' ? 'chat' : 'routines'), active: activeView === 'routines' },
+    { id: 'planning', icon: <PlanningIcon size={22} />, label: 'Planejamento', group: 'Produtividade', onClick: () => setActiveView(activeView === 'planning' ? 'chat' : 'planning'), active: activeView === 'planning' },
     { id: 'calendar', icon: <CalendarIcon size={22} />, label: 'Calendario', group: 'Produtividade', onClick: () => setActiveView(activeView === 'calendar' ? 'chat' : 'calendar'), active: activeView === 'calendar' },
     // Conhecimento
     { id: 'notes', icon: <NotesIcon size={22} />, label: 'Notas', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'notes' ? 'chat' : 'notes'), active: activeView === 'notes' },
@@ -297,7 +295,7 @@ export function AppLayout(): JSX.Element {
     { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
     { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
     { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
-    { id: 'insights', icon: <LightbulbIcon size={22} />, label: 'Insights', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
+    { id: 'insights', icon: <InsightsIcon size={22} />, label: 'Insights', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
     // Comunicação
     { id: 'inbox', icon: <InboxIcon size={22} />, label: 'Inbox', group: 'Comunicação', onClick: () => setActiveView(activeView === 'inbox' ? 'chat' : 'inbox'), active: activeView === 'inbox', badge: unreadCount > 0 || whatsappUnread > 0 },
     { id: 'whatsapp', icon: <WhatsAppIcon size={22} />, label: 'WhatsApp', group: 'Comunicação', onClick: () => { setActiveView(activeView === 'whatsapp' ? 'chat' : 'whatsapp'); setWhatsappUnread(0); }, active: activeView === 'whatsapp', badge: whatsappUnread > 0 },
@@ -305,9 +303,9 @@ export function AppLayout(): JSX.Element {
     { id: 'trabalhos', icon: <BriefcaseIcon size={22} />, label: 'Trabalhos', group: 'Trabalho', onClick: () => setActiveView(activeView === 'trabalhos' ? 'chat' : 'trabalhos'), active: activeView === 'trabalhos' },
     { id: 'finance', icon: <FinanceIcon size={22} />, label: 'Financas', group: 'Trabalho', onClick: () => setActiveView(activeView === 'finance' ? 'chat' : 'finance'), active: activeView === 'finance' },
     { id: 'images', icon: <ImagesIcon size={22} />, label: 'Imagens', group: 'Trabalho', onClick: () => setActiveView(activeView === 'images' ? 'chat' : 'images'), active: activeView === 'images' },
-    { id: 'maestro', icon: <FlaskIcon size={22} />, label: 'Maestro', group: 'Trabalho', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
+    { id: 'maestro', icon: <MaestroIcon size={22} />, label: 'Maestro', group: 'Trabalho', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
     // Sistema
-    { id: 'system', icon: <SettingsIcon size={22} />, label: 'Sistema', group: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
+    { id: 'system', icon: <SystemIcon size={22} />, label: 'Sistema', group: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
   ];
 
   return (
