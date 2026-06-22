@@ -182,6 +182,9 @@ fn run_desktop() {
             agents::selfimprove::maestro_si_merge,
             agents::selfimprove::maestro_si_discard,
             agents::selfimprove::maestro_si_gate,
+            agents::skills::maestro_skill_extract,
+            agents::skills::maestro_skill_publish,
+            agents::skills::maestro_skill_list,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())

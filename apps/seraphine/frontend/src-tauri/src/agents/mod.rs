@@ -4,6 +4,7 @@ pub mod policy;
 pub mod promptguard;
 pub mod proto;
 pub mod selfimprove;
+pub mod skills;
 pub mod ssh;
 
 use std::collections::HashMap;
