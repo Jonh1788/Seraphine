@@ -17,6 +17,10 @@ interface NotificationActions {
   setWhatsappUnread: (v: number) => void;
   incrementWhatsappUnread: () => void;
   pushWhatsappMessage: (msg: WhatsAppMessage) => void;
+  /** Merge a batch (chat history / chat-list seeds) into the store, deduped by
+   *  chatId+timestamp+body. Incoming entries win on collision, so a full-history
+   *  message (correct fromMe) replaces a chat-list seed of the same message. */
+  mergeWhatsappMessages: (msgs: WhatsAppMessage[]) => void;
   setTasksPendingCount: (v: number) => void;
   setPushStatus: (v: NotificationState['pushStatus']) => void;
   setPushMsg: (v: string | null) => void;
@@ -36,8 +40,16 @@ export const useNotificationStore = create<NotificationState & NotificationActio
   setWhatsappUnread: (v) => set({ whatsappUnread: v }),
   incrementWhatsappUnread: () => set((s) => ({ whatsappUnread: s.whatsappUnread + 1 })),
   pushWhatsappMessage: (msg) => set((s) => ({
-    whatsappMessages: [msg, ...s.whatsappMessages].slice(0, 100),
+    whatsappMessages: [msg, ...s.whatsappMessages].slice(0, 400),
   })),
+  mergeWhatsappMessages: (msgs) => set((s) => {
+    const byKey = new Map<string, WhatsAppMessage>();
+    const key = (m: WhatsAppMessage): string => `${m.chatId}|${m.timestamp}|${m.body}`;
+    for (const m of s.whatsappMessages) byKey.set(key(m), m);
+    for (const m of msgs) byKey.set(key(m), m); // incoming wins (history > seed)
+    const merged = [...byKey.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 400);
+    return { whatsappMessages: merged };
+  }),
   setTasksPendingCount: (v) => set({ tasksPendingCount: v }),
   setPushStatus: (v) => set({ pushStatus: v }),
   setPushMsg: (v) => set({ pushMsg: v }),

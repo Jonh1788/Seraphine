@@ -1,5 +1,5 @@
 import './obsidian.css';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftIcon,
   CalendarIcon,
@@ -9,6 +9,8 @@ import {
   SparkleIcon,
   WhatsAppIcon,
 } from '../icons/Icons';
+import { useNotificationStore } from '../stores/notificationStore';
+import { fetchWhatsappChats, fetchWhatsappHistory } from './api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -136,6 +138,20 @@ export function WhatsAppPanel({ messages, onBack, onNavigate }: WhatsAppPanelPro
   const [search, setSearch] = useState('');
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const mergeHistory = useNotificationStore((s) => s.mergeWhatsappMessages);
+
+  // On open: seed the chat list from the bridge so conversations appear even
+  // before any live message arrives (the WS feed is live-only). Runs once.
+  const seededChats = useRef(false);
+  useEffect(() => {
+    if (seededChats.current) return;
+    seededChats.current = true;
+    void fetchWhatsappChats().then(mergeHistory).catch(() => { seededChats.current = false; });
+  }, [mergeHistory]);
+
+  // On selecting a chat: load its recent history once (correct fromMe per msg),
+  // merged + deduped into the store so past messages show on open.
+  const loadedHistory = useRef<Set<string>>(new Set());
 
   // Group messages by chat (most recent first), preserve original message data.
   const chatGroups = useMemo(() => {
@@ -178,6 +194,14 @@ export function WhatsAppPanel({ messages, onBack, onNavigate }: WhatsAppPanelPro
     () => chatGroups.find((g) => g.chatId === selectedId) ?? null,
     [chatGroups, selectedId],
   );
+
+  useEffect(() => {
+    if (!selectedId || loadedHistory.current.has(selectedId)) return;
+    loadedHistory.current.add(selectedId);
+    void fetchWhatsappHistory(selectedId, 30)
+      .then(mergeHistory)
+      .catch(() => { loadedHistory.current.delete(selectedId); });
+  }, [selectedId, mergeHistory]);
 
   // Suggestion bar: derive smart actions from the latest incoming message.
   const suggestion = useMemo(() => {

@@ -136,6 +136,38 @@ async def whatsapp_chats(request: Request) -> Any:
     return data
 
 
+@router.get("/whatsapp/messages/{chat_id}")
+async def whatsapp_messages(chat_id: str, request: Request, limit: int = 30) -> Any:
+    """Proxy to bridge GET /api/messages/:chatId — recent history of one chat.
+
+    Lets the WhatsApp panel show a conversation's past messages on open
+    (the live WS feed only carries messages that arrive while the panel is
+    open). Passes the bridge response through verbatim:
+    ``{chatId, chatName, messages: [{id, body, timestamp, fromMe, author, ...}]}``.
+    """
+    base = getattr(request.app.state, "whatsapp_bridge_url", None)
+    if not base:
+        from seraphine.config import settings as _settings
+        base = _settings.whatsapp_bridge_url
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="whatsapp integration not configured (set SERAPHINE_WHATSAPP_BRIDGE_URL)",
+        )
+    limit = max(1, min(int(limit), 50))
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(
+                f"{base.rstrip('/')}/api/messages/{chat_id}", params={"limit": limit}
+            )
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"bridge GET /api/messages failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"bridge unreachable: {e}")
+
+
 # ----------------------------------------------------------------------
 # Webhook — incoming messages from bridge
 # ----------------------------------------------------------------------
