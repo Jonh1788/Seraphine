@@ -152,20 +152,26 @@ export function AppBootstrap(): null {
           chatId === 'status' ||
           chatId.endsWith('@broadcast') ||
           chatId.endsWith('@newsletter');
-        if (!wa.fromMe && !isNoise) {
-          incrementWhatsappUnread();
+        if (!isNoise) {
+          // Store EVERY message (inbound + my own outbound) preserving its real
+          // direction, so the WhatsApp panel can show both sides. Only the
+          // unread badge + interrupt-notify are gated on inbound (!fromMe) —
+          // my own sent messages must not bump unread or fire notifications.
           pushWhatsappMessage({
             chatId,
             chatName: wa.chatName || 'Desconhecido',
             author: wa.author || wa.chatName || 'Desconhecido',
             body: wa.body || '',
             timestamp: wa.timestamp || Date.now() / 1000,
-            fromMe: false,
+            fromMe: Boolean(wa.fromMe),
             important: wa.important || false,
           });
-          if (wa.important) {
-            const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
-            void notify('Seraphine -- WhatsApp', text);
+          if (!wa.fromMe) {
+            incrementWhatsappUnread();
+            if (wa.important) {
+              const text = `${wa.author || wa.chatName}: ${(wa.body || '').slice(0, 200)}`;
+              void notify('Seraphine -- WhatsApp', text);
+            }
           }
         }
       } else if (type === 'avatar_action') {

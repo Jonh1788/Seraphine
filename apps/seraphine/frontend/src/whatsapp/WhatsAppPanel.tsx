@@ -47,7 +47,7 @@ function detectSuggestedActions(summary: string): SuggestedAction[] {
   const lower = summary.toLowerCase();
 
   if (
-    /call|reuniao|reunião|meeting|encontro|horario|horário|\d{1,2}h|\d{1,2}:\d{2}|segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo|amanha|amanhã/.test(
+    /call|reuniao|reunião|meeting|encontro|horario|horário|\d{1,2}\s?h|\d{1,2}:\d{2}|segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo|amanha|amanhã|hoje|agendar|marcar|marcamos|combinar|combinamos|que\s+horas|quando|às|as\s+\d/.test(
       lower,
     )
   ) {
@@ -59,7 +59,7 @@ function detectSuggestedActions(summary: string): SuggestedAction[] {
   }
 
   if (
-    /pagar|pagamento|cobrar|cobranca|cobrança|r\$|reais|transferir|pix|boleto|fatura/.test(
+    /pagar|pagamento|cobrar|cobranca|cobrança|r\$|reais|transferir|transfer[êe]ncia|pix|boleto|fatura|dever|devo|conta|dinheiro|valor|grana|emprest/.test(
       lower,
     )
   ) {
@@ -184,7 +184,15 @@ export function WhatsAppPanel({ messages, onBack, onNavigate }: WhatsAppPanelPro
     if (!activeChat) return null;
     const lastIncoming = [...activeChat.messages].reverse().find((m) => !m.fromMe);
     if (!lastIncoming) return null;
-    const actions = detectSuggestedActions(lastIncoming.body);
+    // Detect over the recent INCOMING thread (last 5), not just the final
+    // message — intent ("amanhã às 15h", "me manda o pix") often sits a couple
+    // lines back, so single-message matching almost always fell to "Responder".
+    const recentText = activeChat.messages
+      .filter((m) => !m.fromMe)
+      .slice(-5)
+      .map((m) => m.body)
+      .join('\n');
+    const actions = detectSuggestedActions(recentText);
     const primary = actions.find((a) => a.type !== 'reply') ?? actions[0];
     return { primary, label: primary.label };
   }, [activeChat]);
