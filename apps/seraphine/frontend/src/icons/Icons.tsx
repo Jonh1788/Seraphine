@@ -680,3 +680,15 @@ export function GaugeIcon({ size = 24, className = '' }: IconProps) {
     </svg>
   );
 }
+
+export function LearningIcon({ size = 24, className = '' }: IconProps) {
+  // Graduation cap — self-improvement / "Aprendizado". Distinct from the
+  // BrainIcon (which the Memória nav item already owns).
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M21.4 8.6 12 4 2.6 8.6 12 13.2z" />
+      <path d="M6 10.7V15c0 1.1 2.7 2.5 6 2.5s6-1.4 6-2.5v-4.3" />
+      <path d="M21.4 8.6v5.4" />
+    </svg>
+  );
+}

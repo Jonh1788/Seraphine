@@ -24,7 +24,8 @@ export type ActiveView =
   | 'planning'
   | 'research'
   | 'maestro'
-  | 'telemetry';
+  | 'telemetry'
+  | 'learning';
 
 interface UiState {
   activeView: ActiveView;
