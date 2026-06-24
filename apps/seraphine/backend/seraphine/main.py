@@ -95,7 +95,14 @@ def _on_reminder_fire(rid: str, msg: str) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = MemoryStore(settings.sqlite_path)
+    # Telemetry — register its migrator BEFORE ensure_schema so the
+    # llm_usage table exists, then build the service (needed by the
+    # AnthropicClient sink constructed below).
+    from seraphine.telemetry import TelemetryService
+    from seraphine.telemetry import schema as telemetry_schema
+    store.register_migrator("telemetry", telemetry_schema.migrate)
     await store.ensure_schema()
+    telemetry_service = TelemetryService(store)
 
     if settings.llm_backend in ("anthropic", "claude_max"):
         from llm_adapters.anthropic import AnthropicClient
@@ -123,10 +130,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info(
                 "Using Anthropic API backend (model=%s)", settings.anthropic_model
             )
+        def _telemetry_sink(rec: dict) -> None:
+            # Fire-and-forget: telemetry must add ZERO latency to a turn.
+            try:
+                import asyncio as _aio
+                _aio.create_task(telemetry_service.record(
+                    backend=rec.get("backend", "?"), model=rec.get("model", "?"),
+                    feature="chat",
+                    input_tokens=rec.get("input_tokens", 0),
+                    output_tokens=rec.get("output_tokens", 0),
+                ))
+            except Exception:
+                pass
+
         llm = AnthropicClient(
             api_key=api_key,
             model=settings.anthropic_model,
             base_url=settings.anthropic_base_url,
+            telemetry=_telemetry_sink,
         )
     elif settings.llm_backend == "openai":
         llm = OpenAICompatClient(settings.llm_base_url, settings.llm_model)
@@ -840,6 +861,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.deepsearch_service = deepsearch_service
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
+    app.state.telemetry_service = telemetry_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -1293,6 +1315,9 @@ def create_app() -> FastAPI:
 
     from seraphine.calendar_agg.routes import router as calendar_agg_router
     app.include_router(calendar_agg_router)
+
+    from seraphine.telemetry.routes import router as telemetry_router
+    app.include_router(telemetry_router)
 
     from seraphine.reminders.routes import router as reminders_router
 
