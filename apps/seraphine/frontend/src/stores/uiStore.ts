@@ -23,7 +23,8 @@ export type ActiveView =
   | 'focus'
   | 'planning'
   | 'research'
-  | 'maestro';
+  | 'maestro'
+  | 'telemetry';
 
 interface UiState {
   activeView: ActiveView;

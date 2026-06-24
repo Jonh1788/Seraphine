@@ -669,3 +669,14 @@ export function SystemIcon({ size = 24, className = '' }: IconProps) {
     </svg>
   );
 }
+
+export function GaugeIcon({ size = 24, className = '' }: IconProps) {
+  // Speedometer/gauge — cost+energy meter, distinct from the SystemIcon chart.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <path d="M4 15a8 8 0 0 1 16 0" />
+      <path d="M12 15l3.5-3.5" />
+      <circle cx="12" cy="15" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

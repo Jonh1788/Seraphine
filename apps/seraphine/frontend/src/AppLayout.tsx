@@ -35,6 +35,7 @@ import { SystemStatusView } from './system';
 import { PlanningView } from './planning';
 import { ResearchView } from './research';
 import { MaestroView } from './orchestrator';
+import { TelemetryView } from './telemetry/TelemetryView';
 import {
   ChatIcon,
   CalendarIcon,
@@ -58,7 +59,7 @@ import {
   SearchIcon,
   TimerIcon,
 } from './icons/Icons';
-import { RoutinesIcon, PlanningIcon, InsightsIcon, MaestroIcon, SystemIcon } from './icons/Icons';
+import { RoutinesIcon, PlanningIcon, InsightsIcon, MaestroIcon, SystemIcon, GaugeIcon } from './icons/Icons';
 import seraphineLogo from '../src-tauri/icons/128x128.png';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
@@ -305,6 +306,7 @@ export function AppLayout(): JSX.Element {
     { id: 'images', icon: <ImagesIcon size={22} />, label: 'Imagens', group: 'Trabalho', onClick: () => setActiveView(activeView === 'images' ? 'chat' : 'images'), active: activeView === 'images' },
     { id: 'maestro', icon: <MaestroIcon size={22} />, label: 'Maestro', group: 'Trabalho', onClick: () => setActiveView(activeView === 'maestro' ? 'chat' : 'maestro'), active: activeView === 'maestro' },
     // Sistema
+    { id: 'telemetry', icon: <GaugeIcon size={22} />, label: 'Custos', group: 'Sistema', onClick: () => setActiveView(activeView === 'telemetry' ? 'chat' : 'telemetry'), active: activeView === 'telemetry' },
     { id: 'system', icon: <SystemIcon size={22} />, label: 'Sistema', group: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
   ];
 
@@ -623,6 +625,9 @@ export function AppLayout(): JSX.Element {
                 )}
                 {activeView === 'maestro' && (
                   <MaestroView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'telemetry' && (
+                  <TelemetryView onBack={() => setActiveView('chat')} />
                 )}
               </ViewTransition>
             )}

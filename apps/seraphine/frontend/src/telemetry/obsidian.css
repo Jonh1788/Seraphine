@@ -1,0 +1,356 @@
+/* =====================================================================
+   Telemetry — "Custos & Energia" dashboard (Obsidian reskin)
+   Scoped with the `tel-` prefix. Imported at the top of TelemetryView.tsx
+   so equal-specificity overrides win over globals. Reuses the
+   focus-analytics glass-card pattern + obs-* tokens; accent used sparingly
+   (only the hero $ figure carries the lilac gradient).
+   ===================================================================== */
+
+/* ── Hero row: metered cloud $ + flat/local + token cluster ───────── */
+.tel-hero-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: var(--space-4);
+}
+
+.tel-hero {
+  position: relative;
+  overflow: hidden;
+  gap: 10px;
+  background:
+    radial-gradient(700px 220px at 100% 0%, rgba(154, 147, 255, 0.10), transparent 70%),
+    var(--glass-bg);
+}
+
+.tel-hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The single lilac gradient on the screen — the cloud $ figure. */
+.tel-hero-value {
+  font-family: var(--font-mono);
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.tel-hero-value small {
+  font-size: 22px;
+  font-weight: 600;
+  margin-left: 4px;
+  letter-spacing: 0;
+  -webkit-text-fill-color: var(--text-dim);
+  color: var(--text-dim);
+}
+
+.tel-hero-meta {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.tel-hero-meta b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* "flat / local" callout inside the hero — no accent, semantic green chip. */
+.tel-flat {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: rgba(134, 239, 172, 0.08);
+  border: 1px solid rgba(134, 239, 172, 0.22);
+}
+.tel-flat__badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.14);
+  padding: 3px 8px;
+  border-radius: 7px;
+  flex: none;
+}
+.tel-flat__text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.tel-flat__text b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── Mini stat cluster (neutral) ──────────────────────────────────── */
+.tel-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.tel-mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--space-4);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-lg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.tel-mini-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.tel-mini-value {
+  font-family: var(--font-mono);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tel-mini-value small {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 3px;
+}
+.tel-mini-sub {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* ── Two-column section (by-model | by-feature) ───────────────────── */
+.tel-two-col {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--space-4);
+}
+
+/* ── By-model horizontal-bar list ─────────────────────────────────── */
+.tel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tel-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px 14px;
+}
+.tel-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tel-row__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tel-row__tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  flex: none;
+  text-transform: uppercase;
+}
+.tel-row__tag--flat {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+}
+.tel-row__tag--metered {
+  color: var(--accent-hi);
+  background: var(--accent-soft);
+}
+.tel-row__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tel-row__cost {
+  color: var(--text);
+  font-weight: 600;
+}
+.tel-row__cost--zero {
+  color: #86efac;
+}
+.tel-row__calls {
+  color: var(--text-faint);
+}
+.tel-row__track {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.tel-row__fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tel-row__fill--flat {
+  background: linear-gradient(90deg, rgba(95, 94, 107, 0.55), rgba(134, 239, 172, 0.55));
+}
+
+/* ── By-feature compact list ──────────────────────────────────────── */
+.tel-flist {
+  display: flex;
+  flex-direction: column;
+}
+.tel-fitem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tel-fitem:last-child {
+  border-bottom: none;
+}
+.tel-fitem__name {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tel-fitem__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+.tel-fitem__cost { color: var(--text); font-weight: 600; }
+.tel-fitem__calls { color: var(--text-faint); }
+
+/* ── Power widget (Mac-only; degrades to "indisponível") ──────────── */
+.tel-power {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.tel-power__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tel-power__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.tel-power__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #86efac;
+  box-shadow: 0 0 8px rgba(134, 239, 172, 0.7);
+  animation: tel-pulse 2s ease-in-out infinite;
+}
+@keyframes tel-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.tel-power__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+.tel-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.tel-gauge__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tel-gauge__value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tel-gauge__value small {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 3px;
+}
+.tel-power__off {
+  font-size: 13px;
+  color: var(--text-faint);
+  line-height: 1.5;
+  padding: 4px 0 2px;
+}
+
+/* ── Empty / list-empty hints ─────────────────────────────────────── */
+.tel-empty-hint {
+  font-size: 13px;
+  color: var(--text-faint);
+  padding: 6px 0;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .tel-hero-row { grid-template-columns: 1fr; }
+  .tel-two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .tel-mini-grid { grid-template-columns: 1fr; }
+  .tel-power__grid { grid-template-columns: 1fr; }
+  .tel-hero-value { font-size: 42px; }
+}
