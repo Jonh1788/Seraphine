@@ -703,6 +703,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = ConversationEngine(
         llm, store, memory=memory, tools=tools, insight_engine=insight_engine,
     )
+    # Cost-aware routing: feed the engine the metered-spend signal source.
+    engine._telemetry_service = telemetry_service
 
     if settings.tts_backend == "elevenlabs":
         from seraphine.tts.elevenlabs import ElevenLabsAdapter

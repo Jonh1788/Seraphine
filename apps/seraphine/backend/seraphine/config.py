@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Leave empty to always use anthropic_model.
     anthropic_smart_model: str = ""
 
+    # Cost-aware routing: daily USD cap on *metered* (cloud) spend. When the
+    # last-24h metered spend reaches this, the router refuses to escalate to the
+    # metered smart model and stays on the cheap/local default. <= 0 disables.
+    routing_daily_cap_usd: float = 0.0
+
     sqlite_path: Path = Path("../data/seraphine.sqlite")
     chroma_path: Path = Path("../data/chroma")
 

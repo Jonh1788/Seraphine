@@ -522,6 +522,11 @@ class ConversationEngine:
         self.tools = tools
         self.insight_engine = insight_engine
         self.pending_approvals: dict[str, asyncio.Queue[bool]] = {}
+        # Cost-aware routing: per-turn-refreshed metered (cloud) spend over the
+        # last 24h, used as the router's cost guard. _telemetry_service is wired
+        # by main.py after lifespan construction; both tolerate None.
+        self._metered_spend_today: float = 0.0
+        self._telemetry_service: Any = None
         self._turn_counter: int = 0
         self._mood = MoodTracker()
         self._attention = AttentionModel()
@@ -1015,6 +1020,14 @@ class ConversationEngine:
         # into an OpenRouter model AND a key is configured. Resolution never
         # raises — it falls back to (self.llm, None) on any error.
         chat_llm, or_model = await self._resolve_chat_llm()
+        # Refresh the cost-guard signal once per turn (cheap aggregate; never
+        # raises). Skips entirely when the cap is disabled or no telemetry.
+        from seraphine.config import settings as _routing_settings
+        if _routing_settings.routing_daily_cap_usd > 0 and self._telemetry_service is not None:
+            try:
+                self._metered_spend_today = await self._telemetry_service.metered_cost_since(hours=24)
+            except Exception:
+                pass
         try:
             for _iteration in range(MAX_TOOL_ITERATIONS):
                 _raise_if_cancelled()
@@ -1022,9 +1035,8 @@ class ConversationEngine:
                 # escalation; on the OpenRouter path the user-chosen model id
                 # is fixed for the whole turn.
                 model_override = or_model if or_model else self._pick_model(
-                    think=think,
-                    has_images=bool(images),
-                    tool_iteration=_iteration,
+                    think=think, has_images=bool(images),
+                    tool_iteration=_iteration, prompt=content,
                 )
                 if self.tools is not None:
                     stream = chat_llm.chat(messages, tools=self.tools.as_ollama_tools(), think=think, model=model_override)  # type: ignore[call-arg]
@@ -1411,35 +1423,35 @@ class ConversationEngine:
             logger.warning("chat-model resolution failed, using cliproxy: %s", e)
             return (self.llm, None)
 
-    def _pick_model(
-        self,
-        *,
-        think: bool = False,
-        has_images: bool = False,
-        tool_iteration: int = 0,
-    ) -> str | None:
-        """Select model for this turn: escalate to smart model when needed.
+    def _pick_model(self, *, think=False, has_images=False, tool_iteration=0, prompt="") -> str | None:
+        """Select model for this turn via the cost/complexity-aware router.
 
-        Returns a model ID override, or None to use the adapter's default.
-        Only applies when anthropic_smart_model is configured.
+        Returns a model-id override, or None to use the adapter's default.
+        Disabled (returns None) when no anthropic_smart_model is configured.
         """
         from seraphine.config import settings
+        from seraphine.routing import (
+            RouteInputs, RouterConfig, classify_complexity, select_model,
+        )
 
         smart = settings.anthropic_smart_model
         if not smart:
-            return None  # routing disabled — use default model
-
-        # Escalate to the stronger model for complex turns:
-        # 1. User requested thinking/reasoning
-        # 2. Images attached (vision tasks need stronger model)
-        # 3. Tool call iteration > 0 (multi-step tool chains)
-        if think or has_images or tool_iteration > 0:
-            logger.debug("smart routing → %s (think=%s, images=%s, iter=%d)",
-                         smart, think, has_images, tool_iteration)
-            return smart
-
-        # Default: fast model
-        return None
+            return None  # routing disabled — adapter default
+        local = settings.llm_backend in ("openai", "ollama")
+        complexity = classify_complexity(RouteInputs(
+            prompt=prompt or "", think=think, has_images=has_images,
+            tool_iteration=tool_iteration,
+        ))
+        override = select_model(complexity, RouterConfig(
+            fast_model=settings.anthropic_model, smart_model=smart,
+            local_backend=local, daily_cap_usd=settings.routing_daily_cap_usd,
+            metered_spend_today=self._metered_spend_today,
+        ))
+        if override:
+            logger.debug("router → %s (%s, iter=%d, spend=%.4f/%.2f)", override,
+                         complexity, tool_iteration, self._metered_spend_today,
+                         settings.routing_daily_cap_usd)
+        return override
 
     async def _auto_reflect(self) -> None:
         if self.memory is None:
