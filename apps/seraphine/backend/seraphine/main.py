@@ -101,6 +101,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from seraphine.telemetry import TelemetryService
     from seraphine.telemetry import schema as telemetry_schema
     store.register_migrator("telemetry", telemetry_schema.migrate)
+    # Learning loop (OpenJarvis #1): register its migrator alongside telemetry
+    # so the learning_* tables are created by this early ensure_schema() call.
+    from seraphine.learning import schema as learning_schema
+    store.register_migrator("learning", learning_schema.migrate)
     await store.ensure_schema()
     telemetry_service = TelemetryService(store)
 
@@ -706,6 +710,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Cost-aware routing: feed the engine the metered-spend signal source.
     engine._telemetry_service = telemetry_service
 
+    # Learning loop (OpenJarvis #1): wire the LearningService. It needs a
+    # one-shot LLM call (mirror memory/profile.py's accumulation pattern) and
+    # the engine's base system prompt as the eval baseline instruction. The
+    # engine reads the active policy + knobs each turn via _refresh_active_policy.
+    from llm_adapters.types import ChatMessage as _LCM
+    _learning_llm = engine.llm  # the AnthropicClient (engine.__init__: self.llm)
+
+    async def _learning_llm_call(messages: list[dict]) -> str:
+        chat_msgs = [_LCM(role=m["role"], content=m["content"]) for m in messages]
+        acc: list[str] = []
+        async for tok in _learning_llm.chat(chat_msgs, temperature=0.2):
+            if tok.text:
+                acc.append(tok.text)
+        return "".join(acc)
+
+    from seraphine.learning.service import LearningService
+    learning_service = LearningService(
+        store, _learning_llm_call,
+        default_base_instruction=engine.system_prompt[:500],
+    )
+    engine._learning_service = learning_service
+
     if settings.tts_backend == "elevenlabs":
         from seraphine.tts.elevenlabs import ElevenLabsAdapter
 
@@ -864,6 +890,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     app.state.telemetry_service = telemetry_service
+    app.state.learning_service = learning_service
     # Connected WS clients — the event listener pushes notifications here
     app.state.ws_clients: set = set()
 
@@ -1320,6 +1347,9 @@ def create_app() -> FastAPI:
 
     from seraphine.telemetry.routes import router as telemetry_router
     app.include_router(telemetry_router)
+
+    from seraphine.learning.routes import router as learning_router
+    app.include_router(learning_router)
 
     from seraphine.reminders.routes import router as reminders_router
 

@@ -33,11 +33,13 @@ class RouterConfig:
     metered_spend_today: float
 
 
-def classify_complexity(inp: RouteInputs) -> Complexity:
+def classify_complexity(
+    inp: RouteInputs, *, long_prompt_chars: int = _LONG_PROMPT_CHARS
+) -> Complexity:
     if inp.think or inp.has_images:
         return "complex"
     p = inp.prompt or ""
-    if len(p) >= _LONG_PROMPT_CHARS or _CODE_FENCE in p:
+    if len(p) >= long_prompt_chars or _CODE_FENCE in p:
         return "complex"
     if inp.tool_iteration > 0:
         return "moderate"

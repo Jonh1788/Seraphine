@@ -527,6 +527,12 @@ class ConversationEngine:
         # by main.py after lifespan construction; both tolerate None.
         self._metered_spend_today: float = 0.0
         self._telemetry_service: Any = None
+        # Learning loop (OpenJarvis #1): wired by main.py after lifespan
+        # construction. The active policy + computed knobs are refreshed once
+        # per turn; both tolerate a missing service (defaults / no-op).
+        self._learning_service: Any = None
+        self._active_policy_cache: dict | None = None
+        self._effective_knobs: dict | None = None
         self._turn_counter: int = 0
         self._mood = MoodTracker()
         self._attention = AttentionModel()
@@ -547,8 +553,23 @@ class ConversationEngine:
         await q.put(approved)
         return True
 
+    async def _refresh_active_policy(self) -> None:
+        """Load the active learning policy + effective knobs once per turn (guarded)."""
+        from seraphine.learning.knobs import effective_knobs
+        pol = {"version": 0, "behavior_addendum": "", "tool_guidance": "", "knobs": {}}
+        try:
+            if self._learning_service is not None:
+                pol = await self._learning_service.get_active_policy()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("active policy load failed: %s", e)
+        self._active_policy_cache = pol
+        self._effective_knobs = effective_knobs(pol.get("knobs"))
+
     async def _build_recall_block(self, content: str) -> str | None:
         if self.memory is None:
+            return None
+        # Learning knob: a promoted policy may disable the recall block.
+        if not (self._effective_knobs or {}).get("recall_enabled", True):
             return None
         try:
             # Per-turn vector recall must opt into the freshness policy
@@ -563,7 +584,11 @@ class ConversationEngine:
             # Per-turn recall must never surface stale priors — confabulating
             # facts mid-conversation is exactly what freshness exists to
             # prevent. The single-purpose helper hardcodes fresh_only=True.
-            facts = await self.memory.store.list_facts(limit=30, fresh_only=True)
+            # Learning knob: a promoted policy may tune the fact budget.
+            fact_limit = (self._effective_knobs or {}).get("recall_fact_limit", 30)
+            facts = await self.memory.store.list_facts(
+                limit=fact_limit, fresh_only=True
+            )
         except Exception as e:  # pragma: no cover
             logger.warning("list_facts failed: %s", e)
             facts = []
@@ -809,6 +834,11 @@ class ConversationEngine:
         if not prior:
             await self.store.ensure_conversation(conversation_id)
 
+        # Learning loop: refresh the active policy + effective knobs ONCE per
+        # turn, BEFORE the system messages / recall block are built so the
+        # behavior addendum, tool guidance, and knobs all apply this turn.
+        await self._refresh_active_policy()
+
         # 022-B: update internal mood from the user turn before we build
         # the prompt — so the mood line reflects the message we're about
         # to respond to.
@@ -844,6 +874,13 @@ class ConversationEngine:
             self._last_assistant_turn_id = None
 
         messages: list[ChatMessage] = [ChatMessage(role="system", content=self.system_prompt)]
+        # Learning loop: a promoted policy injects a behavior addendum and/or
+        # tool guidance as additional system messages (refreshed above).
+        pol = self._active_policy_cache or {}
+        if pol.get("behavior_addendum"):
+            messages.append(ChatMessage(role="system", content=pol["behavior_addendum"]))
+        if pol.get("tool_guidance"):
+            messages.append(ChatMessage(role="system", content=pol["tool_guidance"]))
         messages.append(ChatMessage(role="system", content=_build_date_context()))
 
         mood_line = self._mood.as_prompt_line()
@@ -1450,10 +1487,13 @@ class ConversationEngine:
         if not smart:
             return None  # routing disabled — adapter default
         local = settings.llm_backend in ("openai", "ollama")
+        # Learning knob: a promoted policy may tune the prompt-length threshold
+        # above which a turn is treated as complex (and may escalate to smart).
+        chars = (self._effective_knobs or {}).get("smart_escalation_prompt_chars", 1500)
         complexity = classify_complexity(RouteInputs(
             prompt=prompt or "", think=think, has_images=has_images,
             tool_iteration=tool_iteration,
-        ))
+        ), long_prompt_chars=chars)
         override = select_model(complexity, RouterConfig(
             fast_model=settings.anthropic_model, smart_model=smart,
             local_backend=local, daily_cap_usd=settings.routing_daily_cap_usd,
