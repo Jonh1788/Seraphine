@@ -143,6 +143,13 @@ class ProactiveScheduler:
             "cron", day_of_week="mon", hour=6, minute=30,
             name="metalearning",
         )
+        # Learning loop: nightly self-improvement cycle (proposes pending
+        # candidates; promotion stays human-gated via the Aprendizado panel).
+        self._sched.add_job(
+            self._tick_learning,
+            "cron", hour=3, minute=30,
+            name="learning_cycle",
+        )
         # 040 — track runs so the inspector UI can show last status.
         self._sched.add_listener(
             self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR,
@@ -405,6 +412,16 @@ class ProactiveScheduler:
             self._last_mood_checkin_date = today
         except Exception as e:
             logger.warning("tick_mood_checkin: %s", e)
+
+    async def _tick_learning(self) -> None:
+        try:
+            svc = getattr(self.app_state, "learning_service", None)
+            if svc is None:
+                return
+            result = await svc.run_cycle()
+            logger.info("learning cycle: %s", (result or {}).get("status"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("learning cycle failed: %s", e)
 
     async def _tick_weekly_reflection(self) -> None:
         try:
