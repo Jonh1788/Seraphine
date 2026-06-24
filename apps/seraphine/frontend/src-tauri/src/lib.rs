@@ -27,6 +27,8 @@ mod mac_tools;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod telemetry;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod voice_io;
 mod whisper;
 
@@ -160,6 +162,8 @@ fn run_desktop() {
             mac_tools::screen_key_local,
             // 042 active app
             mac_tools::active_app_local,
+            // Telemetry — Apple-Silicon power sampler (powermetrics, mac-only).
+            telemetry::read_power,
             // CV Triage — Task 15: zip a folder of PDFs for upload.
             cv_triage_zip::zip_folder_pdfs,
             // Maestro — agent orchestration (desktop only).
