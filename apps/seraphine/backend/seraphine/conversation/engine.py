@@ -1322,6 +1322,18 @@ class ConversationEngine:
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)
 
+        # Learning loop: capture this interaction as a trace (fire-and-forget).
+        try:
+            import asyncio as _aio
+            from seraphine.learning.traces import record_trace
+            _aio.create_task(record_trace(
+                self.store, conversation_id=conversation_id, turn_id=turn_id,
+                user_msg=content, assistant_msg=final_text,
+                tools=list(getattr(self, "_turn_tools_used", []) or []), feature="chat",
+            ))
+        except Exception:
+            pass
+
         # 028-C: stamp a turn_feedback row so the NEXT user turn can
         # classify the reaction.
         try:
