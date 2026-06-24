@@ -69,3 +69,30 @@ class TelemetryService:
                 "by_backend": [{"backend": r[0], "cost_usd": round(r[1], 4), "calls": r[2]} for r in by_backend],
             }
         return await asyncio.to_thread(_work)
+
+    async def metered_cost_since(self, *, hours: int = 24) -> float:
+        """Sum of cost_usd for metered (cost>0) calls in the last ``hours``.
+
+        Used by the router's cost guard. Cheap single-row aggregate; never raises
+        (returns 0.0 on any error) so it can sit on the turn-setup path.
+        """
+        # Mirror summary()'s predicate: record() stores ``ts`` as a Python
+        # ``datetime.now(timezone.utc).isoformat()`` string, so we compare
+        # ``ts >= ?`` against a Python-computed ISO cutoff (NOT sqlite's
+        # ``datetime('now', ?)``, whose " "-separated/offset-less format would
+        # not match the stored ISO strings).
+        since = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(hours)))).isoformat()
+
+        def _work() -> float:
+            try:
+                with self.store._connect() as conn:
+                    cur = conn.execute(
+                        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM llm_usage "
+                        "WHERE cost_usd > 0 AND ts >= ?",
+                        (since,),
+                    )
+                    row = cur.fetchone()
+                    return float(row[0]) if row and row[0] is not None else 0.0
+            except Exception:
+                return 0.0
+        return await asyncio.to_thread(_work)
