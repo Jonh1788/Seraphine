@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
@@ -263,12 +263,17 @@ class AnthropicClient:
         base_url: str = "https://api.anthropic.com",
         timeout: float = 120.0,
         max_tokens: int = 4096,
+        telemetry: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_tokens = max_tokens
+        # Optional per-call usage sink. Default None → no telemetry, no behavior
+        # change. This package is SHARED with Aura, which never passes a sink,
+        # so the default path must stay a pure no-op.
+        self._telemetry = telemetry
         # anthropic-beta: quando passamos por CLIProxyAPI, ele sobrescreve
         # totalmente os flags baseline se o cliente mandar os próprios
         # (ver claude_executor.go:903-905). Enviamos um set mínimo que:
@@ -303,6 +308,40 @@ class AnthropicClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    def _emit_usage(
+        self,
+        model: str,
+        input_tokens: Any,
+        output_tokens: Any,
+    ) -> None:
+        """Forward one call's token usage to the optional telemetry sink.
+
+        No-op when no sink is configured. Wrapped in try/except so telemetry
+        can NEVER break an actual LLM call. ``backend`` is derived from the
+        configured ``base_url``: localhost / cliproxy proxies map to
+        ``"cliproxy"`` (flat-rate, $0 marginal), everything else to
+        ``"anthropic"`` (metered).
+        """
+        if self._telemetry is None:
+            return
+        try:
+            bu = self.base_url
+            backend = (
+                "cliproxy"
+                if ("cliproxy" in bu or "127.0.0.1" in bu or "localhost" in bu)
+                else "anthropic"
+            )
+            rec = {
+                "backend": backend,
+                "model": model,
+                "input_tokens": int(input_tokens or 0),
+                "output_tokens": int(output_tokens or 0),
+            }
+            self._telemetry(rec)
+        except Exception:
+            # Telemetry must never propagate into the caller.
+            logger.debug("telemetry emit failed", exc_info=True)
 
     async def transcribe_image_pages(self, image_blocks: list[dict]) -> str:
         """Send a sequence of image content blocks to Claude and return literal
@@ -397,6 +436,8 @@ class AnthropicClient:
             await asyncio.sleep(wait_s)
         resp.raise_for_status()
         data = resp.json()
+        u = data.get("usage") or {}
+        self._emit_usage(body["model"], u.get("input_tokens"), u.get("output_tokens"))
         for block in data.get("content", []) or []:
             if (
                 isinstance(block, dict)
@@ -478,6 +519,11 @@ class AnthropicClient:
 
         done_seen = False
         in_thinking = False
+        # Per-call token usage. input_tokens arrives on `message_start`,
+        # output_tokens (cumulative) on the final `message_delta` — we overwrite
+        # on each message_delta so the last value wins.
+        usage_in = 0
+        usage_out = 0
         # Accumulator for the currently open content block (indexed by block index)
         block_types: dict[int, str] = {}
         tool_use_state: dict[int, dict[str, Any]] = {}
@@ -559,7 +605,12 @@ class AnthropicClient:
                         continue
 
                     etype = evt.get("type") or current_event
-                    if etype == "content_block_start":
+                    if etype == "message_start":
+                        usage_in = (
+                            evt.get("message", {}).get("usage", {}).get("input_tokens")
+                            or usage_in
+                        )
+                    elif etype == "content_block_start":
                         idx = evt.get("index", 0)
                         block = evt.get("content_block", {}) or {}
                         btype = block.get("type", "")
@@ -613,6 +664,11 @@ class AnthropicClient:
                         # message_stop time below, once we know the turn is
                         # actually ending on tool_use.
                     elif etype == "message_delta":
+                        # output_tokens here is cumulative — overwrite so the
+                        # last message_delta wins.
+                        out_tok = evt.get("usage", {}).get("output_tokens")
+                        if out_tok is not None:
+                            usage_out = out_tok
                         delta = evt.get("delta", {}) or {}
                         stop_reason = delta.get("stop_reason")
                         if stop_reason == "tool_use" and tool_use_state:
@@ -638,6 +694,7 @@ class AnthropicClient:
                                 yield Token(text="</think>", done=False)
                                 in_thinking = False
                             done_seen = True
+                            self._emit_usage(body["model"], usage_in, usage_out)
                             yield Token(text="", done=True, tool_calls=tc_list)
                             return
                     elif etype == "message_stop":
@@ -645,6 +702,7 @@ class AnthropicClient:
                             yield Token(text="</think>", done=False)
                             in_thinking = False
                         done_seen = True
+                        self._emit_usage(body["model"], usage_in, usage_out)
                         yield Token(text="", done=True)
                         return
                     elif etype == "error":
@@ -662,4 +720,5 @@ class AnthropicClient:
             raise LLMUnavailableError(str(e)) from e
 
         if not done_seen:
+            self._emit_usage(body["model"], usage_in, usage_out)
             yield Token(text="", done=True)

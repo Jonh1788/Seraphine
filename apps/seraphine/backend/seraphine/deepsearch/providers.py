@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
@@ -181,9 +181,34 @@ class OpenRouterChatClient:
     shape (directly consumable by the engine's ``_parse_tool_call``).
     """
 
-    def __init__(self, api_key: str, *, timeout: float = 180.0) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        timeout: float = 180.0,
+        telemetry: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.api_key = api_key
         self.timeout = timeout
+        # Optional per-call usage sink (default None → no-op). Same opt-in
+        # contract as AnthropicClient.
+        self._telemetry = telemetry
+
+    def _emit_usage(self, model: str, usage: dict[str, Any]) -> None:
+        """Forward OpenRouter usage to the optional sink. Never raises."""
+        if self._telemetry is None:
+            return
+        try:
+            self._telemetry(
+                {
+                    "backend": "openrouter",
+                    "model": model,
+                    "input_tokens": int(usage.get("prompt_tokens") or 0),
+                    "output_tokens": int(usage.get("completion_tokens") or 0),
+                }
+            )
+        except Exception:
+            pass
 
     async def chat(
         self,
@@ -213,9 +238,15 @@ class OpenRouterChatClient:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        # Ask OpenRouter to append a final usage frame to the stream so we can
+        # record token counts. Only requested when a telemetry sink is present
+        # — otherwise the request stays byte-for-byte identical to before.
+        if self._telemetry is not None:
+            body["usage"] = {"include": True}
 
         # index -> accumulated tool call ({"id","name","arguments"}).
         acc: dict[int, dict[str, str]] = {}
+        usage: dict[str, Any] = {}
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             async with client.stream(
@@ -240,6 +271,9 @@ class OpenRouterChatClient:
                         obj = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    # Usage may ride on its own (usually empty-choices) frame.
+                    if obj.get("usage"):
+                        usage = obj["usage"]
                     choices = obj.get("choices") or []
                     if not choices:
                         continue
@@ -260,6 +294,8 @@ class OpenRouterChatClient:
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
+
+        self._emit_usage(model or "openai/gpt-4o-mini", usage)
 
         if acc:
             tool_calls = [
