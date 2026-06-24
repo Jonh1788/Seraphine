@@ -2,6 +2,7 @@ import './obsidian.css';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 import { SparkleIcon } from '../icons/Icons';
 import type { SeraphineWS } from '../ws/client';
 import type {
@@ -1244,6 +1245,7 @@ export function ChatView({
                         <>
                           {raw.trim() && (
                             <Markdown
+                              remarkPlugins={[remarkGfm]}
                               rehypePlugins={[rehypeRaw]}
                               components={{
                                 img: ({ src, alt }) => (

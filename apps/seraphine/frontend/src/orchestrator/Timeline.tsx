@@ -9,6 +9,7 @@
 // caret; an Edit/Write with a derivable +N -N renders a diff chip, otherwise it
 // falls back to the check. Missing fields default to the check, never a crash.
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AgentEvent } from './types';
 
 type ToolColor = string;
@@ -267,7 +268,7 @@ export function Timeline({ events, sepLabel = 'SESSÃO INICIADA' }: { events: Ag
                     <span className="mst-tl__msg-name">Agente</span>
                     {it.time && <span className="mst-tl__msg-time">{it.time}</span>}
                   </div>
-                  <div className="mst-tl__msg-text mst-tl__msg-text--md"><Markdown>{it.text}</Markdown></div>
+                  <div className="mst-tl__msg-text mst-tl__msg-text--md"><Markdown remarkPlugins={[remarkGfm]}>{it.text}</Markdown></div>
                 </div>
               </div>
             )}

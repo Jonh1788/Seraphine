@@ -2,6 +2,7 @@ import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 import { ArrowLeftIcon, SearchIcon } from '../icons/Icons';
 import {
   cancelRun,
@@ -587,7 +588,7 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
           <div className="research-report">
             {finished && <div className="research-report__badge">Relatorio</div>}
             <div className="research-report__body">
-              <Markdown rehypePlugins={[rehypeRaw]}>{renderedReport}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{renderedReport}</Markdown>
             </div>
 
             {reportSources.length > 0 && (
