@@ -44,6 +44,9 @@ class AppleFoundationModelsClient:
     async def aclose(self) -> None:
         return None
 
+    async def warmup(self, system_prompt: str = "") -> None:
+        return None
+
     async def chat(self, messages: list[ChatMessage], *, model: str | None = None,
                    temperature: float = 0.7, audio: bytes | None = None,
                    tools: list[dict[str, Any]] | None = None,

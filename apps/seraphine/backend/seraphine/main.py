@@ -1313,6 +1313,9 @@ def create_app() -> FastAPI:
     from seraphine.telemetry.routes import router as telemetry_router
     app.include_router(telemetry_router)
 
+    from seraphine.llm.routes import router as llm_router
+    app.include_router(llm_router)
+
     from seraphine.learning.routes import router as learning_router
     app.include_router(learning_router)
 

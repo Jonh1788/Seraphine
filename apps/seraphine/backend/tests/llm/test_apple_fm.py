@@ -87,3 +87,7 @@ def test_chat_streams_with_mocked_subprocess(monkeypatch):
 
 def test_aclose_noop():
     assert asyncio.run(AppleFoundationModelsClient().aclose()) is None
+
+
+def test_warmup_noop():
+    assert asyncio.run(AppleFoundationModelsClient().warmup("sys")) is None
