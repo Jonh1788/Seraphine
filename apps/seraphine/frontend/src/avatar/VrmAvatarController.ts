@@ -22,6 +22,7 @@ import {
 } from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
@@ -263,13 +264,17 @@ export class VrmAvatarController implements AvatarAdapter {
   // Camera presets — smooth transition via lerp in the RAF loop
   private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
   private cameraCurrent = { ...this.cameraTarget };
+  /** User orbit/zoom controls (opt-in; only on the main avatar view). */
+  private controls: OrbitControls | null = null;
+  /** Once the user grabs the camera, stop the preset auto-lerp until a preset is re-selected. */
+  private userCamera = false;
   static readonly CAMERA_PRESETS: Record<string, typeof VrmAvatarController.prototype.cameraTarget> = {
     bust:     { px: 0, py: 1.45, pz: 0.9,  lx: 0, ly: 1.35, lz: 0, fov: 30 },
     face:     { px: 0, py: 1.55, pz: 0.45, lx: 0, ly: 1.52, lz: 0, fov: 24 },
     fullBody: { px: 0, py: 1.0,  pz: 2.5,  lx: 0, ly: 0.9,  lz: 0, fov: 30 },
   };
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, opts?: { cameraControls?: boolean }) {
     void canvas; // retained by renderer
     this.scene = new Scene();
 
@@ -303,6 +308,31 @@ export class VrmAvatarController implements AvatarAdapter {
     const rim = new DirectionalLight(0xffffff, 0.6);
     rim.position.set(0, 2, -2);
     this.scene.add(rim);
+
+    // --- User orbit/zoom controls (opt-in: main avatar view only) ---
+    if (opts?.cameraControls) {
+      const controls = new OrbitControls(this.camera, this.renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.enablePan = false; // keep her centered
+      controls.enableZoom = true;
+      controls.minDistance = 0.35;
+      controls.maxDistance = 4.0;
+      // Don't let the user orbit under the floor or straight over the head.
+      controls.minPolarAngle = 0.35 * Math.PI;
+      controls.maxPolarAngle = 0.62 * Math.PI;
+      controls.target.set(
+        this.cameraTarget.lx,
+        this.cameraTarget.ly,
+        this.cameraTarget.lz,
+      );
+      // First drag/zoom hands control to the user; the preset lerp yields.
+      controls.addEventListener("start", () => {
+        this.userCamera = true;
+      });
+      controls.update();
+      this.controls = controls;
+    }
 
     this.clock = new Clock();
     this.nextBlinkAt = this.scheduleBlink(0);
@@ -552,23 +582,33 @@ export class VrmAvatarController implements AvatarAdapter {
     this.rafId = requestAnimationFrame(loop);
   }
 
-  /** Smoothly lerp the camera toward the target preset. */
+  /** Smoothly lerp the camera toward the target preset, then let OrbitControls
+   *  (if present) drive once the user grabs the camera. */
   private updateCamera(delta: number): void {
-    const speed = 3.0; // higher = snappier transition
-    const t = Math.min(1, speed * delta);
-    const c = this.cameraCurrent;
-    const g = this.cameraTarget;
-    c.px += (g.px - c.px) * t;
-    c.py += (g.py - c.py) * t;
-    c.pz += (g.pz - c.pz) * t;
-    c.lx += (g.lx - c.lx) * t;
-    c.ly += (g.ly - c.ly) * t;
-    c.lz += (g.lz - c.lz) * t;
-    c.fov += (g.fov - c.fov) * t;
-    this.camera.position.set(c.px, c.py, c.pz);
-    this.camera.lookAt(c.lx, c.ly, c.lz);
-    this.camera.fov = c.fov;
-    this.camera.updateProjectionMatrix();
+    // While the user hasn't taken over, animate toward the active preset.
+    if (!this.userCamera) {
+      const speed = 3.0; // higher = snappier transition
+      const t = Math.min(1, speed * delta);
+      const c = this.cameraCurrent;
+      const g = this.cameraTarget;
+      c.px += (g.px - c.px) * t;
+      c.py += (g.py - c.py) * t;
+      c.pz += (g.pz - c.pz) * t;
+      c.lx += (g.lx - c.lx) * t;
+      c.ly += (g.ly - c.ly) * t;
+      c.lz += (g.lz - c.lz) * t;
+      c.fov += (g.fov - c.fov) * t;
+      this.camera.position.set(c.px, c.py, c.pz);
+      this.camera.fov = c.fov;
+      this.camera.updateProjectionMatrix();
+      if (this.controls) {
+        this.controls.target.set(c.lx, c.ly, c.lz);
+      } else {
+        this.camera.lookAt(c.lx, c.ly, c.lz);
+      }
+    }
+    // OrbitControls owns lookAt + applies inertia/damping every frame.
+    this.controls?.update();
   }
 
   private updateIdle(delta?: number): void {
@@ -976,7 +1016,20 @@ export class VrmAvatarController implements AvatarAdapter {
   setCameraPreset(preset: string): void {
     const p = VrmAvatarController.CAMERA_PRESETS[preset];
     if (!p) return;
+    // Sync the lerp's start point to wherever the user left the camera, so the
+    // transition to the preset is smooth instead of snapping.
+    if (this.controls) {
+      this.cameraCurrent.px = this.camera.position.x;
+      this.cameraCurrent.py = this.camera.position.y;
+      this.cameraCurrent.pz = this.camera.position.z;
+      this.cameraCurrent.lx = this.controls.target.x;
+      this.cameraCurrent.ly = this.controls.target.y;
+      this.cameraCurrent.lz = this.controls.target.z;
+      this.cameraCurrent.fov = this.camera.fov;
+    }
     this.cameraTarget = { ...p };
+    // Re-engage the auto-lerp; the preset acts as a "reset" away from free orbit.
+    this.userCamera = false;
   }
 
   /** Get the list of available camera presets. */
@@ -1681,11 +1734,15 @@ export class VrmAvatarController implements AvatarAdapter {
     this.poseLocked = true;
     this.gesturePlayer.cancel();
     if (this.mixer) this.mixer.timeScale = 0;
+    // The Animation Lab installs its own OrbitControls on this camera/canvas;
+    // disable ours so the two don't fight over input.
+    if (this.controls) this.controls.enabled = false;
   }
 
   exitPoseMode(): void {
     this.poseLocked = false;
     if (this.mixer) this.mixer.timeScale = 1;
+    if (this.controls) this.controls.enabled = true;
   }
 
   /** Accessors for Animation Lab (scene graph manipulation). */
@@ -1782,6 +1839,10 @@ export class VrmAvatarController implements AvatarAdapter {
       this.holdTimer = null;
     }
     this.gesturePlayer.cancel();
+    if (this.controls) {
+      this.controls.dispose();
+      this.controls = null;
+    }
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;

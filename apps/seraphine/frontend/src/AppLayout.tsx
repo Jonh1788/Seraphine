@@ -430,6 +430,7 @@ export function AppLayout(): JSX.Element {
             <VrmAvatar
               avatarUrl={localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm'}
               onReady={handleAvatarReady}
+              cameraControls
             />
           </div>
 
