@@ -166,6 +166,14 @@ export class VrmAvatarController implements AvatarAdapter {
    * discarded on resume so the animation doesn't jump.
    */
   private renderPaused = false;
+  /** Active pause reasons; the loop is paused while any is present.
+   *  Sources: 'manual' (companion drag), 'hidden' (window hidden),
+   *  'view' (non-chat view), 'context' (WebGL context lost). */
+  private readonly pauseReasons = new Set<string>();
+  /** Bound so we can removeEventListener in dispose(). */
+  private readonly onVisibilityChange = (): void => {
+    this.setPauseReason("hidden", document.hidden);
+  };
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
   // @ts-expect-error write-only field kept for setEmotion() backward compat
   private _currentEmotion: string | null = null;
@@ -339,6 +347,10 @@ export class VrmAvatarController implements AvatarAdapter {
 
     this.clock = new Clock();
     this.nextBlinkAt = this.scheduleBlink(0);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    // If we mount while already hidden, start paused.
+    if (document.hidden) this.pauseReasons.add("hidden");
+    this.renderPaused = this.pauseReasons.size > 0;
     this.startLoop();
   }
 
@@ -498,14 +510,23 @@ export class VrmAvatarController implements AvatarAdapter {
     this.idleLookSpeed = 1.5 + Math.random() * 1.0;
   }
 
-  /** Pause/resume the per-frame work without killing the RAF chain. */
-  public setRenderPaused(paused: boolean): void {
-    if (this.renderPaused === paused) return;
-    this.renderPaused = paused;
-    if (!paused) {
+  /** Pause/resume a single reason. The loop runs only when no reason is set. */
+  public setPauseReason(reason: string, paused: boolean): void {
+    const wasPaused = this.pauseReasons.size > 0;
+    if (paused) this.pauseReasons.add(reason);
+    else this.pauseReasons.delete(reason);
+    const nowPaused = this.pauseReasons.size > 0;
+    if (wasPaused === nowPaused) return;
+    this.renderPaused = nowPaused;
+    if (!nowPaused) {
       // Discard accumulated pause time so animations don't jump.
       this.clock.getDelta();
     }
+  }
+
+  /** Backwards-compatible manual pause (used by the avatar-companion drag). */
+  public setRenderPaused(paused: boolean): void {
+    this.setPauseReason("manual", paused);
   }
 
   private startLoop(): void {
@@ -1833,6 +1854,7 @@ export class VrmAvatarController implements AvatarAdapter {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
