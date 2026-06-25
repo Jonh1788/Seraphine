@@ -2,7 +2,7 @@
  * AppLayout — shell with nav rail, top bar, overlays, always-mounted
  * ChatView, and view switching via activeView state.
  */
-import { Fragment, useCallback, useRef } from 'react';
+import { Fragment, useCallback, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
@@ -81,6 +81,11 @@ import type { FocusPhase } from './focus/useFocusTimer';
 
 export function AppLayout(): JSX.Element {
   const { wsRef, playbackRef, avatarCtrlRef } = useAppRefs();
+
+  // Avatar controller in state so consumers (Labs) re-render when it's ready.
+  // The ref alone can't drive re-renders, so passing avatarCtrlRef.current as a
+  // prop captured a stale null on the Lab's first render.
+  const [avatarController, setAvatarController] = useState<VrmAvatarController | null>(null);
 
   // UI store
   const activeView = useUiStore((s) => s.activeView);
@@ -226,6 +231,7 @@ export function AppLayout(): JSX.Element {
   // Avatar ready handler — dispatches custom event for AppBootstrap
   const handleAvatarReady = useCallback((controller: VrmAvatarController) => {
     avatarCtrlRef.current = controller;
+    setAvatarController(controller);
     // Let listeners (e.g. the Sistema "Avatar 3D" status card) know the VRM is live.
     try { window.dispatchEvent(new CustomEvent('seraphine:avatar-ready')); } catch { /* */ }
     const pb = playbackRef.current;
@@ -424,6 +430,7 @@ export function AppLayout(): JSX.Element {
             <VrmAvatar
               avatarUrl={localStorage.getItem('seraphine.avatarUrl') || '/avatars/seraphine.vrm'}
               onReady={handleAvatarReady}
+              cameraControls
             />
           </div>
 
@@ -683,11 +690,11 @@ export function AppLayout(): JSX.Element {
       <EmailInboxModal open={inboxOpen} onClose={() => setInboxOpen(false)} ws={wsRef.current} messageId={inboxMessageId} />
 
       {labOpen && (
-        <AvatarLab controller={avatarCtrlRef.current} onClose={() => setLabOpen(false)} />
+        <AvatarLab controller={avatarController} onClose={() => setLabOpen(false)} />
       )}
 
       {animLabOpen && (
-        <AnimationLab controller={avatarCtrlRef.current} onClose={() => setAnimLabOpen(false)} />
+        <AnimationLab controller={avatarController} onClose={() => setAnimLabOpen(false)} />
       )}
 
       <CommandPalette

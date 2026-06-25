@@ -159,7 +159,8 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
         if (!entry.loop) {
           setPlayingAnimation(null);
         }
-      } catch {
+      } catch (e) {
+        console.error('[AvatarLab] playAnimation failed:', e);
         setPlayingAnimation(null);
       }
     },

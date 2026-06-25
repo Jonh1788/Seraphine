@@ -15,17 +15,20 @@ import {
   QuaternionKeyframeTrack,
   Scene,
   Vector3,
+  VectorKeyframeTrack,
   WebGLRenderer,
   type AnimationAction,
   type Object3D,
 } from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
 import { resolveEmotion, EMOTION_MAP, type EmotionMapping } from "./expressions";
 import { GesturePlayer, GESTURE_LIBRARY, type GestureDefinition } from "./gestures";
+import { rebaseQuaternion, applyVrm0QuatFlip, scaleHipsInPlace } from "./retarget";
 import { solveHeadLookAt, solveArmIK, worldQuatToLocal } from "../lab/ikSolver";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
@@ -261,13 +264,20 @@ export class VrmAvatarController implements AvatarAdapter {
   // Camera presets — smooth transition via lerp in the RAF loop
   private cameraTarget = { px: 0, py: 1.45, pz: 0.9, lx: 0, ly: 1.35, lz: 0, fov: 30 };
   private cameraCurrent = { ...this.cameraTarget };
+  /** User orbit/zoom controls (opt-in; only on the main avatar view). */
+  private controls: OrbitControls | null = null;
+  /** Once the user grabs the camera, stop the preset auto-lerp until a preset is re-selected. */
+  private userCamera = false;
   static readonly CAMERA_PRESETS: Record<string, typeof VrmAvatarController.prototype.cameraTarget> = {
     bust:     { px: 0, py: 1.45, pz: 0.9,  lx: 0, ly: 1.35, lz: 0, fov: 30 },
     face:     { px: 0, py: 1.55, pz: 0.45, lx: 0, ly: 1.52, lz: 0, fov: 24 },
     fullBody: { px: 0, py: 1.0,  pz: 2.5,  lx: 0, ly: 0.9,  lz: 0, fov: 30 },
   };
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    opts?: { cameraControls?: boolean; minDistance?: number; maxDistance?: number },
+  ) {
     void canvas; // retained by renderer
     this.scene = new Scene();
 
@@ -301,6 +311,31 @@ export class VrmAvatarController implements AvatarAdapter {
     const rim = new DirectionalLight(0xffffff, 0.6);
     rim.position.set(0, 2, -2);
     this.scene.add(rim);
+
+    // --- User orbit/zoom controls (opt-in: main avatar view only) ---
+    if (opts?.cameraControls) {
+      const controls = new OrbitControls(this.camera, this.renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.enablePan = false; // keep her centered
+      controls.enableZoom = true;
+      controls.minDistance = opts.minDistance ?? 0.35;
+      controls.maxDistance = opts.maxDistance ?? 4.0;
+      // Don't let the user orbit under the floor or straight over the head.
+      controls.minPolarAngle = 0.35 * Math.PI;
+      controls.maxPolarAngle = 0.62 * Math.PI;
+      controls.target.set(
+        this.cameraTarget.lx,
+        this.cameraTarget.ly,
+        this.cameraTarget.lz,
+      );
+      // First drag/zoom hands control to the user; the preset lerp yields.
+      controls.addEventListener("start", () => {
+        this.userCamera = true;
+      });
+      controls.update();
+      this.controls = controls;
+    }
 
     this.clock = new Clock();
     this.nextBlinkAt = this.scheduleBlink(0);
@@ -550,23 +585,33 @@ export class VrmAvatarController implements AvatarAdapter {
     this.rafId = requestAnimationFrame(loop);
   }
 
-  /** Smoothly lerp the camera toward the target preset. */
+  /** Smoothly lerp the camera toward the target preset, then let OrbitControls
+   *  (if present) drive once the user grabs the camera. */
   private updateCamera(delta: number): void {
-    const speed = 3.0; // higher = snappier transition
-    const t = Math.min(1, speed * delta);
-    const c = this.cameraCurrent;
-    const g = this.cameraTarget;
-    c.px += (g.px - c.px) * t;
-    c.py += (g.py - c.py) * t;
-    c.pz += (g.pz - c.pz) * t;
-    c.lx += (g.lx - c.lx) * t;
-    c.ly += (g.ly - c.ly) * t;
-    c.lz += (g.lz - c.lz) * t;
-    c.fov += (g.fov - c.fov) * t;
-    this.camera.position.set(c.px, c.py, c.pz);
-    this.camera.lookAt(c.lx, c.ly, c.lz);
-    this.camera.fov = c.fov;
-    this.camera.updateProjectionMatrix();
+    // While the user hasn't taken over, animate toward the active preset.
+    if (!this.userCamera) {
+      const speed = 3.0; // higher = snappier transition
+      const t = Math.min(1, speed * delta);
+      const c = this.cameraCurrent;
+      const g = this.cameraTarget;
+      c.px += (g.px - c.px) * t;
+      c.py += (g.py - c.py) * t;
+      c.pz += (g.pz - c.pz) * t;
+      c.lx += (g.lx - c.lx) * t;
+      c.ly += (g.ly - c.ly) * t;
+      c.lz += (g.lz - c.lz) * t;
+      c.fov += (g.fov - c.fov) * t;
+      this.camera.position.set(c.px, c.py, c.pz);
+      this.camera.fov = c.fov;
+      this.camera.updateProjectionMatrix();
+      if (this.controls) {
+        this.controls.target.set(c.lx, c.ly, c.lz);
+      } else {
+        this.camera.lookAt(c.lx, c.ly, c.lz);
+      }
+    }
+    // OrbitControls owns lookAt + applies inertia/damping every frame.
+    this.controls?.update();
   }
 
   private updateIdle(delta?: number): void {
@@ -974,7 +1019,20 @@ export class VrmAvatarController implements AvatarAdapter {
   setCameraPreset(preset: string): void {
     const p = VrmAvatarController.CAMERA_PRESETS[preset];
     if (!p) return;
+    // Sync the lerp's start point to wherever the user left the camera, so the
+    // transition to the preset is smooth instead of snapping.
+    if (this.controls) {
+      this.cameraCurrent.px = this.camera.position.x;
+      this.cameraCurrent.py = this.camera.position.y;
+      this.cameraCurrent.pz = this.camera.position.z;
+      this.cameraCurrent.lx = this.controls.target.x;
+      this.cameraCurrent.ly = this.controls.target.y;
+      this.cameraCurrent.lz = this.controls.target.z;
+      this.cameraCurrent.fov = this.camera.fov;
+    }
     this.cameraTarget = { ...p };
+    // Re-engage the auto-lerp; the preset acts as a "reset" away from free orbit.
+    this.userCamera = false;
   }
 
   /** Get the list of available camera presets. */
@@ -1190,32 +1248,36 @@ export class VrmAvatarController implements AvatarAdapter {
   ): Promise<AnimationClip> {
     const ext = url.split(".").pop()?.toLowerCase();
     let clips: AnimationClip[];
+    let assetRoot: Object3D;
 
     if (ext === "fbx") {
       const fbxLoader = new FBXLoader();
       const group = await fbxLoader.loadAsync(url);
       clips = group.animations;
+      assetRoot = group;
     } else {
       // GLB / GLTF
       const gltfLoader = new GLTFLoader();
       const gltf = await gltfLoader.loadAsync(url);
       clips = gltf.animations;
+      assetRoot = gltf.scene;
     }
 
     if (!clips || clips.length === 0) {
       throw new Error(`No animation clips found in ${url}`);
     }
 
-    console.log(`[anim] loaded ${url}: ${clips.length} clip(s), first has ${clips[0].tracks.length} tracks, duration ${clips[0].duration}s`);
-    // Log ALL unique bone names so we can build the mapping
-    const boneNames = [...new Set(clips[0].tracks.map(t => t.name.split('.')[0]))];
-    console.log(`[anim] ALL bone names in FBX (${boneNames.length}):`, boneNames);
+    // Ensure world matrices on the asset rig are up to date before we read
+    // rest-pose world rotations from it during retargeting.
+    assetRoot.updateWorldMatrix(true, true);
 
-    const retargeted = this.retargetClip(clips[0], vrm);
-    console.log(`[anim] retargeted: ${retargeted.tracks.length} tracks (from ${clips[0].tracks.length} original)`);
-    if (retargeted.tracks.length > 0) {
-      console.log(`[anim] retargeted sample:`, retargeted.tracks.slice(0, 3).map(t => t.name));
-    }
+    const retargeted = this.retargetClip(clips[0], assetRoot, vrm);
+
+    // We only needed the source rig to read its rest pose; the retargeted clip
+    // is self-contained. Free the source asset's GPU resources (one per unique
+    // URL, since callers cache the returned clip).
+    VRMUtils.deepDispose(assetRoot);
+
     return retargeted;
   }
 
@@ -1224,12 +1286,37 @@ export class VrmAvatarController implements AvatarAdapter {
    * Replaces track bone names from Mixamo convention to the actual
    * bone object names in the VRM's raw skeleton.
    */
-  private retargetClip(clip: AnimationClip, vrm: VRM): AnimationClip {
+  private retargetClip(
+    clip: AnimationClip,
+    fbxRoot: Object3D,
+    vrm: VRM,
+  ): AnimationClip {
+    const isVrm0 = vrm.meta?.metaVersion === "0";
     const retargetedTracks: KeyframeTrack[] = [];
 
+    // --- hips height ratio for position scaling ---
+    const hipsBoneName = Object.keys(MIXAMO_TO_VRM).find(
+      (n) => MIXAMO_TO_VRM[n] === "hips" && fbxRoot.getObjectByName(n),
+    );
+    const mixamoHipsNode = hipsBoneName
+      ? fbxRoot.getObjectByName(hipsBoneName)
+      : null;
+    const vrmHipsNode = vrm.humanoid?.getNormalizedBoneNode("hips");
+    let hipsPositionScale = 1;
+    if (mixamoHipsNode && vrmHipsNode) {
+      const mixamoHipsHeight = Math.abs(mixamoHipsNode.position.y) || 1;
+      const vrmHipsWorld = new Vector3();
+      const vrmRootWorld = new Vector3();
+      vrmHipsNode.getWorldPosition(vrmHipsWorld);
+      vrm.scene.getWorldPosition(vrmRootWorld);
+      const vrmHipsHeight = Math.abs(vrmHipsWorld.y - vrmRootWorld.y) || 1;
+      hipsPositionScale = vrmHipsHeight / mixamoHipsHeight;
+    }
+
+    const parentRestWorld = new Quaternion();
+    const restWorldInverse = new Quaternion();
+
     for (const track of clip.tracks) {
-      // Track names are like "mixamorigHead.quaternion" or
-      // "mixamorigHead.position".
       const dotIndex = track.name.indexOf(".");
       if (dotIndex === -1) continue;
 
@@ -1239,34 +1326,73 @@ export class VrmAvatarController implements AvatarAdapter {
       const vrmBoneName = MIXAMO_TO_VRM[boneName];
       if (!vrmBoneName) continue; // skip unmapped bones (fingers, etc.)
 
-      const boneNode = vrm.humanoid?.getRawBoneNode(
-        vrmBoneName as Parameters<typeof vrm.humanoid.getRawBoneNode>[0],
+      const targetNode = vrm.humanoid?.getNormalizedBoneNode(
+        vrmBoneName as Parameters<typeof vrm.humanoid.getNormalizedBoneNode>[0],
       );
-      if (!boneNode) continue;
+      if (!targetNode) continue;
 
-      const newTrackName = `${boneNode.name}.${property}`;
+      const sourceNode = fbxRoot.getObjectByName(boneName);
+      if (!sourceNode) continue; // no rest-pose graph for this bone → skip
 
-      // ONLY apply rotation (quaternion) tracks. Position and scale
-      // tracks from external rigs almost always cause deformation
-      // because bone lengths/positions differ between the source rig
-      // and the VRM skeleton. The VRM keeps its own bone positions;
-      // we only drive the rotations from the animation.
+      const newTrackName = `${targetNode.name}.${property}`;
+
       if (
         property === "quaternion" &&
         track instanceof QuaternionKeyframeTrack
       ) {
+        // Rest-pose rotations in world space, captured once per bone.
+        sourceNode.getWorldQuaternion(restWorldInverse).invert();
+        if (sourceNode.parent) {
+          sourceNode.parent.getWorldQuaternion(parentRestWorld);
+        } else {
+          parentRestWorld.identity();
+        }
+
+        const src = track.values;
+        const out = new Float32Array(src.length);
+        const q = new Quaternion();
+        for (let i = 0; i < src.length; i += 4) {
+          q.set(src[i], src[i + 1], src[i + 2], src[i + 3]);
+          let r = rebaseQuaternion(q, parentRestWorld, restWorldInverse);
+          if (isVrm0) r = applyVrm0QuatFlip(r);
+          out[i] = r.x;
+          out[i + 1] = r.y;
+          out[i + 2] = r.z;
+          out[i + 3] = r.w;
+        }
         retargetedTracks.push(
           new QuaternionKeyframeTrack(
             newTrackName,
             Array.from(track.times),
-            Array.from(track.values),
+            Array.from(out),
+          ),
+        );
+      } else if (property === "position" && vrmBoneName === "hips") {
+        // Hips translation only. In-place: drop X/Z, keep scaled Y.
+        const src = track.values;
+        const out = new Float32Array(src.length);
+        for (let i = 0; i < src.length; i += 3) {
+          const [x, y, z] = scaleHipsInPlace(src[i + 1], hipsPositionScale);
+          out[i] = x;
+          out[i + 1] = y;
+          out[i + 2] = z;
+        }
+        retargetedTracks.push(
+          new VectorKeyframeTrack(
+            newTrackName,
+            Array.from(track.times),
+            Array.from(out),
           ),
         );
       }
-      // Position and scale tracks are intentionally skipped.
+      // All other position/scale tracks are intentionally dropped.
     }
 
-    return new AnimationClip(clip.name || "retargeted", clip.duration, retargetedTracks);
+    return new AnimationClip(
+      clip.name || "retargeted",
+      clip.duration,
+      retargetedTracks,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1611,11 +1737,15 @@ export class VrmAvatarController implements AvatarAdapter {
     this.poseLocked = true;
     this.gesturePlayer.cancel();
     if (this.mixer) this.mixer.timeScale = 0;
+    // The Animation Lab installs its own OrbitControls on this camera/canvas;
+    // disable ours so the two don't fight over input.
+    if (this.controls) this.controls.enabled = false;
   }
 
   exitPoseMode(): void {
     this.poseLocked = false;
     if (this.mixer) this.mixer.timeScale = 1;
+    if (this.controls) this.controls.enabled = true;
   }
 
   /** Accessors for Animation Lab (scene graph manipulation). */
@@ -1712,6 +1842,10 @@ export class VrmAvatarController implements AvatarAdapter {
       this.holdTimer = null;
     }
     this.gesturePlayer.cancel();
+    if (this.controls) {
+      this.controls.dispose();
+      this.controls = null;
+    }
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;
