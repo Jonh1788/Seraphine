@@ -15,6 +15,7 @@ import {
   QuaternionKeyframeTrack,
   Scene,
   Vector3,
+  VectorKeyframeTrack,
   WebGLRenderer,
   type AnimationAction,
   type Object3D,
@@ -26,6 +27,7 @@ import type { AvatarAdapter } from "./AvatarAdapter";
 import { envelopeToVisemes, playAudioWithLipSync } from "./lipsync";
 import { resolveEmotion, EMOTION_MAP, type EmotionMapping } from "./expressions";
 import { GesturePlayer, GESTURE_LIBRARY, type GestureDefinition } from "./gestures";
+import { rebaseQuaternion, applyVrm0QuatFlip, scaleHipsInPlace } from "./retarget";
 import { solveHeadLookAt, solveArmIK, worldQuatToLocal } from "../lab/ikSolver";
 
 type EmotionLabel = "neutral" | "happy" | "sad" | "angry" | "thinking" | string;
@@ -1190,32 +1192,30 @@ export class VrmAvatarController implements AvatarAdapter {
   ): Promise<AnimationClip> {
     const ext = url.split(".").pop()?.toLowerCase();
     let clips: AnimationClip[];
+    let assetRoot: Object3D;
 
     if (ext === "fbx") {
       const fbxLoader = new FBXLoader();
       const group = await fbxLoader.loadAsync(url);
       clips = group.animations;
+      assetRoot = group;
     } else {
       // GLB / GLTF
       const gltfLoader = new GLTFLoader();
       const gltf = await gltfLoader.loadAsync(url);
       clips = gltf.animations;
+      assetRoot = gltf.scene;
     }
 
     if (!clips || clips.length === 0) {
       throw new Error(`No animation clips found in ${url}`);
     }
 
-    console.log(`[anim] loaded ${url}: ${clips.length} clip(s), first has ${clips[0].tracks.length} tracks, duration ${clips[0].duration}s`);
-    // Log ALL unique bone names so we can build the mapping
-    const boneNames = [...new Set(clips[0].tracks.map(t => t.name.split('.')[0]))];
-    console.log(`[anim] ALL bone names in FBX (${boneNames.length}):`, boneNames);
+    // Ensure world matrices on the asset rig are up to date before we read
+    // rest-pose world rotations from it during retargeting.
+    assetRoot.updateWorldMatrix(true, true);
 
-    const retargeted = this.retargetClip(clips[0], vrm);
-    console.log(`[anim] retargeted: ${retargeted.tracks.length} tracks (from ${clips[0].tracks.length} original)`);
-    if (retargeted.tracks.length > 0) {
-      console.log(`[anim] retargeted sample:`, retargeted.tracks.slice(0, 3).map(t => t.name));
-    }
+    const retargeted = this.retargetClip(clips[0], assetRoot, vrm);
     return retargeted;
   }
 
@@ -1224,12 +1224,37 @@ export class VrmAvatarController implements AvatarAdapter {
    * Replaces track bone names from Mixamo convention to the actual
    * bone object names in the VRM's raw skeleton.
    */
-  private retargetClip(clip: AnimationClip, vrm: VRM): AnimationClip {
+  private retargetClip(
+    clip: AnimationClip,
+    fbxRoot: Object3D,
+    vrm: VRM,
+  ): AnimationClip {
+    const isVrm0 = vrm.meta?.metaVersion === "0";
     const retargetedTracks: KeyframeTrack[] = [];
 
+    // --- hips height ratio for position scaling ---
+    const hipsBoneName = Object.keys(MIXAMO_TO_VRM).find(
+      (n) => MIXAMO_TO_VRM[n] === "hips" && fbxRoot.getObjectByName(n),
+    );
+    const mixamoHipsNode = hipsBoneName
+      ? fbxRoot.getObjectByName(hipsBoneName)
+      : null;
+    const vrmHipsNode = vrm.humanoid?.getNormalizedBoneNode("hips");
+    let hipsPositionScale = 1;
+    if (mixamoHipsNode && vrmHipsNode) {
+      const mixamoHipsHeight = Math.abs(mixamoHipsNode.position.y) || 1;
+      const vrmHipsWorld = new Vector3();
+      const vrmRootWorld = new Vector3();
+      vrmHipsNode.getWorldPosition(vrmHipsWorld);
+      vrm.scene.getWorldPosition(vrmRootWorld);
+      const vrmHipsHeight = Math.abs(vrmHipsWorld.y - vrmRootWorld.y) || 1;
+      hipsPositionScale = vrmHipsHeight / mixamoHipsHeight;
+    }
+
+    const parentRestWorld = new Quaternion();
+    const restWorldInverse = new Quaternion();
+
     for (const track of clip.tracks) {
-      // Track names are like "mixamorigHead.quaternion" or
-      // "mixamorigHead.position".
       const dotIndex = track.name.indexOf(".");
       if (dotIndex === -1) continue;
 
@@ -1239,34 +1264,73 @@ export class VrmAvatarController implements AvatarAdapter {
       const vrmBoneName = MIXAMO_TO_VRM[boneName];
       if (!vrmBoneName) continue; // skip unmapped bones (fingers, etc.)
 
-      const boneNode = vrm.humanoid?.getRawBoneNode(
-        vrmBoneName as Parameters<typeof vrm.humanoid.getRawBoneNode>[0],
+      const targetNode = vrm.humanoid?.getNormalizedBoneNode(
+        vrmBoneName as Parameters<typeof vrm.humanoid.getNormalizedBoneNode>[0],
       );
-      if (!boneNode) continue;
+      if (!targetNode) continue;
 
-      const newTrackName = `${boneNode.name}.${property}`;
+      const sourceNode = fbxRoot.getObjectByName(boneName);
+      if (!sourceNode) continue; // no rest-pose graph for this bone → skip
 
-      // ONLY apply rotation (quaternion) tracks. Position and scale
-      // tracks from external rigs almost always cause deformation
-      // because bone lengths/positions differ between the source rig
-      // and the VRM skeleton. The VRM keeps its own bone positions;
-      // we only drive the rotations from the animation.
+      const newTrackName = `${targetNode.name}.${property}`;
+
       if (
         property === "quaternion" &&
         track instanceof QuaternionKeyframeTrack
       ) {
+        // Rest-pose rotations in world space, captured once per bone.
+        sourceNode.getWorldQuaternion(restWorldInverse).invert();
+        if (sourceNode.parent) {
+          sourceNode.parent.getWorldQuaternion(parentRestWorld);
+        } else {
+          parentRestWorld.identity();
+        }
+
+        const src = track.values;
+        const out = new Float32Array(src.length);
+        const q = new Quaternion();
+        for (let i = 0; i < src.length; i += 4) {
+          q.set(src[i], src[i + 1], src[i + 2], src[i + 3]);
+          let r = rebaseQuaternion(q, parentRestWorld, restWorldInverse);
+          if (isVrm0) r = applyVrm0QuatFlip(r);
+          out[i] = r.x;
+          out[i + 1] = r.y;
+          out[i + 2] = r.z;
+          out[i + 3] = r.w;
+        }
         retargetedTracks.push(
           new QuaternionKeyframeTrack(
             newTrackName,
             Array.from(track.times),
-            Array.from(track.values),
+            Array.from(out),
+          ),
+        );
+      } else if (property === "position" && vrmBoneName === "hips") {
+        // Hips translation only. In-place: drop X/Z, keep scaled Y.
+        const src = track.values;
+        const out = new Float32Array(src.length);
+        for (let i = 0; i < src.length; i += 3) {
+          const [x, y, z] = scaleHipsInPlace(src[i + 1], hipsPositionScale);
+          out[i] = x;
+          out[i + 1] = y;
+          out[i + 2] = z;
+        }
+        retargetedTracks.push(
+          new VectorKeyframeTrack(
+            newTrackName,
+            Array.from(track.times),
+            Array.from(out),
           ),
         );
       }
-      // Position and scale tracks are intentionally skipped.
+      // All other position/scale tracks are intentionally dropped.
     }
 
-    return new AnimationClip(clip.name || "retargeted", clip.duration, retargetedTracks);
+    return new AnimationClip(
+      clip.name || "retargeted",
+      clip.duration,
+      retargetedTracks,
+    );
   }
 
   // -------------------------------------------------------------------------
