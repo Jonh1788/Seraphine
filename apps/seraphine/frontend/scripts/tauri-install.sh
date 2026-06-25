@@ -26,7 +26,10 @@ done
 
 echo "[tauri-install] running tauri build..."
 cd "$FRONTEND_DIR"
-pnpm tauri build
+# Only build the .app bundle. The .dmg target adds nothing for a local install
+# and bundle_dmg.sh (which drives Finder via AppleScript) fails in
+# non-interactive / headless runs, aborting the whole build.
+pnpm tauri build --bundles app
 
 if [[ ! -d "$BUNDLE" ]]; then
   echo "[tauri-install] ERROR: build did not produce $BUNDLE" >&2
