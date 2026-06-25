@@ -1216,6 +1216,12 @@ export class VrmAvatarController implements AvatarAdapter {
     assetRoot.updateWorldMatrix(true, true);
 
     const retargeted = this.retargetClip(clips[0], assetRoot, vrm);
+
+    // We only needed the source rig to read its rest pose; the retargeted clip
+    // is self-contained. Free the source asset's GPU resources (one per unique
+    // URL, since callers cache the returned clip).
+    VRMUtils.deepDispose(assetRoot);
+
     return retargeted;
   }
 
