@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 export interface WorkProjectBlockData {
   id: string;
   name: string;
@@ -13,7 +15,7 @@ interface WorkProjectChatBlockProps {
   onOpen?: (id: string) => void;
 }
 
-export function WorkProjectChatBlock({ project, onOpen }: WorkProjectChatBlockProps): JSX.Element {
+function WorkProjectChatBlockImpl({ project, onOpen }: WorkProjectChatBlockProps): JSX.Element {
   return (
     <div className="work-chat-block">
       <div className="work-chat-block__header">
@@ -37,3 +39,5 @@ export function WorkProjectChatBlock({ project, onOpen }: WorkProjectChatBlockPr
     </div>
   );
 }
+
+export const WorkProjectChatBlock = memo(WorkProjectChatBlockImpl);

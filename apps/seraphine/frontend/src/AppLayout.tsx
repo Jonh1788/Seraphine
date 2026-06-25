@@ -280,6 +280,24 @@ export function AppLayout(): JSX.Element {
     setQuickTaskTitle('');
   }, [quickTaskTitle, setQuickNewTaskOpen, setQuickTaskTitle]);
 
+  // Stable callbacks for ChatView so its React.memo holds across shell re-renders.
+  const handleInitialTextConsumed = useCallback(() => {
+    setPendingComposerText(null);
+    setPendingComposerAutoSend(false);
+  }, [setPendingComposerText, setPendingComposerAutoSend]);
+
+  const handleRealtimeToggle = useCallback(() => {
+    const next = !realtimeActive;
+    if (!next) {
+      playbackRef.current?.stop();
+      wsRef.current?.send({ type: 'interrupt' });
+    } else {
+      warmSharedAudioContext();
+      playbackRef.current?.ensureCtx();
+    }
+    setRealtimeActive(next);
+  }, [realtimeActive, playbackRef, wsRef, setRealtimeActive]);
+
   // Nav rail items
   const navItems = useMemo<{
     id: string;
@@ -516,22 +534,9 @@ export function AppLayout(): JSX.Element {
                 onNavigateToJob={navigateToJob}
                 initialText={pendingComposerText}
                 initialAutoSend={pendingComposerAutoSend}
-                onInitialTextConsumed={() => {
-                  setPendingComposerText(null);
-                  setPendingComposerAutoSend(false);
-                }}
+                onInitialTextConsumed={handleInitialTextConsumed}
                 realtimeActive={realtimeActive}
-                onRealtimeToggle={() => {
-                  const next = !realtimeActive;
-                  if (!next) {
-                    playbackRef.current?.stop();
-                    wsRef.current?.send({ type: 'interrupt' });
-                  } else {
-                    warmSharedAudioContext();
-                    playbackRef.current?.ensureCtx();
-                  }
-                  setRealtimeActive(next);
-                }}
+                onRealtimeToggle={handleRealtimeToggle}
                 playback={playbackRef.current}
                 manualMute={manualMute}
                 onManualMuteToggle={toggleManualMute}

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { RepeatIcon, ClockIcon } from '../icons/Icons';
 
 const FREQ_LABELS: Record<string, string> = {
@@ -21,7 +22,7 @@ export interface RecurringChatBlockProps {
   rule: RecurringRule;
 }
 
-export function RecurringChatBlock({ rule }: RecurringChatBlockProps): JSX.Element {
+function RecurringChatBlockImpl({ rule }: RecurringChatBlockProps): JSX.Element {
   const freqLabel = FREQ_LABELS[rule.frequency] || rule.frequency;
 
   let schedule = freqLabel;
@@ -59,3 +60,5 @@ export function RecurringChatBlock({ rule }: RecurringChatBlockProps): JSX.Eleme
     </div>
   );
 }
+
+export const RecurringChatBlock = memo(RecurringChatBlockImpl);
