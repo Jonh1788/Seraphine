@@ -2,7 +2,7 @@
  * AppLayout — shell with nav rail, top bar, overlays, always-mounted
  * ChatView, and view switching via activeView state.
  */
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
@@ -281,7 +281,7 @@ export function AppLayout(): JSX.Element {
   }, [quickTaskTitle, setQuickNewTaskOpen, setQuickTaskTitle]);
 
   // Nav rail items
-  const navItems: {
+  const navItems = useMemo<{
     id: string;
     icon: JSX.Element;
     label: string;
@@ -290,7 +290,7 @@ export function AppLayout(): JSX.Element {
     active?: boolean;
     badge?: boolean;
     badgeCount?: number;
-  }[] = [
+  }[]>(() => [
     // Núcleo
     { id: 'chat', icon: <ChatIcon size={22} />, label: 'Chat', group: 'Núcleo', onClick: () => setActiveView('chat'), active: activeView === 'chat' },
     { id: 'dashboard', icon: <DashboardIcon size={22} />, label: 'Dashboard', group: 'Núcleo', onClick: () => setActiveView('dashboard'), active: activeView === 'dashboard' },
@@ -322,7 +322,7 @@ export function AppLayout(): JSX.Element {
     { id: 'learning', icon: <LearningIcon size={22} />, label: 'Aprendizado', group: 'Sistema', onClick: () => setActiveView(activeView === 'learning' ? 'chat' : 'learning'), active: activeView === 'learning' },
     { id: 'telemetry', icon: <GaugeIcon size={22} />, label: 'Custos', group: 'Sistema', onClick: () => setActiveView(activeView === 'telemetry' ? 'chat' : 'telemetry'), active: activeView === 'telemetry' },
     { id: 'system', icon: <SystemIcon size={22} />, label: 'Sistema', group: 'Sistema', onClick: () => setActiveView(activeView === 'system' ? 'chat' : 'system'), active: activeView === 'system' },
-  ];
+  ], [activeView, tasksPendingCount, unreadCount, whatsappUnread, setActiveView, setWhatsappUnread]);
 
   return (
     <div className="app" onClick={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }} onTouchStart={() => { warmSharedAudioContext(); playbackRef.current?.ensureCtx(); }}>
