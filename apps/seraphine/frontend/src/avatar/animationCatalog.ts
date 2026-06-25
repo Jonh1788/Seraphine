@@ -57,7 +57,8 @@ export const useAnimationCatalog = create<CatalogState>((set) => ({
         builtin: false,
       }));
       set({ assets: [...builtinsAsAssets(), ...uploaded], loaded: true });
-    } catch {
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[animationCatalog] load failed', err);
       set({ loaded: true });
     }
   },

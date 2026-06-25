@@ -33,7 +33,7 @@ import { useDelayedFlag } from '../utils';
 import { TriageWizard } from '../cv-triage/TriageWizard';
 import { ActiveJobsPanel } from '../cv-triage/ActiveJobsPanel';
 import { useAnimationCatalog, resolveAnimationTag } from '../avatar/animationCatalog';
-import { extractAnimTags } from './animTag';
+import { extractAnimTags, stripAnimTags } from './animTag';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -101,10 +101,7 @@ interface Turn {
  */
 const AUDIO_TAG_RE = /\[[a-zà-ú][a-zà-ú ]{1,29}\](?!\()/gi;
 function stripAudioTags(text: string): string {
-  return text
-    .replace(AUDIO_TAG_RE, '')
-    .replace(/\[anim:[a-z0-9_-]+\]/gi, '')
-    .replace(/ {2,}/g, ' ');
+  return stripAnimTags(text.replace(AUDIO_TAG_RE, '')).replace(/ {2,}/g, ' ');
 }
 
 /**

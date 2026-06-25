@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil  # noqa: F401  (kept for parity; remove if unused)
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
