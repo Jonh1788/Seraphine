@@ -32,6 +32,8 @@ import { ChatSkeleton } from './ChatSkeleton';
 import { useDelayedFlag } from '../utils';
 import { TriageWizard } from '../cv-triage/TriageWizard';
 import { ActiveJobsPanel } from '../cv-triage/ActiveJobsPanel';
+import { useAnimationCatalog, resolveAnimationTag } from '../avatar/animationCatalog';
+import { extractAnimTags, stripAnimTags } from './animTag';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -99,7 +101,7 @@ interface Turn {
  */
 const AUDIO_TAG_RE = /\[[a-zà-ú][a-zà-ú ]{1,29}\](?!\()/gi;
 function stripAudioTags(text: string): string {
-  return text.replace(AUDIO_TAG_RE, '').replace(/ {2,}/g, ' ');
+  return stripAnimTags(text.replace(AUDIO_TAG_RE, '')).replace(/ {2,}/g, ' ');
 }
 
 /**
@@ -543,6 +545,27 @@ function ChatViewImpl({
   // Timer ref for resetting avatar to idle after turn_end
   const avatarResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Animation catalog: resolve [anim:tag] tokens to playable FBX assets.
+  const animAssets = useAnimationCatalog((s) => s.assets);
+  const loadAnimCatalog = useAnimationCatalog((s) => s.load);
+  useEffect(() => { void loadAnimCatalog(); }, [loadAnimCatalog]);
+
+  /** Trigger a System B FBX animation from a detected [anim:tag] token. */
+  const triggerAnimationFromTag = useCallback(
+    (tag: string) => {
+      const ctrl = avatarController?.current;
+      if (!ctrl) return;
+      const asset = resolveAnimationTag(animAssets, tag);
+      if (!asset) return; // unknown tag → ignore silently
+      try {
+        void ctrl.playAnimation?.(asset.url, { loop: asset.loop });
+      } catch {
+        // controller may not expose playAnimation yet
+      }
+    },
+    [avatarController, animAssets],
+  );
+
   /** Trigger avatar expression/gesture from a detected tag. */
   const triggerAvatarFromTag = useCallback(
     (tag: string) => {
@@ -608,6 +631,9 @@ function ChatViewImpl({
         while ((tagMatch = tagRe.exec(tokenText)) !== null) {
           triggerAvatarFromTag(tagMatch[1]);
         }
+        for (const animTag of extractAnimTags(tokenText)) {
+          triggerAnimationFromTag(animTag);
+        }
         const turnId = msg.turn_id;
         setStreamingTurnId(turnId);
         setTurns((prev) => {
@@ -631,6 +657,9 @@ function ChatViewImpl({
         let tagMatch: RegExpExecArray | null;
         while ((tagMatch = tagRe.exec(openerText)) !== null) {
           triggerAvatarFromTag(tagMatch[1]);
+        }
+        for (const animTag of extractAnimTags(openerText)) {
+          triggerAnimationFromTag(animTag);
         }
         setTurns((prev) => [
           ...prev,
@@ -871,7 +900,7 @@ function ChatViewImpl({
         console.warn('[ws] unknown msg.type', (msg as { type?: string }).type);
       }
     });
-  }, [ws, triggerAvatarFromTag, avatarController]);
+  }, [ws, triggerAvatarFromTag, triggerAnimationFromTag, avatarController]);
 
   // Auto-scroll to bottom whenever turns change.
   useLayoutEffect(() => {

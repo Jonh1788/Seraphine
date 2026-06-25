@@ -3957,6 +3957,101 @@ button:disabled {
   line-height: 1.4;
 }
 
+/* --- Animations catalog --- */
+
+.avatar-lab__anim-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.avatar-lab__section-subtitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.avatar-lab__anim-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.avatar-lab__anim-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.avatar-lab__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+}
+
+.avatar-lab__icon-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.avatar-lab__icon-btn:hover {
+  color: var(--text);
+  background: var(--bg-3);
+  border-color: var(--border);
+}
+
+.avatar-lab__anim-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.avatar-lab__anim-upload input[type='text'],
+.avatar-lab__anim-upload input[type='file'],
+.avatar-lab__anim-upload select {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.avatar-lab__anim-upload input[type='text']:focus,
+.avatar-lab__anim-upload select:focus {
+  border-color: var(--accent-dim);
+}
+
+.avatar-lab__anim-upload input[type='file'] {
+  color: var(--text-dim);
+}
+
+.avatar-lab__anim-loop {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* --- Reset --- */
 
 .avatar-lab__reset {

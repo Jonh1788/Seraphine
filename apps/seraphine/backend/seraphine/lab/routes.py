@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/lab", tags=["lab"])
@@ -17,6 +19,45 @@ logger = logging.getLogger(__name__)
 # Resolve data dir relative to the project root (apps/seraphine/data/lab/).
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "lab"
 _GESTURES_FILE = _DATA_DIR / "gestures.json"
+
+_ANIMATIONS_DIR = _DATA_DIR / "animations"
+_ANIMATIONS_FILE = _DATA_DIR / "animations.json"
+_ALLOWED_ANIM_EXT = {".fbx", ".glb", ".vrma"}
+_MAX_ANIM_BYTES = 25 * 1024 * 1024
+
+
+def _read_animations() -> list[dict[str, Any]]:
+    if not _ANIMATIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(_ANIMATIONS_FILE.read_text("utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read animations manifest: %s", exc)
+        return []
+
+
+def _write_animations(records: list[dict[str, Any]]) -> None:
+    try:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _ANIMATIONS_FILE.write_text(
+            json.dumps(records, indent=2, ensure_ascii=False), "utf-8"
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Falha ao salvar animações: {exc}") from exc
+
+
+def _normalize_anim_tags(raw: "str | list[str]") -> list[str]:
+    items = raw.split(",") if isinstance(raw, str) else list(raw)
+    out: list[str] = []
+    for t in items:
+        t = t.strip().lower()
+        if not t or "]" in t or ":" in t:
+            continue
+        if t not in out:
+            out.append(t)
+    return out
+
 
 _EXPORT_SCHEMA_VERSION = 1
 
@@ -180,3 +221,113 @@ async def import_gestures(
         _write_all(data)
 
     return result
+
+
+class AnimationUpdate(BaseModel):
+    label: str | None = None
+    source: Literal["mixamo", "blender"] | None = None
+    tags: list[str] | None = None
+    loop: bool | None = None
+
+
+def _find_anim(records: list[dict[str, Any]], anim_id: str) -> dict[str, Any] | None:
+    for rec in records:
+        if rec.get("id") == anim_id:
+            return rec
+    return None
+
+
+@router.get("/animations")
+async def list_animations() -> list[dict[str, Any]]:
+    return _read_animations()
+
+
+@router.post("/animations")
+async def upload_animation(
+    file: UploadFile = File(...),
+    label: str = Form(...),
+    source: Literal["mixamo", "blender"] = Form(...),
+    tags: str = Form(""),
+    loop: bool = Form(False),
+) -> dict[str, Any]:
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in _ALLOWED_ANIM_EXT:
+        raise HTTPException(status_code=400, detail=f"Formato não suportado: {ext or 'sem extensão'}")
+    blob = await file.read()
+    if not blob:
+        raise HTTPException(status_code=400, detail="Arquivo vazio")
+    if len(blob) > _MAX_ANIM_BYTES:
+        raise HTTPException(status_code=400, detail="Arquivo muito grande (máx 25 MB)")
+
+    anim_id = uuid.uuid4().hex
+    stored_name = f"{anim_id}{ext}"
+    dest_dir = _ANIMATIONS_DIR / source
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / stored_name
+    dest.write_bytes(blob)
+
+    record: dict[str, Any] = {
+        "id": anim_id,
+        "filename": stored_name,
+        "label": label.strip() or stored_name,
+        "source": source,
+        "tags": _normalize_anim_tags(tags),
+        "loop": bool(loop),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    records = _read_animations()
+    records.append(record)
+    try:
+        _write_animations(records)
+    except HTTPException:
+        dest.unlink(missing_ok=True)  # don't leave an orphan file
+        raise
+    return record
+
+
+@router.put("/animations/{anim_id}")
+async def update_animation(anim_id: str, body: AnimationUpdate) -> dict[str, Any]:
+    records = _read_animations()
+    rec = _find_anim(records, anim_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Animação '{anim_id}' não encontrada")
+    if body.label is not None:
+        rec["label"] = body.label.strip() or rec["label"]
+    if body.tags is not None:
+        rec["tags"] = _normalize_anim_tags(body.tags)
+    if body.loop is not None:
+        rec["loop"] = bool(body.loop)
+    if body.source is not None and body.source != rec["source"]:
+        old = _ANIMATIONS_DIR / rec["source"] / rec["filename"]
+        new_dir = _ANIMATIONS_DIR / body.source
+        new_dir.mkdir(parents=True, exist_ok=True)
+        if old.exists():
+            old.rename(new_dir / rec["filename"])
+        rec["source"] = body.source
+    _write_animations(records)
+    return rec
+
+
+@router.delete("/animations/{anim_id}")
+async def delete_animation(anim_id: str) -> dict[str, str]:
+    records = _read_animations()
+    rec = _find_anim(records, anim_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Animação '{anim_id}' não encontrada")
+    f = _ANIMATIONS_DIR / rec["source"] / rec["filename"]
+    f.unlink(missing_ok=True)
+    records.remove(rec)
+    _write_animations(records)
+    return {"status": "ok"}
+
+
+@router.get("/animations/{anim_id}/file")
+async def get_animation_file(anim_id: str) -> FileResponse:
+    records = _read_animations()
+    rec = _find_anim(records, anim_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Animação '{anim_id}' não encontrada")
+    f = _ANIMATIONS_DIR / rec["source"] / rec["filename"]
+    if not f.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    return FileResponse(str(f), filename=rec["filename"])
