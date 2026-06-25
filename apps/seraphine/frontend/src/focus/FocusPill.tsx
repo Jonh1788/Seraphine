@@ -1,12 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { FocusState, FocusActions, FocusPhase } from './useFocusTimer';
+import type { FocusPhase } from './useFocusTimer';
+import { useFocus } from './FocusContext';
 import { PlayIcon, PauseIcon, SkipIcon, TimerIcon, XIcon } from '../icons/Icons';
-
-interface FocusPillProps {
-  state: FocusState;
-  actions: FocusActions;
-}
 
 const PHASE_LABELS: Record<FocusPhase, string> = {
   work: 'Trabalho',
@@ -21,7 +17,8 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export function FocusPill({ state, actions }: FocusPillProps): JSX.Element {
+export function FocusPill(): JSX.Element {
+  const [state, actions] = useFocus();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);

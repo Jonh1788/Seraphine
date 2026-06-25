@@ -76,8 +76,7 @@ import type { ActiveView } from './stores/uiStore';
 import { useChatStore } from './stores/chatStore';
 import { useRealtimeStore } from './stores/realtimeStore';
 import { useNotificationStore } from './stores/notificationStore';
-import { useFocusTimer } from './focus/useFocusTimer';
-import type { FocusPhase } from './focus/useFocusTimer';
+import { SidebarFocusCard } from './focus/SidebarFocusCard';
 
 export function AppLayout(): JSX.Element {
   const { wsRef, playbackRef, avatarCtrlRef } = useAppRefs();
@@ -159,43 +158,8 @@ export function AppLayout(): JSX.Element {
   // Quick task input ref
   const quickTaskInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus timer — with avatar expression transitions
-  const handleFocusTransition = useCallback((from: FocusPhase, to: FocusPhase) => {
-    if (to === 'work' && (from === 'idle' || from === 'break' || from === 'long_break')) {
-      fetch(`${API_BASE}/music/focus-start`, { method: 'POST' }).catch(() => {});
-    }
-    const ctrl = avatarCtrlRef.current;
-    if (!ctrl) return;
-    if (to === 'work' && from === 'idle') {
-      ctrl.setExpression?.('focused', 300, 0);
-    } else if (to === 'work') {
-      ctrl.setExpression?.('focused', 300, 0);
-    } else if (to === 'break' || to === 'long_break') {
-      ctrl.setExpression?.('warm', 300, 0);
-    }
-    if (from === 'long_break' && to === 'work') {
-      ctrl.setExpression?.('happy', 300, 3000);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const [focusState, focusActions] = useFocusTimer(handleFocusTransition);
-
-  // Derived display values for the sidebar FOCO Pomodoro card.
-  const FOCUS_PHASE_SECS: Record<FocusPhase, number> = {
-    work: 25 * 60,
-    break: 5 * 60,
-    long_break: 15 * 60,
-    idle: 25 * 60,
-  };
-  const focusTotal = FOCUS_PHASE_SECS[focusState.phase];
-  const focusRemaining = focusState.phase === 'idle' ? focusTotal : focusState.remaining;
-  const focusMmss = `${Math.floor(focusRemaining / 60)
-    .toString()
-    .padStart(2, '0')}:${(focusRemaining % 60).toString().padStart(2, '0')}`;
-  const focusPct =
-    focusState.phase === 'idle'
-      ? 0
-      : Math.max(0, Math.min(100, ((focusTotal - focusRemaining) / focusTotal) * 100));
+  // Focus timer + sidebar FOCO card moved into FocusProvider / SidebarFocusCard
+  // so the 1s tick re-renders only those leaves, not this shell.
 
   // Talk handlers from AppBootstrap (exposed on window)
   const getTalkHandlers = useCallback(() => {
@@ -357,7 +321,7 @@ export function AppLayout(): JSX.Element {
               ouvindo
             </span>
           )}
-          <FocusPill state={focusState} actions={focusActions} />
+          <FocusPill />
           <button
             type="button"
             className={`btn-lab btn-push btn-push--${pushStatus}`}
@@ -481,38 +445,7 @@ export function AppLayout(): JSX.Element {
             <ApprovalPanel ws={wsRef.current} />
           </div>
 
-          <button
-            type="button"
-            className={`sidebar__foco${focusState.phase === 'idle' ? ' sidebar__foco--idle' : ''}`}
-            aria-label={focusState.phase === 'idle' ? 'Iniciar foco Pomodoro' : 'Foco Pomodoro'}
-            onClick={() => {
-              if (focusState.phase === 'idle') focusActions.start();
-              else if (focusState.running) focusActions.pause();
-              else focusActions.resume();
-            }}
-          >
-            <div className="sidebar__foco-head">
-              <span className="sidebar__foco-label">FOCO</span>
-              <span className="sidebar__foco-mode">
-                {focusState.phase === 'idle'
-                  ? 'Iniciar'
-                  : focusState.phase === 'work'
-                    ? 'Pomodoro'
-                    : focusState.phase === 'long_break'
-                      ? 'Pausa longa'
-                      : 'Pausa'}
-              </span>
-            </div>
-            <div className="sidebar__foco-time">
-              <span className="sidebar__foco-num">{focusMmss}</span>
-              <span className="sidebar__foco-rest">
-                {focusState.phase === 'idle' ? 'Pomodoro' : focusState.running ? 'restante' : 'pausado'}
-              </span>
-            </div>
-            <div className="sidebar__foco-bar">
-              <div style={{ width: `${focusPct}%` }} />
-            </div>
-          </button>
+          <SidebarFocusCard />
         </aside>
 
         <section className="chat">
