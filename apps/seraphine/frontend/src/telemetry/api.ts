@@ -46,6 +46,26 @@ export async function fetchTelemetrySummary(days = 7): Promise<TelemetrySummary>
 }
 
 /* ------------------------------------------------------------------ */
+/*  Active inference engine — GET /llm/engine                          */
+/* ------------------------------------------------------------------ */
+
+export interface EngineInfo {
+  name: string;
+  backend: string;
+  model: string;
+  is_local: boolean;
+  is_flat_cost: boolean;
+  supports_tools: boolean;
+  supports_vision: boolean;
+}
+
+export async function fetchEngineInfo(): Promise<EngineInfo> {
+  const res = await fetch(`${API_BASE}/llm/engine`);
+  if (!res.ok) throw new Error(`fetchEngineInfo: HTTP ${res.status}`);
+  return res.json();
+}
+
+/* ------------------------------------------------------------------ */
 /*  Power telemetry — Tauri `read_power` (Mac-only, optional)          */
 /*                                                                     */
 /*  The command may not be registered yet. We import the Tauri core    */

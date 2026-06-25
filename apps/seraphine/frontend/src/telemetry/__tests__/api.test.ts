@@ -40,6 +40,27 @@ describe('telemetry api', () => {
     await expect(api.fetchTelemetrySummary()).rejects.toThrow('HTTP 503');
   });
 
+  it('fetchEngineInfo hits /llm/engine and returns the parsed body', async () => {
+    const ENGINE = {
+      name: 'Claude (cliproxy)',
+      backend: 'cliproxy',
+      model: 'claude-sonnet-4-6',
+      is_local: false,
+      is_flat_cost: true,
+      supports_tools: true,
+      supports_vision: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ENGINE })));
+    const out = await api.fetchEngineInfo();
+    expect(String((fetch as any).mock.calls[0][0])).toContain('/llm/engine');
+    expect(out).toEqual(ENGINE);
+  });
+
+  it('fetchEngineInfo throws on a non-ok response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    await expect(api.fetchEngineInfo()).rejects.toThrow('HTTP 500');
+  });
+
   it('readPower degrades to { supported: false } when Tauri is unavailable', async () => {
     // Outside the Tauri shell the dynamic import of @tauri-apps/api/core
     // rejects (or invoke throws) → readPower must swallow it.

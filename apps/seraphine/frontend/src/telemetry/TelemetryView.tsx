@@ -12,8 +12,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, RefreshIcon, GaugeIcon } from '../icons/Icons';
 import {
   fetchTelemetrySummary,
+  fetchEngineInfo,
   readPower,
   type TelemetrySummary,
+  type EngineInfo,
   type PowerSample,
 } from './api';
 
@@ -120,15 +122,57 @@ function Gauge({ label, mw }: { label: string; mw?: number }): JSX.Element {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Active engine card — capability chips drive the cost story         */
+/* ------------------------------------------------------------------ */
+
+function EngineCard({ engine }: { engine: EngineInfo }): JSX.Element {
+  return (
+    <section className="focus-analytics__chart-card tel-engine-card">
+      <div className="tel-engine-head">
+        <GaugeIcon size={16} />
+        <h3 className="focus-analytics__chart-title">Motor de inferência</h3>
+      </div>
+      <div className="tel-engine-name">{engine.name}</div>
+      <div className="tel-engine-model">{engine.model}</div>
+      <div className="tel-engine-chips">
+        <span
+          className={`tel-engine-chip ${engine.is_local ? 'tel-engine-chip--green' : 'tel-engine-chip--dim'}`}
+        >
+          {engine.is_local ? 'local' : 'nuvem'}
+        </span>
+        <span
+          className={`tel-engine-chip ${engine.is_flat_cost ? 'tel-engine-chip--green' : 'tel-engine-chip--amber'}`}
+        >
+          {engine.is_flat_cost ? 'flat $0' : 'medido'}
+        </span>
+        {engine.supports_tools && <span className="tel-engine-chip">tools</span>}
+        {engine.supports_vision && <span className="tel-engine-chip">visão</span>}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main view                                                          */
 /* ------------------------------------------------------------------ */
 
 export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
   const [period, setPeriod] = useState<Period>(7);
   const [summary, setSummary] = useState<TelemetrySummary | null>(null);
+  const [engine, setEngine] = useState<EngineInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
+
+  // The active engine is independent of the report period, so fetch it once
+  // on mount. Any failure → null → the card hides; it never breaks the panel.
+  useEffect(() => {
+    let alive = true;
+    fetchEngineInfo()
+      .then((info) => { if (alive) setEngine(info); })
+      .catch(() => { if (alive) setEngine(null); });
+    return () => { alive = false; };
+  }, []);
 
   const load = useCallback(async (p: Period): Promise<void> => {
     const id = ++reqId.current;
@@ -203,6 +247,8 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
           </button>
         </div>
       </div>
+
+      {engine && <EngineCard engine={engine} />}
 
       <div className="insights-view__filters" role="group" aria-label="Período do relatório">
         {([7, 30] as const).map((p) => (

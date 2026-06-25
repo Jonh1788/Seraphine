@@ -94,6 +94,64 @@
   font-weight: 600;
 }
 
+/* ── Active engine card (drives the flat-vs-metered cost story) ───── */
+.tel-engine-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tel-engine-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+.tel-engine-head .focus-analytics__chart-title {
+  margin: 0;
+}
+.tel-engine-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.tel-engine-model {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.tel-engine-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tel-engine-chip {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+}
+.tel-engine-chip--green {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.12);
+  border-color: rgba(134, 239, 172, 0.24);
+}
+.tel-engine-chip--amber {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+.tel-engine-chip--dim {
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+}
+
 /* ── Mini stat cluster (neutral) ──────────────────────────────────── */
 .tel-mini-grid {
   display: grid;
