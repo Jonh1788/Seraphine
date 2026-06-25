@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VrmAvatarController } from '../avatar/VrmAvatarController';
-import { ANIMATION_LIBRARY, type AnimationEntry } from '../avatar/animations';
+import { useAnimationCatalog, type AnimationAsset } from '../avatar/animationCatalog';
+import { API_BASE } from '../api';
 import { GestureEditor } from './GestureEditor';
 
 /** Predefined emotion presets with Portuguese labels. */
@@ -58,6 +59,9 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
   const [sliders, setSliders] = useState<Record<string, number>>({});
   const [playingGesture, setPlayingGesture] = useState<string | null>(null);
   const [playingAnimation, setPlayingAnimation] = useState<string | null>(null);
+  const [animUploadError, setAnimUploadError] = useState<string | null>(null);
+  const animAssets = useAnimationCatalog((s) => s.assets);
+  const loadAnimCatalog = useAnimationCatalog((s) => s.load);
   const [quickText, setQuickText] = useState('');
   const [quickRunning, setQuickRunning] = useState(false);
   const quickAbortRef = useRef(false);
@@ -139,11 +143,15 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
     [controller, playingGesture],
   );
 
-  const handleAnimation = useCallback(
-    async (entry: AnimationEntry) => {
+  useEffect(() => {
+    void loadAnimCatalog();
+  }, [loadAnimCatalog]);
+
+  const playAsset = useCallback(
+    (asset: AnimationAsset) => {
       if (!controller) return;
-      // Toggle: if already playing this animation, stop it.
-      if (playingAnimation === entry.url) {
+      // Toggle: if already playing this asset, stop it.
+      if (playingAnimation === asset.url) {
         try {
           controller.stopAnimation?.();
         } catch {
@@ -152,19 +160,39 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
         setPlayingAnimation(null);
         return;
       }
-      setPlayingAnimation(entry.url);
-      try {
-        await controller.playAnimation?.(entry.url, { loop: entry.loop });
-        // For one-shot animations, clear state when done.
-        if (!entry.loop) {
-          setPlayingAnimation(null);
-        }
-      } catch (e) {
-        console.error('[AvatarLab] playAnimation failed:', e);
-        setPlayingAnimation(null);
-      }
+      void controller.playAnimation?.(asset.url, { loop: asset.loop });
+      setPlayingAnimation(asset.url);
     },
     [controller, playingAnimation],
+  );
+
+  const handleDeleteAnim = useCallback(
+    async (asset: AnimationAsset) => {
+      if (!window.confirm(`Excluir a animação "${asset.label}"?`)) return;
+      await fetch(`${API_BASE}/lab/animations/${asset.id}`, { method: 'DELETE' });
+      await loadAnimCatalog();
+    },
+    [loadAnimCatalog],
+  );
+
+  const handleEditAnim = useCallback(
+    async (asset: AnimationAsset) => {
+      const label = window.prompt('Nome:', asset.label) ?? asset.label;
+      const tags = (
+        window.prompt('Tags (separadas por vírgula):', asset.tags.join(', ')) ??
+        asset.tags.join(', ')
+      )
+        .split(',')
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+      await fetch(`${API_BASE}/lab/animations/${asset.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, tags }),
+      });
+      await loadAnimCatalog();
+    },
+    [loadAnimCatalog],
   );
 
   const handleStopAnimation = useCallback(() => {
@@ -575,32 +603,118 @@ export function AvatarLab({ controller, onClose }: AvatarLabProps): JSX.Element 
             {/* Animations */}
             <section className="avatar-lab__section">
               <h3 className="avatar-lab__section-title">Animacoes</h3>
-              {ANIMATION_LIBRARY.length > 0 ? (
-                <div className="avatar-lab__gestures">
-                  {ANIMATION_LIBRARY.map((entry) => (
-                    <button
-                      key={entry.name}
-                      type="button"
-                      className={`avatar-lab__gesture-btn${playingAnimation === entry.url ? ' avatar-lab__btn--active' : ''}`}
-                      onClick={() => void handleAnimation(entry)}
-                    >
-                      {entry.label}
-                    </button>
-                  ))}
-                  {playingAnimation && (
-                    <button
-                      type="button"
-                      className="avatar-lab__gesture-btn"
-                      onClick={handleStopAnimation}
-                    >
-                      Parar
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <p className="avatar-lab__test-hint">
-                  Adicione arquivos .fbx de Mixamo em /public/animations/
-                </p>
+
+              <form
+                className="avatar-lab__anim-upload"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const fd = new FormData(form);
+                  const file = fd.get('file') as File | null;
+                  if (!file || !file.size) {
+                    setAnimUploadError('Escolha um arquivo');
+                    return;
+                  }
+                  setAnimUploadError(null);
+                  const res = await fetch(`${API_BASE}/lab/animations`, {
+                    method: 'POST',
+                    body: fd,
+                  });
+                  if (!res.ok) {
+                    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+                    setAnimUploadError(body.detail ?? 'Falha no upload');
+                    return;
+                  }
+                  form.reset();
+                  await loadAnimCatalog();
+                }}
+              >
+                <input type="file" name="file" accept=".fbx,.glb,.vrma" required />
+                <input type="text" name="label" placeholder="Nome (ex: Comemorar)" required />
+                <select name="source" defaultValue="mixamo" className="gesture-editor__select">
+                  <option value="mixamo">Mixamo</option>
+                  <option value="blender">Blender (minhas)</option>
+                </select>
+                <input type="text" name="tags" placeholder="tags: comemorar, vitoria" />
+                <label className="avatar-lab__anim-loop">
+                  <input type="checkbox" name="loop" value="true" /> Loop
+                </label>
+                <button type="submit" className="avatar-lab__gesture-btn">
+                  Adicionar animação
+                </button>
+                {animUploadError && (
+                  <span className="avatar-lab__test-hint" role="alert">
+                    {animUploadError}
+                  </span>
+                )}
+              </form>
+
+              {(['mixamo', 'blender'] as const).map((src) => {
+                const items = animAssets.filter((a) => a.source === src);
+                return (
+                  <div key={src} className="avatar-lab__anim-group">
+                    <h4 className="avatar-lab__section-subtitle">
+                      {src === 'mixamo' ? 'Mixamo' : 'Blender (minhas)'}
+                    </h4>
+                    <div className="avatar-lab__gestures">
+                      {items.map((asset) => (
+                        <div key={asset.id} className="avatar-lab__anim-item">
+                          <button
+                            type="button"
+                            className={`avatar-lab__gesture-btn${playingAnimation === asset.url ? ' avatar-lab__btn--active' : ''}`}
+                            onClick={() => playAsset(asset)}
+                          >
+                            {asset.label}
+                          </button>
+                          {asset.tags.length > 0 && (
+                            <span className="avatar-lab__anim-tags">
+                              {asset.tags.map((t) => (
+                                <span key={t} className="avatar-lab__chip">
+                                  {t}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                          {!asset.builtin && (
+                            <>
+                              <button
+                                type="button"
+                                className="avatar-lab__icon-btn"
+                                onClick={() => void handleEditAnim(asset)}
+                                aria-label="Editar"
+                              >
+                                editar
+                              </button>
+                              <button
+                                type="button"
+                                className="avatar-lab__icon-btn"
+                                onClick={() => void handleDeleteAnim(asset)}
+                                aria-label="Excluir"
+                              >
+                                excluir
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      {items.length === 0 && (
+                        <p className="avatar-lab__test-hint">
+                          Nenhuma animação {src === 'mixamo' ? 'Mixamo' : 'do Blender'} ainda.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {playingAnimation && (
+                <button
+                  type="button"
+                  className="avatar-lab__gesture-btn"
+                  onClick={handleStopAnimation}
+                >
+                  Parar
+                </button>
               )}
             </section>
 
