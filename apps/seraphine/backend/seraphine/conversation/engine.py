@@ -19,6 +19,7 @@ from seraphine.memory.emotional_context import (
     record_emotional_context,
 )
 from seraphine.conversation.attention import AttentionModel
+from seraphine.lab.animation_prompt import build_animation_prompt_block
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.mood import MoodTracker
 from seraphine.memory.open_loops import OpenLoopsService
@@ -515,9 +516,10 @@ class ConversationEngine:
     ) -> None:
         self.llm = llm
         self.store = store
-        # Append the personality seed to the cached system prompt so it
-        # adds zero runtime cost on Anthropic (cacheable prefix).
-        self.system_prompt = system_prompt + _PERSONALITY_SEED
+        # Append the personality seed + animation-tag catalog to the cached
+        # system prompt so they add zero runtime cost on Anthropic (cacheable prefix).
+        _anim_block = build_animation_prompt_block() or ""
+        self.system_prompt = system_prompt + _PERSONALITY_SEED + _anim_block
         self.memory = memory
         self.tools = tools
         self.insight_engine = insight_engine
