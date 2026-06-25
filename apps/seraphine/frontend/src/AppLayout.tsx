@@ -2,7 +2,7 @@
  * AppLayout — shell with nav rail, top bar, overlays, always-mounted
  * ChatView, and view switching via activeView state.
  */
-import { Fragment, useCallback, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ViewTransition } from './utils/ViewTransition';
 import { ChatView } from './chat/ChatView';
@@ -253,6 +253,12 @@ export function AppLayout(): JSX.Element {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pause the avatar's render loop whenever it isn't visible (non-chat views).
+  // Re-applied when the controller becomes available so it starts correct.
+  useEffect(() => {
+    avatarCtrlRef.current?.setPauseReason('view', activeView !== 'chat');
+  }, [activeView, avatarController, avatarCtrlRef]);
 
   // Command palette action handler
   const handlePaletteAction = useCallback((action: string) => {
