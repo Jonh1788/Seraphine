@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from seraphine.config import settings
 from seraphine.conversation.audio_engine import AudioEngine
 from seraphine.conversation.engine import ConversationEngine
-from llm_adapters.client import OllamaClient, OpenAICompatClient
 from seraphine.memory.embeddings import OllamaEmbeddings
 from seraphine.memory.manager import MemoryManager
 from seraphine.memory.store import MemoryStore
@@ -108,56 +107,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await store.ensure_schema()
     telemetry_service = TelemetryService(store)
 
-    if settings.llm_backend in ("anthropic", "claude_max"):
-        from llm_adapters.anthropic import AnthropicClient
+    def _telemetry_sink(rec: dict) -> None:
+        # Fire-and-forget: telemetry must add ZERO latency to a turn.
+        try:
+            import asyncio as _aio
+            _aio.create_task(telemetry_service.record(
+                backend=rec.get("backend", "?"), model=rec.get("model", "?"),
+                feature="chat",
+                input_tokens=rec.get("input_tokens", 0),
+                output_tokens=rec.get("output_tokens", 0),
+            ))
+        except Exception:
+            pass
 
-        if settings.llm_backend == "claude_max":
-            from llm_adapters.keychain import get_access_token, KeychainError
-
-            try:
-                api_key = get_access_token()
-            except KeychainError as e:
-                raise RuntimeError(
-                    f"SERAPHINE_LLM_BACKEND=claude_max but Keychain read failed: {e}. "
-                    f"Make sure Claude Code is installed and you're logged in."
-                ) from e
-            logger.info(
-                "Using Claude Max backend via Keychain OAuth (model=%s)",
-                settings.anthropic_model,
-            )
-        else:
-            if not settings.anthropic_api_key:
-                raise RuntimeError(
-                    "SERAPHINE_LLM_BACKEND=anthropic but SERAPHINE_ANTHROPIC_API_KEY is empty"
-                )
-            api_key = settings.anthropic_api_key
-            logger.info(
-                "Using Anthropic API backend (model=%s)", settings.anthropic_model
-            )
-        def _telemetry_sink(rec: dict) -> None:
-            # Fire-and-forget: telemetry must add ZERO latency to a turn.
-            try:
-                import asyncio as _aio
-                _aio.create_task(telemetry_service.record(
-                    backend=rec.get("backend", "?"), model=rec.get("model", "?"),
-                    feature="chat",
-                    input_tokens=rec.get("input_tokens", 0),
-                    output_tokens=rec.get("output_tokens", 0),
-                ))
-            except Exception:
-                pass
-
-        llm = AnthropicClient(
-            api_key=api_key,
-            model=settings.anthropic_model,
-            base_url=settings.anthropic_base_url,
-            telemetry=_telemetry_sink,
-        )
-    elif settings.llm_backend == "openai":
-        llm = OpenAICompatClient(settings.llm_base_url, settings.llm_model)
-        logger.info("Using OpenAI-compatible backend (vMLX/LM Studio) at %s", settings.llm_base_url)
-    else:
-        llm = OllamaClient(settings.ollama_base_url, settings.llm_model)
+    from seraphine.llm.factory import build_engine
+    llm, engine_info = build_engine(settings, telemetry=_telemetry_sink)
     try:
         from seraphine.conversation.engine import DEFAULT_SYSTEM_PROMPT
         await llm.warmup(system_prompt=DEFAULT_SYSTEM_PROMPT)
@@ -846,6 +810,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.store = store
     app.state.stt = stt
     app.state.llm = llm
+    app.state.engine_info = engine_info
     # 033 — proxy broker for tool_proxy_request/response round-trips.
     from seraphine.ws.proxy_broker import ProxyBroker
     app.state.proxy_broker = ProxyBroker()
