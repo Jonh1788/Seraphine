@@ -19,7 +19,7 @@ import {
   getWeeklyReport,
 } from '../insights';
 import type { WeeklyReport } from '../insights';
-import { useFocusTimer } from '../focus/useFocusTimer';
+import { useFocus } from '../focus/FocusContext';
 import { listHabits } from '../habits/api';
 import type { HabitWithStatus } from '../habits/types';
 
@@ -364,7 +364,7 @@ function WellnessCard(): JSX.Element {
 
 export function DashboardView({ onNavigate, connected }: DashboardViewProps): JSX.Element {
   const [data, setData] = useState<DashboardSummary | null>(null);
-  const [focusState, focusActions] = useFocusTimer();
+  const [focusState, focusActions] = useFocus();
   const [habits, setHabits] = useState<HabitWithStatus[]>([]);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [workBriefing, setWorkBriefing] = useState<{
