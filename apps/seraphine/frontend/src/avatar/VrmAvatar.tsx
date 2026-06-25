@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { VrmAvatarController } from "./VrmAvatarController";
 
 export interface VrmAvatarProps {
@@ -17,6 +17,7 @@ export interface VrmAvatarProps {
 export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
   const { avatarUrl, width, height, onReady, cameraControls, cameraMinDistance, cameraMaxDistance } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [recreateKey, setRecreateKey] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -26,6 +27,8 @@ export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
       minDistance: cameraMinDistance,
       maxDistance: cameraMaxDistance,
     });
+    // After a real WebGL context loss, three's GL state is unusable — rebuild.
+    controller.onContextRestoreNeeded = () => setRecreateKey((k) => k + 1);
     let cancelled = false;
     controller
       .loadAvatar(avatarUrl)
@@ -41,7 +44,7 @@ export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
       cancelled = true;
       controller.dispose();
     };
-  }, [avatarUrl, onReady, cameraControls, cameraMinDistance, cameraMaxDistance]);
+  }, [avatarUrl, onReady, cameraControls, cameraMinDistance, cameraMaxDistance, recreateKey]);
 
   return (
     <div id="seraphine-avatar-root" role="img" aria-label="Seraphine avatar">

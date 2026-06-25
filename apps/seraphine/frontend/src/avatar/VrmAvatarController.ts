@@ -174,6 +174,21 @@ export class VrmAvatarController implements AvatarAdapter {
   private readonly onVisibilityChange = (): void => {
     this.setPauseReason("hidden", document.hidden);
   };
+  private readonly canvas: HTMLCanvasElement;
+  /** Optional: React asks to recreate the controller after context loss. */
+  public onContextRestoreNeeded: (() => void) | null = null;
+  private readonly onContextLost = (e: Event): void => {
+    // Prevent the default "context is gone forever" behavior so the browser
+    // will attempt a restore, and stop rendering into the dead context.
+    e.preventDefault();
+    this.setPauseReason("context", true);
+  };
+  private readonly onContextRestored = (): void => {
+    // three's internal GL state is invalid after a real loss; the safest path
+    // is a full recreate. Signal React; if no handler is wired, just resume.
+    if (this.onContextRestoreNeeded) this.onContextRestoreNeeded();
+    else this.setPauseReason("context", false);
+  };
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
   // @ts-expect-error write-only field kept for setEmotion() backward compat
   private _currentEmotion: string | null = null;
@@ -286,7 +301,9 @@ export class VrmAvatarController implements AvatarAdapter {
     canvas: HTMLCanvasElement,
     opts?: { cameraControls?: boolean; minDistance?: number; maxDistance?: number },
   ) {
-    void canvas; // retained by renderer
+    this.canvas = canvas;
+    canvas.addEventListener("webglcontextlost", this.onContextLost);
+    canvas.addEventListener("webglcontextrestored", this.onContextRestored);
     this.scene = new Scene();
 
     const width = canvas.width || 400;
@@ -1855,6 +1872,8 @@ export class VrmAvatarController implements AvatarAdapter {
     if (this.disposed) return;
     this.disposed = true;
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
