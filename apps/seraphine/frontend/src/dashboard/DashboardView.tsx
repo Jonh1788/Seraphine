@@ -2,7 +2,6 @@ import './obsidian.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../api';
 import { AlertTriangleIcon, SparkleIcon } from '../icons/Icons';
-import { VrmAvatar } from '../avatar/VrmAvatar';
 import {
   addWaterIntake,
   getWaterProfile,
@@ -101,16 +100,6 @@ interface DashboardViewProps {
   connected: boolean;
 }
 
-const AVATAR_LS_KEY = 'seraphine.avatarUrl';
-const DEFAULT_AVATAR = '/avatars/seraphine.vrm';
-
-function resolveAvatarUrl(): string {
-  try {
-    return localStorage.getItem(AVATAR_LS_KEY) || DEFAULT_AVATAR;
-  } catch {
-    return DEFAULT_AVATAR;
-  }
-}
 
 function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -374,7 +363,6 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
   } | null>(null);
   const [workSuggestions, setWorkSuggestions] = useState<WorkSuggestion[]>([]);
   const [workToday, setWorkToday] = useState<WorkToday | null>(null);
-  const [avatarUrl] = useState<string>(() => resolveAvatarUrl());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -621,12 +609,6 @@ export function DashboardView({ onNavigate, connected }: DashboardViewProps): JS
 
         {/* --- Hero card --- */}
         <div className="dash-hero">
-          <div className="dash-hero__avatar">
-            <div className="dash-hero__avatar-glow" />
-            <div className="dash-hero__avatar-slot">
-              <VrmAvatar avatarUrl={avatarUrl} width={120} height={150} />
-            </div>
-          </div>
           <div className="dash-hero__body">
             <div className="dash-hero__greeting">{heroGreeting}</div>
             <div className="dash-hero__summary">
