@@ -218,6 +218,11 @@ _RE_LEFTOVER_NOISE = re.compile(r"[`~]+")
 _RE_AUDIO_TAG = re.compile(r"\[[a-zA-Z][a-zA-Z ]{0,29}\](?!\()")
 
 
+# Avatar animation triggers like [anim:acenar] — never spoken; stripped
+# unconditionally (unlike ElevenLabs audio tags, which v3 renders).
+_RE_ANIM_TAG = re.compile(r"\[anim:[a-z0-9_-]+\]", re.IGNORECASE)
+
+
 def strip_markdown_for_tts(text: str, *, strip_audio_tags: bool = False) -> str:
     """Return a TTS-friendly plain-text version of `text`.
 
@@ -289,6 +294,8 @@ def strip_markdown_for_tts(text: str, *, strip_audio_tags: bool = False) -> str:
     # Anything that LOOKS like markdown noise but slipped past the
     # structural passes (lone backticks/asterisks/etc.).
     s = _RE_LEFTOVER_NOISE.sub("", s)
+    # Animation triggers are control tokens, never speech — always remove.
+    s = _RE_ANIM_TAG.sub("", s)
     # Strip ElevenLabs audio tags when the TTS model doesn't support them.
     if strip_audio_tags:
         s = _RE_AUDIO_TAG.sub("", s)
