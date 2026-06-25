@@ -1894,5 +1894,9 @@ export class VrmAvatarController implements AvatarAdapter {
     });
     this.scene.clear();
     this.renderer.dispose();
+    // dispose() frees GPU programs but NOT the WebGL context itself.
+    // Without this, repeated mount/unmount + window hide/show cycles leak
+    // contexts until the WebView's ~16-context cap stalls creation (freeze).
+    this.renderer.forceContextLoss();
   }
 }
