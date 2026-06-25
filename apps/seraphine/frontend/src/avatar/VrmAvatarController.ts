@@ -166,6 +166,29 @@ export class VrmAvatarController implements AvatarAdapter {
    * discarded on resume so the animation doesn't jump.
    */
   private renderPaused = false;
+  /** Active pause reasons; the loop is paused while any is present.
+   *  Sources: 'manual' (companion drag), 'hidden' (window hidden),
+   *  'view' (non-chat view), 'context' (WebGL context lost). */
+  private readonly pauseReasons = new Set<string>();
+  /** Bound so we can removeEventListener in dispose(). */
+  private readonly onVisibilityChange = (): void => {
+    this.setPauseReason("hidden", document.hidden);
+  };
+  private readonly canvas: HTMLCanvasElement;
+  /** Optional: React asks to recreate the controller after context loss. */
+  public onContextRestoreNeeded: (() => void) | null = null;
+  private readonly onContextLost = (e: Event): void => {
+    // Prevent the default "context is gone forever" behavior so the browser
+    // will attempt a restore, and stop rendering into the dead context.
+    e.preventDefault();
+    this.setPauseReason("context", true);
+  };
+  private readonly onContextRestored = (): void => {
+    // three's internal GL state is invalid after a real loss; the safest path
+    // is a full recreate. Signal React; if no handler is wired, just resume.
+    if (this.onContextRestoreNeeded) this.onContextRestoreNeeded();
+    else this.setPauseReason("context", false);
+  };
   /** @deprecated Kept for backward compat with old setEmotion() calls. */
   // @ts-expect-error write-only field kept for setEmotion() backward compat
   private _currentEmotion: string | null = null;
@@ -278,7 +301,9 @@ export class VrmAvatarController implements AvatarAdapter {
     canvas: HTMLCanvasElement,
     opts?: { cameraControls?: boolean; minDistance?: number; maxDistance?: number },
   ) {
-    void canvas; // retained by renderer
+    this.canvas = canvas;
+    canvas.addEventListener("webglcontextlost", this.onContextLost);
+    canvas.addEventListener("webglcontextrestored", this.onContextRestored);
     this.scene = new Scene();
 
     const width = canvas.width || 400;
@@ -339,6 +364,10 @@ export class VrmAvatarController implements AvatarAdapter {
 
     this.clock = new Clock();
     this.nextBlinkAt = this.scheduleBlink(0);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    // If we mount while already hidden, start paused.
+    if (document.hidden) this.pauseReasons.add("hidden");
+    this.renderPaused = this.pauseReasons.size > 0;
     this.startLoop();
   }
 
@@ -498,14 +527,23 @@ export class VrmAvatarController implements AvatarAdapter {
     this.idleLookSpeed = 1.5 + Math.random() * 1.0;
   }
 
-  /** Pause/resume the per-frame work without killing the RAF chain. */
-  public setRenderPaused(paused: boolean): void {
-    if (this.renderPaused === paused) return;
-    this.renderPaused = paused;
-    if (!paused) {
+  /** Pause/resume a single reason. The loop runs only when no reason is set. */
+  public setPauseReason(reason: string, paused: boolean): void {
+    const wasPaused = this.pauseReasons.size > 0;
+    if (paused) this.pauseReasons.add(reason);
+    else this.pauseReasons.delete(reason);
+    const nowPaused = this.pauseReasons.size > 0;
+    if (wasPaused === nowPaused) return;
+    this.renderPaused = nowPaused;
+    if (!nowPaused) {
       // Discard accumulated pause time so animations don't jump.
       this.clock.getDelta();
     }
+  }
+
+  /** Backwards-compatible manual pause (used by the avatar-companion drag). */
+  public setRenderPaused(paused: boolean): void {
+    this.setPauseReason("manual", paused);
   }
 
   private startLoop(): void {
@@ -1833,6 +1871,9 @@ export class VrmAvatarController implements AvatarAdapter {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -1872,5 +1913,9 @@ export class VrmAvatarController implements AvatarAdapter {
     });
     this.scene.clear();
     this.renderer.dispose();
+    // dispose() frees GPU programs but NOT the WebGL context itself.
+    // Without this, repeated mount/unmount + window hide/show cycles leak
+    // contexts until the WebView's ~16-context cap stalls creation (freeze).
+    this.renderer.forceContextLoss();
   }
 }

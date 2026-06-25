@@ -29,3 +29,10 @@ export function useAppRefs(): AppRefs {
   if (!ctx) throw new Error('useAppRefs must be used within RefsProvider');
   return ctx;
 }
+
+/** Like {@link useAppRefs} but returns null instead of throwing when no
+ *  RefsProvider is mounted. Used by FocusProvider so it can render in
+ *  isolation (e.g. unit tests) without requiring the full app shell. */
+export function useOptionalAppRefs(): AppRefs | null {
+  return useContext(RefsContext);
+}

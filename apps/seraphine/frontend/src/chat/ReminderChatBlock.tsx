@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { BellIcon, ClockIcon, CalendarIcon, RepeatIcon } from '../icons/Icons';
 
 export interface ReminderData {
@@ -15,7 +16,7 @@ const RECURRING_LABELS: Record<string, string> = {
   hourly: 'A cada hora',
 };
 
-export function ReminderChatBlock({ reminder }: { reminder: ReminderData }): JSX.Element {
+function ReminderChatBlockImpl({ reminder }: { reminder: ReminderData }): JSX.Element {
   // Format date as DD/MM
   let dateLabel = '';
   if (reminder.date && reminder.date.length >= 10) {
@@ -64,3 +65,5 @@ export function ReminderChatBlock({ reminder }: { reminder: ReminderData }): JSX
     </div>
   );
 }
+
+export const ReminderChatBlock = memo(ReminderChatBlockImpl);

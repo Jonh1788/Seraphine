@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { NotesIcon } from '../icons/Icons';
 
 export interface NoteChatBlockData {
@@ -35,7 +36,7 @@ function openInNotesView(id: string): void {
   window.location.assign(url.pathname + url.search);
 }
 
-export function NoteChatBlock({ note }: NoteChatBlockProps): JSX.Element {
+function NoteChatBlockImpl({ note }: NoteChatBlockProps): JSX.Element {
   const snippet = preview(note.content);
   const title = note.title?.trim() || 'Sem titulo';
 
@@ -64,3 +65,5 @@ export function NoteChatBlock({ note }: NoteChatBlockProps): JSX.Element {
     </button>
   );
 }
+
+export const NoteChatBlock = memo(NoteChatBlockImpl);

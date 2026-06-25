@@ -1,5 +1,5 @@
 import './obsidian.css';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
@@ -344,7 +344,7 @@ function timeGreeting(): string {
   return 'Boa noite';
 }
 
-export function ChatView({
+function ChatViewImpl({
   ws,
   status,
   speak = false,
@@ -1275,6 +1275,7 @@ export function ChatView({
                             />
                           ))}
                           {t.tasks && t.tasks.length > 0 && (
+                            // TODO: stabilize prop onOpenEditor (inline arrow) before memo helps — TaskChatBlock left unwrapped
                             <TaskChatBlock
                               tasks={t.tasks}
                               onOpenEditor={(id) => setEditingChatTaskId(id)}
@@ -1289,6 +1290,7 @@ export function ChatView({
                           {t.notes && t.notes.map((note, ni) => (
                             <NoteChatBlock key={`note-${ni}`} note={note} />
                           ))}
+                          {/* TODO: stabilize prop onSendMessage (inline arrow) before memo helps — MusicChatBlock left unwrapped */}
                           {t.music && t.music.map((card, mi) => (
                             <MusicChatBlock
                               key={`music-${mi}`}
@@ -1589,3 +1591,5 @@ export function ChatView({
     </div>
   );
 }
+
+export const ChatView = memo(ChatViewImpl);
