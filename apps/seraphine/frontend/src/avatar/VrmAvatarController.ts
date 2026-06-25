@@ -274,7 +274,10 @@ export class VrmAvatarController implements AvatarAdapter {
     fullBody: { px: 0, py: 1.0,  pz: 2.5,  lx: 0, ly: 0.9,  lz: 0, fov: 30 },
   };
 
-  constructor(canvas: HTMLCanvasElement, opts?: { cameraControls?: boolean }) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    opts?: { cameraControls?: boolean; minDistance?: number; maxDistance?: number },
+  ) {
     void canvas; // retained by renderer
     this.scene = new Scene();
 
@@ -316,8 +319,8 @@ export class VrmAvatarController implements AvatarAdapter {
       controls.dampingFactor = 0.08;
       controls.enablePan = false; // keep her centered
       controls.enableZoom = true;
-      controls.minDistance = 0.35;
-      controls.maxDistance = 4.0;
+      controls.minDistance = opts.minDistance ?? 0.35;
+      controls.maxDistance = opts.maxDistance ?? 4.0;
       // Don't let the user orbit under the floor or straight over the head.
       controls.minPolarAngle = 0.35 * Math.PI;
       controls.maxPolarAngle = 0.62 * Math.PI;

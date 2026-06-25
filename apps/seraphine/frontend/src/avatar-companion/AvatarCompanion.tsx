@@ -534,6 +534,8 @@ export function AvatarCompanion(): JSX.Element {
         width={size.w}
         height={size.h}
         onReady={handleReady}
+        cameraControls
+        cameraMaxDistance={8}
       />
       {/* Transparent drag handle across the top ~40px — drag here to move */}
       <div
