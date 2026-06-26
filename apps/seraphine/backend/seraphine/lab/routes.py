@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +17,15 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/lab", tags=["lab"])
 logger = logging.getLogger(__name__)
 
-# Resolve data dir relative to the project root (apps/seraphine/data/lab/).
-_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "lab"
+# Resolve data dir. Defaults to the source-relative path for local dev
+# (apps/seraphine/data/lab/), but on the VPS this MUST point at the
+# persistent /data volume (SERAPHINE_LAB_DATA_DIR=/data/lab) — otherwise
+# uploaded animations + the gesture/animation manifests live in the
+# ephemeral image layer and vanish on every `docker compose up --build`.
+_DATA_DIR = Path(
+    os.environ.get("SERAPHINE_LAB_DATA_DIR")
+    or str(Path(__file__).resolve().parents[3] / "data" / "lab")
+)
 _GESTURES_FILE = _DATA_DIR / "gestures.json"
 
 _ANIMATIONS_DIR = _DATA_DIR / "animations"
