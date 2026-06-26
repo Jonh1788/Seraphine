@@ -50,6 +50,10 @@ services:
       SERAPHINE_SQLITE_PATH: /data/seraphine.sqlite
       SERAPHINE_CHROMA_PATH: /data/chroma
       SERAPHINE_SKILLS_DIR: /data/skills
+      # Lab gestures + uploaded animations (manifest + .fbx files) must live
+      # on the persistent volume, not the ephemeral image layer, or they
+      # vanish on every rebuild. See lab/routes.py _DATA_DIR.
+      SERAPHINE_LAB_DATA_DIR: /data/lab
       SERAPHINE_GOOGLE_TOKEN_PATH: /data/google-token.json
       SERAPHINE_LLM_BACKEND: anthropic
       SERAPHINE_ANTHROPIC_BASE_URL: http://cliproxy:8317
