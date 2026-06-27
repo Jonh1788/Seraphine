@@ -1165,6 +1165,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("freshness archive registration failed")
 
+    # Anexos: TTL cleanup diário do staging store.
+    try:
+        if proactive_scheduler is not None and proactive_scheduler.enabled:
+            from seraphine.attachments.store import cleanup as _attachments_cleanup
+
+            def _attachments_housekeeping_tick() -> int:
+                return _attachments_cleanup(ttl_hours=24)
+
+            proactive_scheduler._sched.add_job(
+                _attachments_housekeeping_tick,
+                "cron", hour=4, minute=45,
+                id="attachments_housekeeping",
+                name="attachments_housekeeping",
+            )
+            logger.info("attachments housekeeping cron registered (04:45 daily)")
+    except Exception:
+        logger.exception("attachments housekeeping registration failed")
+
     logger.info("Seraphine lifespan started (model=%s)", settings.llm_model)
     try:
         yield
@@ -1274,6 +1292,9 @@ def create_app() -> FastAPI:
 
     from seraphine.images.routes import router as images_router
     app.include_router(images_router)
+
+    from seraphine.attachments.routes import router as attachments_router
+    app.include_router(attachments_router)
 
     from seraphine.background_tasks.routes import router as bg_tasks_router
     app.include_router(bg_tasks_router)
