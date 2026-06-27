@@ -81,6 +81,22 @@ def _convert_content_part(part: dict[str, Any]) -> dict[str, Any]:
         return {"type": "text", "text": part.get("text", "")}
     if ptype == "image":
         return part
+    if ptype in ("pdf", "document"):
+        url = part.get("data_url") or part.get("url") or ""
+        data = ""
+        if isinstance(url, str) and url.startswith("data:"):
+            try:
+                _header, data = url.split(",", 1)
+            except ValueError:
+                data = ""
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": data,
+            },
+        }
     if ptype == "image_url":
         url_obj = part.get("image_url") or {}
         url = url_obj.get("url", "") if isinstance(url_obj, dict) else str(url_obj)

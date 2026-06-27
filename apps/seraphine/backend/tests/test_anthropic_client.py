@@ -442,3 +442,22 @@ async def test_tool_call_json_raises_when_no_tool_use_block() -> None:
             await client.tool_call_json(system="r", user="u", tool=tool)
     finally:
         await client.aclose()
+
+
+def test_convert_pdf_part_to_document_block():
+    from llm_adapters.anthropic import _convert_content_part
+
+    part = {"type": "pdf", "data_url": "data:application/pdf;base64,QUJD"}
+    out = _convert_content_part(part)
+    assert out == {
+        "type": "document",
+        "source": {"type": "base64", "media_type": "application/pdf", "data": "QUJD"},
+    }
+
+
+def test_convert_pdf_part_without_dataurl_is_empty_data():
+    from llm_adapters.anthropic import _convert_content_part
+
+    out = _convert_content_part({"type": "pdf", "data_url": "garbage"})
+    assert out["type"] == "document"
+    assert out["source"]["data"] == ""
