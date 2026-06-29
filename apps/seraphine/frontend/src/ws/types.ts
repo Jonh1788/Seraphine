@@ -30,6 +30,8 @@ export interface UserMessage {
   speak?: boolean;
   /** Base64 data-URL images attached to this message (vision support). */
   images?: string[];
+  /** Staged attachments (image/PDF) referenced by id; resolved server-side. */
+  attachments?: { id: string; kind: string; mime: string; filename: string }[];
 }
 
 export interface TokenMessage {
