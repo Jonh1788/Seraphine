@@ -815,6 +815,7 @@ class ConversationEngine:
         *,
         think: bool = False,
         images: list[str] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[StreamEvent]:
         # Default to a never-set event so the rest of the function can
@@ -1026,19 +1027,29 @@ class ConversationEngine:
         compacted = await self._compact_context(conversation_id, prior)
         messages.extend(compacted)
 
-        # Build vision-format content when images are attached
-        if images:
-            parts: list[dict[str, Any]] = [{"type": "text", "text": content}]
-            for img_url in images:
-                parts.append({"type": "image_url", "image_url": {"url": img_url}})
-            msg_content: str | list[dict[str, Any]] = parts
-        else:
-            msg_content = content
+        from seraphine.config import settings as _prov_settings
+        from seraphine.attachments.content import build_user_content
+
+        # Resolve o provider UMA vez, antes de montar o conteúdo, pra decidir
+        # bloco nativo (Claude) vs fallback de texto (OpenRouter/local).
+        chat_llm, or_model = await self._resolve_chat_llm()
+        use_native = (or_model is None) and (
+            _prov_settings.llm_backend in ("anthropic", "claude_max")
+        )
+        vision_llm = self.llm if hasattr(self.llm, "_client") else None
+
+        msg_content = await build_user_content(
+            content,
+            images=images,
+            attachments=attachments,
+            use_native=use_native,
+            vision_llm=vision_llm,
+        )
         messages.append(ChatMessage(role="user", content=msg_content))
 
-        # Expose the user's attached images to opt-in tools (e.g.
-        # `remember_my_appearance`) for the duration of this turn. Reset
-        # in `finally` so concurrent turns / future turns aren't poisoned.
+        # Expose images to opt-in tools for this turn (ContextVar).
+        # v1: só imagens legadas do chat alimentam tools consumidoras; anexos
+        # por id ainda não (fora de escopo).
         _images_token = _current_user_images.set(list(images or []))
 
         user_turn = await self.store.add_turn(conversation_id, "user", content)
@@ -1058,7 +1069,6 @@ class ConversationEngine:
         # cliproxy is the default; ``or_model`` is set only when the user opted
         # into an OpenRouter model AND a key is configured. Resolution never
         # raises — it falls back to (self.llm, None) on any error.
-        chat_llm, or_model = await self._resolve_chat_llm()
         # Refresh the cost-guard signal once per turn (cheap aggregate; never
         # raises). Skips entirely when the cap is disabled or no telemetry.
         from seraphine.config import settings as _routing_settings

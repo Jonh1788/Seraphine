@@ -771,6 +771,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                 speak = bool(payload.get("speak", False))
                 think = bool(payload.get("think", False))
                 images = payload.get("images") or None
+                attachments = payload.get("attachments") or None
                 audio_meta = payload.get("audio_meta") or None
 
                 # 023-B: translate prosody into a prompt hint — engine will
@@ -898,6 +899,7 @@ async def conversation_ws(ws: WebSocket) -> None:
                         content,
                         think=think,
                         images=images,
+                        attachments=attachments,
                         cancel_event=turn_cancel_event,
                     ):
                         etype = getattr(event, "type", None)

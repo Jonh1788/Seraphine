@@ -31,6 +31,7 @@ dependencies = [
     "core-db",
     "mod-tasks",
     "mod-finance",
+    "mod-vision",
     "google-integration",
 ]
 
@@ -39,6 +40,7 @@ llm-adapters = { workspace = true }
 core-db = { workspace = true }
 mod-tasks = { workspace = true }
 mod-finance = { workspace = true }
+mod-vision = { workspace = true }
 google-integration = { workspace = true }
 
 [project.optional-dependencies]

@@ -34,6 +34,7 @@ import { TriageWizard } from '../cv-triage/TriageWizard';
 import { ActiveJobsPanel } from '../cv-triage/ActiveJobsPanel';
 import { useAnimationCatalog, resolveAnimationTag } from '../avatar/animationCatalog';
 import { extractAnimTags, stripAnimTags } from './animTag';
+import { usePendingAttachments } from '../attachments/usePendingAttachments';
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -408,6 +409,7 @@ function ChatViewImpl({
 
   const [streamingTurnId, setStreamingTurnId] = useState<string | null>(null);
   const [pendingImages, setPendingImages] = useState<{name: string; dataUrl: string}[]>([]);
+  const attach = usePendingAttachments();
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -910,12 +912,15 @@ function ChatViewImpl({
   }, [turns]);
 
   const isStreaming = streamingTurnId !== null;
-  const canSend = status === 'connected' && !isStreaming && (draft.trim().length > 0 || pendingImages.length > 0);
+  const canSend = status === 'connected' && !isStreaming && (draft.trim().length > 0 || pendingImages.length > 0 || attach.pending.length > 0);
 
   const send = (): void => {
     if (!canSend) return;
     const content = draft.trim();
     const images = pendingImages.length > 0 ? pendingImages.map((i) => i.dataUrl) : undefined;
+    const atts = attach.pending.length > 0
+      ? attach.pending.map((a) => ({ id: a.id, kind: a.kind, mime: a.mime, filename: a.filename }))
+      : undefined;
     setTurns((prev) => [
       ...prev,
       { id: `u-${Date.now()}`, role: 'user', content: content || '(imagem)', images },
@@ -927,9 +932,11 @@ function ChatViewImpl({
       speak,
       think,
       ...(images ? { images } : {}),
+      ...(atts ? { attachments: atts } : {}),
     });
     setDraft('');
     setPendingImages([]);
+    attach.clear();
 
     // SDD 016-D: briefly compress the input pill as a send feedback pulse.
     const el = chatInputRef.current;
@@ -943,6 +950,10 @@ function ChatViewImpl({
     const files = e.target.files;
     if (!files) return;
     Array.from(files).forEach((file) => {
+      if (file.type === 'application/pdf') {
+        void attach.add(file);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -1027,13 +1038,7 @@ function ChatViewImpl({
         };
         reader.readAsDataURL(file);
       } else if (file.type === 'application/pdf') {
-        // 039 — PDFs: inline a hint that points at the local path so
-        // the LLM calls document_read on the file (via Mac proxy).
-        // The browser doesn't expose the host path, so we just mention
-        // the name; user can clarify or drop the full path in text.
-        setDraft((prev) =>
-          prev + (prev ? '\n' : '') + `[PDF: ${file.name}] — chama document_read quando pedir pra resumir`,
-        );
+        void attach.add(file);
       }
     }
   }, []);
@@ -1401,6 +1406,26 @@ function ChatViewImpl({
         </div>
       )}
 
+      {/* Pending PDF chips strip */}
+      {attach.pending.length > 0 && (
+        <div className="image-preview-strip">
+          {attach.pending.map((a) => (
+            <div key={a.id} className="image-preview">
+              <span className="image-preview__badge">PDF</span>
+              <span className="image-preview__name">{a.filename}</span>
+              <button
+                type="button"
+                className="image-preview__remove"
+                onClick={() => attach.remove(a.id)}
+                aria-label={`Remover ${a.filename}`}
+              >
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {realtimeActive && (
         <RealtimeController
           ws={ws}
@@ -1474,7 +1499,7 @@ function ChatViewImpl({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf"
               multiple
               className="visually-hidden"
               onChange={handleFilesSelected}
