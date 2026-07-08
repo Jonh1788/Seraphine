@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # fingerprint short-circuit, so a daily cadence is plenty.
     memory_audit_interval_s: int = 86400  # 24h
 
+    # Scheduled read-only "LLM wiki" build pass (Karpathy pattern): synthesizes
+    # /data/wiki markdown from new deepsearch runs + captured attachments +
+    # people. Daily cadence; watermark short-circuits when nothing is new.
+    wiki_build_interval_s: int = 86400  # 24h
+
     # Browser automation — leave url empty to disable
     browser_agent_url: str = ""  # "http://localhost:3002"
 

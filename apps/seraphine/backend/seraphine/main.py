@@ -1072,6 +1072,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         memory_audit_task = asyncio.create_task(_memory_audit_loop())
 
+    wiki_build_task: asyncio.Task[None] | None = None
+    async def _wiki_build_loop() -> None:
+        from seraphine.wiki import builder as _wiki_builder
+        interval = max(60, int(settings.wiki_build_interval_s))
+        while True:
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            try:
+                result = await _wiki_builder.run_once(store, llm, deepsearch_service)
+                if result.get("sources_ingested") or result.get("people_updated"):
+                    logger.info(
+                        "wiki build: %s sources, %s people",
+                        result.get("sources_ingested", 0), result.get("people_updated", 0),
+                    )
+            except Exception:
+                logger.exception("wiki build loop iteration failed")
+
+    wiki_build_task = asyncio.create_task(_wiki_build_loop())
+
     # ------------------------------------------------------------------
     # Background insights refresh loop — every 6 hours.
     # Runs once at startup so /insights is warm on first request.
@@ -1202,6 +1223,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             memory_audit_task.cancel()
             try:
                 await memory_audit_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if wiki_build_task is not None:
+            wiki_build_task.cancel()
+            try:
+                await wiki_build_task
             except (asyncio.CancelledError, Exception):
                 pass
         if insights_refresh_task is not None:
