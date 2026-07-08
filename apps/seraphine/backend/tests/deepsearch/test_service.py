@@ -185,6 +185,45 @@ async def test_set_config_roundtrips(store, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_deep_run_schedules_wiki_ingest(store, monkeypatch, tmp_path):
+    monkeypatch.setenv("SERAPHINE_WIKI_DATA_DIR", str(tmp_path))
+    _patch_engine(monkeypatch)
+    seen = []
+
+    async def _spy(run, s, l):
+        seen.append(run.get("mode"))
+        return []
+
+    monkeypatch.setattr("seraphine.wiki.builder.ingest_deepsearch_run", _spy)
+    svc = _make_service(store)
+    run_id = await svc.start_run("q", "deep")
+    await _await_run(svc, run_id)
+    # drain the fire-and-forget ingest task(s) deterministically
+    if svc._wiki_ingest_tasks:
+        await asyncio.gather(*list(svc._wiki_ingest_tasks))
+    assert seen == ["deep"]
+
+
+@pytest.mark.asyncio
+async def test_quick_run_does_not_schedule_wiki_ingest(store, monkeypatch, tmp_path):
+    monkeypatch.setenv("SERAPHINE_WIKI_DATA_DIR", str(tmp_path))
+    _patch_engine(monkeypatch)
+    seen = []
+
+    async def _spy(run, s, l):
+        seen.append(run.get("mode"))
+        return []
+
+    monkeypatch.setattr("seraphine.wiki.builder.ingest_deepsearch_run", _spy)
+    svc = _make_service(store)
+    run_id = await svc.start_run("q", "quick")
+    await _await_run(svc, run_id)
+    if svc._wiki_ingest_tasks:
+        await asyncio.gather(*list(svc._wiki_ingest_tasks))
+    assert seen == []
+
+
+@pytest.mark.asyncio
 async def test_list_models_cliproxy_curated_no_key(store, monkeypatch):
     svc = _make_service(store)
     models = await svc.list_models()

@@ -81,6 +81,10 @@ class DeepSearchService:
         # first ``get()`` steal events and starve the others).
         self._subs: dict[str, set[asyncio.Queue]] = {}
         self._tasks: dict[str, asyncio.Task] = {}
+        # Fire-and-forget wiki-ingest tasks (Deep runs). Held here so the event
+        # loop keeps a strong ref (create_task results are GC-eligible otherwise);
+        # each removes itself on completion.
+        self._wiki_ingest_tasks: set[asyncio.Task] = set()
 
     # -- config ------------------------------------------------------------
 
@@ -405,6 +409,26 @@ class DeepSearchService:
             sources = emit._state.get("sources") or []  # type: ignore[attr-defined]
 
         await self._finish(run_id, status, report, sources)
+
+        # On-demand wiki ingest: a completed Deep run composes into the wiki now
+        # (fire-and-forget). Quick runs and non-done outcomes are skipped. The
+        # nightly pass is the safety-net for anything missed here.
+        if mode == "deep" and status == "done":
+            async def _wiki_ingest() -> None:
+                try:
+                    from seraphine.wiki import files as _wiki_files
+                    from seraphine.wiki.builder import ingest_deepsearch_run
+                    run = await self.get_run(run_id)
+                    if run:
+                        touched = await ingest_deepsearch_run(run, self.store, self.llm)
+                        if touched:
+                            _wiki_files.write_index()
+                except Exception:
+                    logger.exception("wiki on-demand ingest failed for %s", run_id)
+
+            t = asyncio.create_task(_wiki_ingest())
+            self._wiki_ingest_tasks.add(t)
+            t.add_done_callback(self._wiki_ingest_tasks.discard)
 
     async def _finish(
         self,
