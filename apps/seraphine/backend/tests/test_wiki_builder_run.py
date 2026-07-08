@@ -36,11 +36,15 @@ async def test_run_once_ingests_deepsearch_and_advances_watermark(tmp_path, monk
         {"id": "r0", "query": "velho", "report": "# Velho", "status": "done", "created_at": "2020-01-01T00:00:00+00:00"},
     ])
     llm = _FakeLLM('{"pages":[{"slug":"cafe","title":"Café","category":"topic","body":"resumo","links":[]}]}')
-    # watermark in the past → r1 is new, r0 stays old only if we set watermark; here none → both new
     await store.set_kv("wiki_last_ingest_at", "2025-01-01T00:00:00+00:00")
     summary = await b.run_once(store, llm, deep)
-    assert summary["sources_ingested"] == 1  # only r1 (r0 is before watermark)
-    assert f.read_page("cafe") is not None
+    # deepsearch loop no longer pre-filters by watermark: both r1 and r0 lack a
+    # raw marker → both ingested (raw-marker dedup is the sole gate).
+    assert summary["sources_ingested"] == 2
+    assert f.read_page("cafe") is not None  # r1 (and r0) both build the "cafe" page
+    assert (f.wiki_root() / "raw" / "research").exists()
+    # both runs produced raw markers (the "already ingested" marks)
+    assert len(list((f.wiki_root() / "raw" / "research").glob("*.md"))) == 2
     assert (await store.get_kv("wiki_last_ingest_at")) > "2025-01-01T00:00:00+00:00"
     # index + log written
     assert (f.wiki_root() / "index.md").exists()

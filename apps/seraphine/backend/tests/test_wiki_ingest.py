@@ -86,3 +86,25 @@ async def test_run_once_ingests_fresh_run(tmp_path, monkeypatch):
     summary = await b.run_once(store, llm, deep)
     assert summary["sources_ingested"] == 1
     assert f.read_page("cafe") is not None
+
+
+async def test_run_once_safety_net_ingests_old_run_without_raw_marker(tmp_path, monkeypatch):
+    """Safety-net: a done run created well BEFORE the watermark, whose on-demand
+    ingest never wrote a raw marker, must still be ingested by the nightly pass.
+    The deepsearch loop no longer pre-filters by watermark; raw-marker dedup is
+    the sole gate."""
+    monkeypatch.setenv("SERAPHINE_WIKI_DATA_DIR", str(tmp_path))
+    store = _FakeStore()
+    # watermark is recent; the run is ancient → old pre-filter would have skipped it
+    await store.set_kv("wiki_last_ingest_at", "2026-07-01T00:00:00+00:00")
+    old_run = dict(_RUN)
+    old_run["created_at"] = "2020-01-01T00:00:00+00:00"
+    # no pre-existing raw marker for this run
+    ref = b.capture.deepsearch_ref(old_run)
+    assert not (f.wiki_root() / "raw" / ref).exists()
+    llm = _CountLLM(_PAYLOAD)
+    deep = _FakeDeep([old_run])
+    summary = await b.run_once(store, llm, deep)
+    assert summary["sources_ingested"] == 1  # ingested despite predating watermark
+    assert f.read_page("cafe") is not None
+    assert llm.calls == 1

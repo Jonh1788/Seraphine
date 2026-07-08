@@ -200,10 +200,14 @@ async def run_once(store: Any, llm: Any, deepsearch_service: Any) -> dict[str, A
     except Exception as e:
         logger.warning("run_once: list_runs failed: %s", e)
         runs = []
+    # NB: do NOT pre-filter by watermark here. The raw-marker dedup inside
+    # ingest_deepsearch_run is the source of truth for "already ingested", so
+    # this nightly loop acts as a safety-net that re-ingests any done run whose
+    # on-demand ingest failed/crashed (no raw marker), even if it predates the
+    # watermark.
     new_runs = [
         r for r in runs
         if r.get("status") == "done" and (r.get("report") or "").strip()
-        and (r.get("created_at") or "") > watermark
     ]
     for run in new_runs:
         touched = await ingest_deepsearch_run(run, store, llm)
