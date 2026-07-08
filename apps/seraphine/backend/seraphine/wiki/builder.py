@@ -164,6 +164,25 @@ async def build_person_pages(store: Any, llm: Any, since: str) -> list[str]:
     return updated
 
 
+async def ingest_deepsearch_run(run: dict[str, Any], store: Any, llm: Any) -> list[str]:
+    """Ingest ONE deepsearch run into the wiki. Idempotent: the raw/ file is the
+    'already ingested' marker and is written LAST, so a crash mid-build leaves no
+    marker and the nightly pass retries. ``store`` is accepted for call-site
+    symmetry (unused today). Returns the slugs of pages touched."""
+    ref = capture.deepsearch_ref(run)
+    if ref is None:
+        return []
+    if (files.wiki_root() / "raw" / ref).exists():
+        return []  # already ingested (raw marker present)
+    source = {"ref": ref, "title": run.get("query", ""), "text": run.get("report", "")}
+    ops = await build_pages_from_source(source, files.list_pages(), llm)
+    touched = apply_page_ops(ops, source_ref=ref)
+    capture.export_deepsearch_run(run)  # write raw LAST = mark ingested
+    if touched:
+        files.append_log(f"ingest | {run.get('query', '')} -> {', '.join(touched)}")
+    return touched
+
+
 async def run_once(store: Any, llm: Any, deepsearch_service: Any) -> dict[str, Any]:
     """One nightly pass: ingest new deepsearch + attachment sources, rebuild
     person pages, index, lint. Advances the watermark. Read-only on memory."""
@@ -187,14 +206,8 @@ async def run_once(store: Any, llm: Any, deepsearch_service: Any) -> dict[str, A
         and (r.get("created_at") or "") > watermark
     ]
     for run in new_runs:
-        ref = capture.export_deepsearch_run(run)
-        if not ref:
-            continue
-        source = {"ref": ref, "title": run.get("query", ""), "text": run.get("report", "")}
-        ops = await build_pages_from_source(source, files.list_pages(), llm)
-        touched = apply_page_ops(ops, source_ref=ref)
+        touched = await ingest_deepsearch_run(run, store, llm)
         if touched:
-            files.append_log(f"ingest | {run.get('query', '')} -> {', '.join(touched)}")
             sources_ingested += 1
 
     # 2) new attachment sources (captured on-the-fly into raw/attachments)

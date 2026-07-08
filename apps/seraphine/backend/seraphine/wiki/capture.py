@@ -15,19 +15,26 @@ logger = logging.getLogger("seraphine.wiki.capture")
 _MAX_PDF_CHARS = 30_000
 
 
-def export_deepsearch_run(run: dict[str, Any]) -> str | None:
-    """Write a done deepsearch report into raw/research/. Returns the ref."""
+def deepsearch_ref(run: dict[str, Any]) -> str | None:
+    """Compute the raw/ ref for a deepsearch run WITHOUT writing. None if empty report."""
     report = (run.get("report") or "").strip()
     if not report:
         return None
     created = (run.get("created_at") or "")[:10] or "0000-00-00"
     slug = files.slugify(run.get("query") or run.get("id") or "pesquisa")
-    ref = f"research/{created}-{slug}.md"
+    return f"research/{created}-{slug}.md"
+
+
+def export_deepsearch_run(run: dict[str, Any]) -> str | None:
+    """Write a done deepsearch report into raw/research/. Idempotent. Returns the ref."""
+    ref = deepsearch_ref(run)
+    if ref is None:
+        return None
     path = files.wiki_root() / "raw" / ref
     if path.exists():
         return ref
     header = f"# Pesquisa: {run.get('query', '')}\n\n_id: {run.get('id', '')} · {run.get('created_at', '')}_\n\n"
-    path.write_text(header + report + "\n", encoding="utf-8")
+    path.write_text(header + (run.get("report") or "").strip() + "\n", encoding="utf-8")
     return ref
 
 
