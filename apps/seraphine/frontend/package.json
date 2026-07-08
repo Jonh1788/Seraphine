@@ -29,12 +29,13 @@
     "onnxruntime-web": "^1.24.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-force-graph-2d": "^1.29.1",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.6.1",
-    "zustand": "^5.0.5",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
-    "three": "^0.169.0"
+    "three": "^0.169.0",
+    "zustand": "^5.0.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
