@@ -61,7 +61,7 @@ import {
   SearchIcon,
   TimerIcon,
 } from './icons/Icons';
-import { RoutinesIcon, PlanningIcon, InsightsIcon, MaestroIcon, SystemIcon, GaugeIcon, LearningIcon } from './icons/Icons';
+import { RoutinesIcon, PlanningIcon, InsightsIcon, MaestroIcon, SystemIcon, GaugeIcon, LearningIcon, WikiIcon } from './icons/Icons';
 import seraphineLogo from '../src-tauri/icons/128x128.png';
 import { CommandPalette } from './command-palette/CommandPalette';
 import { QuickCapture } from './quick-capture/QuickCapture';
@@ -291,7 +291,7 @@ export function AppLayout(): JSX.Element {
     { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
     { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
     { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
-    { id: 'wiki', icon: <NotesIcon size={22} />, label: 'Wiki', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'wiki' ? 'chat' : 'wiki'), active: activeView === 'wiki' },
+    { id: 'wiki', icon: <WikiIcon size={22} />, label: 'Wiki', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'wiki' ? 'chat' : 'wiki'), active: activeView === 'wiki' },
     { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
     { id: 'insights', icon: <InsightsIcon size={22} />, label: 'Insights', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
     // Comunicação

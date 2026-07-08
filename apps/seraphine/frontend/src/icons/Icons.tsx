@@ -482,6 +482,19 @@ export function NotesIcon({ size = 24, className = '' }: IconProps) {
   );
 }
 
+export function WikiIcon({ size = 24, className = '' }: IconProps) {
+  // Lucide "network": linked nodes / knowledge graph — distinct from NotesIcon.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
+      <rect x="9" y="2" width="6" height="6" rx="1" />
+      <rect x="2" y="16" width="6" height="6" rx="1" />
+      <rect x="16" y="16" width="6" height="6" rx="1" />
+      <path d="M12 8v4" />
+      <path d="M5 16v-1a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v1" />
+    </svg>
+  );
+}
+
 export function RefreshIcon({ size = 24, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...defaults}>
