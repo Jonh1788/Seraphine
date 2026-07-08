@@ -1,0 +1,6 @@
+/* Wiki view — reuses global tokens; scoped tweaks only. */
+.wiki { display: flex; height: 100%; gap: var(--space-4, 12px); }
+.wiki__graph { flex: 1; min-width: 0; border-right: 1px solid var(--border, #333); }
+.wiki__panel { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-4, 12px); }
+.wiki__empty { opacity: 0.6; padding: var(--space-4, 12px); }
+.wiki__src { font-size: 12px; opacity: 0.7; margin-top: 12px; }

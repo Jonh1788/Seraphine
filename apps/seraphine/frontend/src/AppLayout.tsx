@@ -34,6 +34,7 @@ import { GoalsView } from './goals';
 import { SystemStatusView } from './system';
 import { PlanningView } from './planning';
 import { ResearchView } from './research';
+import { WikiView } from './wiki';
 import { MaestroView } from './orchestrator';
 import { TelemetryView } from './telemetry/TelemetryView';
 import { LearningView } from './learning/LearningView';
@@ -290,6 +291,7 @@ export function AppLayout(): JSX.Element {
     { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
     { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
     { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
+    { id: 'wiki', icon: <NotesIcon size={22} />, label: 'Wiki', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'wiki' ? 'chat' : 'wiki'), active: activeView === 'wiki' },
     { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
     { id: 'insights', icon: <InsightsIcon size={22} />, label: 'Insights', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'insights' ? 'chat' : 'insights'), active: activeView === 'insights' },
     // Comunicação
@@ -542,6 +544,9 @@ export function AppLayout(): JSX.Element {
                 )}
                 {activeView === 'research' && (
                   <ResearchView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'wiki' && (
+                  <WikiView onBack={() => setActiveView('chat')} />
                 )}
                 {activeView === 'notes' && (
                   <NotesView

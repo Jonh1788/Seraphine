@@ -23,6 +23,7 @@ export type ActiveView =
   | 'focus'
   | 'planning'
   | 'research'
+  | 'wiki'
   | 'maestro'
   | 'telemetry'
   | 'learning';
