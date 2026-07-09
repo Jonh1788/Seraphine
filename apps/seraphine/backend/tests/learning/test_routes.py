@@ -20,6 +20,7 @@ from core_db import Store
 from seraphine.learning import schema as learning_schema
 from seraphine.learning.routes import router
 from seraphine.learning.service import LearningService
+from seraphine.learning.traces import record_trace
 
 
 def _make_store(tmp_path: Path, name: str = "routes.sqlite") -> Store:
@@ -29,16 +30,33 @@ def _make_store(tmp_path: Path, name: str = "routes.sqlite") -> Store:
     return store
 
 
-def make_llm(judge_score: float = 0.9, optimizer_json: str | None = None):
-    """Deterministic scripted llm_call branching on message content.
+def _seed_traces(store: Store, n: int) -> None:
+    for i in range(n):
+        asyncio.run(
+            record_trace(
+                store,
+                conversation_id=f"c{i}",
+                turn_id=f"t{i}",
+                user_msg=f"pergunta {i}",
+                assistant_msg=f"resposta {i}",
+                signal=None,
+            )
+        )
+
+
+def make_llm(sentinel: str = "Seja conciso.", base_score: float = 0.80,
+             cand_score: float = 0.95, optimizer_json: str | None = None):
+    """Deterministic scripted llm_call that BEATS the margin gate: the optimizer
+    proposes `sentinel` as the addendum, the responder echoes the system prompt,
+    and the judge scores the (sentinel-carrying) candidate high vs the baseline.
 
     - optimizer turn: "WHITELISTED KNOBS" in messages[0]["content"]
     - judge turn:     "RUBRIC" in messages[-1]["content"]
-    - else:           responder
+    - else:           responder (echoes the system prompt)
     """
     OPT = optimizer_json or (
-        '{"behavior_addendum":"Seja conciso.","tool_guidance":"",'
-        '"knobs":{"recall_fact_limit":12},"rationale":"r"}'
+        '{"behavior_addendum":"%s","tool_guidance":"",'
+        '"knobs":{"recall_fact_limit":12},"rationale":"r"}' % sentinel
     )
 
     async def llm(messages):
@@ -47,8 +65,8 @@ def make_llm(judge_score: float = 0.9, optimizer_json: str | None = None):
         if "WHITELISTED KNOBS" in first:
             return OPT
         if "RUBRIC" in last:
-            return '{"score": %s}' % judge_score
-        return "uma resposta"  # responder
+            return '{"score": %s}' % (cand_score if sentinel in last else base_score)
+        return first  # responder echoes the system prompt
 
     return llm
 
@@ -56,7 +74,8 @@ def make_llm(judge_score: float = 0.9, optimizer_json: str | None = None):
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
     store = _make_store(tmp_path)
-    svc = LearningService(store, make_llm(judge_score=0.9))
+    _seed_traces(store, 8)  # enough evidence + novelty for run_cycle's gate
+    svc = LearningService(store, make_llm())
 
     app = FastAPI()
     app.include_router(router)
