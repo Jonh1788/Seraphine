@@ -3,7 +3,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
-import { SparkleIcon } from '../icons/Icons';
+import { SparkleIcon, BookmarkIcon, CheckIcon } from '../icons/Icons';
+import { ingestChatToWiki } from '../wiki/api';
 import type { SeraphineWS } from '../ws/client';
 import type {
   McpApprovalRequestMessage,
@@ -429,6 +430,17 @@ function ChatViewImpl({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const [historyLoading, setHistoryLoading] = useState<boolean>(!!conversationIdRef.current);
   const delayedHistoryLoading = useDelayedFlag(historyLoading, 100);
+  const [wikiSave, setWikiSave] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
+
+  const saveTurnToWiki = useCallback(async (turnId: string, question: string, answer: string) => {
+    setWikiSave((s) => ({ ...s, [turnId]: 'saving' }));
+    try {
+      const res = await ingestChatToWiki(question, answer);
+      setWikiSave((s) => ({ ...s, [turnId]: res.created ? 'saved' : 'error' }));
+    } catch {
+      setWikiSave((s) => ({ ...s, [turnId]: 'error' }));
+    }
+  }, []);
 
   // Restore chat history from backend on mount
   useEffect(() => {
@@ -1209,7 +1221,7 @@ function ChatViewImpl({
             Digite uma mensagem ou segure o microfone pra falar.
           </div>
         )}
-        {turns.map((t) => {
+        {turns.map((t, i) => {
           const parsed =
             t.role === 'assistant' ? parseThinking(t.content) : null;
 
@@ -1352,6 +1364,28 @@ function ChatViewImpl({
                   ) : (
                     parsed ? parsed.response : t.content
                   )}
+                  {t.role === 'assistant' && !t.streaming && (() => {
+                    const answer = parsed ? parsed.response : t.content;
+                    const question = [...turns.slice(0, i)].reverse().find((x) => x.role === 'user')?.content ?? '';
+                    const st = wikiSave[t.id];
+                    return (
+                      <div className="bubble__actions">
+                        <button
+                          type="button"
+                          className="btn-wiki-save"
+                          title="Salvar esta resposta na wiki"
+                          disabled={st === 'saving' || st === 'saved'}
+                          onClick={() => void saveTurnToWiki(t.id, question, answer)}
+                        >
+                          {st === 'saved' ? <CheckIcon size={14} /> : <BookmarkIcon size={14} />}
+                          <span>
+                            {st === 'saving' ? 'salvando…' : st === 'saved' ? 'salvo na wiki'
+                              : st === 'error' ? 'erro ao salvar' : 'salvar na wiki'}
+                          </span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {t.streaming && <span className="cursor" />}
                   {t.mcpApproval && (
                     <McpApprovalBlock

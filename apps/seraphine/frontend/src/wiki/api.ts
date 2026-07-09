@@ -27,3 +27,18 @@ export function getWikiGraph(): Promise<WikiGraph> {
 export function getWikiSource(ref: string): Promise<{ ref: string; content: string }> {
   return request<{ ref: string; content: string }>(`/wiki/source/${ref}`);
 }
+
+export async function ingestChatToWiki(
+  question: string, answer: string, title?: string,
+): Promise<{ pages: string[]; created: boolean }> {
+  const res = await fetch(`${API_BASE}/wiki/ingest/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, answer, title }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` - ${text}` : ''}`);
+  }
+  return (await res.json()) as { pages: string[]; created: boolean };
+}

@@ -552,3 +552,13 @@
 .sidebar__foco--idle .sidebar__foco-num {
   color: var(--text-dim);
 }
+
+.bubble__actions { margin-top: 6px; }
+.btn-wiki-save {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 8px;
+  background: transparent; border: 1px solid var(--border, #333);
+  color: var(--text-dim, #999); font-size: 12px; cursor: pointer;
+}
+.btn-wiki-save:hover:not(:disabled) { color: var(--accent, #9a93ff); border-color: var(--accent, #9a93ff); }
+.btn-wiki-save:disabled { opacity: 0.7; cursor: default; }
