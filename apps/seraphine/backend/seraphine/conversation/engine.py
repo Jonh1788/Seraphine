@@ -365,6 +365,15 @@ _current_user_images: ContextVar[list[str]] = ContextVar(
     "_current_user_images", default=[],
 )
 
+# Per-turn list of tool names executed this turn, for the learning trace.
+# ContextVar (task-local) so concurrent turns don't cross-contaminate; a plain
+# local list in handle_user_message holds the SAME object, so record_trace —
+# which runs after the finally resets the var — still sees the tools. Default
+# None (not []) so _exec_one_tool never mutates a shared module-level default.
+_current_turn_tools: ContextVar[list[str] | None] = ContextVar(
+    "_current_turn_tools", default=None,
+)
+
 
 async def _proxy_tool_via_client(
     app_state: Any, tool_name: str, tool_args: dict[str, Any],
@@ -771,6 +780,12 @@ class ConversationEngine:
         (result, possibly-mutated args). Used both in the sequential
         approval-required path and inside parallel asyncio.gather for
         non-approval calls."""
+        # Record the tool name for this turn's learning trace (both exec paths
+        # funnel through here). Only when a turn has bound the list — never the
+        # module-level None default.
+        _tt = _current_turn_tools.get()
+        if _tt is not None:
+            _tt.append(tool_name)
         if (
             getattr(tool, "consumes_attached_image", False)
             and not tool_args.get("reference_url")
@@ -1051,6 +1066,11 @@ class ConversationEngine:
         # v1: só imagens legadas do chat alimentam tools consumidoras; anexos
         # por id ainda não (fora de escopo).
         _images_token = _current_user_images.set(list(images or []))
+
+        # Per-turn tool accumulator for the learning trace. The plain local
+        # outlives the ContextVar reset in `finally`, so record_trace sees it.
+        turn_tools: list[str] = []
+        _tools_token = _current_turn_tools.set(turn_tools)
 
         user_turn = await self.store.add_turn(conversation_id, "user", content)
 
@@ -1367,6 +1387,10 @@ class ConversationEngine:
             except (ValueError, LookupError):
                 # Token from a different context — safe to ignore.
                 pass
+            try:
+                _current_turn_tools.reset(_tools_token)
+            except (ValueError, LookupError):
+                pass
 
         final_text = "".join(accumulated)
         assistant_turn = await self.store.add_turn(conversation_id, "assistant", final_text)
@@ -1378,7 +1402,7 @@ class ConversationEngine:
             _aio.create_task(record_trace(
                 self.store, conversation_id=conversation_id, turn_id=turn_id,
                 user_msg=content, assistant_msg=final_text,
-                tools=list(getattr(self, "_turn_tools_used", []) or []), feature="chat",
+                tools=list(turn_tools), feature="chat",
             ))
         except Exception:
             pass
