@@ -15,6 +15,7 @@ from typing import Any
 from mod_vision import describe_image, extract_pdf_text
 
 from seraphine.attachments.store import load_attachment
+from seraphine.wiki.capture import capture_attachment
 
 _MAX_PDF_TEXT_CHARS = 30_000
 _IMG_DESCRIBE_PROMPT = (
@@ -46,6 +47,12 @@ async def build_user_content(
         if loaded is None:
             continue
         data, meta = loaded
+        # Wiki (Task 7): capture the used attachment as a raw/ source. Fire-and-
+        # forget — never blocks or breaks the turn. Nightly run_once ingests it.
+        try:
+            asyncio.create_task(capture_attachment(str(att_id), data, meta))
+        except Exception:
+            pass
         kind = meta.get("kind")
         mime = meta.get("mime") or "application/octet-stream"
         name = meta.get("filename", "")
