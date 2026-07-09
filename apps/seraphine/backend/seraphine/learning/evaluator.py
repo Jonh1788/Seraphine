@@ -84,3 +84,33 @@ async def evaluate_policy(
     per_case = await asyncio.gather(*[_one(c) for c in eval_cases])
     mean = sum(c["score"] for c in per_case) / len(per_case)
     return EvalResult(score=mean, per_case=list(per_case), n=len(per_case))
+
+
+async def evaluate_policy_repeated(
+    llm_call: LLMCall,
+    *,
+    behavior_addendum: str,
+    tool_guidance: str,
+    eval_cases: list[dict[str, Any]],
+    base_instruction: str = "",
+    concurrency: int = 3,
+    repeats: int = 1,
+) -> EvalResult:
+    """Run evaluate_policy `repeats` times and average the scores, to damp the
+    LLM-judge's run-to-run noise. repeats<1 is clamped to 1."""
+    repeats = max(1, int(repeats))
+    results: list[EvalResult] = []
+    for _ in range(repeats):
+        results.append(
+            await evaluate_policy(
+                llm_call,
+                behavior_addendum=behavior_addendum,
+                tool_guidance=tool_guidance,
+                eval_cases=eval_cases,
+                base_instruction=base_instruction,
+                concurrency=concurrency,
+            )
+        )
+    mean = sum(r.score for r in results) / len(results)
+    last = results[-1]
+    return EvalResult(score=mean, per_case=last.per_case, n=last.n)

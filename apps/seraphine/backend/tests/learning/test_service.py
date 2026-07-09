@@ -73,6 +73,50 @@ def make_echo_llm():
     return llm
 
 
+def make_good_llm(base_score=0.85, cand_score=0.95):
+    """Candidate policy carries SENTINEL_GOOD in its addendum; the responder
+    echoes the system prompt so the judge sees the sentinel and scores the
+    candidate higher than the (sentinel-less) baseline."""
+
+    async def llm(messages):
+        first = messages[0]["content"]
+        last = messages[-1]["content"]
+        if "WHITELISTED KNOBS" in first:
+            return (
+                '{"behavior_addendum":"SENTINEL_GOOD","tool_guidance":"",'
+                '"knobs":{},"rationale":"melhora"}'
+            )
+        if "RUBRIC" in last:
+            return '{"score": %s}' % (cand_score if "SENTINEL_GOOD" in last else base_score)
+        return first  # responder echoes the system prompt
+
+    return llm
+
+
+def make_addendum_llm(addendum, base_score=0.80, cand_score=0.95):
+    """Optimizer proposes `addendum`; the responder echoes the system prompt so
+    the judge scores the candidate high (cand_score) when its addendum is
+    present and the (addendum-less) baseline low (base_score). Lets a two-cycle
+    promote/rollback test produce a DISTINCT pending candidate per cycle that
+    still beats the margin gate."""
+
+    opt = (
+        '{"behavior_addendum":"%s","tool_guidance":"",'
+        '"knobs":{},"rationale":"r"}'
+    ) % addendum
+
+    async def llm(messages):
+        first = messages[0]["content"]
+        last = messages[-1]["content"]
+        if "WHITELISTED KNOBS" in first:
+            return opt
+        if "RUBRIC" in last:
+            return '{"score": %s}' % (cand_score if addendum in last else base_score)
+        return first  # responder echoes the system prompt
+
+    return llm
+
+
 def _seed_traces(store: Store, n: int) -> None:
     for i in range(n):
         asyncio.run(
@@ -87,10 +131,10 @@ def _seed_traces(store: Store, n: int) -> None:
         )
 
 
-def test_run_cycle_stores_pending_when_no_regression(tmp_path: Path):
+def test_run_cycle_stores_pending_when_beats_margin(tmp_path: Path):
     store = _make_store(tmp_path)
-    _seed_traces(store, 1)
-    svc = LearningService(store, make_llm(judge_score=0.9))
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_good_llm(base_score=0.85, cand_score=0.95))
 
     result = asyncio.run(svc.run_cycle())
 
@@ -112,13 +156,63 @@ def test_run_cycle_rejects_on_regression(tmp_path: Path):
     assert result["passed"] is False
     assert result["baseline_score"] == pytest.approx(0.9)
     assert result["candidate_score"] == pytest.approx(0.3)
-    assert "regressed" in result["rationale"]
+    assert "below margin" in result["rationale"]
+
+
+def test_gate_pending_when_beats_margin(tmp_path: Path):
+    store = _make_store(tmp_path)
+    _seed_traces(store, 8)  # 8 traces / 8 convs — passes evidence
+    svc = LearningService(store, make_good_llm(base_score=0.85, cand_score=0.95))
+
+    result = asyncio.run(svc.run_cycle())
+
+    assert result["status"] == "pending"
+    assert result["candidate_score"] >= result["baseline_score"] + 0.05
+    assert len(asyncio.run(svc.list_candidates(status="pending"))) == 1
+
+
+def test_gate_rejects_on_tie(tmp_path: Path):
+    store = _make_store(tmp_path)
+    _seed_traces(store, 8)
+    # candidate scores the SAME as baseline (tie) → does not beat the margin
+    svc = LearningService(store, make_good_llm(base_score=0.85, cand_score=0.85))
+
+    result = asyncio.run(svc.run_cycle())
+
+    assert result["status"] == "rejected"
+    assert "below margin" in result["rationale"]
+    assert asyncio.run(svc.list_candidates(status="pending")) == []
+
+
+def test_gate_skips_low_evidence(tmp_path: Path):
+    store = _make_store(tmp_path)
+    _seed_traces(store, 2)  # 2 < learning_min_traces (5)
+    svc = LearningService(store, make_good_llm())
+
+    result = asyncio.run(svc.run_cycle())
+
+    assert result["status"] == "skipped_low_evidence"
+    # no candidate row was created
+    assert asyncio.run(svc.list_candidates()) == []
+
+
+def test_gate_skips_no_new_traces(tmp_path: Path):
+    store = _make_store(tmp_path)
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_good_llm())
+
+    first = asyncio.run(svc.run_cycle())
+    assert first["status"] in ("pending", "rejected")  # a candidate row now exists
+    # no new traces since that candidate → second cycle is skipped
+    second = asyncio.run(svc.run_cycle())
+    assert second["status"] == "skipped_no_new"
+    assert len(asyncio.run(svc.list_candidates())) == 1  # no extra row
 
 
 def test_promote_creates_active_version(tmp_path: Path):
     store = _make_store(tmp_path)
-    _seed_traces(store, 1)
-    svc = LearningService(store, make_llm(judge_score=0.9))
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_good_llm(base_score=0.80, cand_score=0.95))
 
     asyncio.run(svc.run_cycle())
     cid = asyncio.run(svc.list_candidates(status="pending"))[0]["id"]
@@ -128,8 +222,8 @@ def test_promote_creates_active_version(tmp_path: Path):
 
     active = asyncio.run(svc.get_active_policy())
     assert active["version"] == version
-    assert active["behavior_addendum"] == "Seja conciso."
-    assert active["knobs"] == {"recall_fact_limit": 12}
+    assert active["behavior_addendum"] == "SENTINEL_GOOD"
+    assert active["knobs"] == {}
 
     cand = asyncio.run(svc.get_candidate(cid))
     assert cand["status"] == "promoted"
@@ -137,24 +231,17 @@ def test_promote_creates_active_version(tmp_path: Path):
 
 def test_promote_then_rollback(tmp_path: Path):
     store = _make_store(tmp_path)
-    _seed_traces(store, 1)
-    svc = LearningService(store, make_llm())
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_addendum_llm("Addendum A"))
 
-    opt_a = (
-        '{"behavior_addendum":"Addendum A","tool_guidance":"",'
-        '"knobs":{},"rationale":"a"}'
-    )
-    opt_b = (
-        '{"behavior_addendum":"Addendum B","tool_guidance":"",'
-        '"knobs":{},"rationale":"b"}'
-    )
-
-    svc._llm_call = make_llm(optimizer_json=opt_a)
+    svc._llm_call = make_addendum_llm("Addendum A")
     asyncio.run(svc.run_cycle())
     cid_a = asyncio.run(svc.list_candidates(status="pending"))[0]["id"]
     v1 = asyncio.run(svc.promote(cid_a))
 
-    svc._llm_call = make_llm(optimizer_json=opt_b)
+    # New traces so the second cycle passes the novelty gate.
+    _seed_traces(store, 4)
+    svc._llm_call = make_addendum_llm("Addendum B")
     asyncio.run(svc.run_cycle())
     cid_b = asyncio.run(svc.list_candidates(status="pending"))[0]["id"]
     v2 = asyncio.run(svc.promote(cid_b))
@@ -170,8 +257,8 @@ def test_promote_then_rollback(tmp_path: Path):
 
 def test_reject_sets_status(tmp_path: Path):
     store = _make_store(tmp_path)
-    _seed_traces(store, 1)
-    svc = LearningService(store, make_llm())
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_good_llm(base_score=0.80, cand_score=0.95))
 
     asyncio.run(svc.run_cycle())
     cid = asyncio.run(svc.list_candidates(status="pending"))[0]["id"]
@@ -182,8 +269,8 @@ def test_reject_sets_status(tmp_path: Path):
 
 def test_promote_non_pending_raises(tmp_path: Path):
     store = _make_store(tmp_path)
-    _seed_traces(store, 1)
-    svc = LearningService(store, make_llm())
+    _seed_traces(store, 8)
+    svc = LearningService(store, make_good_llm(base_score=0.80, cand_score=0.95))
 
     asyncio.run(svc.run_cycle())
     cid = asyncio.run(svc.list_candidates(status="pending"))[0]["id"]

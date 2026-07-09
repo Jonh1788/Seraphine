@@ -18,7 +18,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from seraphine.learning.evaluator import evaluate_policy
 from seraphine.learning.optimizer import propose_candidate
 from seraphine.learning.traces import recent_traces
 
@@ -172,55 +171,75 @@ class LearningService:
     # Cycle
     # ------------------------------------------------------------------
 
-    async def run_cycle(
-        self, *, tolerance: float = 0.02, trace_limit: int = 50
-    ) -> dict[str, Any]:
+    async def run_cycle(self) -> dict[str, Any]:
+        from seraphine.config import settings as _s
+        from seraphine.learning.evaluator import evaluate_policy_repeated
+
+        min_margin = float(_s.learning_min_margin)
+        min_traces = int(_s.learning_min_traces)
+        min_convs = int(_s.learning_min_convs)
+        repeats = max(1, int(_s.learning_eval_repeats))
+
+        # Gate 1 — novelty: skip if no trace is newer than the last candidate.
+        def _watermarks() -> tuple[str | None, str | None]:
+            with self.store._connect() as conn:
+                t = conn.execute("SELECT MAX(ts) FROM learning_trace").fetchone()[0]
+                c = conn.execute("SELECT MAX(ts) FROM learning_candidate").fetchone()[0]
+            return t, c
+
+        max_trace_ts, max_cand_ts = await asyncio.to_thread(_watermarks)
+        if max_trace_ts is None:
+            return {"status": "skipped_no_new", "reason": "no traces"}
+        if max_cand_ts is not None and max_trace_ts <= max_cand_ts:
+            return {"status": "skipped_no_new", "reason": "no new traces since last candidate"}
+
+        # Gate 2 — evidence: need enough traces / distinct conversations.
+        traces = await recent_traces(self.store, limit=50, prefer_low_signal=True)
+        n_convs = len({t.get("conversation_id") for t in traces if t.get("conversation_id")})
+        if len(traces) < min_traces or n_convs < min_convs:
+            return {
+                "status": "skipped_low_evidence",
+                "traces": len(traces), "convs": n_convs,
+            }
+
+        # Expensive path — eval + propose (Gate 4 = repeated eval).
         await self.ensure_eval_set()
         cases = await self.list_eval_cases()
         active = await self.get_active_policy()
 
-        baseline = await evaluate_policy(
+        baseline = await evaluate_policy_repeated(
             self._llm_call,
             behavior_addendum=active["behavior_addendum"],
             tool_guidance=active["tool_guidance"],
-            eval_cases=cases,
-            base_instruction=self.base,
-        )
-
-        traces = await recent_traces(
-            self.store, limit=trace_limit, prefer_low_signal=True
+            eval_cases=cases, base_instruction=self.base, repeats=repeats,
         )
         cand = await propose_candidate(
-            self._llm_call,
-            traces=traces,
+            self._llm_call, traces=traces,
             active_behavior=active["behavior_addendum"],
             active_tool_guidance=active["tool_guidance"],
             active_knobs=active["knobs"],
         )
-
-        cand_eval = await evaluate_policy(
+        cand_eval = await evaluate_policy_repeated(
             self._llm_call,
             behavior_addendum=cand.behavior_addendum,
             tool_guidance=cand.tool_guidance,
-            eval_cases=cases,
-            base_instruction=self.base,
+            eval_cases=cases, base_instruction=self.base, repeats=repeats,
         )
 
-        non_empty = bool(
-            cand.behavior_addendum or cand.tool_guidance or cand.knobs
-        )
-        no_regression = cand_eval.score >= baseline.score - tolerance
-        passed = non_empty and no_regression
+        # Gate 3 — margin: must BEAT baseline by min_margin (not just tie).
+        non_empty = bool(cand.behavior_addendum or cand.tool_guidance or cand.knobs)
+        beats = cand_eval.score >= baseline.score + min_margin
+        passed = non_empty and beats
         status = "pending" if passed else "rejected"
 
         rationale = cand.rationale
         if not passed:
             if not non_empty:
                 rationale += " | empty proposal"
-            elif not no_regression:
+            else:
                 rationale += (
-                    f" | regressed: cand={cand_eval.score:.3f} "
-                    f"< base={baseline.score:.3f}"
+                    f" | below margin: cand={cand_eval.score:.3f} "
+                    f"base={baseline.score:.3f} need>={baseline.score + min_margin:.3f}"
                 )
 
         cid = str(uuid.uuid4())
@@ -233,28 +252,18 @@ class LearningService:
                     "baseline_score, candidate_score, status, rationale, "
                     "base_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        cid,
-                        _now(),
-                        cand.behavior_addendum,
-                        cand.tool_guidance,
-                        json.dumps(cand.knobs),
-                        baseline.score,
-                        cand_eval.score,
-                        status,
-                        rationale,
-                        active["version"],
+                        cid, _now(), cand.behavior_addendum, cand.tool_guidance,
+                        json.dumps(cand.knobs), baseline.score, cand_eval.score,
+                        status, rationale, active["version"],
                     ),
                 )
 
         await asyncio.to_thread(_work)
 
         return {
-            "candidate_id": cid,
-            "status": status,
-            "baseline_score": baseline.score,
-            "candidate_score": cand_eval.score,
-            "passed": passed,
-            "rationale": rationale,
+            "candidate_id": cid, "status": status,
+            "baseline_score": baseline.score, "candidate_score": cand_eval.score,
+            "passed": passed, "rationale": rationale,
         }
 
     # ------------------------------------------------------------------

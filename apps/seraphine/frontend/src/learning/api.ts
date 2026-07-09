@@ -50,10 +50,12 @@ export interface Knob {
 export interface CycleSummary {
   candidate_id?: string;
   status: string;
-  baseline_score: number;
-  candidate_score: number;
-  passed: boolean;
-  rationale: string;
+  // Skip results (skipped_no_new / skipped_low_evidence) omit these — the gate
+  // returned before proposing/evaluating a candidate.
+  baseline_score?: number;
+  candidate_score?: number;
+  passed?: boolean;
+  rationale?: string;
 }
 
 /** Currently-promoted policy (version 0 = default, no overrides). */

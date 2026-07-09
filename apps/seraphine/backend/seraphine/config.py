@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     # fingerprint short-circuit, so a daily cadence is plenty.
     memory_audit_interval_s: int = 86400  # 24h
 
+    # Learning-loop candidate gate. Thresholds live here (NOT in the knob
+    # registry) because the optimizer proposes knobs — it must not tune its own
+    # gate. A candidate is surfaced as 'pending' only if it BEATS the active
+    # policy by learning_min_margin on the (repeated) eval; below that → rejected.
+    learning_min_margin: float = 0.05
+    learning_min_traces: int = 5
+    learning_min_convs: int = 2
+    learning_eval_repeats: int = 2
+
     # Scheduled read-only "LLM wiki" build pass (Karpathy pattern): synthesizes
     # /data/wiki markdown from new deepsearch runs + captured attachments +
     # people. Daily cadence; watermark short-circuits when nothing is new.
