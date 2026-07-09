@@ -51,6 +51,10 @@
   color: #fca5a5;
   background: rgba(248, 113, 113, 0.14);
 }
+.lrn-runnote__tag--skip {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.14);
+}
 
 /* ── Inline toast / status note ───────────────────────────────────── */
 .lrn-note {

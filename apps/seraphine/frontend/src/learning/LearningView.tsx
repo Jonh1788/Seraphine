@@ -40,8 +40,8 @@ interface LearningViewProps {
 /* ------------------------------------------------------------------ */
 
 /** Score → 2-3 decimal string (pt-BR comma). Non-numbers degrade to "--". */
-function fmtScore(v: number): string {
-  if (!Number.isFinite(v)) return '--';
+function fmtScore(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return '--';
   // 3 decimals, trim a trailing zero so 0.900 reads "0,90" but 0.915 stays.
   const s = v.toFixed(3);
   const trimmed = s.endsWith('0') ? s.slice(0, -1) : s;
@@ -281,16 +281,20 @@ export function LearningView({ onBack }: LearningViewProps): JSX.Element {
           </div>
         </div>
         <div className="tasks-view__header-actions">
-          {cycle && (
-            <span className="lrn-runnote">
-              <span
-                className={`lrn-runnote__tag lrn-runnote__tag--${cycle.passed ? 'pass' : 'fail'}`}
-              >
-                {cycle.status}
+          {cycle && (() => {
+            const skipped = cycle.status.startsWith('skipped');
+            const tag = skipped ? 'skip' : cycle.passed ? 'pass' : 'fail';
+            return (
+              <span className="lrn-runnote">
+                <span className={`lrn-runnote__tag lrn-runnote__tag--${tag}`}>
+                  {cycle.status}
+                </span>
+                {!skipped && (
+                  <>{fmtScore(cycle.baseline_score)} → {fmtScore(cycle.candidate_score)}</>
+                )}
               </span>
-              {fmtScore(cycle.baseline_score)} → {fmtScore(cycle.candidate_score)}
-            </span>
-          )}
+            );
+          })()}
           <button type="button" className="tasks-view__new-btn" onClick={handleRun} disabled={running}>
             {running ? <RefreshIcon size={16} /> : <PlayIcon size={16} />}
             <span>{running ? 'Rodando...' : 'Rodar ciclo agora'}</span>
