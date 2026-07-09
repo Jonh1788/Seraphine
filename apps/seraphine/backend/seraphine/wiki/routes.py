@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from seraphine.wiki import files
 
@@ -51,3 +52,24 @@ async def wiki_source(ref: str) -> dict[str, Any]:
     if content is None:
         raise HTTPException(status_code=404, detail="not found")
     return {"ref": ref, "content": content}
+
+
+class ChatIngestBody(BaseModel):
+    answer: str
+    question: str = ""
+    title: str | None = None
+
+
+@router.post("/ingest/chat")
+async def wiki_ingest_chat(body: ChatIngestBody, request: Request) -> dict[str, Any]:
+    if not (body.answer or "").strip():
+        raise HTTPException(status_code=400, detail="answer vazio")
+    llm = getattr(request.app.state, "llm", None)
+    store = getattr(request.app.state, "store", None)
+    if llm is None or store is None:
+        raise HTTPException(status_code=503, detail="wiki ingest não configurado")
+    from seraphine.wiki.builder import ingest_chat_qa
+    touched = await ingest_chat_qa(body.question, body.answer, store, llm)
+    if touched:
+        files.write_index()
+    return {"pages": touched, "created": bool(touched)}
