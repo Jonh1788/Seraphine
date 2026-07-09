@@ -430,13 +430,13 @@ function ChatViewImpl({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const [historyLoading, setHistoryLoading] = useState<boolean>(!!conversationIdRef.current);
   const delayedHistoryLoading = useDelayedFlag(historyLoading, 100);
-  const [wikiSave, setWikiSave] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
+  const [wikiSave, setWikiSave] = useState<Record<string, 'saving' | 'saved' | 'noop' | 'error'>>({});
 
   const saveTurnToWiki = useCallback(async (turnId: string, question: string, answer: string) => {
     setWikiSave((s) => ({ ...s, [turnId]: 'saving' }));
     try {
       const res = await ingestChatToWiki(question, answer);
-      setWikiSave((s) => ({ ...s, [turnId]: res.created ? 'saved' : 'error' }));
+      setWikiSave((s) => ({ ...s, [turnId]: res.created ? 'saved' : 'noop' }));
     } catch {
       setWikiSave((s) => ({ ...s, [turnId]: 'error' }));
     }
@@ -1374,12 +1374,13 @@ function ChatViewImpl({
                           type="button"
                           className="btn-wiki-save"
                           title="Salvar esta resposta na wiki"
-                          disabled={st === 'saving' || st === 'saved'}
+                          disabled={st === 'saving' || st === 'saved' || st === 'noop'}
                           onClick={() => void saveTurnToWiki(t.id, question, answer)}
                         >
-                          {st === 'saved' ? <CheckIcon size={14} /> : <BookmarkIcon size={14} />}
+                          {st === 'saved' || st === 'noop' ? <CheckIcon size={14} /> : <BookmarkIcon size={14} />}
                           <span>
                             {st === 'saving' ? 'salvando…' : st === 'saved' ? 'salvo na wiki'
+                              : st === 'noop' ? 'nada a salvar'
                               : st === 'error' ? 'erro ao salvar' : 'salvar na wiki'}
                           </span>
                         </button>
