@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from mod_vision import extract_pdf_text
@@ -35,6 +37,28 @@ def export_deepsearch_run(run: dict[str, Any]) -> str | None:
         return ref
     header = f"# Pesquisa: {run.get('query', '')}\n\n_id: {run.get('id', '')} · {run.get('created_at', '')}_\n\n"
     path.write_text(header + (run.get("report") or "").strip() + "\n", encoding="utf-8")
+    return ref
+
+
+def chat_qa_ref(question: str, answer: str) -> str:
+    """Deterministic raw/ ref for a chat Q&A. Same Q&A → same ref (dedup)."""
+    h = hashlib.sha256(((question or "") + "\n" + (answer or "")).encode("utf-8")).hexdigest()[:8]
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"chat/{date}-{h}.md"
+
+
+def export_chat_qa(question: str, answer: str) -> str:
+    """Write a chat Q&A into raw/chat/. Idempotent. Returns the ref."""
+    ref = chat_qa_ref(question, answer)
+    path = files.wiki_root() / "raw" / ref
+    if path.exists():
+        return ref
+    body = (
+        "# Q&A do chat\n\n"
+        f"**Pergunta:** {(question or '').strip()}\n\n"
+        f"**Resposta:**\n\n{(answer or '').strip()}\n"
+    )
+    path.write_text(body, encoding="utf-8")
     return ref
 
 

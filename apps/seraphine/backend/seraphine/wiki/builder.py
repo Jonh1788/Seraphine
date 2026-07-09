@@ -183,6 +183,26 @@ async def ingest_deepsearch_run(run: dict[str, Any], store: Any, llm: Any) -> li
     return touched
 
 
+async def ingest_chat_qa(question: str, answer: str, store: Any, llm: Any) -> list[str]:
+    """Ingest ONE chat Q&A into the wiki (opt-in, on-demand). Idempotent by
+    content hash: the raw/chat marker is written LAST. ``store`` is accepted for
+    call-site symmetry (unused today). Returns the slugs of pages touched."""
+    q = (question or "").strip()
+    a = (answer or "").strip()
+    if not a:
+        return []
+    ref = capture.chat_qa_ref(q, a)
+    if (files.wiki_root() / "raw" / ref).exists():
+        return []  # already saved (raw marker present)
+    source = {"ref": ref, "title": (q[:80] or "Q&A do chat"), "text": f"Pergunta: {q}\n\nResposta: {a}"}
+    ops = await build_pages_from_source(source, files.list_pages(), llm)
+    touched = apply_page_ops(ops, source_ref=ref)
+    capture.export_chat_qa(q, a)  # write raw LAST = mark saved
+    if touched:
+        files.append_log(f"ingest(chat) | {q[:60]} -> {', '.join(touched)}")
+    return touched
+
+
 async def run_once(store: Any, llm: Any, deepsearch_service: Any) -> dict[str, Any]:
     """One nightly pass: ingest new deepsearch + attachment sources, rebuild
     person pages, index, lint. Advances the watermark. Read-only on memory."""

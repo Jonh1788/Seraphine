@@ -32,6 +32,7 @@ def wiki_root() -> Path:
         root = base / "wiki"
     (root / "raw" / "research").mkdir(parents=True, exist_ok=True)
     (root / "raw" / "attachments").mkdir(parents=True, exist_ok=True)
+    (root / "raw" / "chat").mkdir(parents=True, exist_ok=True)
     (root / "wiki").mkdir(parents=True, exist_ok=True)
     return root
 
