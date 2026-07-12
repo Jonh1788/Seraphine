@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Exercise } from '../api';
 import { checkMCQ } from './grading';
 
@@ -6,9 +6,12 @@ export function ExerciseMCQ({ exercise, onResult }: { exercise: Exercise; onResu
   const [chosen, setChosen] = useState<number | null>(null);
   const options = exercise.payload.options ?? [];
   const answered = chosen !== null;
+  const answeredRef = useRef(false);
 
   const pick = (i: number) => {
+    if (answeredRef.current) return;
     if (answered || i < 0 || i >= options.length) return;
+    answeredRef.current = true;
     setChosen(i);
     onResult(checkMCQ(exercise.payload.answer_idx, i));
   };
