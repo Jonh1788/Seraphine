@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowLeftIcon } from '../icons/Icons';
+import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon } from '../icons/Icons';
 import {
   listCourses, createCourse, getCourse, getStats,
   type CourseSummary, type Course, type Stats,
@@ -46,18 +46,25 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
 
   if (mode.kind === 'lesson') {
     return (
-      <div className="trilha-view">
+      <div className="tr-view">
         <LessonPlayer lessonId={mode.lessonId}
-          onDone={() => loadCourse(mode.courseId)} />
+          onDone={() => loadCourse(mode.courseId)}
+          onNext={async () => {
+            const c = await getCourse(mode.courseId);
+            setCourse(c);
+            const nxt = c.lessons.find((l) => l.lock === 'unlocked');
+            if (nxt) setMode({ kind: 'lesson', courseId: mode.courseId, lessonId: nxt.id });
+            else setMode({ kind: 'map', courseId: mode.courseId });
+          }} />
       </div>
     );
   }
 
   if (mode.kind === 'map' && course) {
     return (
-      <div className="trilha-view">
-        <header className="trilha-view__header">
-          <button type="button" className="trilha-back" onClick={() => { setMode({ kind: 'list' }); refreshList(); }}>
+      <div className="tr-view">
+        <header className="tr-head">
+          <button type="button" className="tr-back" onClick={() => { setMode({ kind: 'list' }); refreshList(); }}>
             <ArrowLeftIcon size={18} /><span>Trilhas</span>
           </button>
         </header>
@@ -69,42 +76,61 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
 
   // list
   return (
-    <div className="trilha-view">
-      <header className="trilha-view__header">
-        <button type="button" className="trilha-back" onClick={onBack}>
+    <div className="tr-view">
+      <header className="tr-head">
+        <button type="button" className="tr-back" onClick={onBack}>
           <ArrowLeftIcon size={18} /><span>Voltar</span>
         </button>
+        <div className="tr-head__text">
+          <h2 className="tr-head__title">Trilhas</h2>
+          <p className="tr-head__sub">Aprenda qualquer coisa, uma lição por vez</p>
+        </div>
         {stats && (
-          <div className="trilha-stats">
-            <span className="trilha-badge">{stats.xp_total} XP</span>
-            <span className="trilha-badge">Streak: {stats.streak_count}</span>
+          <div className="tr-head__stats">
+            <span className="tr-pill tr-pill--xp"><ZapIcon size={14} />{stats.xp_total.toLocaleString('pt-BR')} XP</span>
+            <span className="tr-pill tr-pill--streak"><FlameIcon size={14} />{stats.streak_count} dias</span>
           </div>
         )}
       </header>
-      <div className="trilha-create">
-        <input className="trilha-input" value={topic} onChange={(e) => setTopic(e.target.value)}
+
+      <div className="tr-create">
+        <span className="tr-create__icon"><SparkleIcon size={20} /></span>
+        <input className="tr-create__input" value={topic} onChange={(e) => setTopic(e.target.value)}
           placeholder="Aprender sobre… (ex: Redes neurais)"
           onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
-        <button type="button" className="trilha-check" disabled={creating || !topic.trim()} onClick={create}>
+        <button type="button" className="tr-btn" disabled={creating || !topic.trim()} onClick={create}>
           {creating ? 'Criando…' : 'Criar trilha'}
         </button>
       </div>
-      <ul className="trilha-list">
-        {courses.map((c) => (
-          <li key={c.id}>
-            <button type="button" className="trilha-card"
-              disabled={c.status !== 'ready'}
-              onClick={() => loadCourse(c.id)}>
-              <span className="trilha-card__title">{c.title || c.topic}</span>
-              <span className="trilha-card__meta">
-                {c.status === 'generating' ? 'Gerando…' :
-                 c.status === 'failed' ? 'Falhou' :
-                 `${c.done}/${c.total} lições`}
-              </span>
-            </button>
-          </li>
-        ))}
-        {!courses.length && <li className="trilha-empty">Crie sua primeira trilha.</li>}
+
+      <ul className="tr-grid">
+        {courses.map((c) => {
+          const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+          const isDone = c.status === 'ready' && c.total > 0 && c.done === c.total;
+          return (
+            <li key={c.id}>
+              <button type="button" className={`tr-card${isDone ? ' tr-card--done' : ''}`}
+                disabled={c.status !== 'ready'} onClick={() => loadCourse(c.id)}>
+                <span className="tr-card__icon"><TrilhasIcon size={20} /></span>
+                <span className={`tr-card__status tr-card__status--${c.status === 'generating' ? 'gen' : isDone ? 'done' : 'active'}`}>
+                  {c.status === 'generating' ? (<><span className="tr-card__blink" />gerando…</>)
+                    : c.status === 'failed' ? 'falhou'
+                    : isDone ? (<><CheckIcon size={12} />concluída</>) : 'em andamento'}
+                </span>
+                <span className="tr-card__title">{c.title || c.topic}</span>
+                <span className="tr-card__meta">
+                  {c.status === 'generating' ? 'A Seraphine está montando as lições' : `${c.done}/${c.total} lições`}
+                </span>
+                <span className="tr-progress">
+                  {c.status === 'generating'
+                    ? <span className="tr-progress__bar tr-progress__bar--shimmer" />
+                    : <span className={`tr-progress__bar${pct === 100 ? ' tr-progress__bar--green' : ''}`} style={{ width: `${pct}%` }} />}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        {!courses.length && <li className="tr-empty">Crie sua primeira trilha.</li>}
       </ul>
     </div>
   );

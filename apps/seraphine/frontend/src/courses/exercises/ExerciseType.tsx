@@ -21,15 +21,17 @@ export function ExerciseType({ exercise, onResult }: { exercise: Exercise; onRes
     }
   };
   return (
-    <div className="trilha-ex">
-      <p className="trilha-ex__prompt">{exercise.prompt}</p>
+    <div className="tr-ex">
+      <p className="tr-ex__prompt">{exercise.prompt}</p>
       <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        <input className="trilha-input" value={value} disabled={state !== 'idle'}
-          onChange={(e) => setValue(e.target.value)} placeholder="Sua resposta…" />
-        {state === 'idle' && <button type="submit" className="trilha-check">Verificar</button>}
+        <input className="tr-type__input" value={value} disabled={state !== 'idle'}
+          onChange={(e) => setValue(e.target.value)} placeholder="Sua resposta…" autoFocus />
+        {state === 'idle' && (
+          <button type="submit" className="tr-btn tr-btn--full tr-type__submit" disabled={!value.trim()}>Verificar</button>
+        )}
       </form>
-      {state === 'checking' && <p className="trilha-ex__hint">Verificando…</p>}
-      {state === 'done' && <p className="trilha-ex__hint">{feedback}</p>}
+      {state === 'checking' && <p className="tr-ex__hint">Verificando…</p>}
+      {state === 'done' && <p className="tr-ex__hint">{feedback}</p>}
     </div>
   );
 }
