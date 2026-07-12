@@ -34,6 +34,29 @@ def test_cloze_without_blank_rejected():
     }) is None
 
 
+def test_cloze_multi_blank_rejected():
+    # cloze de múltiplas lacunas não é suportado (front/correção assumem 1) →
+    # descartado na validação em vez de virar um exercício impossível de acertar.
+    assert valid_exercise({
+        "type": "cloze", "prompt": "Complete a frase:",
+        "payload": {
+            "text": "Plantas são ___ ou ___. Ex: ___.",
+            "answers": [["autotróficos", "produtores", "cianobactérias"]],
+        },
+    }) is None
+
+
+def test_cloze_flattens_list_answers():
+    # o LLM às vezes devolve answers como lista-de-listas; achatar em strings
+    # planas (NUNCA stringificar a lista → "['azul', 'anil']").
+    out = valid_exercise({
+        "type": "cloze", "prompt": "Complete:",
+        "payload": {"text": "O céu é ___.", "answers": [["azul", "anil"]]},
+    })
+    assert out["payload"]["answers"] == ["azul", "anil"]
+    assert all("[" not in a for a in out["payload"]["answers"])
+
+
 def test_valid_type():
     out = valid_exercise({
         "type": "type", "prompt": "Capital do Brasil?",
