@@ -71,8 +71,6 @@
 .trilha-ex__prompt { font-weight: 600; }
 .trilha-ex__options { display: flex; flex-direction: column; gap: 8px; }
 .trilha-opt { text-align: left; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: var(--text); cursor: pointer; }
-.trilha-opt--correct { border-color: #86efac; background: rgba(134,239,172,0.14); }
-.trilha-opt--wrong { border-color: #fca5a5; background: rgba(248,113,113,0.14); }
 .trilha-match-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .trilha-match-left { flex: 1; }
 .trilha-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -170,3 +168,30 @@
 .tr-side-card--muted { background: transparent; }
 .tr-side-card__title { font-size: 15px; font-weight: 700; }
 .tr-side-card__meta { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+
+/* ── Exercícios: moldura, MCQ, type ── */
+.tr-ex { display: flex; flex-direction: column; gap: 14px; }
+.tr-ex__prompt { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+.tr-ex__hint { font-size: 13.5px; color: var(--text-dim); }
+.tr-opts { display: flex; flex-direction: column; gap: 10px; }
+.tr-opt {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 15px 18px; border-radius: 14px; font: inherit; font-size: 15px; cursor: pointer;
+  background: var(--surface, #17171e); border: 1px solid var(--border-strong); color: var(--text);
+}
+.tr-opt:disabled { cursor: default; }
+.tr-opt__num {
+  flex: none; width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 700; background: rgba(255,255,255,.06); color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.tr-opt--chosen { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px rgba(154,147,255,.12); }
+.tr-opt--chosen .tr-opt__num { background: var(--accent); color: #14141a; border-color: transparent; }
+.tr-opt--correct { border-color: rgba(74,222,128,.5); background: rgba(74,222,128,.08); }
+.tr-opt--wrong { border-color: rgba(239,107,107,.5); background: rgba(239,107,107,.08); }
+.tr-type__input {
+  width: 100%; padding: 16px 18px; border-radius: 14px; font: inherit; font-size: 16px;
+  background: var(--surface); border: 1px solid var(--border-strong); color: var(--text);
+}
+.tr-type__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154,147,255,.12); }
+.tr-type__submit { margin-top: 12px; }
