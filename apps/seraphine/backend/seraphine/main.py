@@ -457,6 +457,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Reading service failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
+    # Courses / Trilhas — always enabled (SQLite-backed)
+    # ------------------------------------------------------------------
+    try:
+        from seraphine.courses import schema as courses_schema
+        store.register_migrator("seraphine_courses", courses_schema.migrate)
+        await store.ensure_schema()  # idempotent
+        logger.info("Courses migrator registered")
+    except Exception as e:
+        logger.warning("Courses migrator failed (non-critical): %s", e)
+
+    # ------------------------------------------------------------------
     # Planning (SDD 093) — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     planning_service = None
@@ -1316,6 +1327,9 @@ def create_app() -> FastAPI:
 
     from seraphine.flashcards.routes import router as flashcards_router
     app.include_router(flashcards_router)
+
+    from seraphine.courses.routes import router as courses_router
+    app.include_router(courses_router)
 
     from seraphine.images.routes import router as images_router
     app.include_router(images_router)
