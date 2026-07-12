@@ -1,3 +1,67 @@
+/* ── Trilhas · Obsidian reskin ─────────────────────────────────────── */
+/* Fundação: botões/pills/progresso/eyebrow/feedback + keyframes.       */
+/* Assinatura Duolingo: sombra dura deslocada — SÓ em ações do fluxo.   */
+
+.tr-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 22px; border: none; border-radius: 14px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  box-shadow: 0 4px 0 #4b44a8; transition: transform .1s, box-shadow .1s;
+}
+.tr-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 #4b44a8; }
+.tr-btn:disabled { background: rgba(255,255,255,.08); color: var(--text-faint, #5f5e6b); box-shadow: none; cursor: not-allowed; }
+.tr-btn--green { background: #4ade80; color: #14141a; box-shadow: 0 4px 0 #2c7a4b; }
+.tr-btn--green:active:not(:disabled) { box-shadow: 0 1px 0 #2c7a4b; }
+.tr-btn--ghost { background: transparent; color: var(--text-dim, #9594a0); box-shadow: none; border: 1px solid var(--border-strong, rgba(255,255,255,.12)); }
+.tr-btn--full { width: 100%; }
+
+.tr-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 700; padding: 6px 12px; border-radius: 999px;
+  background: rgba(255,255,255,.06); color: var(--text, #ececef);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+}
+.tr-pill--xp { color: #ffd54f; background: rgba(255,213,79,.1); border-color: rgba(255,213,79,.2); }
+.tr-pill--streak { color: #ff8a4c; background: rgba(255,138,76,.1); border-color: rgba(255,138,76,.2); }
+.tr-pill--accent { color: var(--accent, #9a93ff); background: var(--accent-soft, rgba(154,147,255,.14)); border-color: rgba(154,147,255,.25); }
+
+.tr-progress { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
+.tr-progress__bar { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent-dim, #6c63d6), var(--accent, #9a93ff)); transition: width .3s; }
+.tr-progress__bar--green { background: #4ade80; }
+.tr-progress__bar--shimmer {
+  width: 40%; background: linear-gradient(90deg, transparent, var(--accent-soft, rgba(154,147,255,.14)), transparent);
+  animation: trShimmer 1.4s infinite;
+}
+
+.tr-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent, #9a93ff); }
+
+.tr-feedback {
+  position: sticky; bottom: 0; margin-top: 16px; padding: 16px 18px; border-radius: 16px;
+  display: flex; align-items: flex-start; gap: 12px;
+  animation: trSlideUp .2s ease-out;
+}
+.tr-feedback--ok { background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.25); }
+.tr-feedback--no { background: rgba(239,107,107,.1); border: 1px solid rgba(239,107,107,.25); }
+.tr-feedback__dot { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #14141a; }
+.tr-feedback--ok .tr-feedback__dot { background: #4ade80; }
+.tr-feedback--no .tr-feedback__dot { background: #ef6b6b; }
+.tr-feedback__title { font-weight: 700; font-size: 15px; }
+.tr-feedback--ok .tr-feedback__title { color: #4ade80; }
+.tr-feedback--no .tr-feedback__title { color: #ef6b6b; }
+.tr-feedback__expl { font-size: 13.5px; color: var(--text-dim, #9594a0); margin-top: 4px; line-height: 1.5; }
+.tr-feedback__actions { margin-left: auto; align-self: center; }
+
+@keyframes trShimmer { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+@keyframes statusBlink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes nodePulse {
+  0% { box-shadow: 0 0 0 0 rgba(154,147,255,.45); }
+  70% { box-shadow: 0 0 0 14px rgba(154,147,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(154,147,255,0); }
+}
+@keyframes trSlideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes trSlideIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+
 .trilha-view { display: flex; flex-direction: column; gap: 16px; padding: 16px; height: 100%; overflow-y: auto; }
 .trilha-view__header { display: flex; justify-content: space-between; align-items: center; }
 .trilha-back { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-dim); cursor: pointer; }
