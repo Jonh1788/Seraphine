@@ -25,6 +25,7 @@ import { NotesView } from './notes';
 import { JournalView } from './journal';
 import { ImagesView } from './images/ImagesView';
 import { FlashcardsView } from './flashcards/FlashcardsView';
+import { TrilhasView } from './courses/TrilhasView';
 import { ReadingListView } from './reading/ReadingListView';
 import { DashboardView } from './dashboard';
 import { JobsTab } from './cv-triage/JobsTab';
@@ -49,6 +50,7 @@ import {
   BrainIcon,
   BriefcaseIcon,
   FlashcardIcon,
+  TrilhasIcon,
   ImagesIcon,
   TasksIcon,
   BellIcon,
@@ -290,6 +292,7 @@ export function AppLayout(): JSX.Element {
     { id: 'journal', icon: <BookIcon size={22} />, label: 'Diario', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'journal' ? 'chat' : 'journal'), active: activeView === 'journal' },
     { id: 'reading', icon: <BookmarkIcon size={22} />, label: 'Leituras', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'reading' ? 'chat' : 'reading'), active: activeView === 'reading' },
     { id: 'flashcards', icon: <FlashcardIcon size={22} />, label: 'Flashcards', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'flashcards' ? 'chat' : 'flashcards'), active: activeView === 'flashcards' },
+    { id: 'trilhas', icon: <TrilhasIcon size={22} />, label: 'Trilhas', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'trilhas' ? 'chat' : 'trilhas'), active: activeView === 'trilhas' },
     { id: 'research', icon: <SearchIcon size={22} />, label: 'Pesquisa', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'research' ? 'chat' : 'research'), active: activeView === 'research' },
     { id: 'wiki', icon: <WikiIcon size={22} />, label: 'Wiki', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'wiki' ? 'chat' : 'wiki'), active: activeView === 'wiki' },
     { id: 'memory', icon: <BrainIcon size={22} />, label: 'Memoria', group: 'Conhecimento', onClick: () => setActiveView(activeView === 'memory' ? 'chat' : 'memory'), active: activeView === 'memory' },
@@ -562,6 +565,9 @@ export function AppLayout(): JSX.Element {
                 )}
                 {activeView === 'flashcards' && (
                   <FlashcardsView onBack={() => setActiveView('chat')} />
+                )}
+                {activeView === 'trilhas' && (
+                  <TrilhasView onBack={() => setActiveView('chat')} />
                 )}
                 {activeView === 'reading' && (
                   <ReadingListView onBack={() => setActiveView('chat')} />
