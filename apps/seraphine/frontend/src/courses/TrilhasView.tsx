@@ -62,9 +62,9 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
 
   if (mode.kind === 'map' && course) {
     return (
-      <div className="trilha-view">
-        <header className="trilha-view__header">
-          <button type="button" className="trilha-back" onClick={() => { setMode({ kind: 'list' }); refreshList(); }}>
+      <div className="tr-view">
+        <header className="tr-head">
+          <button type="button" className="tr-back" onClick={() => { setMode({ kind: 'list' }); refreshList(); }}>
             <ArrowLeftIcon size={18} /><span>Trilhas</span>
           </button>
         </header>
