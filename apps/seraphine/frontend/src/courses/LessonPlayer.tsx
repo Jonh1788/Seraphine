@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { getLesson, completeLesson, type Lesson, type CompleteResult } from './api';
 import { ExerciseMCQ } from './exercises/ExerciseMCQ';
 import { ExerciseCloze } from './exercises/ExerciseCloze';
@@ -61,7 +63,9 @@ export function LessonPlayer({ lessonId, onDone, onNext }:
         {frame}
         <p className="tr-eyebrow">Teoria da lição</p>
         <h2 className="tr-player__title">{lesson.title}</h2>
-        <div className="tr-concept">{lesson.concept_md}</div>
+        <div className="tr-concept">
+          <Markdown remarkPlugins={[remarkGfm]}>{lesson.concept_md}</Markdown>
+        </div>
         <div className="tr-tip">
           <span className="tr-tip__icon"><SparkleIcon size={16} /></span>
           <p>Dica da Seraphine: leia o exemplo com calma — os exercícios usam exatamente esses conceitos.</p>
