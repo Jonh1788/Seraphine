@@ -15,6 +15,7 @@ export type ActiveView =
   | 'journal'
   | 'images'
   | 'flashcards'
+  | 'trilhas'
   | 'reading'
   | 'trabalhos'
   | 'inbox'
