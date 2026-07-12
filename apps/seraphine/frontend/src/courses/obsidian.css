@@ -65,16 +65,6 @@
 .trilha-view { display: flex; flex-direction: column; gap: 16px; padding: 16px; height: 100%; overflow-y: auto; }
 .trilha-view__header { display: flex; justify-content: space-between; align-items: center; }
 .trilha-back { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-dim); cursor: pointer; }
-.trilha-input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: var(--bg-2, #1e1e1e); color: var(--text); }
-.trilha-check { padding: 8px 16px; border-radius: 8px; border: none; background: #7c6cff; color: #fff; font-weight: 700; cursor: pointer; }
-.trilha-check:disabled { opacity: 0.5; cursor: default; }
-.trilha-ex__prompt { font-weight: 600; }
-.trilha-ex__options { display: flex; flex-direction: column; gap: 8px; }
-.trilha-opt { text-align: left; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: var(--text); cursor: pointer; }
-.trilha-match-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
-.trilha-match-left { flex: 1; }
-.trilha-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.trilha-step { display: flex; justify-content: space-between; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.04); }
 
 /* ── Tela: player (frame, teoria, resultado) ── */
 .tr-player { display: flex; flex-direction: column; gap: 16px; max-width: 720px; margin: 0 auto; padding: 8px 0 24px; animation: trSlideIn .25s cubic-bezier(.16,1,.3,1); }
@@ -195,3 +185,28 @@
 }
 .tr-type__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(154,147,255,.12); }
 .tr-type__submit { margin-top: 12px; }
+
+/* ── Exercícios: match, cloze ── */
+.tr-match { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 28px; }
+.tr-match__col { display: flex; flex-direction: column; gap: 12px; }
+.tr-match__item {
+  width: 100%; text-align: left; padding: 14px 16px; border-radius: 14px; font: inherit; font-size: 14px;
+  background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); cursor: pointer;
+}
+.tr-match__item--sel { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px rgba(154,147,255,.12); }
+.tr-match__item--ok { border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.08); color: var(--text-dim); cursor: default; }
+.tr-match__item--err { border-color: #ef6b6b; background: rgba(239,107,107,.12); animation: trShake .3s; }
+@keyframes trShake { 0%, 100% { transform: none; } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.tr-cloze__sentence { padding: 20px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); font-size: 17px; line-height: 2.15; }
+.tr-cloze__blank { display: inline-block; min-width: 120px; border-bottom: 2px dashed var(--border-strong); vertical-align: bottom; }
+.tr-cloze__chip {
+  display: inline-flex; padding: 6px 14px; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  background: var(--elev, #1f1f27); border: 1px solid var(--border-strong); color: var(--text); box-shadow: 0 4px 0 #101016;
+}
+.tr-cloze__chip--placed { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; box-shadow: none; }
+.tr-cloze__chip--used { opacity: .3; cursor: default; box-shadow: none; }
+.tr-cloze__bank { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 8px 0; }
+.tr-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tr-steps__item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border-strong); }
+.tr-steps__ctrl { display: inline-flex; gap: 6px; }
+.tr-steps__ctrl button { background: var(--elev); border: 1px solid var(--border-strong); color: var(--text-dim); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; }
