@@ -27,6 +27,7 @@ class FakeLLM:
             return {"lessons": [
                 {"title": "Introdução à luz", "objective": "o que é luz"},
                 {"title": "Fótons", "objective": "quantização"},
+                {"title": "Espectro", "objective": "cores e comprimento de onda"},
             ]}
         return {"concept_md": "# Luz\nA luz é...", "exercises": [
             {"type": "mcq", "prompt": "O que é fóton?",
@@ -46,7 +47,7 @@ async def test_research_digest_raises_when_search_fails():
 @pytest.mark.asyncio
 async def test_make_outline_returns_lessons():
     lessons = await gen.make_outline(FakeLLM(), topic="Luz", digest="…")
-    assert len(lessons) == 2
+    assert len(lessons) == 3
     assert lessons[0]["title"] == "Introdução à luz"
 
 
@@ -77,8 +78,8 @@ async def test_generate_course_persists_ready(tmp_path):
         n_lessons = conn.execute("SELECT COUNT(*) FROM lesson WHERE course_id=?", (cid,)).fetchone()[0]
         n_ex = conn.execute("SELECT COUNT(*) FROM exercise").fetchone()[0]
     assert status == "ready"
-    assert n_lessons == 2
-    assert n_ex == 4  # 2 lessons × 2 exercises
+    assert n_lessons == 3
+    assert n_ex == 6  # 3 lessons × 2 exercises
 
 
 @pytest.mark.asyncio

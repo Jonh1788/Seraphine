@@ -221,7 +221,7 @@ async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, e
     try:
         digest = await research_digest(engine, topic)
         lessons = await make_outline(llm, topic=topic, digest=digest)
-        if len(lessons) < 2:
+        if len(lessons) < 3:
             raise CourseGenerationError("outline muito curto")
 
         built: list[dict] = []
