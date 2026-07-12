@@ -46,9 +46,16 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
 
   if (mode.kind === 'lesson') {
     return (
-      <div className="trilha-view">
+      <div className="tr-view">
         <LessonPlayer lessonId={mode.lessonId}
-          onDone={() => loadCourse(mode.courseId)} />
+          onDone={() => loadCourse(mode.courseId)}
+          onNext={async () => {
+            const c = await getCourse(mode.courseId);
+            setCourse(c);
+            const nxt = c.lessons.find((l) => l.lock === 'unlocked');
+            if (nxt) setMode({ kind: 'lesson', courseId: mode.courseId, lessonId: nxt.id });
+            else setMode({ kind: 'map', courseId: mode.courseId });
+          }} />
       </div>
     );
   }
