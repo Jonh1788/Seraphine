@@ -1,0 +1,87 @@
+/* src/mobile/obsidian.css — fundação (tudo funciona em qualquer shell;
+   as regras de LAYOUT do shell ficam sob html[data-shell='phone'] nas tasks seguintes) */
+.morb-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.morb {
+  position: relative; display: inline-block; border-radius: 50%;
+  background: radial-gradient(circle at 32% 26%, #efedff 0%, #cac5ff 22%, #9a93ff 55%, #4d45b8 85%, #332d85 100%);
+  box-shadow: inset -5px -7px 14px rgba(15,10,60,.55), inset 3px 4px 8px rgba(255,255,255,.35),
+              0 4px 18px rgba(154,147,255,.45);
+}
+.morb__spec {
+  position: absolute; left: 22%; top: 14%; width: 34%; height: 20%;
+  border-radius: 50%; background: rgba(255,255,255,.75); filter: blur(2px);
+  transform: rotate(-24deg);
+}
+.morb--float { animation: orbFloat 5s ease-in-out infinite; }
+.morb__halo {
+  position: absolute; inset: -18%; border-radius: 50%; z-index: -1;
+  background: conic-gradient(from 0deg, rgba(154,147,255,.0), rgba(154,147,255,.5), rgba(202,197,255,.25), rgba(154,147,255,.0));
+  filter: blur(7px); animation: orbSpin 6s linear infinite;
+}
+.mshell-card { background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255,255,255,.08)); border-radius: 16px; padding: 14px; }
+.mshell-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint, #5f5e6b); }
+@keyframes orbFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes orbSpin { to { transform: rotate(360deg); } }
+@keyframes statusBlink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* ── shell (layout phone) ── */
+html[data-shell='phone'] .mshell { display: flex; flex-direction: column; height: 100dvh; background: var(--app, #0f0f14); }
+html[data-shell='phone'] .mshell__content { flex: 1; min-height: 0; overflow-y: auto; padding: calc(12px + env(safe-area-inset-top, 44px)) 16px 16px; }
+html[data-shell='phone'] .mtabbar {
+  flex: none; display: flex; align-items: flex-end; justify-content: space-around;
+  background: var(--nav, #131319); border-top: 1px solid var(--border, rgba(255,255,255,.08));
+  padding: 8px 6px calc(10px + env(safe-area-inset-bottom, 20px));
+}
+html[data-shell='phone'] .mtab {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 56px; min-height: 44px;
+  background: none; border: none; font: inherit; color: var(--text-faint, #5f5e6b); cursor: pointer;
+}
+html[data-shell='phone'] .mtab__label { font-size: 10px; font-weight: 600; }
+html[data-shell='phone'] .mtab--active { color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .mtab--active .mtab__label { font-weight: 700; }
+html[data-shell='phone'] .mtab--chat { margin-top: -22px; }
+html[data-shell='phone'] .mtab--chat .morb { box-shadow: inset -5px -7px 14px rgba(15,10,60,.55), inset 3px 4px 8px rgba(255,255,255,.35), 0 6px 20px rgba(154,147,255,.4), 0 0 0 5px var(--app, #0f0f14); }
+html[data-shell='phone'] .mpushed { display: flex; flex-direction: column; height: 100dvh; background: var(--app, #0f0f14); }
+html[data-shell='phone'] .mpushed__head { flex: none; display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top, 44px)) 14px 10px; border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); }
+html[data-shell='phone'] .mpushed__back { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: var(--text-dim, #9594a0); cursor: pointer; }
+html[data-shell='phone'] .mpushed__title { font-size: 16px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .mpushed__body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom, 20px); }
+html[data-shell='phone'] .mshell-pending { padding: 40px 16px; text-align: center; color: var(--text-faint, #5f5e6b); }
+
+/* ── hoje ── */
+html[data-shell='phone'] .mhoje { display: flex; flex-direction: column; gap: 14px; }
+html[data-shell='phone'] .mhoje__head { display: flex; align-items: center; gap: 12px; padding: 4px 0 2px; }
+html[data-shell='phone'] .mhoje__hi { font-size: 22px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje__sub { font-size: 13px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .msugere {
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(154,147,255,.14), rgba(154,147,255,.04));
+  border: 1px solid rgba(154,147,255,.22);
+}
+html[data-shell='phone'] .msugere__icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft, rgba(154,147,255,.14)); color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .msugere__title { font-size: 14px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .msugere__body { font-size: 12.5px; color: var(--text-dim, #9594a0); margin-top: 2px; }
+html[data-shell='phone'] .msugere__actions { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
+html[data-shell='phone'] .msugere__go { padding: 8px 14px; border-radius: 10px; border: none; background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; min-height: 34px; }
+html[data-shell='phone'] .msugere__later { background: none; border: none; color: var(--text-faint, #5f5e6b); font: inherit; font-size: 12px; cursor: pointer; min-height: 30px; }
+html[data-shell='phone'] .mhoje__row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+html[data-shell='phone'] .mhoje-agenda__row { display: flex; gap: 10px; padding: 6px 0; font-size: 13.5px; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-agenda__time { color: var(--accent, #9a93ff); font-weight: 700; min-width: 44px; }
+html[data-shell='phone'] .mhoje-tarefas__row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13.5px; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-tarefas__check { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--border-strong, rgba(255,255,255,.12)); background: none; color: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+html[data-shell='phone'] .mhoje-tarefas__check:active { color: var(--accent, #9a93ff); border-color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .mhoje-habitos__ring { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 8px auto 0; font-size: 13px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-habitos__ring span { background: var(--surface, #17171e); width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+html[data-shell='phone'] .mhoje-orcamento__value { font-size: 20px; font-weight: 700; color: var(--text, #ececef); margin-top: 4px; }
+
+/* ── mais ── */
+html[data-shell='phone'] .mmais { display: flex; flex-direction: column; gap: 14px; }
+html[data-shell='phone'] .mmais__profile { display: flex; align-items: center; gap: 12px; }
+html[data-shell='phone'] .mmais__stats { display: flex; gap: 8px; }
+html[data-shell='phone'] .mmais-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; }
+html[data-shell='phone'] .mmais-pill--xp { color: #ffd54f; background: rgba(255,213,79,.1); border: 1px solid rgba(255,213,79,.2); }
+html[data-shell='phone'] .mmais-pill--streak { color: #ff8a4c; background: rgba(255,138,76,.1); border: 1px solid rgba(255,138,76,.2); }
+html[data-shell='phone'] .mmais__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+html[data-shell='phone'] .mmais__mod { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 84px; cursor: pointer; font: inherit; color: var(--text, #ececef); }
+html[data-shell='phone'] .mmais__mod-icon { width: 36px; height: 36px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft, rgba(154,147,255,.14)); color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .mmais__mod-title { font-size: 14px; font-weight: 700; }
