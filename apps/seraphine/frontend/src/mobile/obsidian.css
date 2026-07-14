@@ -73,3 +73,15 @@ html[data-shell='phone'] .mhoje-tarefas__check:active { color: var(--accent, #9a
 html[data-shell='phone'] .mhoje-habitos__ring { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 8px auto 0; font-size: 13px; font-weight: 700; color: var(--text, #ececef); }
 html[data-shell='phone'] .mhoje-habitos__ring span { background: var(--surface, #17171e); width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 html[data-shell='phone'] .mhoje-orcamento__value { font-size: 20px; font-weight: 700; color: var(--text, #ececef); margin-top: 4px; }
+
+/* ── mais ── */
+html[data-shell='phone'] .mmais { display: flex; flex-direction: column; gap: 14px; }
+html[data-shell='phone'] .mmais__profile { display: flex; align-items: center; gap: 12px; }
+html[data-shell='phone'] .mmais__stats { display: flex; gap: 8px; }
+html[data-shell='phone'] .mmais-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; }
+html[data-shell='phone'] .mmais-pill--xp { color: #ffd54f; background: rgba(255,213,79,.1); border: 1px solid rgba(255,213,79,.2); }
+html[data-shell='phone'] .mmais-pill--streak { color: #ff8a4c; background: rgba(255,138,76,.1); border: 1px solid rgba(255,138,76,.2); }
+html[data-shell='phone'] .mmais__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+html[data-shell='phone'] .mmais__mod { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 84px; cursor: pointer; font: inherit; color: var(--text, #ececef); }
+html[data-shell='phone'] .mmais__mod-icon { width: 36px; height: 36px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft, rgba(154,147,255,.14)); color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .mmais__mod-title { font-size: 14px; font-weight: 700; }
