@@ -4,6 +4,7 @@ import { PushedScreen } from './PushedScreen';
 import { TasksView } from '../tasks/TasksView';
 import { TrilhasView } from '../courses/TrilhasView';
 import { ChatTab } from './ChatTab';
+import { HojeScreen } from './HojeScreen';
 import './obsidian.css';
 
 export type Pushed = { key: string; title: string } | null;
@@ -25,7 +26,7 @@ export function PhoneShell() {
   return (
     <div className="mshell">
       <main className="mshell__content">
-        {tab === 'hoje' && <div className="mshell-pending">Em construção</div>}
+        {tab === 'hoje' && <HojeScreen onOpen={setPushed} />}
         {tab === 'tarefas' && <TasksView onBack={() => setTab('hoje')} />}
         {tab === 'chat' && <ChatTab />}
         {tab === 'trilhas' && <TrilhasView onBack={() => setTab('hoje')} />}

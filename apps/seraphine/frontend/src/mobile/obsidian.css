@@ -47,3 +47,29 @@ html[data-shell='phone'] .mpushed__back { min-width: 44px; min-height: 44px; dis
 html[data-shell='phone'] .mpushed__title { font-size: 16px; font-weight: 700; color: var(--text, #ececef); }
 html[data-shell='phone'] .mpushed__body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom, 20px); }
 html[data-shell='phone'] .mshell-pending { padding: 40px 16px; text-align: center; color: var(--text-faint, #5f5e6b); }
+
+/* ── hoje ── */
+html[data-shell='phone'] .mhoje { display: flex; flex-direction: column; gap: 14px; }
+html[data-shell='phone'] .mhoje__head { display: flex; align-items: center; gap: 12px; padding: 4px 0 2px; }
+html[data-shell='phone'] .mhoje__hi { font-size: 22px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje__sub { font-size: 13px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .msugere {
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(154,147,255,.14), rgba(154,147,255,.04));
+  border: 1px solid rgba(154,147,255,.22);
+}
+html[data-shell='phone'] .msugere__icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft, rgba(154,147,255,.14)); color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .msugere__title { font-size: 14px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .msugere__body { font-size: 12.5px; color: var(--text-dim, #9594a0); margin-top: 2px; }
+html[data-shell='phone'] .msugere__actions { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
+html[data-shell='phone'] .msugere__go { padding: 8px 14px; border-radius: 10px; border: none; background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; min-height: 34px; }
+html[data-shell='phone'] .msugere__later { background: none; border: none; color: var(--text-faint, #5f5e6b); font: inherit; font-size: 12px; cursor: pointer; min-height: 30px; }
+html[data-shell='phone'] .mhoje__row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+html[data-shell='phone'] .mhoje-agenda__row { display: flex; gap: 10px; padding: 6px 0; font-size: 13.5px; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-agenda__time { color: var(--accent, #9a93ff); font-weight: 700; min-width: 44px; }
+html[data-shell='phone'] .mhoje-tarefas__row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13.5px; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-tarefas__check { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--border-strong, rgba(255,255,255,.12)); background: none; color: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+html[data-shell='phone'] .mhoje-tarefas__check:active { color: var(--accent, #9a93ff); border-color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .mhoje-habitos__ring { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 8px auto 0; font-size: 13px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .mhoje-habitos__ring span { background: var(--surface, #17171e); width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+html[data-shell='phone'] .mhoje-orcamento__value { font-size: 20px; font-weight: 700; color: var(--text, #ececef); margin-top: 4px; }
