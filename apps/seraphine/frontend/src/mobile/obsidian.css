@@ -1,0 +1,25 @@
+/* src/mobile/obsidian.css — fundação (tudo funciona em qualquer shell;
+   as regras de LAYOUT do shell ficam sob html[data-shell='phone'] nas tasks seguintes) */
+.morb-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.morb {
+  position: relative; display: inline-block; border-radius: 50%;
+  background: radial-gradient(circle at 32% 26%, #efedff 0%, #cac5ff 22%, #9a93ff 55%, #4d45b8 85%, #332d85 100%);
+  box-shadow: inset -5px -7px 14px rgba(15,10,60,.55), inset 3px 4px 8px rgba(255,255,255,.35),
+              0 4px 18px rgba(154,147,255,.45);
+}
+.morb__spec {
+  position: absolute; left: 22%; top: 14%; width: 34%; height: 20%;
+  border-radius: 50%; background: rgba(255,255,255,.75); filter: blur(2px);
+  transform: rotate(-24deg);
+}
+.morb--float { animation: orbFloat 5s ease-in-out infinite; }
+.morb__halo {
+  position: absolute; inset: -18%; border-radius: 50%; z-index: -1;
+  background: conic-gradient(from 0deg, rgba(154,147,255,.0), rgba(154,147,255,.5), rgba(202,197,255,.25), rgba(154,147,255,.0));
+  filter: blur(7px); animation: orbSpin 6s linear infinite;
+}
+.mshell-card { background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255,255,255,.08)); border-radius: 16px; padding: 14px; }
+.mshell-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint, #5f5e6b); }
+@keyframes orbFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes orbSpin { to { transform: rotate(360deg); } }
+@keyframes statusBlink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
