@@ -4,10 +4,9 @@ import { AppBootstrap } from './AppBootstrap';
 import { AppLayout } from './AppLayout';
 import { PhoneShell } from './mobile/PhoneShell';
 
-const isPhone = typeof document !== 'undefined'
-  && document.documentElement.dataset.shell === 'phone';
-
 export function App(): JSX.Element {
+  const isPhone = typeof document !== 'undefined'
+    && document.documentElement.dataset.shell === 'phone';
   return (
     <RefsProvider>
       <FocusProvider>

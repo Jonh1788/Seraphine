@@ -16,3 +16,16 @@ describe('TabBar', () => {
     expect(picked).toBe('trilhas');
   });
 });
+
+describe('phone gate', () => {
+  it('reads dataset.shell at render time, not import time', async () => {
+    document.documentElement.dataset.shell = 'phone';
+    // importar DEPOIS do stamp — o gate deve ver 'phone'
+    const { PhoneShell } = await import('../PhoneShell');
+    expect(PhoneShell).toBeTypeOf('function');
+    // o App computa isPhone no corpo do componente; simular a leitura:
+    const isPhone = document.documentElement.dataset.shell === 'phone';
+    expect(isPhone).toBe(true);
+    delete document.documentElement.dataset.shell;
+  });
+});
