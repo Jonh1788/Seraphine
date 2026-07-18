@@ -58,3 +58,19 @@ def test_list_courses(client):
     r = client.get("/courses")
     assert r.status_code == 200
     assert len(r.json()["courses"]) >= 1
+
+
+def test_create_with_invalid_tutor_400(client):
+    r = client.post("/courses", json={"topic": "X", "tutor_model": "banana"})
+    assert r.status_code == 400
+
+
+def test_create_with_tutor_ok(client):
+    r = client.post("/courses", json={"topic": "X", "tutor_model": "cliproxy:claude-haiku-4-5"})
+    assert r.status_code == 200
+
+
+def test_models_endpoint_empty_without_ds(client):
+    r = client.get("/courses/models")
+    assert r.status_code == 200
+    assert r.json() == {"models": []}
