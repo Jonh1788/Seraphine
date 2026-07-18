@@ -45,4 +45,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             streak_last_day TEXT
         )"""
     )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(course)").fetchall()}
+    if "tutor_model" not in cols:
+        conn.execute("ALTER TABLE course ADD COLUMN tutor_model TEXT")
     conn.commit()

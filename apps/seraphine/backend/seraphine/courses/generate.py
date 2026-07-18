@@ -229,7 +229,9 @@ async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, e
     """Roda os 3 estágios e persiste. Seta course.status ready|failed.
     Nunca levanta (é chamado em background); erros viram status='failed'."""
     try:
-        digest = await research_digest(engine, topic)
+        from seraphine.courses.sources import resolve_source
+        src = await resolve_source(topic, engine=engine)
+        digest = src["digest"]
         lessons = await make_outline(llm, topic=topic, digest=digest)
         if len(lessons) < 3:
             raise CourseGenerationError("outline muito curto")
@@ -247,14 +249,21 @@ async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, e
                 )
             built.append({"spec": spec, "content": content})
 
-        title = topic.strip()[:120]
+        title = src["title"] or topic.strip()[:120]
+        source_ref = src["source_ref"]
 
         def _persist() -> None:
             with store._connect() as conn:
-                conn.execute(
-                    "UPDATE course SET title=?, status='ready' WHERE id=?",
-                    (title, course_id),
-                )
+                if source_ref:
+                    conn.execute(
+                        "UPDATE course SET title=?, source_ref=?, status='ready' WHERE id=?",
+                        (title, source_ref, course_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE course SET title=?, status='ready' WHERE id=?",
+                        (title, course_id),
+                    )
                 for i, b in enumerate(built):
                     lid = str(uuid.uuid4())
                     lstatus = "ok" if b["content"]["exercises"] else "incomplete"

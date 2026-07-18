@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from seraphine.courses import generate as gen
+from seraphine.courses.sources import is_url
+from seraphine.courses.tutor import tutor_llm
 
 logger = logging.getLogger("seraphine.courses")
 
@@ -46,33 +48,42 @@ _JUDGE_SYSTEM = (
 
 class CoursesService:
     def __init__(self, store: Any, llm: Any = None, engine: Any = None,
-                 flashcards: Any = None) -> None:
+                 flashcards: Any = None, openrouter_key: str = "") -> None:
         self.store = store
         self.llm = llm
         self.engine = engine
         self.flashcards = flashcards
+        self.openrouter_key = openrouter_key
 
     def _spawn(self, coro) -> None:
         """Dispara o job de geração. Sobrescrito nos testes."""
         asyncio.create_task(coro)
 
-    async def create_course(self, topic: str) -> dict[str, Any]:
+    async def create_course(self, topic: str, tutor_model: str | None = None) -> dict[str, Any]:
         topic = (topic or "").strip()
         if not topic:
             raise ValueError("tópico vazio")
         cid = str(uuid.uuid4())
+        source_ref = topic if is_url(topic) else None
 
         def _work() -> None:
             with self.store._connect() as conn:
                 conn.execute(
-                    "INSERT INTO course (id, topic, status, created_ts)"
-                    " VALUES (?,?,?,?)", (cid, topic[:200], "generating", _now()),
+                    "INSERT INTO course (id, topic, status, created_ts, source_ref, tutor_model)"
+                    " VALUES (?,?,?,?,?,?)",
+                    (cid, topic[:200], "generating", _now(), source_ref, tutor_model),
                 )
                 conn.commit()
 
         await asyncio.to_thread(_work)
+        try:
+            llm_tutor = tutor_llm(tutor_model, app_llm=self.llm, openrouter_key=self.openrouter_key)
+        except Exception as e:  # noqa: BLE001 — resolução do tutor não deve derrubar o create
+            logger.warning("create_course: tutor '%s' indisponível, usando LLM padrão: %s",
+                           tutor_model, e)
+            llm_tutor = self.llm
         self._spawn(gen.generate_course(
-            self.store, course_id=cid, topic=topic, llm=self.llm, engine=self.engine,
+            self.store, course_id=cid, topic=topic, llm=llm_tutor, engine=self.engine,
         ))
         return {"course_id": cid, "status": "generating"}
 
@@ -155,20 +166,23 @@ class CoursesService:
         return await asyncio.to_thread(_work)
 
     async def grade_type(self, exercise_id: str, answer: str) -> dict[str, Any]:
-        def _load() -> tuple[str, dict, str] | None:
+        def _load() -> tuple[str, dict, str, str | None] | None:
             with self.store._connect() as conn:
                 r = conn.execute(
-                    "SELECT prompt, payload_json, explanation FROM exercise WHERE id=? AND type='type'",
+                    "SELECT e.prompt, e.payload_json, e.explanation, c.tutor_model"
+                    " FROM exercise e JOIN lesson l ON l.id=e.lesson_id"
+                    " LEFT JOIN course c ON c.id=l.course_id"
+                    " WHERE e.id=? AND e.type='type'",
                     (exercise_id,),
                 ).fetchone()
             if not r:
                 return None
-            return r[0], json.loads(r[1] or "{}"), (r[2] or "")
+            return r[0], json.loads(r[1] or "{}"), (r[2] or ""), r[3]
 
         loaded = await asyncio.to_thread(_load)
         if loaded is None:
             return {"correct": False, "feedback": "exercício não encontrado"}
-        prompt, payload, explanation = loaded
+        prompt, payload, explanation, tutor_model = loaded
         accepted = payload.get("accepted") or []
         norm = _normalize(answer)
         if norm and any(norm == _normalize(a) for a in accepted):
@@ -182,7 +196,9 @@ class CoursesService:
                 + "\n</dados>\n\nResposta do aluno: " + (answer or "")
             )
             try:
-                verdict = await self.llm.tool_call_json(
+                judge = tutor_llm(tutor_model, app_llm=self.llm,
+                                  openrouter_key=self.openrouter_key)
+                verdict = await judge.tool_call_json(
                     system=_JUDGE_SYSTEM, user=user, tool=JUDGE_TOOL,
                     cache_system=True, max_tokens=64,
                 )
