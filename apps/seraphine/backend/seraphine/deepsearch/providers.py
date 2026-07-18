@@ -339,7 +339,9 @@ class RoleLLM:
                 out.append(tok.text)
         return "".join(out)
 
-    async def complete_json(self, *, system: str, user: str, tool: dict) -> dict:
+    async def complete_json(
+        self, *, system: str, user: str, tool: dict, max_tokens: int = 1024
+    ) -> dict:
         if self.provider == "openrouter":
             # Ask for raw JSON in the prompt (+ request the json_object response
             # format), then parse defensively — never raise on a malformed reply.
@@ -353,14 +355,14 @@ class RoleLLM:
                         {"role": "user", "content": user},
                     ],
                     model=self.model,
-                    max_tokens=1024,
+                    max_tokens=max_tokens,
                     response_format={"type": "json_object"},
                 )
             except Exception:
                 return {}
             return _parse_json_object(raw)
         return await self._app_llm.tool_call_json(
-            system=system, user=user, tool=tool, model=self.model
+            system=system, user=user, tool=tool, max_tokens=max_tokens, model=self.model
         )
 
     async def stream(
