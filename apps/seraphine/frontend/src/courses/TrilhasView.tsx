@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon } from '../icons/Icons';
+import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon, LinkIcon } from '../icons/Icons';
 import {
-  listCourses, createCourse, getCourse, getStats,
-  type CourseSummary, type Course, type Stats,
+  listCourses, createCourse, getCourse, getStats, listModels,
+  type CourseSummary, type Course, type Stats, type TutorModel,
 } from './api';
 import { CourseMap } from './CourseMap';
 import { LessonPlayer } from './LessonPlayer';
@@ -14,6 +14,8 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [topic, setTopic] = useState('');
+  const [tutorModel, setTutorModel] = useState('');
+  const [models, setModels] = useState<TutorModel[]>([]);
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [course, setCourse] = useState<Course | null>(null);
@@ -24,6 +26,8 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => { refreshList().catch(() => {}); }, [refreshList]);
+
+  useEffect(() => { listModels().then(setModels).catch(() => {}); }, []);
 
   // poll enquanto algum curso está 'generating'
   useEffect(() => {
@@ -40,7 +44,7 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   const create = async () => {
     if (!topic.trim() || creating) return;
     setCreating(true);
-    try { await createCourse(topic.trim()); setTopic(''); await refreshList(); }
+    try { await createCourse(topic.trim(), tutorModel || undefined); setTopic(''); await refreshList(); }
     finally { setCreating(false); }
   };
 
@@ -96,8 +100,12 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
       <div className="tr-create">
         <span className="tr-create__icon"><SparkleIcon size={20} /></span>
         <input className="tr-create__input" value={topic} onChange={(e) => setTopic(e.target.value)}
-          placeholder="Aprender sobre… (ex: Redes neurais)"
+          placeholder="Aprender sobre… (tópico ou link)"
           onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
+        <select className="tr-create__tutor" value={tutorModel} onChange={(e) => setTutorModel(e.target.value)}>
+          <option value="">Tutor: Padrão</option>
+          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
         <button type="button" className="tr-btn" disabled={creating || !topic.trim()} onClick={create}>
           {creating ? 'Criando…' : 'Criar trilha'}
         </button>
@@ -118,6 +126,7 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
                     : isDone ? (<><CheckIcon size={12} />concluída</>) : 'em andamento'}
                 </span>
                 <span className="tr-card__title">{c.title || c.topic}</span>
+                {c.source_ref && <span className="tr-card__link"><LinkIcon size={11} />link</span>}
                 <span className="tr-card__meta">
                   {c.status === 'generating' ? 'A Seraphine está montando as lições' : `${c.done}/${c.total} lições`}
                 </span>

@@ -7,7 +7,10 @@ export interface CourseSummary {
   status: 'generating' | 'ready' | 'failed';
   total: number;
   done: number;
+  source_ref?: string | null;
 }
+
+export interface TutorModel { id: string; name: string }
 
 export interface LessonNode {
   id: string;
@@ -77,11 +80,16 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function createCourse(topic: string): Promise<{ course_id: string; status: string }> {
+export async function createCourse(topic: string, tutorModel?: string): Promise<{ course_id: string; status: string }> {
   return j(await fetch(`${API_BASE}/courses`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ topic }),
+    body: JSON.stringify(tutorModel ? { topic, tutor_model: tutorModel } : { topic }),
   }));
+}
+
+export async function listModels(): Promise<TutorModel[]> {
+  const data = await j<{ models: TutorModel[] }>(await fetch(`${API_BASE}/courses/models`));
+  return data.models;
 }
 
 export async function listCourses(): Promise<CourseSummary[]> {

@@ -94,11 +94,12 @@ class CoursesService:
                     "SELECT c.id, c.topic, c.title, c.status,"
                     " (SELECT COUNT(*) FROM lesson l WHERE l.course_id=c.id) AS total,"
                     " (SELECT COUNT(*) FROM lesson l JOIN lesson_progress p"
-                    "   ON p.lesson_id=l.id AND p.status='done' WHERE l.course_id=c.id) AS done"
+                    "   ON p.lesson_id=l.id AND p.status='done' WHERE l.course_id=c.id) AS done,"
+                    " c.source_ref"
                     " FROM course c ORDER BY c.created_ts DESC"
                 ).fetchall()
             return [{"id": r[0], "topic": r[1], "title": r[2], "status": r[3],
-                     "total": int(r[4] or 0), "done": int(r[5] or 0)} for r in rows]
+                     "total": int(r[4] or 0), "done": int(r[5] or 0), "source_ref": r[6]} for r in rows]
 
         return await asyncio.to_thread(_work)
 
