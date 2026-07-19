@@ -17,7 +17,12 @@ from seraphine.courses.generate import CourseGenerationError, research_digest
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 _MAX_BYTES = 2_000_000
-_DIGEST_CAP = 18000
+# Import de URL: o material integral É o curso — cabe no contexto do modelo
+# (120k chars ≈ 30k tokens), então não truncamos como no digest de pesquisa.
+# Um cap baixo aqui degrada as últimas lições (visto em produção: conversa de
+# 108k chars cortada a 18k → lição final rasa).
+_DIGEST_CAP_IMPORT = 120_000
+_DIGEST_CAP = 18000  # relatório do deepsearch (denso por construção)
 _MIN_CONTENT_LEN = 60      # string do stream conta como conteúdo
 _MIN_GENERIC_CHARS = 500   # página genérica precisa disso de texto útil
 
@@ -84,7 +89,7 @@ async def resolve_source(raw: str, *, engine) -> dict:
         html = await _get_text(raw)
         parsed = (parse_share_html(html) if "chatgpt.com/share/" in raw
                   else parse_generic_html(html))
-        return {"title": parsed["title"], "digest": parsed["text"][:_DIGEST_CAP],
+        return {"title": parsed["title"], "digest": parsed["text"][:_DIGEST_CAP_IMPORT],
                 "source_ref": raw}
     digest = await research_digest(engine, raw)
     return {"title": None, "digest": digest, "source_ref": None}

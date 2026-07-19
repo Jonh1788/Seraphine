@@ -63,3 +63,29 @@ async def test_resolve_source_share_url_uses_parser(monkeypatch):
     assert out["title"] == "Curso de Teste"
     assert out["source_ref"] == "https://chatgpt.com/share/6a5b"
     assert "Capítulo 1" in out["digest"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_source_url_import_keeps_long_content(monkeypatch):
+    # conversa de ~40k chars NÃO pode ser truncada no cap de pesquisa (18k) —
+    # imports usam _DIGEST_CAP_IMPORT (120k). Regressão vista em produção.
+    long_chunk = "Conteúdo didático relevante do capítulo. " * 1000  # ~41k chars
+    html = ('<html><head><title>ChatGPT - Longa</title></head><body><script>'
+            'window.__reactRouterContext.streamController.enqueue("[\\"'
+            + long_chunk + '\\"]");</script></body></html>')
+
+    async def fake_get(url):
+        return html
+    monkeypatch.setattr(sources, "_get_text", fake_get)
+    out = await sources.resolve_source("https://chatgpt.com/share/x", engine=None)
+    assert len(out["digest"]) > 18000          # não truncou no cap de pesquisa
+    assert len(out["digest"]) <= 120_000       # respeita o cap de import
+
+
+@pytest.mark.asyncio
+async def test_resolve_source_topic_still_caps_at_18k():
+    class Eng:
+        async def run(self, q, mode, *, emit):
+            return {"status": "done", "report": "x" * 30000, "sources": []}
+    out = await sources.resolve_source("Tópico longo", engine=Eng())
+    assert len(out["digest"]) == 18000         # research_digest mantém 18k
