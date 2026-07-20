@@ -15,7 +15,9 @@ _TUTOR_RE = _re.compile(r"^(cliproxy|openrouter):.+$")
 
 
 class TopicIn(BaseModel):
-    topic: str
+    topic: str | None = None
+    code: str | None = None
+    focus: str = "math"
     tutor_model: str | None = None
 
 
@@ -78,10 +80,19 @@ def _svc(request: Request) -> CoursesService:
 
 @router.post("")
 async def create_course(payload: TopicIn, request: Request) -> dict[str, Any]:
+    if not (payload.topic or payload.code):
+        raise HTTPException(status_code=400, detail="informe topic ou code")
+    if payload.focus not in ("math", "code"):
+        raise HTTPException(status_code=400, detail="focus inválido")
+    if payload.code and len(payload.code) > 200_000:
+        raise HTTPException(status_code=400, detail="code grande demais (200k)")
     if payload.tutor_model and not _TUTOR_RE.match(payload.tutor_model):
         raise HTTPException(status_code=400, detail="tutor_model inválido")
     try:
-        return await _svc(request).create_course(payload.topic, tutor_model=payload.tutor_model)
+        return await _svc(request).create_course(
+            topic=payload.topic, code=payload.code, focus=payload.focus,
+            tutor_model=payload.tutor_model,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
