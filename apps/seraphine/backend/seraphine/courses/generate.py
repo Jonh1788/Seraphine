@@ -254,6 +254,33 @@ _LESSON_SYSTEM = (
     "Responda chamando make_lesson."
 )
 
+_KATEX_GRAPH_SUFFIX = (
+    "Fórmulas matemáticas SEMPRE em LaTeX entre $...$ (inline) ou $$...$$ (bloco). "
+    "Quando um conceito tiver forma visual (curvas, interpolação, formas), inclua no "
+    "concept_md um bloco cercado de linguagem graph com JSON: "
+    '```graph\n{"expr": "1 - exp(-k*t)", "x": {"var": "t", "min": 0, "max": 1}, '
+    '"params": [{"name": "k", "min": 1, "max": 20, "default": 5}]}\n``` '
+    "usando SÓ as funções sin cos tan exp log sqrt abs pow min max e constantes pi, e. "
+)
+
+_FOCUS_FRAMING = {
+    "math": ("O material é CÓDIGO-FONTE. Monte o curso sobre a MATEMÁTICA presente "
+             "nele: cada lição ancora numa função/fórmula real do código (cite o "
+             "trecho), explica o conceito matemático por trás e generaliza. "),
+    "code": ("O material é CÓDIGO-FONTE. Monte o curso sobre o CÓDIGO em si: "
+             "estruturas, fluxo, APIs e padrões usados, na ordem do arquivo. "),
+}
+
+
+def _outline_system(focus: str | None) -> str:
+    prefix = _FOCUS_FRAMING.get(focus, "") if focus else ""
+    return prefix + _OUTLINE_SYSTEM + " " + _KATEX_GRAPH_SUFFIX
+
+
+def _lesson_system(focus: str | None) -> str:
+    prefix = _FOCUS_FRAMING.get(focus, "") if focus else ""
+    return prefix + _LESSON_SYSTEM + " " + _KATEX_GRAPH_SUFFIX
+
 
 async def research_digest(engine: Any, topic: str) -> str:
     if engine is None:
@@ -267,22 +294,23 @@ async def research_digest(engine: Any, topic: str) -> str:
     return report[:18000]
 
 
-async def make_outline(llm: Any, *, topic: str, digest: str) -> list[dict]:
+async def make_outline(llm: Any, *, topic: str, digest: str, focus: str | None = None) -> list[dict]:
     user = f"Tópico: {topic}\n\n<material>\n{digest}\n</material>"
     payload = await llm.tool_call_json(
-        system=_OUTLINE_SYSTEM, user=user, tool=OUTLINE_TOOL,
+        system=_outline_system(focus), user=user, tool=OUTLINE_TOOL,
         cache_system=True, max_tokens=1500,
     )
     return clamp_outline((payload or {}).get("lessons", []))
 
 
-async def make_lesson(llm: Any, *, topic: str, digest: str, title: str, objective: str) -> dict:
+async def make_lesson(llm: Any, *, topic: str, digest: str, title: str, objective: str,
+                      focus: str | None = None) -> dict:
     user = (
         f"Tópico do curso: {topic}\nLição: {title}\nObjetivo: {objective}\n\n"
         f"<material>\n{digest}\n</material>"
     )
     payload = await llm.tool_call_json(
-        system=_LESSON_SYSTEM, user=user, tool=LESSON_TOOL,
+        system=_lesson_system(focus), user=user, tool=LESSON_TOOL,
         cache_system=True, max_tokens=3000,
     )
     payload = payload or {}
@@ -295,14 +323,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, engine: Any) -> None:
+async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, engine: Any,
+                          code: str | None = None, focus: str = "math") -> None:
     """Roda os 3 estágios e persiste. Seta course.status ready|failed.
     Nunca levanta (é chamado em background); erros viram status='failed'."""
     try:
-        from seraphine.courses.sources import resolve_source
-        src = await resolve_source(topic, engine=engine)
+        from seraphine.courses.sources import resolve_code_source, resolve_source
+        if code is not None:
+            src = resolve_code_source(code, topic=topic, focus=focus)
+        else:
+            src = await resolve_source(topic, engine=engine)
         digest = src["digest"]
-        lessons = await make_outline(llm, topic=topic, digest=digest)
+        # framing por foco só se aplica quando a fonte é código; tópico/URL usa base
+        lesson_focus = focus if code is not None else None
+        lessons = await make_outline(llm, topic=topic, digest=digest, focus=lesson_focus)
         if len(lessons) < 3:
             raise CourseGenerationError("outline muito curto")
 
@@ -310,12 +344,12 @@ async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, e
         for spec in lessons:
             content = await make_lesson(
                 llm, topic=topic, digest=digest,
-                title=spec["title"], objective=spec["objective"],
+                title=spec["title"], objective=spec["objective"], focus=lesson_focus,
             )
             if not content["exercises"]:
                 content = await make_lesson(  # re-tenta uma vez
                     llm, topic=topic, digest=digest,
-                    title=spec["title"], objective=spec["objective"],
+                    title=spec["title"], objective=spec["objective"], focus=lesson_focus,
                 )
             built.append({"spec": spec, "content": content})
 

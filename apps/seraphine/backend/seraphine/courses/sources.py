@@ -93,3 +93,8 @@ async def resolve_source(raw: str, *, engine) -> dict:
                 "source_ref": raw}
     digest = await research_digest(engine, raw)
     return {"title": None, "digest": digest, "source_ref": None}
+
+
+def resolve_code_source(code: str, *, topic: str | None, focus: str) -> dict:
+    title = topic or ("Matemática do código" if focus == "math" else "Entendendo o código")
+    return {"title": title, "digest": (code or "")[:_DIGEST_CAP_IMPORT], "source_ref": "code"}

@@ -89,3 +89,17 @@ async def test_resolve_source_topic_still_caps_at_18k():
             return {"status": "done", "report": "x" * 30000, "sources": []}
     out = await sources.resolve_source("Tópico longo", engine=Eng())
     assert len(out["digest"]) == 18000         # research_digest mantém 18k
+
+
+def test_resolve_code_source_math():
+    out = sources.resolve_code_source("float f = 1.0f - expf(-k*t);" * 10,
+                                      topic=None, focus="math")
+    assert out["source_ref"] == "code"
+    assert out["title"] == "Matemática do código"
+    assert "expf" in out["digest"]
+
+
+def test_resolve_code_source_topic_and_cap():
+    out = sources.resolve_code_source("x" * 200_000, topic="Meu firmware", focus="code")
+    assert out["title"] == "Meu firmware"
+    assert len(out["digest"]) == 120_000
