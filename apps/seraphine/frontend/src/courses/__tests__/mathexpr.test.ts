@@ -29,4 +29,10 @@ describe('mathexpr', () => {
     expect(() => parseExpr('')).toThrow();
     expect(() => evalExpr(parseExpr('x+1'), {})).toThrow();  // var ausente
   });
+  it('prototype members are not functions/constants/vars', () => {
+    expect(() => parseExpr('constructor(1)')).toThrow();
+    expect(() => parseExpr('__proto__(1)')).toThrow();
+    expect(() => evalExpr(parseExpr('constructor + 1'), { k: 2 })).toThrow();
+    expect(() => evalExpr(parseExpr('hasownproperty'), { k: 2 })).toThrow();
+  });
 });

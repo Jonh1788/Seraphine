@@ -16,6 +16,9 @@ const FUNCS: Record<string, (...a: number[]) => number> = {
 };
 const CONSTS: Record<string, number> = { pi: Math.PI, e: Math.E };
 
+// Own-property guard — evita walk na prototype chain (constructor, __proto__, hasOwnProperty…).
+const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+
 type Tok = { t: 'num'; v: number } | { t: 'id'; v: string } | { t: 'op'; v: string };
 
 function tokenize(src: string): Tok[] {
@@ -84,14 +87,14 @@ export function parseExpr(src: string): Expr {
       p++;
       const name = t.v.toLowerCase();
       if (peek()?.t === 'op' && peek().v === '(') {
-        if (!(name in FUNCS)) throw new Error(`função desconhecida '${t.v}'`);
+        if (!has(FUNCS, name)) throw new Error(`função desconhecida '${t.v}'`);
         eat('(');
         const args: Expr[] = [expr()];
         while (peek()?.t === 'op' && peek().v === ',') { eat(); args.push(expr()); }
         eat(')');
         return { k: 'call', fn: name, args };
       }
-      if (name in CONSTS) return { k: 'num', v: CONSTS[name] };
+      if (has(CONSTS, name)) return { k: 'num', v: CONSTS[name] };
       return { k: 'var', name: t.v };
     }
     if (t.t === 'op' && t.v === '(') { eat('('); const e = expr(); eat(')'); return e; }
@@ -106,7 +109,7 @@ export function evalExpr(ast: Expr, vars: Record<string, number>): number {
   switch (ast.k) {
     case 'num': return ast.v;
     case 'var': {
-      if (!(ast.name in vars)) throw new Error(`variável '${ast.name}' ausente`);
+      if (!has(vars, ast.name)) throw new Error(`variável '${ast.name}' ausente`);
       return vars[ast.name];
     }
     case 'neg': return -evalExpr(ast.a, vars);
