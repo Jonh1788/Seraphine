@@ -11,12 +11,14 @@ import { ExerciseMCQ } from './exercises/ExerciseMCQ';
 import { ExerciseCloze } from './exercises/ExerciseCloze';
 import { ExerciseType } from './exercises/ExerciseType';
 import { ExerciseMatch } from './exercises/ExerciseMatch';
+import { ExerciseGraph } from './exercises/ExerciseGraph';
 import { XIcon, BookmarkIcon, SparkleIcon, TrophyIcon, ZapIcon, FlameIcon, FlashcardIcon, CheckIcon } from '../icons/Icons';
 
 type Screen = 'loading' | 'error' | 'teach' | 'exercise' | 'result';
 
 const EYEBROW: Record<string, string> = {
   mcq: 'Múltipla escolha', cloze: 'Complete a frase', type: 'Digite a resposta', match: 'Relacionar',
+  graph: 'Ajuste o gráfico',
 };
 
 // Renderer de `code` do react-markdown: intercepta blocos ```graph (JSON -> GraphBlock).
@@ -124,6 +126,7 @@ export function LessonPlayer({ lessonId, onDone, onNext }:
         {ex.type === 'cloze' && <ExerciseCloze exercise={ex} onResult={onResult} />}
         {ex.type === 'type' && <ExerciseType exercise={ex} onResult={onResult} />}
         {ex.type === 'match' && <ExerciseMatch exercise={ex} onResult={onResult} />}
+        {ex.type === 'graph' && <ExerciseGraph exercise={ex} onResult={onResult} />}
       </div>
       {answered && (
         <div className={`tr-feedback tr-feedback--${lastCorrect ? 'ok' : 'no'}`}>

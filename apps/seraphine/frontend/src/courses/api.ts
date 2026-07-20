@@ -29,7 +29,7 @@ export interface Course {
   lessons: LessonNode[];
 }
 
-export type ExerciseType = 'mcq' | 'cloze' | 'type' | 'match';
+export type ExerciseType = 'mcq' | 'cloze' | 'type' | 'match' | 'graph';
 
 export interface Exercise {
   id: string;
@@ -44,6 +44,10 @@ export interface Exercise {
     answers?: string[];
     pairs?: [string, string][];
     steps?: string[];
+    expr?: string;
+    x?: { var: string; min: number; max: number };
+    params?: { name: string; min: number; max: number; default: number }[];
+    target?: { param: string; value: number; tol: number };
   };
   explanation: string | null;
 }
