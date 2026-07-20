@@ -10,20 +10,23 @@ export type GraphSpec = {
 const W = 560, H = 220, PAD = 28, SAMPLES = 120;
 
 export function GraphBlock({ spec, hideSliders = false }: { spec: GraphSpec; hideSliders?: boolean }) {
-  const ast: Expr = useMemo(() => parseExpr(spec.expr), [spec.expr]);
+  const ast: Expr | null = useMemo(() => { try { return parseExpr(spec.expr); } catch { return null; } }, [spec.expr]);
   const [params, setParams] = useState<Record<string, number>>(() =>
     Object.fromEntries((spec.params ?? []).map((p) => [p.name, p.default])));
 
   const pts = useMemo(() => {
     const out: [number, number][] = [];
+    if (!ast) return out;
     for (let i = 0; i <= SAMPLES; i++) {
       const x = spec.x.min + (i / SAMPLES) * (spec.x.max - spec.x.min);
-      const y = evalExpr(ast, { ...params, [spec.x.var]: x });
+      let y: number;
+      try { y = evalExpr(ast, { ...params, [spec.x.var]: x }); } catch { continue; }
       if (Number.isFinite(y)) out.push([x, y]);
     }
     return out;
   }, [ast, params, spec]);
 
+  if (!ast) return null;
   if (!pts.length) return null;
   const ys = pts.map(([, y]) => y);
   const yMin = Math.min(...ys), yMax = Math.max(...ys);

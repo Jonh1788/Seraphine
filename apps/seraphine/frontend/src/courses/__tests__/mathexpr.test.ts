@@ -29,6 +29,11 @@ describe('mathexpr', () => {
     expect(() => parseExpr('')).toThrow();
     expect(() => evalExpr(parseExpr('x+1'), {})).toThrow();  // var ausente
   });
+  it('exprVars collects variable names', async () => {
+    const { exprVars } = await import('../mathexpr');
+    expect(exprVars(parseExpr('1 - exp(-k*t) + a'))).toEqual(new Set(['k', 't', 'a']));
+    expect(exprVars(parseExpr('sin(pi)'))).toEqual(new Set());
+  });
   it('prototype members are not functions/constants/vars', () => {
     expect(() => parseExpr('constructor(1)')).toThrow();
     expect(() => parseExpr('__proto__(1)')).toThrow();

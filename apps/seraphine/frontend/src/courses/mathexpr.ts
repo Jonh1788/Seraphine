@@ -105,6 +105,21 @@ export function parseExpr(src: string): Expr {
   return root;
 }
 
+export function exprVars(ast: Expr): Set<string> {
+  const out = new Set<string>();
+  const walk = (e: Expr): void => {
+    switch (e.k) {
+      case 'var': out.add(e.name); break;
+      case 'neg': walk(e.a); break;
+      case 'bin': walk(e.a); walk(e.b); break;
+      case 'call': e.args.forEach(walk); break;
+      case 'num': break;
+    }
+  };
+  walk(ast);
+  return out;
+}
+
 export function evalExpr(ast: Expr, vars: Record<string, number>): number {
   switch (ast.k) {
     case 'num': return ast.v;

@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { getLesson, completeLesson, type Lesson, type CompleteResult } from './api';
 import { GraphBlock, type GraphSpec } from './GraphBlock';
-import { parseExpr } from './mathexpr';
+import { parseExpr, exprVars } from './mathexpr';
 import { ExerciseMCQ } from './exercises/ExerciseMCQ';
 import { ExerciseCloze } from './exercises/ExerciseCloze';
 import { ExerciseType } from './exercises/ExerciseType';
@@ -27,7 +27,11 @@ function MaybeGraph({ className, children }: { className?: string; children?: Re
     try {
       const spec = JSON.parse(String(children)) as GraphSpec;
       if (spec && typeof spec.expr === 'string' && spec.x) {
-        parseExpr(spec.expr); // valida antes de montar; GraphBlock re-parseia com sucesso garantido
+        const ast = parseExpr(spec.expr); // valida antes de montar; GraphBlock re-parseia com sucesso garantido
+        const allowed = new Set([spec.x.var, ...(spec.params ?? []).map((p) => p.name)]);
+        for (const v of exprVars(ast)) {
+          if (!allowed.has(v)) throw new Error(`variável '${v}' fora dos params`);
+        }
         return <GraphBlock spec={spec} />;
       }
     } catch { /* fail-soft: renderiza como código comum */ }
