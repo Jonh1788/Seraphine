@@ -84,10 +84,21 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function createCourse(topic: string, tutorModel?: string): Promise<{ course_id: string; status: string }> {
+export interface CreateCourseInput {
+  topic?: string;
+  code?: string;
+  focus?: 'math' | 'code';
+  tutorModel?: string;
+}
+
+export async function createCourse(input: CreateCourseInput): Promise<{ course_id: string; status: string }> {
+  const body: Record<string, unknown> = {};
+  if (input.topic) body.topic = input.topic;
+  if (input.code) { body.code = input.code; body.focus = input.focus ?? 'math'; }
+  if (input.tutorModel) body.tutor_model = input.tutorModel;
   return j(await fetch(`${API_BASE}/courses`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(tutorModel ? { topic, tutor_model: tutorModel } : { topic }),
+    body: JSON.stringify(body),
   }));
 }
 
