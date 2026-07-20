@@ -14,7 +14,7 @@ from typing import Any
 
 logger = logging.getLogger("seraphine.courses")
 
-EX_TYPES = {"mcq", "cloze", "type", "match"}
+EX_TYPES = {"mcq", "cloze", "type", "match", "graph"}
 
 
 def _s(v: Any, n: int) -> str:
@@ -67,6 +67,40 @@ def valid_exercise(raw: dict) -> dict | None:
         if not accepted:
             return None
         payload = {"accepted": accepted, "rubric": _s(payload_in.get("rubric"), 300)}
+
+    elif etype == "graph":
+        expr = _s(payload_in.get("expr"), 300)
+        x = payload_in.get("x") if isinstance(payload_in.get("x"), dict) else {}
+        params_in = payload_in.get("params") or []
+        target = payload_in.get("target") if isinstance(payload_in.get("target"), dict) else {}
+        xvar = _s(x.get("var"), 20)
+        params = []
+        for p in params_in[:3]:
+            if not isinstance(p, dict):
+                continue
+            name = _s(p.get("name"), 20)
+            try:
+                lo, hi, df = float(p["min"]), float(p["max"]), float(p["default"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if name and name.isidentifier() and lo < hi and lo <= df <= hi:
+                params.append({"name": name, "min": lo, "max": hi, "default": df})
+        try:
+            xmin, xmax = float(x.get("min")), float(x.get("max"))
+            tval, ttol = float(target.get("value")), float(target.get("tol"))
+        except (TypeError, ValueError):
+            return None
+        tparam = _s(target.get("param"), 20)
+        allowed = {xvar} | {p["name"] for p in params}
+        if (not xvar or not xvar.isidentifier() or not params
+                or xmin >= xmax or ttol <= 0
+                or tparam not in {p["name"] for p in params}
+                or not _valid_expr(expr, allowed)):
+            return None
+        payload = {
+            "expr": expr, "x": {"var": xvar, "min": xmin, "max": xmax},
+            "params": params, "target": {"param": tparam, "value": tval, "tol": ttol},
+        }
 
     else:  # match
         pairs_in = payload_in.get("pairs")
@@ -189,7 +223,7 @@ LESSON_TOOL = {
                 "items": {
                     "type": "object", "required": ["type", "prompt", "payload"],
                     "properties": {
-                        "type": {"type": "string", "enum": ["mcq", "cloze", "type", "match"]},
+                        "type": {"type": "string", "enum": ["mcq", "cloze", "type", "match", "graph"]},
                         "prompt": {"type": "string", "maxLength": 300},
                         "payload": {"type": "object"},
                         "explanation": {"type": "string", "maxLength": 500},

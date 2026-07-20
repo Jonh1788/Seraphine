@@ -99,4 +99,54 @@ def test_clamp_outline_caps_and_dedups():
 
 
 def test_ex_types_frozen():
-    assert EX_TYPES == {"mcq", "cloze", "type", "match"}
+    assert EX_TYPES == {"mcq", "cloze", "type", "match", "graph"}
+
+
+def _graph_payload(**over):
+    p = {
+        "expr": "1 - exp(-k*t)",
+        "x": {"var": "t", "min": 0, "max": 1},
+        "params": [{"name": "k", "min": 1, "max": 20, "default": 5}],
+        "target": {"param": "k", "value": 10, "tol": 1.5},
+    }
+    p.update(over)
+    return p
+
+
+def test_valid_graph_exercise():
+    out = valid_exercise({
+        "type": "graph", "prompt": "Ajuste k até a curva atingir 63% em t=0.1",
+        "payload": _graph_payload(), "explanation": "k=10 dá tau=0.1",
+    })
+    assert out["type"] == "graph"
+    assert out["payload"]["target"]["tol"] == 1.5
+    assert out["payload"]["x"]["var"] == "t"
+
+
+def test_graph_bad_expr_rejected():
+    assert valid_exercise({
+        "type": "graph", "prompt": "Ajuste:",
+        "payload": _graph_payload(expr="__import__('os')"),
+    }) is None
+
+
+def test_graph_target_param_must_exist():
+    assert valid_exercise({
+        "type": "graph", "prompt": "Ajuste:",
+        "payload": _graph_payload(target={"param": "zz", "value": 1, "tol": 1}),
+    }) is None
+
+
+def test_graph_bad_ranges_rejected():
+    assert valid_exercise({
+        "type": "graph", "prompt": "Ajuste:",
+        "payload": _graph_payload(x={"var": "t", "min": 5, "max": 1}),
+    }) is None
+    assert valid_exercise({
+        "type": "graph", "prompt": "Ajuste:",
+        "payload": _graph_payload(target={"param": "k", "value": 1, "tol": 0}),
+    }) is None
+
+
+def test_ex_types_includes_graph():
+    assert "graph" in EX_TYPES
