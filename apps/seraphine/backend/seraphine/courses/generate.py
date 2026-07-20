@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -112,6 +113,41 @@ def clamp_outline(raw: list, *, lo: int = 5, hi: int = 12) -> list[dict]:
         if len(out) >= hi:
             break
     return out
+
+
+_ALLOWED_FUNCS = {"sin", "cos", "tan", "exp", "log", "sqrt", "abs", "pow", "min", "max"}
+_ALLOWED_CONSTS = {"pi", "e"}
+_EXPR_TOKEN = re.compile(r"\s*(\d+\.?\d*|[A-Za-z_][A-Za-z_0-9]*|[-+*/^(),])")
+
+
+def _valid_expr(expr: str, allowed_vars: set[str]) -> bool:
+    """Whitelist estrita: números, vars declaradas, operadores, funções e
+    constantes conhecidas. Qualquer resto (incl. '**', ';', '=') → False.
+    NÃO avalia nada — só tokeniza e classifica."""
+    s = (expr or "").strip()
+    if not s:
+        return False
+    pos = 0
+    while pos < len(s):
+        m = _EXPR_TOKEN.match(s, pos)
+        if not m:
+            return False
+        tok = m.group(1)
+        pos = m.end()
+        if tok[0].isdigit():
+            continue
+        if tok in "-+*/^(),":
+            # '**' chegaria como dois '*' seguidos — permitido? Não: rejeitar
+            # explicitamente pra não normalizar silenciosamente.
+            if tok == "*" and pos < len(s) and s[pos] == "*":
+                return False
+            continue
+        low = tok.lower()
+        if low in _ALLOWED_FUNCS or low in _ALLOWED_CONSTS or tok in allowed_vars:
+            continue
+        return False
+    # sobra de espaço no fim é ok; '=' nunca casa no regex → já falhou acima
+    return True
 
 
 class CourseGenerationError(RuntimeError):
