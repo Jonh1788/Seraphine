@@ -7,13 +7,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("seraphine.courses")
 
-EX_TYPES = {"mcq", "cloze", "type", "match"}
+EX_TYPES = {"mcq", "cloze", "type", "match", "graph"}
 
 
 def _s(v: Any, n: int) -> str:
@@ -67,6 +68,40 @@ def valid_exercise(raw: dict) -> dict | None:
             return None
         payload = {"accepted": accepted, "rubric": _s(payload_in.get("rubric"), 300)}
 
+    elif etype == "graph":
+        expr = _s(payload_in.get("expr"), 300)
+        x = payload_in.get("x") if isinstance(payload_in.get("x"), dict) else {}
+        params_in = payload_in.get("params") or []
+        target = payload_in.get("target") if isinstance(payload_in.get("target"), dict) else {}
+        xvar = _s(x.get("var"), 20)
+        params = []
+        for p in params_in[:3]:
+            if not isinstance(p, dict):
+                continue
+            name = _s(p.get("name"), 20)
+            try:
+                lo, hi, df = float(p["min"]), float(p["max"]), float(p["default"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if name and name.isidentifier() and lo < hi and lo <= df <= hi:
+                params.append({"name": name, "min": lo, "max": hi, "default": df})
+        try:
+            xmin, xmax = float(x.get("min")), float(x.get("max"))
+            tval, ttol = float(target.get("value")), float(target.get("tol"))
+        except (TypeError, ValueError):
+            return None
+        tparam = _s(target.get("param"), 20)
+        allowed = {xvar} | {p["name"] for p in params}
+        if (not xvar or not xvar.isidentifier() or not params
+                or xmin >= xmax or ttol <= 0
+                or tparam not in {p["name"] for p in params}
+                or not _valid_expr(expr, allowed)):
+            return None
+        payload = {
+            "expr": expr, "x": {"var": xvar, "min": xmin, "max": xmax},
+            "params": params, "target": {"param": tparam, "value": tval, "tol": ttol},
+        }
+
     else:  # match
         pairs_in = payload_in.get("pairs")
         steps_in = payload_in.get("steps")
@@ -114,6 +149,41 @@ def clamp_outline(raw: list, *, lo: int = 5, hi: int = 12) -> list[dict]:
     return out
 
 
+_ALLOWED_FUNCS = {"sin", "cos", "tan", "exp", "log", "sqrt", "abs", "pow", "min", "max"}
+_ALLOWED_CONSTS = {"pi", "e"}
+_EXPR_TOKEN = re.compile(r"\s*(\d+\.?\d*|[A-Za-z_][A-Za-z_0-9]*|[-+*/^(),])")
+
+
+def _valid_expr(expr: str, allowed_vars: set[str]) -> bool:
+    """Whitelist estrita: números, vars declaradas, operadores, funções e
+    constantes conhecidas. Qualquer resto (incl. '**', ';', '=') → False.
+    NÃO avalia nada — só tokeniza e classifica."""
+    s = (expr or "").strip()
+    if not s:
+        return False
+    pos = 0
+    while pos < len(s):
+        m = _EXPR_TOKEN.match(s, pos)
+        if not m:
+            return False
+        tok = m.group(1)
+        pos = m.end()
+        if tok[0].isdigit():
+            continue
+        if tok in "-+*/^(),":
+            # '**' chegaria como dois '*' seguidos — permitido? Não: rejeitar
+            # explicitamente pra não normalizar silenciosamente.
+            if tok == "*" and pos < len(s) and s[pos] == "*":
+                return False
+            continue
+        low = tok.lower()
+        if low in _ALLOWED_FUNCS or low in _ALLOWED_CONSTS or tok in allowed_vars:
+            continue
+        return False
+    # sobra de espaço no fim é ok; '=' nunca casa no regex → já falhou acima
+    return True
+
+
 class CourseGenerationError(RuntimeError):
     pass
 
@@ -153,7 +223,7 @@ LESSON_TOOL = {
                 "items": {
                     "type": "object", "required": ["type", "prompt", "payload"],
                     "properties": {
-                        "type": {"type": "string", "enum": ["mcq", "cloze", "type", "match"]},
+                        "type": {"type": "string", "enum": ["mcq", "cloze", "type", "match", "graph"]},
                         "prompt": {"type": "string", "maxLength": 300},
                         "payload": {"type": "object"},
                         "explanation": {"type": "string", "maxLength": 500},
@@ -184,6 +254,33 @@ _LESSON_SYSTEM = (
     "Responda chamando make_lesson."
 )
 
+_KATEX_GRAPH_SUFFIX = (
+    "Fórmulas matemáticas SEMPRE em LaTeX entre $...$ (inline) ou $$...$$ (bloco). "
+    "Quando um conceito tiver forma visual (curvas, interpolação, formas), inclua no "
+    "concept_md um bloco cercado de linguagem graph com JSON: "
+    '```graph\n{"expr": "1 - exp(-k*t)", "x": {"var": "t", "min": 0, "max": 1}, '
+    '"params": [{"name": "k", "min": 1, "max": 20, "default": 5}]}\n``` '
+    "usando SÓ as funções sin cos tan exp log sqrt abs pow min max e constantes pi, e. "
+)
+
+_FOCUS_FRAMING = {
+    "math": ("O material é CÓDIGO-FONTE. Monte o curso sobre a MATEMÁTICA presente "
+             "nele: cada lição ancora numa função/fórmula real do código (cite o "
+             "trecho), explica o conceito matemático por trás e generaliza. "),
+    "code": ("O material é CÓDIGO-FONTE. Monte o curso sobre o CÓDIGO em si: "
+             "estruturas, fluxo, APIs e padrões usados, na ordem do arquivo. "),
+}
+
+
+def _outline_system(focus: str | None) -> str:
+    prefix = _FOCUS_FRAMING.get(focus, "") if focus else ""
+    return prefix + _OUTLINE_SYSTEM + " " + _KATEX_GRAPH_SUFFIX
+
+
+def _lesson_system(focus: str | None) -> str:
+    prefix = _FOCUS_FRAMING.get(focus, "") if focus else ""
+    return prefix + _LESSON_SYSTEM + " " + _KATEX_GRAPH_SUFFIX
+
 
 async def research_digest(engine: Any, topic: str) -> str:
     if engine is None:
@@ -197,22 +294,23 @@ async def research_digest(engine: Any, topic: str) -> str:
     return report[:18000]
 
 
-async def make_outline(llm: Any, *, topic: str, digest: str) -> list[dict]:
+async def make_outline(llm: Any, *, topic: str, digest: str, focus: str | None = None) -> list[dict]:
     user = f"Tópico: {topic}\n\n<material>\n{digest}\n</material>"
     payload = await llm.tool_call_json(
-        system=_OUTLINE_SYSTEM, user=user, tool=OUTLINE_TOOL,
+        system=_outline_system(focus), user=user, tool=OUTLINE_TOOL,
         cache_system=True, max_tokens=1500,
     )
     return clamp_outline((payload or {}).get("lessons", []))
 
 
-async def make_lesson(llm: Any, *, topic: str, digest: str, title: str, objective: str) -> dict:
+async def make_lesson(llm: Any, *, topic: str, digest: str, title: str, objective: str,
+                      focus: str | None = None) -> dict:
     user = (
         f"Tópico do curso: {topic}\nLição: {title}\nObjetivo: {objective}\n\n"
         f"<material>\n{digest}\n</material>"
     )
     payload = await llm.tool_call_json(
-        system=_LESSON_SYSTEM, user=user, tool=LESSON_TOOL,
+        system=_lesson_system(focus), user=user, tool=LESSON_TOOL,
         cache_system=True, max_tokens=3000,
     )
     payload = payload or {}
@@ -225,14 +323,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, engine: Any) -> None:
+async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, engine: Any,
+                          code: str | None = None, focus: str = "math") -> None:
     """Roda os 3 estágios e persiste. Seta course.status ready|failed.
     Nunca levanta (é chamado em background); erros viram status='failed'."""
     try:
-        from seraphine.courses.sources import resolve_source
-        src = await resolve_source(topic, engine=engine)
+        from seraphine.courses.sources import resolve_code_source, resolve_source
+        if code is not None:
+            src = resolve_code_source(code, topic=topic, focus=focus)
+        else:
+            src = await resolve_source(topic, engine=engine)
         digest = src["digest"]
-        lessons = await make_outline(llm, topic=topic, digest=digest)
+        # framing por foco só se aplica quando a fonte é código; tópico/URL usa base
+        lesson_focus = focus if code is not None else None
+        lessons = await make_outline(llm, topic=topic, digest=digest, focus=lesson_focus)
         if len(lessons) < 3:
             raise CourseGenerationError("outline muito curto")
 
@@ -240,12 +344,12 @@ async def generate_course(store: Any, *, course_id: str, topic: str, llm: Any, e
         for spec in lessons:
             content = await make_lesson(
                 llm, topic=topic, digest=digest,
-                title=spec["title"], objective=spec["objective"],
+                title=spec["title"], objective=spec["objective"], focus=lesson_focus,
             )
             if not content["exercises"]:
                 content = await make_lesson(  # re-tenta uma vez
                     llm, topic=topic, digest=digest,
-                    title=spec["title"], objective=spec["objective"],
+                    title=spec["title"], objective=spec["objective"], focus=lesson_focus,
                 )
             built.append({"spec": spec, "content": content})
 

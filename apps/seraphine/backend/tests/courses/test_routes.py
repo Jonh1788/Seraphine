@@ -74,3 +74,23 @@ def test_models_endpoint_empty_without_ds(client):
     r = client.get("/courses/models")
     assert r.status_code == 200
     assert r.json() == {"models": []}
+
+
+def test_create_from_code_ok(client):
+    r = client.post("/courses", json={"code": "int main(){}", "focus": "math"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "generating"
+
+
+def test_create_requires_topic_or_code(client):
+    assert client.post("/courses", json={}).status_code == 400
+
+
+def test_create_bad_focus_400(client):
+    r = client.post("/courses", json={"code": "x", "focus": "banana"})
+    assert r.status_code == 400
+
+
+def test_create_code_too_big_400(client):
+    r = client.post("/courses", json={"code": "x" * 200_001})
+    assert r.status_code == 400

@@ -59,19 +59,26 @@ class CoursesService:
         """Dispara o job de geração. Sobrescrito nos testes."""
         asyncio.create_task(coro)
 
-    async def create_course(self, topic: str, tutor_model: str | None = None) -> dict[str, Any]:
+    async def create_course(self, topic: str | None = None, code: str | None = None,
+                            focus: str = "math", tutor_model: str | None = None) -> dict[str, Any]:
         topic = (topic or "").strip()
-        if not topic:
-            raise ValueError("tópico vazio")
+        code = code if code else None
+        if not topic and not code:
+            raise ValueError("informe um tópico ou código")
         cid = str(uuid.uuid4())
-        source_ref = topic if is_url(topic) else None
+        if code is not None:
+            source_ref = "code"
+            db_topic = topic or ("Matemática do código" if focus == "math" else "Entendendo o código")
+        else:
+            source_ref = topic if is_url(topic) else None
+            db_topic = topic
 
         def _work() -> None:
             with self.store._connect() as conn:
                 conn.execute(
                     "INSERT INTO course (id, topic, status, created_ts, source_ref, tutor_model)"
                     " VALUES (?,?,?,?,?,?)",
-                    (cid, topic[:200], "generating", _now(), source_ref, tutor_model),
+                    (cid, db_topic[:200], "generating", _now(), source_ref, tutor_model),
                 )
                 conn.commit()
 
@@ -83,7 +90,8 @@ class CoursesService:
                            tutor_model, e)
             llm_tutor = self.llm
         self._spawn(gen.generate_course(
-            self.store, course_id=cid, topic=topic, llm=llm_tutor, engine=self.engine,
+            self.store, course_id=cid, topic=db_topic, llm=llm_tutor, engine=self.engine,
+            code=code, focus=focus,
         ))
         return {"course_id": cid, "status": "generating"}
 

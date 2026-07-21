@@ -1,18 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { getLesson, completeLesson, type Lesson, type CompleteResult } from './api';
+import { GraphBlock, type GraphSpec } from './GraphBlock';
+import { parseExpr, exprVars } from './mathexpr';
 import { ExerciseMCQ } from './exercises/ExerciseMCQ';
 import { ExerciseCloze } from './exercises/ExerciseCloze';
 import { ExerciseType } from './exercises/ExerciseType';
 import { ExerciseMatch } from './exercises/ExerciseMatch';
+import { ExerciseGraph } from './exercises/ExerciseGraph';
 import { XIcon, BookmarkIcon, SparkleIcon, TrophyIcon, ZapIcon, FlameIcon, FlashcardIcon, CheckIcon } from '../icons/Icons';
 
 type Screen = 'loading' | 'error' | 'teach' | 'exercise' | 'result';
 
 const EYEBROW: Record<string, string> = {
   mcq: 'Múltipla escolha', cloze: 'Complete a frase', type: 'Digite a resposta', match: 'Relacionar',
+  graph: 'Ajuste o gráfico',
 };
+
+// Renderer de `code` do react-markdown: intercepta blocos ```graph (JSON -> GraphBlock).
+// GraphBlock chama parseExpr no useMemo SEM try, então validamos parseExpr(spec.expr)
+// AQUI, dentro do try — se qualquer coisa falhar (JSON, spec, expr) cai no <code> normal.
+function MaybeGraph({ className, children }: { className?: string; children?: ReactNode }) {
+  if (className === 'language-graph') {
+    try {
+      const spec = JSON.parse(String(children)) as GraphSpec;
+      if (spec && typeof spec.expr === 'string' && spec.x) {
+        const ast = parseExpr(spec.expr); // valida antes de montar; GraphBlock re-parseia com sucesso garantido
+        const allowed = new Set([spec.x.var, ...(spec.params ?? []).map((p) => p.name)]);
+        for (const v of exprVars(ast)) {
+          if (!allowed.has(v)) throw new Error(`variável '${v}' fora dos params`);
+        }
+        return <GraphBlock spec={spec} />;
+      }
+    } catch { /* fail-soft: renderiza como código comum */ }
+  }
+  return <code className={className}>{children}</code>;
+}
 
 export function LessonPlayer({ lessonId, onDone, onNext }:
   { lessonId: string; onDone: () => void; onNext?: () => void }) {
@@ -64,7 +91,8 @@ export function LessonPlayer({ lessonId, onDone, onNext }:
         <p className="tr-eyebrow">Teoria da lição</p>
         <h2 className="tr-player__title">{lesson.title}</h2>
         <div className="tr-concept">
-          <Markdown remarkPlugins={[remarkGfm]}>{lesson.concept_md}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}
+            components={{ code: MaybeGraph }}>{lesson.concept_md}</Markdown>
         </div>
         <div className="tr-tip">
           <span className="tr-tip__icon"><SparkleIcon size={16} /></span>
@@ -98,6 +126,7 @@ export function LessonPlayer({ lessonId, onDone, onNext }:
         {ex.type === 'cloze' && <ExerciseCloze exercise={ex} onResult={onResult} />}
         {ex.type === 'type' && <ExerciseType exercise={ex} onResult={onResult} />}
         {ex.type === 'match' && <ExerciseMatch exercise={ex} onResult={onResult} />}
+        {ex.type === 'graph' && <ExerciseGraph exercise={ex} onResult={onResult} />}
       </div>
       {answered && (
         <div className={`tr-feedback tr-feedback--${lastCorrect ? 'ok' : 'no'}`}>

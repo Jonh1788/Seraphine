@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon, LinkIcon } from '../icons/Icons';
+import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon, LinkIcon, CommandIcon } from '../icons/Icons';
 import {
   listCourses, createCourse, getCourse, getStats, listModels,
   type CourseSummary, type Course, type Stats, type TutorModel,
@@ -14,6 +14,9 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [topic, setTopic] = useState('');
+  const [codeMode, setCodeMode] = useState(false);
+  const [code, setCode] = useState('');
+  const [focus, setFocus] = useState<'math' | 'code'>('math');
   const [tutorModel, setTutorModel] = useState('');
   const [models, setModels] = useState<TutorModel[]>([]);
   const [creating, setCreating] = useState(false);
@@ -42,9 +45,18 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   }, []);
 
   const create = async () => {
-    if (!topic.trim() || creating) return;
+    if ((codeMode ? !code.trim() : !topic.trim()) || creating) return;
     setCreating(true);
-    try { await createCourse(topic.trim(), tutorModel || undefined); setTopic(''); await refreshList(); }
+    try {
+      await createCourse({
+        topic: topic.trim() || undefined,
+        code: codeMode ? code : undefined,
+        focus,
+        tutorModel: tutorModel || undefined,
+      });
+      setTopic(''); setCode('');
+      await refreshList();
+    }
     finally { setCreating(false); }
   };
 
@@ -97,16 +109,36 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
         )}
       </header>
 
-      <div className="tr-create">
+      <div className={`tr-create${codeMode ? ' tr-create--code' : ''}`}>
         <span className="tr-create__icon"><SparkleIcon size={20} /></span>
         <input className="tr-create__input" value={topic} onChange={(e) => setTopic(e.target.value)}
-          placeholder="Aprender sobre… (tópico ou link)"
-          onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
+          placeholder={codeMode ? 'Título (opcional)' : 'Aprender sobre… (tópico ou link)'}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !codeMode) create(); }} />
+        {codeMode && (
+          <>
+            <textarea className="tr-create__code" value={code} onChange={(e) => setCode(e.target.value)}
+              rows={10} placeholder="Cole o código aqui…" />
+            <div className="tr-create__focus">
+              <label>
+                <input type="radio" name="tr-focus" checked={focus === 'math'} onChange={() => setFocus('math')} />
+                Matemática do código
+              </label>
+              <label>
+                <input type="radio" name="tr-focus" checked={focus === 'code'} onChange={() => setFocus('code')} />
+                Entender o código
+              </label>
+            </div>
+          </>
+        )}
+        <button type="button" className={`tr-create__toggle${codeMode ? ' tr-create__toggle--on' : ''}`}
+          onClick={() => setCodeMode((v) => !v)}>
+          <CommandIcon size={13} /> colar código
+        </button>
         <select className="tr-create__tutor" value={tutorModel} onChange={(e) => setTutorModel(e.target.value)}>
           <option value="">Tutor: Padrão</option>
           {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        <button type="button" className="tr-btn" disabled={creating || !topic.trim()} onClick={create}>
+        <button type="button" className="tr-btn" disabled={creating || (codeMode ? !code.trim() : !topic.trim())} onClick={create}>
           {creating ? 'Criando…' : 'Criar trilha'}
         </button>
       </div>

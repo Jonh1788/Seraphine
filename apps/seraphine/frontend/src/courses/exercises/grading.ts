@@ -19,3 +19,7 @@ export function checkMatchPairs(pairs: [string, string][], mapping: Record<numbe
 export function checkSteps(steps: string[], ordered: string[]): boolean {
   return steps.length === ordered.length && steps.every((s, i) => s === ordered[i]);
 }
+
+export function checkGraphTarget(value: number, target: number, tol: number): boolean {
+  return Number.isFinite(value) && Math.abs(value - target) <= tol;
+}
