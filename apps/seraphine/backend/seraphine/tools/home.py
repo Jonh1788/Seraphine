@@ -1,0 +1,254 @@
+"""Tools da casa — som do EspMusic.
+
+O que o LLM enxerga. As descrições precisam ser explícitas sobre quando
+NÃO usar: a Seraphine já tem `play_music` para tocar no navegador do
+Mac, e sem essa instrução ela escolhe errado.
+
+`lan_request` (o relé HTTP do cliente) não aparece aqui de propósito —
+uma tool de HTTP genérico na LAN seria um escape hatch para o modelo.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import wave
+from typing import Any
+
+from seraphine.home.espmusic import UnknownRoom
+from seraphine.home.transport import HomeHTTPError, HomeUnreachable
+from seraphine.tools.base import Tool, ToolResult
+
+logger = logging.getLogger("seraphine.tools.home")
+
+# O `synthesize_stream` de todos os adaptadores devolve PCM s16le mono
+# a 24 kHz (ver tts/base.py).
+TTS_SAMPLE_RATE = 24_000
+
+_ONLY_WHEN_AT_HOME = (
+    "Use APENAS quando o usuário citar um cômodo ou a casa ('na sala', "
+    "'no banheiro', 'nas caixas', 'na casa'). Para tocar no próprio Mac "
+    "do usuário, use `play_music`, que é o padrão."
+)
+
+ACTIONS = [
+    "pause",
+    "resume",
+    "next",
+    "stop",
+    "mute",
+    "volume_up",
+    "volume_down",
+    "volume_set",
+    "radio_on",
+    "radio_off",
+]
+
+
+def _pcm_to_wav(pcm: bytes, *, rate: int = TTS_SAMPLE_RATE) -> bytes:
+    """Embrulha PCM s16le mono num WAV, que o ffmpeg do EspMusic decodifica."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _failure(exc: Exception) -> ToolResult:
+    """Traduz a falha em algo que a Seraphine consegue falar em voz alta."""
+    if isinstance(exc, HomeUnreachable):
+        return ToolResult(
+            ok=False,
+            error=(
+                "não alcanço a casa — o app da Seraphine precisa estar "
+                "aberto no Mac e na mesma rede do EspMusic"
+            ),
+        )
+    if isinstance(exc, UnknownRoom):
+        return ToolResult(ok=False, error=str(exc))
+    if isinstance(exc, HomeHTTPError):
+        if exc.status == 404:
+            return ToolResult(ok=False, error="não achei essa música")
+        return ToolResult(
+            ok=False,
+            error=f"o servidor da casa respondeu com erro (HTTP {exc.status})",
+        )
+    if isinstance(exc, ValueError):
+        return ToolResult(ok=False, error=str(exc))
+    logger.exception("home tool falhou")
+    return ToolResult(ok=False, error=f"falha ao falar com a casa: {exc}")
+
+
+class _HomeTool(Tool):
+    """Base das tools da casa: injeta o serviço e centraliza os erros."""
+
+    requires_confirmation = False
+    category = "network"
+
+    def __init__(self, service: Any) -> None:
+        self._svc = service
+
+
+class HomePlayTool(_HomeTool):
+    name = "home_play"
+    description = (
+        "Toca música nas caixas de som da casa (sistema EspMusic). Aceita "
+        "nome de música/artista, link do YouTube ou caminho de pasta. "
+        "'room' escolhe o cômodo; sem ele, toca na caixa que já está "
+        "selecionada. mode='queue' põe na fila em vez de tocar agora. "
+        + _ONLY_WHEN_AT_HOME
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Música, artista, link do YouTube ou caminho.",
+            },
+            "room": {
+                "type": "string",
+                "description": "Cômodo, como o usuário fala: 'sala', 'banheiro'.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["now", "queue"],
+                "description": "'now' toca agora (padrão), 'queue' põe na fila.",
+            },
+        },
+        "required": ["query"],
+    }
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return ToolResult(ok=False, error="'query' é obrigatório")
+        try:
+            out = await self._svc.music.play(
+                query,
+                room=args.get("room") or None,
+                mode=str(args.get("mode") or "now"),
+            )
+        except Exception as e:
+            return _failure(e)
+        return ToolResult(ok=True, output=out)
+
+
+class HomeControlTool(_HomeTool):
+    name = "home_control"
+    description = (
+        "Controla o som da casa: pausar, voltar, pular, parar, mudo, "
+        "volume e rádio (que reabastece a fila com músicas parecidas). "
+        "volume_up/volume_down andam em passos de 2 dB; volume_set usa "
+        "'value' em porcentagem (0 a 100). " + _ONLY_WHEN_AT_HOME
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ACTIONS},
+            "value": {
+                "type": "number",
+                "description": "Só para volume_set: volume alvo de 0 a 100.",
+            },
+            "room": {
+                "type": "string",
+                "description": "Cômodo; sem ele, age na caixa selecionada.",
+            },
+        },
+        "required": ["action"],
+    }
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        action = str(args.get("action") or "")
+        if action not in ACTIONS:
+            return ToolResult(
+                ok=False,
+                error=f"ação desconhecida: '{action}'. Use uma de: {', '.join(ACTIONS)}",
+            )
+        value = args.get("value")
+        try:
+            out = await self._svc.music.control(
+                action,
+                value=float(value) if value is not None else None,
+                room=args.get("room") or None,
+            )
+        except Exception as e:
+            return _failure(e)
+        return ToolResult(ok=True, output=out)
+
+
+class HomeAnnounceTool(_HomeTool):
+    name = "home_announce"
+    description = (
+        "Fala um aviso nas caixas de som da casa, com a voz da Seraphine. "
+        "O aviso corta a música e ela volta do ponto exato depois. Sai na "
+        "caixa que está selecionada. " + _ONLY_WHEN_AT_HOME
+    )
+    json_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "O que falar, em português, em uma ou duas frases.",
+            },
+        },
+        "required": ["text"],
+    }
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return ToolResult(ok=False, error="'text' é obrigatório")
+
+        tts = getattr(self._svc, "tts", None)
+        if tts is None:
+            return ToolResult(
+                ok=False, error="não tenho voz configurada para falar na casa"
+            )
+
+        # ogg é pequeno e todo adaptador que o suporta já entrega pronto;
+        # os outros só têm o stream PCM, que embrulhamos num WAV.
+        try:
+            audio = await tts.synthesize_ogg(text)
+            filename = "aviso.ogg"
+        except NotImplementedError:
+            try:
+                pcm = b"".join([chunk async for chunk in tts.synthesize_stream(text)])
+            except Exception as e:
+                logger.exception("TTS stream falhou")
+                return ToolResult(ok=False, error=f"não consegui gerar a voz: {e}")
+            if not pcm:
+                return ToolResult(ok=False, error="o TTS devolveu áudio vazio")
+            audio = _pcm_to_wav(pcm)
+            filename = "aviso.wav"
+        except Exception as e:
+            logger.exception("TTS ogg falhou")
+            return ToolResult(ok=False, error=f"não consegui gerar a voz: {e}")
+
+        if not audio:
+            return ToolResult(ok=False, error="o TTS devolveu áudio vazio")
+
+        try:
+            out = await self._svc.music.announce(audio, filename=filename)
+        except Exception as e:
+            return _failure(e)
+        return ToolResult(ok=True, output=out, metadata={"text": text})
+
+
+class HomeStatusTool(_HomeTool):
+    name = "home_status"
+    description = (
+        "Diz o que está tocando nas caixas da casa: cômodo selecionado, "
+        "faixa, volume, tamanho da fila, rádio e quais caixas existem. "
+        "Use antes de mudar de cômodo, ou quando o usuário perguntar o que "
+        "está tocando na casa."
+    )
+    json_schema: dict[str, Any] = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            out = await self._svc.music.status()
+        except Exception as e:
+            return _failure(e)
+        return ToolResult(ok=True, output=out)
