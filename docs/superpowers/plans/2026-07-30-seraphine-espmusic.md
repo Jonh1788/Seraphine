@@ -16,8 +16,9 @@
 - Tools novas herdam de `seraphine.tools.base.Tool` e devolvem `ToolResult`.
 - Nas descrições das tools `home_*`, dizer explicitamente para usar **só** quando o usuário citar cômodo ou a casa, e apontar `play_music` para o caso do Mac. Sem isso o LLM confunde com as tools de navegador de `tools/browser.py`.
 - O endereço do EspMusic é constante em dois lugares que **precisam concordar**: `ALLOWED` em `src-tauri/src/home.rs` e `DEFAULT_BASE` em `seraphine/home/transport.py`. Valor: `http://espmusic.local:8080`.
-- O IP de reserva na allowlist (`192.168.1.50:8080` no plano) é um placeholder do endereço real do PC Windows — Jonathan confirma o IP na Task 2 antes do commit.
-- Repo separado: a Task 1 acontece em `~/Dev/HomeEspSera`, com commit próprio lá. Todas as outras acontecem em `~/Dev/Projeto-Seraphine`, na branch `feat/home-espmusic`.
+- A allowlist tem **uma única entrada**: `espmusic.local:8080`. O IP do PC Windows é DHCP e muda — uma entrada morta na allowlist é pior que nenhuma, porque dá falsa sensação de fallback.
+- Repo separado: a Task 1 acontece em `~/Dev/HomeEspSera` (branch `main`, remoto `origin` no GitHub), com commit e **push** próprios lá. O PC Windows recebe o código por `git pull`. Todas as outras tasks acontecem em `~/Dev/Projeto-Seraphine`, na branch `feat/home-espmusic`.
+- **Deploy não acontece dentro de nenhuma task.** `git push vps main` só faz sentido depois do merge; ele entra no fechamento da branch.
 - Spec: `docs/superpowers/specs/2026-07-30-seraphine-espmusic-design.md`.
 
 ## File Structure
@@ -56,7 +57,9 @@ Recebe um áudio pronto (a voz da Seraphine) e o toca com prioridade de aviso. O
 - Consumes: `engine.play_alert(tracks: list[dict], preset: str = "voice")` e `file_track(path: Path) -> dict`, ambos de `core.py`.
 - Produces: `POST /api/announce`, multipart com campo `file`. Responde `{"ok": true}` em sucesso e `{"error": "áudio vazio"}` com 400 em corpo vazio.
 
-> **Exceção deliberada ao TDD:** este repo não tem nenhuma infraestrutura de teste (sem `pytest`, sem `tests/`). Montar uma para um endpoint de 14 linhas é desproporcional, e o `create_app` monta `StaticFiles` sobre `web/dist`, que nem sempre existe. A verificação aqui é manual, com comandos exatos. Todas as outras tasks são TDD normal.
+> **Exceção deliberada ao TDD:** este repo não tem nenhuma infraestrutura de teste (sem `pytest`, sem `tests/`). Montar uma para um endpoint de 14 linhas é desproporcional, e o `create_app` monta `StaticFiles` sobre `web/dist`, que nem sempre existe. A verificação aqui é manual, contra o servidor real, com comandos exatos. Todas as outras tasks são TDD normal.
+>
+> **Divisão de trabalho:** os Steps 1-4 (código, commit, push) são do subagente e acontecem no Mac. Os Steps 5-7 dependem do servidor rodando no PC Windows e são conduzidos pelo controlador junto com Jonathan.
 
 - [ ] **Step 1: Adicionar `python-multipart` às dependências**
 
@@ -66,15 +69,7 @@ Em `server/requirements.txt`, acrescentar a linha (o FastAPI exige esse pacote p
 python-multipart
 ```
 
-- [ ] **Step 2: Instalar a dependência**
-
-Run (no PC Windows, na pasta do projeto):
-```powershell
-python -m pip install -r server/requirements.txt
-```
-Expected: `python-multipart` instalado (ou "already satisfied").
-
-- [ ] **Step 3: Ajustar os imports de `api.py`**
+- [ ] **Step 2: Ajustar os imports de `api.py`**
 
 Trocar a linha de import do FastAPI e acrescentar `tempfile`:
 
@@ -89,7 +84,7 @@ from urllib.parse import unquote
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 ```
 
-- [ ] **Step 4: Adicionar o endpoint**
+- [ ] **Step 3: Adicionar o endpoint**
 
 Logo depois do `/api/alert` (`api.py:229`), ainda na seção "avisos":
 
@@ -117,29 +112,9 @@ Logo depois do `/api/alert` (`api.py:229`), ainda na seção "avisos":
         return ok()
 ```
 
-- [ ] **Step 5: Subir o servidor e verificar o contrato**
+- [ ] **Step 4: Commit e push (no repo do EspMusic)**
 
-Run:
-```powershell
-python server/espmusic.py serve
-```
-Noutro terminal, um arquivo vazio deve dar 400:
-```powershell
-New-Item -ItemType File -Force vazio.wav | Out-Null
-curl.exe -s -o NUL -w "%{http_code}" -X POST http://localhost:8080/api/announce -F "file=@vazio.wav"
-```
-Expected: `400`
-
-- [ ] **Step 6: Verificar que um áudio real toca na caixa**
-
-Gerar um wav de teste com o próprio TTS do Windows e mandá-lo de volta pelo endpoint novo:
-```powershell
-powershell -c "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SetOutputToWaveFile('teste.wav'); $s.Speak('teste de aviso'); $s.Dispose()"
-curl.exe -X POST http://localhost:8080/api/announce -F "file=@teste.wav"
-```
-Expected: `{"ok":true}` e a frase sai na caixa selecionada. Com música tocando, ela corta e volta do ponto exato depois.
-
-- [ ] **Step 7: Commit (no repo do EspMusic)**
+Commit direto na `main` deste repo: o PC Windows recebe o código por `git pull` da `main`, e uma branch aqui só atrapalharia esse caminho.
 
 ```bash
 cd ~/Dev/HomeEspSera
@@ -148,7 +123,41 @@ git commit -m "feat(api): /api/announce — toca áudio externo como aviso
 
 A Seraphine sintetiza a fala com a voz dela e manda o áudio pronto;
 o /api/say continua servindo para o TTS local do Windows."
+git push origin main
 ```
+
+- [ ] **Step 5: Handoff — atualizar e subir o servidor no PC Windows**
+
+O código está no GitHub; quem roda é o PC Windows. Pedir a Jonathan (não é passo de subagente):
+
+```powershell
+cd <pasta do EspMusic no PC>
+git pull
+python -m pip install -r server/requirements.txt
+python server/espmusic.py serve
+```
+
+Esperar a confirmação de que o servidor subiu antes dos próximos passos.
+
+- [ ] **Step 6: Verificar o contrato a partir do Mac**
+
+Corpo vazio precisa dar 400:
+
+```bash
+: > /tmp/vazio.wav
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://espmusic.local:8080/api/announce -F "file=@/tmp/vazio.wav"
+```
+Expected: `400`
+
+- [ ] **Step 7: Verificar que um áudio real toca na caixa**
+
+Gerar um WAV no Mac com o `say` e mandá-lo pelo endpoint novo:
+
+```bash
+say -o /tmp/teste.wav --data-format=LEI16@22050 "teste de aviso"
+curl -s -X POST http://espmusic.local:8080/api/announce -F "file=@/tmp/teste.wav"
+```
+Expected: `{"ok":true}` e a frase sai na caixa selecionada. Com música tocando, ela corta e a faixa volta do ponto exato depois.
 
 ---
 
@@ -194,9 +203,9 @@ Create `src-tauri/src/home.rs` com o stub e os testes. A implementação real de
 //! por isso é constante de compilação e não configuração.
 
 /// Pares host:porta que o relé pode alcançar. `espmusic.local` é o nome
-/// mDNS que o servidor do EspMusic anuncia; o IP é a reserva para
-/// quando o mDNS não resolve.
-const ALLOWED: &[&str] = &["espmusic.local:8080", "192.168.1.50:8080"];
+/// mDNS que o servidor do EspMusic anuncia. Sem IP de reserva: o do PC
+/// é DHCP, e uma entrada que envelhece dá falsa sensação de fallback.
+const ALLOWED: &[&str] = &["espmusic.local:8080"];
 
 /// Verdadeiro quando `base` é uma URL http:// cujo host:porta está na
 /// allowlist. https não é usado na LAN, e recusar qualquer outro esquema
@@ -215,8 +224,9 @@ mod tests {
     }
 
     #[test]
-    fn allows_the_fallback_ip() {
-        assert!(is_allowed("http://192.168.1.50:8080"));
+    fn rejects_the_pcs_ip_because_it_is_not_listed() {
+        // O IP é DHCP; só o nome mDNS entra na allowlist.
+        assert!(!is_allowed("http://192.168.68.62:8080"));
     }
 
     #[test]
@@ -255,7 +265,7 @@ mod home;
 ```
 
 Run: `cd apps/seraphine/frontend/src-tauri && cargo test home::`
-Expected: FAIL — os 3 testes de `allows_*` falham (o stub recusa tudo); os 4 de `rejects_*` passam por acidente.
+Expected: FAIL — os 2 testes de `allows_*` falham (o stub recusa tudo); os 5 de `rejects_*` passam por acidente.
 
 - [ ] **Step 4: Implementar `is_allowed` e ver os testes passarem**
 
@@ -361,9 +371,7 @@ pub async fn lan_request(args: LanRequestArgs) -> Result<LanResponse, String> {
             home::lan_request,
 ```
 
-- [ ] **Step 7: Confirmar o IP de reserva e compilar**
-
-Perguntar a Jonathan o IP fixo do PC Windows e substituir `192.168.1.50:8080` em `ALLOWED` (e no teste `allows_the_fallback_ip`).
+- [ ] **Step 7: Compilar o projeto inteiro**
 
 Run: `cd apps/seraphine/frontend/src-tauri && cargo test home:: && cargo check`
 Expected: 7 testes passam, `cargo check` sem erros.
@@ -1883,15 +1891,21 @@ git add apps/seraphine/backend/seraphine/main.py \
 git commit -m "feat(home): registrar as tools da casa no lifespan"
 ```
 
-- [ ] **Step 7: Deploy**
+---
+
+## Depois do merge — deploy e verificação E2E
+
+Não é uma task: nada aqui roda numa branch não mergeada, porque o E2E precisa do backend novo em produção. Executar ao fechar a branch.
+
+- [ ] **Deploy**
 
 ```bash
-git push vps main            # backend (o hook do VPS redeploya via docker compose)
-cd apps/seraphine/frontend && pnpm tauri:install   # app do Mac com o relé
+git push vps main                                   # backend (hook do VPS redeploya)
+cd apps/seraphine/frontend && pnpm tauri:install     # app do Mac, com o relé
 ```
-No PC Windows, `git pull` no repo do EspMusic e reiniciar `python espmusic.py serve`.
+No PC Windows, o EspMusic já está atualizado pela Task 1.
 
-- [ ] **Step 8: Verificação E2E manual**
+- [ ] **Verificação E2E manual**
 
 Pré-condições: EspMusic no ar, ao menos uma caixa ligada, app da Seraphine aberto no Mac e na mesma rede.
 
@@ -1907,7 +1921,7 @@ Na Seraphine, pedir e conferir:
 8. Fechar o app do Mac e pedir "toca algo na sala" → "não alcanço a casa — o app precisa estar aberto".
 9. "toca Djavan" (sem citar cômodo) → continua tocando no **navegador** do Mac, não nas caixas. Se for para as caixas, reforçar `_ONLY_WHEN_AT_HOME` na descrição.
 
-- [ ] **Step 9: Registrar o resultado**
+- [ ] **Registrar o resultado**
 
 Anotar no fim do spec (`docs/superpowers/specs/2026-07-30-seraphine-espmusic-design.md`) uma seção "Verificação E2E" com a data do dia e, item por item dos 9 acima, o que passou e o que não passou. Commitar junto.
 
