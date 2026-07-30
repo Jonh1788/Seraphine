@@ -22,6 +22,7 @@ mod clipboard;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod cv_triage_zip;
 mod health;
+mod home;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mac_tools;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -58,6 +59,9 @@ fn run_mobile() {
             whisper::whisper_prepare,
             whisper::whisper_transcribe_pcm,
             health::health_schedule_background,
+            // Casa — relé HTTP para a LAN (EspMusic). Vale nos dois
+            // alvos: o iPhone em casa está na mesma rede que o Mac.
+            home::lan_request,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -194,6 +198,9 @@ fn run_desktop() {
             agents::approvals::maestro_approvals_status,
             agents::approvals::maestro_get_rules,
             agents::approvals::maestro_set_rules,
+            // Casa — relé HTTP para a LAN (EspMusic). Vale nos dois
+            // alvos: o iPhone em casa está na mesma rede que o Mac.
+            home::lan_request,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())

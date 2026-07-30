@@ -44,6 +44,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # until the human (or the static safe-tool rule) returns a permission
 # decision. Synchronous = no async runtime; one worker thread per request.
 tiny_http = "0.12"
+# Relé HTTP para a casa — fala com aparelhos da LAN (EspMusic hoje;
+# luzes/garagem/piscina depois). TLS fica desligado de propósito: o relé
+# só fala http:// com hosts da allowlist, e sem TLS a árvore de
+# dependências fica pequena.
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json"] }
 
 [dev-dependencies]
 tempfile = "3"
