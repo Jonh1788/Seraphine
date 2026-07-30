@@ -29,6 +29,31 @@ pub fn is_allowed(base: &str) -> bool {
     ALLOWED.contains(&hostport)
 }
 
+/// Verdadeiro quando a URL **já composta** (`base` + `path`) resolve,
+/// depois de parseada de verdade, para um host:porta da allowlist.
+///
+/// `is_allowed` só enxerga o `base`; o `path` entra na URL sem passar
+/// por lá e consegue trocar o destino real — `@outro-host/` vira
+/// userinfo e o host de verdade passa a ser `outro-host`. Por isso a
+/// trava autoritativa é aqui, sobre o que o cliente HTTP realmente vai
+/// discar, e por parsing e não por lista de caracteres proibidos.
+pub fn resolved_host_allowed(url: &str) -> bool {
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    // Sem porta explícita o destino é a 80, que precisa constar na
+    // allowlist como qualquer outra.
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    ALLOWED.contains(&format!("{host}:{port}").as_str())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LanRequestArgs {
     /// Base absoluta, ex. "http://espmusic.local:8080".
@@ -60,6 +85,12 @@ pub async fn lan_request(args: LanRequestArgs) -> Result<LanResponse, String> {
         return Err(format!("host não permitido: {}", args.base));
     }
     let url = format!("{}{}", args.base.trim_end_matches('/'), args.path);
+    // Trava autoritativa: o `path` também entra na URL, e é ele que
+    // consegue mudar o host de verdade. Vale sobre o que o cliente vai
+    // discar, não sobre o prefixo que o chamador prometeu.
+    if !resolved_host_allowed(&url) {
+        return Err(format!("host não permitido: {url}"));
+    }
     let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
         .build()
@@ -96,7 +127,7 @@ pub async fn lan_request(args: LanRequestArgs) -> Result<LanResponse, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed;
+    use super::{is_allowed, resolved_host_allowed};
 
     #[test]
     fn allows_the_espmusic_mdns_host() {
@@ -132,5 +163,46 @@ mod tests {
     #[test]
     fn rejects_an_allowlisted_host_smuggled_into_the_path() {
         assert!(!is_allowed("http://evil.example.com/espmusic.local:8080"));
+    }
+
+    // A URL composta é `base` + `path`. `is_allowed` só validou o
+    // `base`, então o `path` é a superfície que sobra — estes testes
+    // cobrem a trava que roda sobre o destino real.
+
+    #[test]
+    fn allows_an_ordinary_path_under_the_allowlisted_host() {
+        assert!(resolved_host_allowed("http://espmusic.local:8080/api/play"));
+    }
+
+    #[test]
+    fn rejects_a_path_that_smuggles_another_host_as_userinfo() {
+        // O `base` aprovado vira userinfo e o host de verdade passa a
+        // ser o roteador. Sem parsear a URL composta, isto sairia.
+        assert!(!resolved_host_allowed(
+            "http://espmusic.local:8080@192.168.1.1/admin"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_path_that_smuggles_the_same_host_on_another_port() {
+        assert!(!resolved_host_allowed(
+            "http://espmusic.local:8080@espmusic.local:9000/x"
+        ));
+    }
+
+    #[test]
+    fn rejects_the_allowlisted_host_on_the_implicit_default_port() {
+        // Sem porta explícita o destino é a 80, que não está na lista.
+        assert!(!resolved_host_allowed("http://espmusic.local/api/play"));
+    }
+
+    #[test]
+    fn rejects_a_composed_url_with_a_non_http_scheme() {
+        assert!(!resolved_host_allowed("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn rejects_a_composed_url_that_does_not_parse() {
+        assert!(!resolved_host_allowed("http://espmusic.local:porta/x"));
     }
 }
