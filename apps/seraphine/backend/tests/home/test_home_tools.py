@@ -83,11 +83,19 @@ def test_every_tool_declares_a_valid_schema() -> None:
         assert tool.requires_confirmation is False
 
 
-def test_descriptions_send_the_llm_to_play_music_for_the_mac() -> None:
+def test_descriptions_gate_on_a_room_and_send_music_to_play_music() -> None:
     # Sem isso o LLM confunde com as tools de navegador de tools/browser.py.
     svc = FakeService()
+    for tool in (HomePlayTool(svc), HomeControlTool(svc), HomeAnnounceTool(svc)):
+        assert "APENAS quando o usuário citar um cômodo" in tool.description
+
     for tool in (HomePlayTool(svc), HomeControlTool(svc)):
         assert "play_music" in tool.description
+
+    # `play_music` procura no YouTube Music: não sabe falar um aviso.
+    # Mandar o modelo para lá num "avisa que o jantar chegou" faria ele
+    # buscar a frase como música.
+    assert "play_music" not in HomeAnnounceTool(svc).description
 
 
 def test_status_takes_no_arguments() -> None:
@@ -159,9 +167,14 @@ async def test_announce_falls_back_to_a_wav_built_from_the_pcm_stream() -> None:
 
 
 async def test_announce_without_tts_fails_clearly() -> None:
-    result = await HomeAnnounceTool(FakeService(tts=None)).execute({"text": "oi"})
+    svc = FakeService(tts=None)
+    result = await HomeAnnounceTool(svc).execute({"text": "oi"})
     assert not result.ok
     assert "voz" in (result.error or "").lower()
+    # E não o erro genérico de síntese: sem TTS a falha é de configuração,
+    # não um estouro em cima de `None` — e nada chega às caixas.
+    assert "NoneType" not in (result.error or "")
+    assert svc.music.calls == []
 
 
 async def test_announce_requires_text() -> None:
@@ -178,6 +191,9 @@ async def test_no_client_connected_becomes_a_speakable_sentence() -> None:
     result = await HomePlayTool(svc).execute({"query": "x"})
     assert not result.ok
     assert "app" in (result.error or "").lower()
+    # Nem o erro genérico (que vazaria "WebSocket"), nem o do aparelho.
+    assert "WebSocket" not in (result.error or "")
+    assert "HTTP" not in (result.error or "")
 
 
 async def test_a_404_from_play_says_the_song_was_not_found() -> None:
@@ -186,16 +202,22 @@ async def test_a_404_from_play_says_the_song_was_not_found() -> None:
     result = await HomePlayTool(svc).execute({"query": "x"})
     assert not result.ok
     assert "não achei" in (result.error or "").lower()
+    # Nem o status cru nem o corpo do aparelho vazam para o usuário.
+    assert "404" not in (result.error or "")
+    assert "nada encontrado" not in (result.error or "")
 
 
 async def test_an_unknown_room_keeps_the_list_of_rooms_in_the_error() -> None:
     svc = FakeService()
-    svc.music.raises = UnknownRoom(
+    exc = UnknownRoom(
         "não conheço o cômodo 'garagem'. Caixas disponíveis: banheiro, sala"
     )
+    svc.music.raises = exc
     result = await HomePlayTool(svc).execute({"query": "x", "room": "garagem"})
     assert not result.ok
     assert "banheiro" in (result.error or "")
+    # A frase do adaptador passa inteira, sem prefixo genérico na frente.
+    assert result.error == str(exc)
 
 
 async def test_a_500_from_the_device_is_reported_as_a_device_error() -> None:
@@ -204,3 +226,8 @@ async def test_a_500_from_the_device_is_reported_as_a_device_error() -> None:
     result = await HomeStatusTool(svc).execute({})
     assert not result.ok
     assert "casa" in (result.error or "").lower()
+    # A distinção que importa: o aparelho respondeu, então a culpa não é
+    # do app fechado — e o status entra na frase, sem o corpo cru.
+    assert "HTTP 500" in (result.error or "")
+    assert "app" not in (result.error or "").lower()
+    assert "boom" not in (result.error or "")

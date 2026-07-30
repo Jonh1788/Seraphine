@@ -25,10 +25,19 @@ logger = logging.getLogger("seraphine.tools.home")
 # a 24 kHz (ver tts/base.py).
 TTS_SAMPLE_RATE = 24_000
 
-_ONLY_WHEN_AT_HOME = (
+# A regra de quando usar as tools da casa, em duas partes: o portão do
+# cômodo vale para todas; o ponteiro para `play_music` só vale para as
+# que tocam música. `play_music` procura no YouTube Music e não sabe
+# falar um aviso — mandar o modelo para lá num "avisa que o jantar
+# chegou" faria ele buscar a frase como se fosse uma canção.
+_ROOM_GATE = (
     "Use APENAS quando o usuário citar um cômodo ou a casa ('na sala', "
-    "'no banheiro', 'nas caixas', 'na casa'). Para tocar no próprio Mac "
-    "do usuário, use `play_music`, que é o padrão."
+    "'no banheiro', 'nas caixas', 'na casa')."
+)
+
+_ONLY_WHEN_AT_HOME = (
+    _ROOM_GATE + " Para tocar no próprio Mac do usuário, use `play_music`, "
+    "que é o padrão."
 )
 
 ACTIONS = [
@@ -183,7 +192,7 @@ class HomeAnnounceTool(_HomeTool):
     description = (
         "Fala um aviso nas caixas de som da casa, com a voz da Seraphine. "
         "O aviso corta a música e ela volta do ponto exato depois. Sai na "
-        "caixa que está selecionada. " + _ONLY_WHEN_AT_HOME
+        "caixa que está selecionada. " + _ROOM_GATE
     )
     json_schema: dict[str, Any] = {
         "type": "object",
