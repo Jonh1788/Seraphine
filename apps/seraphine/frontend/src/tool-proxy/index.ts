@@ -44,7 +44,7 @@ function wrapErr(err: unknown): ProxyResponse {
   return { request_id: '', ok: false, error: String(err) };
 }
 
-const handlers: Record<string, Handler> = {
+export const handlers: Record<string, Handler> = {
   run_shell: async (args) => {
     try {
       const result = await tauriInvoke<{ stdout: string; stderr: string; code: number }>(
@@ -322,6 +322,33 @@ const handlers: Record<string, Handler> = {
         output: body,
         error: out.code !== 0 ? `exit ${out.code}` : null,
         metadata: { framework, exit_code: out.code },
+      };
+    } catch (e) {
+      return wrapErr(e);
+    }
+  },
+  // Casa — relé HTTP para a LAN. O backend (no VPS) não alcança
+  // espmusic.local; ele manda a requisição pronta e o Rust executa
+  // daqui de dentro, contra a allowlist de `home.rs`.
+  lan_request: async (args) => {
+    try {
+      const res = await tauriInvoke<{ status: number; body: string }>('lan_request', {
+        args: {
+          base: String(args.base ?? ''),
+          method: String(args.method ?? 'GET'),
+          path: String(args.path ?? ''),
+          json: args.json ?? null,
+          audio_b64: args.audio_b64 ?? null,
+          audio_filename: args.audio_filename ?? null,
+        },
+      });
+      const ok = res.status >= 200 && res.status < 300;
+      return {
+        request_id: '',
+        ok,
+        output: res.body,
+        error: ok ? null : `HTTP ${res.status}`,
+        metadata: { status: res.status },
       };
     } catch (e) {
       return wrapErr(e);
