@@ -170,6 +170,33 @@ async def test_control_maps_each_action(
     assert ("POST", path, body) in transport.calls
 
 
+async def test_control_with_a_room_selects_the_speaker_first(
+    adapter: EspMusicAdapter, transport: FakeTransport
+) -> None:
+    # "aumenta o volume da sala" não pode mexer na caixa que estava
+    # selecionada antes — e aqui o erro é invisível: nada começa a tocar
+    # para denunciar o cômodo errado.
+    await adapter.control("volume_up", room="Sala")
+    assert transport.calls[0] == ("GET", "/api/status", None)
+    assert transport.calls[1] == ("POST", "/api/device", {"name": "espmusic-sala"})
+    assert transport.calls[2] == ("POST", "/api/volume", {"delta_db": 2.0})
+
+
+async def test_mute_reports_the_resulting_state(
+    adapter: EspMusicAdapter, transport: FakeTransport
+) -> None:
+    # /api/mute é um alternador; a frase de volta precisa dizer onde
+    # o som parou, não que "algo foi alternado".
+    # Igualdade, e não `"ligado" in ...`: "ligado" é substring de
+    # "desligado", então a versão com `in` passaria mesmo se o adaptador
+    # devolvesse sempre "mudo desligado".
+    transport.responses["/api/mute"] = {"ok": True, "muted": True}
+    assert await adapter.control("mute") == "mudo ligado"
+
+    transport.responses["/api/mute"] = {"ok": True, "muted": False}
+    assert await adapter.control("mute") == "mudo desligado"
+
+
 async def test_volume_set_converts_percent_to_db(
     adapter: EspMusicAdapter, transport: FakeTransport
 ) -> None:

@@ -118,8 +118,13 @@ class EspMusicAdapter:
             await self._t.request("POST", "/api/stop", json_body={})
             return "parei e limpei a fila"
         if action == "mute":
-            await self._t.request("POST", "/api/mute", json_body={})
-            return "mudo alternado"
+            # /api/mute é um alternador: pedir "muta" com o som já mudo
+            # desmutaria. Não dá para consertar isso aqui sem virar um
+            # "set" — mas a resposta já traz o estado resultante, então
+            # devolvemos ele em vez de "alternei", e quem leu a frase
+            # (usuário ou LLM) enxerga o efeito no mesmo turno.
+            data = await self._t.request("POST", "/api/mute", json_body={})
+            return "mudo ligado" if data.get("muted") else "mudo desligado"
         if action == "volume_up":
             await self._t.request(
                 "POST", "/api/volume", json_body={"delta_db": VOLUME_STEP_DB}
