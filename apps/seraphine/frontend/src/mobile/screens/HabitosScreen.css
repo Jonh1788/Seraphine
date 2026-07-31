@@ -1,0 +1,119 @@
+/* src/mobile/screens/HabitosScreen.css — tela HÁBITOS (handoff linha 276).
+   Medidas tiradas do handoff: cabeçalho 14/20/10, linhas de 16px de raio com
+   14px 15px de padding e 9px de intervalo, chip de 38px, check de 30px.
+   Todas as classes levam o prefixo `ms-habitos-` para nunca colidirem com o
+   CSS de outra tela. */
+
+html[data-shell='phone'] .ms-habitos { display: flex; flex-direction: column; min-height: 100%; }
+
+/* ── cabeçalho + pill de sequência ── */
+html[data-shell='phone'] .ms-habitos-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px 20px 10px;
+}
+html[data-shell='phone'] .ms-habitos-head-txt { min-width: 0; }
+html[data-shell='phone'] .ms-habitos-titulo { font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-habitos-sub { font-size: 12px; color: var(--text-dim, #9594a0); margin-top: 1px; }
+html[data-shell='phone'] .ms-habitos-streak {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: #ff8a4c;
+  background: rgba(255, 138, 76, .1); border: 1px solid rgba(255, 138, 76, .2);
+  padding: 8px 13px; border-radius: 18px;
+}
+html[data-shell='phone'] .ms-habitos-streak-skel {
+  display: inline-block; width: 42px; height: 9px; border-radius: 5px;
+  background: rgba(255, 138, 76, .25); animation: msHabitosSkel 1.4s ease-in-out infinite;
+}
+
+/* ── lista ── */
+html[data-shell='phone'] .ms-habitos-lista {
+  flex: 1; display: flex; flex-direction: column; gap: 9px; padding: 2px 20px 12px;
+}
+html[data-shell='phone'] .ms-habitos-caixa,
+html[data-shell='phone'] .ms-habitos-linha {
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 16px; padding: 14px 15px;
+}
+html[data-shell='phone'] .ms-habitos-linha { display: flex; align-items: center; gap: 12px; }
+/* o pendente da vez: borda accent + halo, exatamente como no handoff */
+html[data-shell='phone'] .ms-habitos-linha--pendente {
+  border-color: var(--accent, #9a93ff);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(154, 147, 255, .14));
+}
+html[data-shell='phone'] .ms-habitos-icone {
+  width: 38px; height: 38px; flex: none; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-soft, rgba(154, 147, 255, .12)); color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-habitos-icone--agua { background: rgba(66, 165, 245, .12); color: #42a5f5; }
+html[data-shell='phone'] .ms-habitos-corpo { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-habitos-nome { font-size: 14px; font-weight: 600; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-habitos-meta { font-size: 11px; color: var(--text-dim, #9594a0); margin-top: 1px; }
+html[data-shell='phone'] .ms-habitos-meta--streak { display: flex; align-items: center; gap: 4px; color: #ff8a4c; font-weight: 600; }
+
+/* check de 30px: cheio em accent quando feito, contorno accent quando pendente */
+html[data-shell='phone'] .ms-habitos-check {
+  width: 30px; height: 30px; flex: none; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 2px solid var(--accent, #9a93ff);
+  color: var(--accent-contrast, #14141a); font: inherit; cursor: pointer; padding: 0;
+}
+html[data-shell='phone'] .ms-habitos-check--on { background: var(--accent, #9a93ff); border-color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-habitos-check--on svg { stroke-width: 3; }
+
+/* ── água: progresso + "+" ── */
+html[data-shell='phone'] .ms-habitos-agua-prog { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+html[data-shell='phone'] .ms-habitos-agua-barra {
+  flex: 1; height: 6px; border-radius: 4px; background: rgba(66, 165, 245, .15); overflow: hidden;
+}
+html[data-shell='phone'] .ms-habitos-agua-barra span { display: block; height: 100%; background: #42a5f5; }
+html[data-shell='phone'] .ms-habitos-agua-label { flex: none; font-size: 10px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-habitos-add {
+  width: 30px; height: 30px; flex: none; border-radius: 10px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  color: #42a5f5; font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-habitos-add:disabled { opacity: .5; cursor: default; }
+
+/* ── "Seraphine sugere" ── */
+html[data-shell='phone'] .ms-habitos-sugere {
+  flex: none; display: flex; align-items: center; gap: 11px; margin: 0 20px 14px;
+  padding: 13px 15px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(154, 147, 255, .14), rgba(154, 147, 255, .04));
+  border: 1px solid rgba(154, 147, 255, .22);
+}
+html[data-shell='phone'] .ms-habitos-sugere-icone { flex: none; display: inline-flex; color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-habitos-sugere-txt { font-size: 12px; line-height: 1.5; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-habitos-sugere .ms-habitos-vazio,
+html[data-shell='phone'] .ms-habitos-sugere .ms-habitos-erro,
+html[data-shell='phone'] .ms-habitos-sugere .ms-habitos-skel { margin-top: 0; flex: 1; }
+
+/* ── três saídas: vazio, erro e carregando ──
+   Nada some por falta de dado; o erro usa a tinta de perigo para nunca ser
+   lido como vazio, e a espera não tem texto para nada piscar "tudo em dia". */
+html[data-shell='phone'] .ms-habitos-vazio { font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-habitos-erro {
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-habitos-erro::before {
+  content: '!'; flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
+  border: 1.2px solid currentColor; font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-habitos-skel { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+html[data-shell='phone'] .ms-habitos-skel span {
+  height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .06);
+  animation: msHabitosSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-habitos-skel span:nth-child(2) { width: 62%; animation-delay: .2s; }
+html[data-shell='phone'] .ms-habitos-skel-lista { display: flex; flex-direction: column; gap: 9px; }
+html[data-shell='phone'] .ms-habitos-skel-linha {
+  height: 68px; border-radius: 16px; background: rgba(255, 255, 255, .05);
+  animation: msHabitosSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-habitos-skel-linha:nth-child(2) { animation-delay: .15s; }
+html[data-shell='phone'] .ms-habitos-skel-linha:nth-child(3) { animation-delay: .3s; }
+html[data-shell='phone'] .ms-habitos-skel-linha:nth-child(4) { animation-delay: .45s; }
+
+@keyframes msHabitosSkel { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
