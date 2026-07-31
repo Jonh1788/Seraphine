@@ -83,7 +83,7 @@ describe('TrilhasMapaScreen', () => {
     expect(caminhoSerpente(10).match(/C /g)?.length).toBe(9);
   });
 
-  it('um nó bloqueado não navega; um liberado abre a lição', async () => {
+  it('um nó bloqueado não navega; um liberado abre a lição com o id dela', async () => {
     felizes();
     const onOpen = vi.fn();
     render(<TrilhasMapaScreen onOpen={onOpen} />);
@@ -93,7 +93,59 @@ describe('TrilhasMapaScreen', () => {
     expect(onOpen).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /^Ownership/ }));
-    expect(onOpen).toHaveBeenCalledWith({ key: 'licao-teoria', title: 'Ownership' });
+    expect(onOpen).toHaveBeenCalledWith({ key: 'licao-teoria', title: 'Ownership', id: 'l3' });
+  });
+
+  it('um nó concluído abre a lição DELE, não a lição da vez', async () => {
+    // sem o id no empurrão a tela de teoria resolve a lição atual sozinha:
+    // tocar em "O que é Rust" abriria "Ownership" com o título errado.
+    felizes();
+    const onOpen = vi.fn();
+    render(<TrilhasMapaScreen onOpen={onOpen} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /^O que é Rust/ })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^O que é Rust/ }));
+    expect(onOpen).toHaveBeenCalledWith({ key: 'licao-teoria', title: 'O que é Rust', id: 'l1' });
+  });
+
+  it('enquanto carrega não afirma progresso nem streak nenhum', async () => {
+    // promessas que nunca resolvem: a tela fica no estado de espera
+    vi.mocked(listCourses).mockReturnValue(new Promise(() => {}));
+    vi.mocked(getStats).mockReturnValue(new Promise(() => {}));
+    const { container } = render(<TrilhasMapaScreen />);
+    // nem "0/0" de progresso, nem um "0" de sequência piscando antes do dado
+    expect(screen.queryByText('0/0')).toBeNull();
+    expect(screen.queryByText('0')).toBeNull();
+    // e o que aparece no lugar é esqueleto, sem texto
+    expect(container.querySelectorAll('.ms-trilhas-skel').length).toBeGreaterThan(0);
+  });
+
+  it('erro não deixa a fração afirmando 0/0', async () => {
+    vi.mocked(listCourses).mockRejectedValue(new Error('rede'));
+    vi.mocked(getStats).mockResolvedValue(STATS);
+    render(<TrilhasMapaScreen />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.queryByText('0/0')).toBeNull();
+  });
+
+  it('trilha inteira travada não é trilha concluída', async () => {
+    // o backend devolve `locked` para toda lição incompleta: sem nenhuma
+    // liberada, nada foi percorrido e nada foi terminado.
+    const travada: Course = {
+      ...CURSO,
+      lessons: CURSO.lessons.map((l) => ({ ...l, lock: 'locked' as const })),
+    };
+    vi.mocked(listCourses).mockResolvedValue([RESUMO]);
+    vi.mocked(getCourse).mockResolvedValue(travada);
+    vi.mocked(getStats).mockResolvedValue(STATS);
+    const { container } = render(<TrilhasMapaScreen />);
+    await waitFor(() => expect(screen.getAllByTestId('ms-trilhas-no').length).toBe(5));
+
+    expect(screen.getByText('0/5')).toBeTruthy();
+    expect(screen.queryByText(/terminou esta trilha/i)).toBeNull();
+    // e o caminho sólido não pode estar inteiro desenhado
+    const solido = container.querySelectorAll('.ms-trilhas-caminho path')[1];
+    expect(solido.getAttribute('d')).toBe(caminhoSerpente(1));
   });
 
   it('mostra estado vazio quando não há nenhuma trilha, e não some', async () => {

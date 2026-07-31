@@ -103,6 +103,7 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
   // junto, e a do mapa não pode apagar o streak.
   const [stats, setStats] = useState<Stats | null>(null);
   const [erroStats, setErroStats] = useState(false);
+  const [carregandoStats, setCarregandoStats] = useState(true);
 
   useEffect(() => {
     let vivo = true;
@@ -128,8 +129,8 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
   useEffect(() => {
     let vivo = true;
     getStats()
-      .then((s) => { if (vivo) { setStats(s); setErroStats(false); } })
-      .catch(() => { if (vivo) { setStats(null); setErroStats(true); } });
+      .then((s) => { if (vivo) { setStats(s); setErroStats(false); setCarregandoStats(false); } })
+      .catch(() => { if (vivo) { setStats(null); setErroStats(true); setCarregandoStats(false); } });
     return () => { vivo = false; };
   }, []);
 
@@ -139,15 +140,25 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
   const pct = total ? Math.round((feitas / total) * 100) : 0;
   const iAtiva = licoes.findIndex((l) => l.lock === 'unlocked');
   const ativa = iAtiva >= 0 ? licoes[iAtiva] : null;
-  // O trecho percorrido termina no nó ativo; trilha inteira feita, termina no troféu.
-  const percorridos = (iAtiva >= 0 ? iAtiva : total) + 1;
+  // Concluída é ter FEITO todas, não é "não achei lição liberada": o backend
+  // devolve `locked` para toda lição `incomplete` (courses/service.py), então
+  // uma trilha inteira travada cairia como terminada se olhássemos só o ativo.
+  const concluida = total > 0 && feitas === total;
+  // O trecho percorrido termina no nó ativo; trilha inteira feita, no troféu;
+  // sem nenhuma liberada, ele para onde as concluídas pararam.
+  const percorridos = (iAtiva >= 0 ? iAtiva : concluida ? total : feitas) + 1;
   // Um nó por lição, mais o troféu do fim.
   const nos = total + 1;
   const altura = Y_INICIAL + (nos - 1) * PASSO + 74;
+  // O número só existe quando há trilha carregada: fora disso o bloco mostra
+  // esqueleto ou travessão, nunca um "0/0" que o usuário leria como progresso.
+  const temFracao = !carregando && !erro && total > 0;
 
   const abrir = (l: LessonNode) => {
     if (l.lock === 'locked') return;
-    onOpen?.({ key: 'licao-teoria', title: l.title });
+    // O id viaja junto: sem ele a tela de teoria cai no fallback e resolve a
+    // lição ATUAL — tocar num nó concluído abriria a lição errada.
+    onOpen?.({ key: 'licao-teoria', title: l.title, id: l.id });
   };
 
   return (
@@ -162,17 +173,23 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
             : <h1 className="ms-trilhas-titulo">{curso ? (curso.title || curso.topic) : 'Trilhas'}</h1>}
         </div>
         <span className="ms-trilhas-streak">
-          {erroStats
+          {carregandoStats
+            ? <span className="ms-trilhas-skel ms-trilhas-skel--chip" aria-hidden="true"><span /></span>
+            : erroStats
             ? <span className="ms-trilhas-erro ms-trilhas-erro--curto" role="alert">streak fora do ar</span>
-            : <><FlameIcon size={13} />{stats ? stats.streak_count : 0}</>}
+            : <><FlameIcon size={13} />{stats?.streak_count ?? 0}</>}
         </span>
       </header>
 
       <div className="ms-trilhas-progresso">
-        <div className="ms-trilhas-barra">
-          <span className="ms-trilhas-barra__preenchida" style={{ width: `${pct}%` }} />
+        <div className={`ms-trilhas-barra${carregando ? ' ms-trilhas-barra--esqueleto' : ''}`}>
+          {temFracao && <span className="ms-trilhas-barra__preenchida" style={{ width: `${pct}%` }} />}
         </div>
-        <span className="ms-trilhas-fracao">{feitas}/{total}</span>
+        {carregando
+          ? <span className="ms-trilhas-skel ms-trilhas-skel--chip" aria-hidden="true"><span /></span>
+          : temFracao
+          ? <span className="ms-trilhas-fracao">{feitas}/{total}</span>
+          : <span className="ms-trilhas-fracao ms-trilhas-fracao--sem">—</span>}
       </div>
 
       <div className="ms-trilhas-mapa" style={{ height: total ? altura : undefined }}>
@@ -191,10 +208,12 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
                 fill="none"
                 aria-hidden="true"
               >
-                {/* o que falta: pontilhado */}
+                {/* o que falta: pontilhado. A cor sai do token, e não do
+                    #9a93ff cru, para acompanhar os temas de accent. */}
                 <path
                   d={caminhoSerpente(nos)}
-                  stroke="rgba(154,147,255,0.3)"
+                  stroke="var(--accent, #9a93ff)"
+                  strokeOpacity="0.3"
                   strokeWidth="4"
                   strokeLinecap="round"
                   strokeDasharray="1 9"
@@ -203,7 +222,7 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
                 {/* o que já foi andado: sólido em accent */}
                 <path
                   d={caminhoSerpente(percorridos)}
-                  stroke="#9a93ff"
+                  stroke="var(--accent, #9a93ff)"
                   strokeWidth="4"
                   strokeLinecap="round"
                   vectorEffect="non-scaling-stroke"
@@ -264,7 +283,8 @@ export function TrilhasMapaScreen({ onBack, onOpen }: ScreenProps) {
             </>
           )
           : erro ? <Vazio>Nenhuma lição para continuar enquanto a trilha não carrega.</Vazio>
-          : total ? <Vazio>Você terminou esta trilha — não há lição pendente para continuar.</Vazio>
+          : concluida ? <Vazio>Você terminou esta trilha — não há lição pendente para continuar.</Vazio>
+          : total ? <Vazio>Nenhuma lição liberada agora — a Seraphine ainda está preparando esta trilha.</Vazio>
           : <Vazio>Nenhuma lição para continuar ainda.</Vazio>}
       </div>
     </div>

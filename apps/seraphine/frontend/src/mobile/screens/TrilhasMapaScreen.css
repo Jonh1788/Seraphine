@@ -47,9 +47,12 @@ html[data-shell='phone'] .ms-trilhas-barra__preenchida {
   background: linear-gradient(90deg, var(--accent-dim, #6c63d6), var(--accent, #9a93ff));
   transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+html[data-shell='phone'] .ms-trilhas-barra--esqueleto { animation: msTrilhasSkel 1.4s ease-in-out infinite; }
 html[data-shell='phone'] .ms-trilhas-fracao {
   flex: none; font-size: 11px; font-weight: 700; color: var(--text-dim, #9594a0);
 }
+/* travessão de "ainda não há número", para o bloco não afirmar 0/0 */
+html[data-shell='phone'] .ms-trilhas-fracao--sem { color: var(--text-faint, #5f5e6b); }
 
 /* ── o mapa: sangra a lateral do shell para o caminho usar a largura toda ── */
 html[data-shell='phone'] .ms-trilhas-mapa {
@@ -180,6 +183,9 @@ html[data-shell='phone'] .ms-trilhas-skel span:nth-child(3) { width: 55%; animat
 html[data-shell='phone'] .ms-trilhas-skel span:nth-child(4) { width: 66%; animation-delay: 0.6s; }
 html[data-shell='phone'] .ms-trilhas-skel--titulo { padding: 0; width: 140px; }
 html[data-shell='phone'] .ms-trilhas-skel--titulo span { height: 15px; }
+/* fichinha de espera do streak e da fração: barra curta, sem texto nenhum */
+html[data-shell='phone'] .ms-trilhas-skel--chip { padding: 0; width: 30px; }
+html[data-shell='phone'] .ms-trilhas-skel--chip span { height: 11px; }
 html[data-shell='phone'] .ms-trilhas-rodape .ms-trilhas-skel { padding: 0; flex: 1; }
 
 @keyframes msTrilhasSkel {
