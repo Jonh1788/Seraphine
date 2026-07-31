@@ -25,6 +25,11 @@ import { Waveform, type WaveformMode } from './Waveform';
  *   botSpeaking ──ws tts_end──> listening
  *   botSpeaking ──VAD onSpeechStart──> userSpeaking  (BARGE-IN: stops TTS, sends interrupt)
  *   any ──active=false──> idle  (stops VAD, sends interrupt if mid-response)
+ *
+ * O desligamento do hardware (microfone + audio unit) mora em `stopEngine`, e
+ * não neste efeito, porque `active=false` NÃO é o único jeito de sair: quem
+ * desmonta o componente com a sessão de pé sai pelo cleanup do desmonte. Os
+ * dois caminhos chamam a mesma sequência.
  */
 export type RealtimeState =
   | 'idle'
@@ -343,38 +348,111 @@ export function RealtimeController({
     wsRef.current?.send({ type: 'interrupt' });
   }, []);
 
+  /**
+   * Desliga o HARDWARE: o microfone (VAD) e o audio unit (VPIO).
+   *
+   * Vive fora do efeito porque tem DOIS caminhos de saída, e por muito tempo só
+   * um deles desligava alguma coisa:
+   *   1. `active` cai — o efeito abaixo reroda e chama isto;
+   *   2. o componente SOME com a sessão ligada — o cleanup de `useEffect(..., [])`
+   *      chama isto. É o caminho normal de saída da voz: a `VozScreen` faz
+   *      `setEncerrada(true)` no mesmo commit do `onBack()`, então o pai desmonta
+   *      antes de o controller chegar a renderizar com `active === false`. Trocar
+   *      de aba ou voltar pelo gesto faz o mesmo. Sem (2), o indicador de
+   *      microfone do iPhone ficava aceso depois de sair da tela.
+   *
+   * A ORDEM aqui não é decorativa:
+   *   - o stop do VAD entra na fila do `vadStopPromiseRef` para que um boot
+   *     seguinte espere o `session.release()` do ORT terminar;
+   *   - o backend é avisado ANTES de o áudio morrer, senão ele segue gerando uma
+   *     resposta que ninguém mais vai ouvir;
+   *   - o sink do VPIO sai da playback ANTES de a sessão parar, senão o áudio
+   *     não-realtime seguinte é empurrado para um audio unit já morto em vez de
+   *     cair de volta no Web Audio.
+   *
+   * Lê tudo por REF de propósito. Um cleanup de efeito com deps `[]` congela os
+   * valores do primeiro render: lendo `state` diria 'idle' para sempre e nunca
+   * avisaria o backend. `stateRef.current` é escrito a cada render, então no
+   * desmonte ele carrega o estado real da última vez que a tela existiu.
+   *
+   * Idempotente: os dois caminhos podem rodar em sequência (desligar e depois
+   * desmontar) e o segundo não encontra nada de pé.
+   */
+  const stopEngine = useCallback((): void => {
+    if (vadRef.current) {
+      const prev = vadRef.current;
+      vadRef.current = null;
+      // Tracka o promise do stop pra que o proximo boot espere ele
+      // terminar antes de criar uma nova session ORT.
+      vadStopPromiseRef.current = vadStopPromiseRef.current
+        .catch(() => { /* swallow prev */ })
+        .then(() => prev.stop())
+        .catch(() => { /* swallow stop */ });
+    }
+    // If we were mid-interaction, tell the backend to drop the turn.
+    //
+    // Cercado porque agora isto também roda dentro do commit de desmonte do
+    // React, onde o socket e a playback podem já estar sendo derrubados por
+    // quem monta. Um estouro aqui subiria pelo boundary mais próximo E, pior,
+    // pularia a liberação do audio unit logo abaixo — trocaria o vazamento de
+    // microfone por um defeito maior. Avisar o backend é o que pode falhar;
+    // soltar o hardware não pode.
+    if (stateRef.current === 'botSpeaking' || stateRef.current === 'userSpeaking' || stateRef.current === 'processing') {
+      try {
+        playbackRef.current?.stop();
+        sendInterrupt();
+        if (audioStartedRef.current) {
+          void Promise.resolve(endUserSegment()).catch((err) => {
+            console.warn('[realtime] endUserSegment durante o desligamento falhou:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('[realtime] aviso de interrupção falhou no desligamento:', err);
+      }
+    }
+    // Detach VPIO sink so subsequent non-realtime playback goes back
+    // through Web Audio, then stop the session.
+    playbackRef.current?.setVpioSink?.(null);
+    if (vpioRef.current) {
+      const session = vpioRef.current;
+      vpioRef.current = null;
+      void session.stop().catch(() => { /* ignore */ });
+    }
+  }, [sendInterrupt, endUserSegment]);
+
+  /**
+   * O desligar visto pelo cleanup do desmonte, sempre na versão mais nova.
+   *
+   * Pelo ref, e não por dependência do efeito: um `useEffect(() => () => stop(),
+   * [stop])` derrubaria o microfone no meio da conversa toda vez que a
+   * identidade da função mudasse. O efeito de desmonte precisa de deps `[]`, e
+   * `[]` só pode alcançar o valor de hoje por ref.
+   */
+  const stopEngineRef = useRef(stopEngine);
+  stopEngineRef.current = stopEngine;
+
+  // --- Desligar no desmonte -------------------------------------------
+  // Deps `[]`: o corpo não faz nada e o cleanup roda uma vez só, no fim — nunca
+  // numa troca de `active`, que é do efeito abaixo.
+  //
+  // Sobre a ordem: o React roda os cleanups na ordem de declaração, então este
+  // corre ANTES do `cancelled = true` do efeito de `active`. Não muda nada, e é
+  // proposital que não mude: `stopEngine` só lê refs, e um boot ainda em voo
+  // continua sendo desarmado pelo `cancelled` — ele para a sessão que criou e
+  // não publica nada. Os dois caminhos não podem parar o mesmo VPIO duas vezes
+  // porque a publicação em `vpioRef` e a checagem de `cancelled` são o mesmo
+  // trecho síncrono.
+  useEffect(() => {
+    return (): void => { stopEngineRef.current(); };
+  }, []);
+
   // --- Start / stop VAD when `active` flips ----------------------------
   useEffect(() => {
     let cancelled = false;
 
     if (!active) {
       // Cleanup path
-      if (vadRef.current) {
-        const prev = vadRef.current;
-        vadRef.current = null;
-        // Tracka o promise do stop pra que o proximo boot espere ele
-        // terminar antes de criar uma nova session ORT.
-        vadStopPromiseRef.current = vadStopPromiseRef.current
-          .catch(() => { /* swallow prev */ })
-          .then(() => prev.stop())
-          .catch(() => { /* swallow stop */ });
-      }
-      // If we were mid-interaction, tell the backend to drop the turn.
-      if (stateRef.current === 'botSpeaking' || stateRef.current === 'userSpeaking' || stateRef.current === 'processing') {
-        playbackRef.current?.stop();
-        sendInterrupt();
-        if (audioStartedRef.current) {
-          endUserSegment();
-        }
-      }
-      // Detach VPIO sink so subsequent non-realtime playback goes back
-      // through Web Audio, then stop the session.
-      playbackRef.current?.setVpioSink?.(null);
-      if (vpioRef.current) {
-        const session = vpioRef.current;
-        vpioRef.current = null;
-        void session.stop().catch(() => { /* ignore */ });
-      }
+      stopEngine();
       setMicAnalyser(null);
       setUserTranscript('');
       setAnswerText('');

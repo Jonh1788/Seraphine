@@ -266,11 +266,47 @@ describe('VozScreen', () => {
     expect(h.props?.active).toBe(false);
   });
 
-  it('sair da tela desliga o realtime — o microfone não fica quente', () => {
+  /* Este teste JÁ SE CHAMOU "o microfone não fica quente" — e era mentira. O
+     `realtimeActive` do store não fala do microfone: quem o lê é o
+     `AppBootstrap`, para calar o wake word enquanto a sessão está de pé
+     (`AppBootstrap.tsx:515`). O microfone e o audio unit são do
+     `RealtimeController`, que aqui é um DUPLO — nada de hardware passa por este
+     arquivo. A promessa falsa custou caro: a saída pelo `onBack` desmontava o
+     controller com a sessão ligada e ele nunca desligava o VAD nem o VPIO,
+     e este teste seguia verde. O desligar de verdade é afirmado contra as
+     chamadas de parada, em `src/realtime/__tests__/teardown.test.tsx`. */
+  it('sair da tela devolve o wake word — a sessão não fica marcada como aberta', () => {
     const { unmount } = montar();
     expect(useRealtimeStore.getState().realtimeActive).toBe(true);
     unmount();
     expect(useRealtimeStore.getState().realtimeActive).toBe(false);
+  });
+
+  /* O caminho de saída que escondia o vazamento: `encerrar()` marca a tela como
+     encerrada NO MESMO commit em que chama o `onBack`. Quando o `onBack` de
+     verdade troca de tela, o controller some antes de chegar a renderizar com
+     `active === false` — ou seja, o desligamento NÃO pode depender dessa
+     renderização. Aqui prendemos só o formato do caminho; o desligamento em si
+     é do controller. */
+  it('encerrar com saída de tela: o controller some sem nunca receber `active` false', () => {
+    const vistos: boolean[] = [];
+    vi.mocked(RealtimeController).mockImplementation(((p: Record<string, unknown>) => {
+      h.props = p;
+      h.montagens += 1;
+      vistos.push(p.active as boolean);
+      return null;
+    }) as unknown as typeof RealtimeController);
+
+    // `onBack` que realmente sai: o pai desmonta a tela na mesma volta.
+    const { unmount } = montar({ onBack: () => unmount() });
+    expect(vistos.length).toBeGreaterThan(0);
+    expect(vistos.every((a) => a === true)).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /encerrar/i }));
+
+    // O controller nunca renderizou com a sessão desligada — ele simplesmente
+    // deixou de existir. É por isso que o desligar mora no desmonte dele.
+    expect(vistos.some((a) => a === false)).toBe(false);
   });
 
   it('o teclado abre o chat, que é onde o teclado mora', () => {
