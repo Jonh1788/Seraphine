@@ -39,6 +39,9 @@ const DEBOUNCE_MS = 200;
 /** Quantos caracteres de prévia cabem em duas linhas do cartão. */
 const PREVIA = 90;
 
+/** O "+" diz `aria-expanded`; com o `aria-controls` ele também diz o QUÊ abre. */
+const COMPOSITOR_ID = 'ms-notas-compositor';
+
 /** Data curta do cartão: hora quando é de hoje, dia/mês quando é mais velha —
  *  a mesma regra da lista de notas do desktop, para a mesma nota não aparecer
  *  com dois formatos diferentes nas duas telas. */
@@ -76,8 +79,17 @@ export function NotasScreen({ onBack }: ScreenProps) {
   const [erroSalvar, setErroSalvar] = useState(false);
   const [recarga, setRecarga] = useState(0);
 
+  // O `vivo` é re-armado no corpo do efeito, não só desligado na limpeza: sob
+  // StrictMode (o `main.tsx` embrulha o app) o dev roda montar → limpar →
+  // montar, e sem esta linha o `vivo.current` ficava `false` para sempre —
+  // salvar escrevia no servidor e a tela não fechava o compositor, não parava
+  // de dizer "Salvando" e engolia até a mensagem de falha. É a forma que o
+  // Diário já usa (`DiarioScreen.tsx:57`).
   const vivo = useRef(true);
-  useEffect(() => () => { vivo.current = false; }, []);
+  useEffect(() => {
+    vivo.current = true;
+    return () => { vivo.current = false; };
+  }, []);
 
   const termo = busca.trim();
 
@@ -134,7 +146,7 @@ export function NotasScreen({ onBack }: ScreenProps) {
           {carregando ? <Skel linhas={1} />
             : erro ? <Erro>Não consegui contar suas notas.</Erro>
             : lista.length ? <p className="ms-notas-sub">{lista.length} {lista.length === 1 ? 'nota' : 'notas'}</p>
-            : termo ? <Vazio>nenhuma casa com a busca</Vazio>
+            : termo ? <Vazio>nenhuma nota casa com a busca</Vazio>
             : <Vazio>nenhuma nota ainda</Vazio>}
         </div>
         <button
@@ -142,6 +154,7 @@ export function NotasScreen({ onBack }: ScreenProps) {
           className="ms-notas-novo"
           aria-label="Nova nota"
           aria-expanded={compondo}
+          aria-controls={COMPOSITOR_ID}
           onClick={() => { setCompondo((c) => !c); setErroSalvar(false); }}
         >
           <PlusIcon size={18} />
@@ -164,7 +177,7 @@ export function NotasScreen({ onBack }: ScreenProps) {
         {/* Compositor: só aparece pelo "+", porque o desenho não pede um
             formulário aberto na cara de quem só queria reler uma nota. */}
         {compondo && (
-          <section className="ms-notas-card ms-notas-compositor">
+          <section id={COMPOSITOR_ID} className="ms-notas-card ms-notas-compositor">
             <input
               type="text"
               className="ms-notas-campo-titulo"

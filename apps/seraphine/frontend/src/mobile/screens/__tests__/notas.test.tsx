@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -101,17 +102,32 @@ describe('NotasScreen', () => {
 
   // O "+" só existe porque `notes/api.ts` tem `createNote`. Botão que não
   // escreve seria pior que botão ausente.
-  it('o + abre o compositor e Salvar cria a nota e recarrega a lista', async () => {
+  //
+  // Renderizado dentro do StrictMode DE PROPÓSITO: `src/main.tsx` embrulha o
+  // app nele, então em dev todo efeito roda montar → limpar → montar. Um
+  // `vivo`/`mounted` que a limpeza desliga e o corpo do efeito não re-arma
+  // deixa este fluxo inteiro morto (a nota vai para o servidor e a tela não
+  // reage), e um `render()` cru — que não duplica a montagem — passaria verde
+  // por cima do bug.
+  it('o + abre o compositor e Salvar cria a nota e recarrega a lista (StrictMode)', async () => {
     vi.mocked(listNotes).mockResolvedValue([]);
-    render(<NotasScreen />);
+    render(<StrictMode><NotasScreen /></StrictMode>);
     await waitFor(() => expect(screen.getByText(/você ainda não escreveu nenhuma nota/i)).toBeTruthy());
 
     // fechado por padrão: a tela abre mostrando notas, não um formulário
     expect(screen.queryByLabelText(/título da nota/i)).toBeNull();
 
-    fireEvent.click(screen.getByLabelText('Nova nota'));
+    const mais = screen.getByLabelText('Nova nota');
+    expect(mais.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(mais);
     const titulo = screen.getByLabelText(/título da nota/i);
     const corpo = screen.getByLabelText(/conteúdo da nota/i);
+
+    // o "+" diz que expandiu e diz o quê: o compositor que acabou de abrir
+    expect(mais.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(mais.getAttribute('aria-controls') ?? '')).toBe(
+      titulo.closest('section'),
+    );
 
     // sem título não há o que salvar
     expect((screen.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement).disabled).toBe(true);
@@ -136,10 +152,13 @@ describe('NotasScreen', () => {
     expect(screen.queryByLabelText(/título da nota/i)).toBeNull();
   });
 
-  it('falha ao salvar mostra erro e não joga fora o que foi escrito', async () => {
+  // Também em StrictMode: era exatamente aqui que o `vivo` não re-armado doía
+  // mais — a falha ficava MUDA (nem alerta, nem botão de volta ao normal) e o
+  // teste sem StrictMode jurava que o erro estava coberto.
+  it('falha ao salvar mostra erro, destrava o botão e não joga fora o que foi escrito (StrictMode)', async () => {
     vi.mocked(listNotes).mockResolvedValue([]);
     vi.mocked(createNote).mockRejectedValue(new Error('rede'));
-    render(<NotasScreen />);
+    render(<StrictMode><NotasScreen /></StrictMode>);
     await waitFor(() => expect(screen.getByText(/você ainda não escreveu nenhuma nota/i)).toBeTruthy());
 
     fireEvent.click(screen.getByLabelText('Nova nota'));
@@ -149,6 +168,10 @@ describe('NotasScreen', () => {
     await waitFor(() => expect(screen.getByText(/não consegui salvar sua nota/i)).toBeTruthy());
     expect(screen.getByText(/não consegui salvar sua nota/i).getAttribute('role')).toBe('alert');
     expect((screen.getByLabelText(/título da nota/i) as HTMLInputElement).value).toBe('Não perde');
+    // e o botão volta a "Salvar" habilitado, em vez de congelar em "Salvando"
+    const salvar = await screen.findByRole('button', { name: 'Salvar' });
+    expect((salvar as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Salvando' })).toBeNull();
   });
 
   it('nota sem conteúdo diz que está vazia, em vez de virar cartão mudo', async () => {
