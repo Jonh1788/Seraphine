@@ -1,0 +1,101 @@
+/* src/mobile/screens/CalendarioScreen.css — tela CALENDÁRIO (handoff linha 518).
+   Medidas tiradas do handoff: cartão 16px de raio com 14px de padding, grade de
+   7 colunas com 3px de gap, célula do dia em 12px com 7px vertical, bolinhas de
+   4px, item do dia com border-left de 3px e raio 13px.
+   Tudo com o prefixo `ms-calendario-` para nunca colidir com outra tela. */
+
+html[data-shell='phone'] .ms-calendario {
+  display: flex;
+  flex-direction: column;
+  color: var(--text, #ececef);
+}
+
+/* ── cabeçalho: ‹ + mês + ação ── */
+html[data-shell='phone'] .ms-calendario-head { display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
+html[data-shell='phone'] .ms-calendario-voltar {
+  flex: none; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center;
+  justify-content: center; background: none; border: none; color: var(--text-dim, #9594a0); cursor: pointer;
+}
+html[data-shell='phone'] .ms-calendario-head__texto { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-calendario-mes { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-calendario-sub { font-size: 11px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-calendario-novo {
+  flex: none; width: 38px; height: 38px; border-radius: 12px; border: none;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+
+/* ── grade do mês ──
+   O mês INTEIRO cabe aqui: as colunas são fracionárias (1fr), então nenhuma
+   largura fixa pode empurrar os últimos dias para fora dos 390px — foi assim
+   que a grade de desktop cortava o mês no dia 18. */
+html[data-shell='phone'] .ms-calendario-grade-wrap { padding: 0 20px 12px; }
+html[data-shell='phone'] .ms-calendario-card {
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 16px;
+  padding: 14px;
+}
+html[data-shell='phone'] .ms-calendario-linha { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; text-align: center; }
+html[data-shell='phone'] .ms-calendario-rotulo { font-size: 9px; font-weight: 700; color: var(--text-faint, #5f5e6b); padding: 3px 0; }
+html[data-shell='phone'] .ms-calendario-semana + .ms-calendario-semana { margin-top: 2px; }
+html[data-shell='phone'] .ms-calendario-pontos { margin-top: 1px; min-height: 4px; }
+
+html[data-shell='phone'] .ms-calendario-dia {
+  font: inherit; font-size: 12px; line-height: 1.2; padding: 7px 0;
+  border: none; border-radius: 10px; background: none;
+  color: var(--text, #ececef); cursor: pointer;
+}
+html[data-shell='phone'] .ms-calendario-dia--sel { box-shadow: inset 0 0 0 1px var(--accent, #9a93ff); color: var(--accent, #9a93ff); font-weight: 700; }
+html[data-shell='phone'] .ms-calendario-dia--hoje { font-weight: 700; background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a); }
+html[data-shell='phone'] .ms-calendario-fora { display: block; }
+
+html[data-shell='phone'] .ms-calendario-ponto-cel { display: flex; justify-content: center; gap: 2px; }
+html[data-shell='phone'] .ms-calendario-ponto { width: 4px; height: 4px; border-radius: 50%; background: var(--text-faint, #5f5e6b); }
+html[data-shell='phone'] .ms-calendario-ponto--eventos { background: #42a5f5; }
+html[data-shell='phone'] .ms-calendario-ponto--tarefas { background: #9a93ff; }
+html[data-shell='phone'] .ms-calendario-ponto--habitos { background: #26a69a; }
+html[data-shell='phone'] .ms-calendario-ponto--foco { background: #ef5350; }
+html[data-shell='phone'] .ms-calendario-ponto--diario { background: #ff7043; }
+
+/* ── lista do dia ── */
+html[data-shell='phone'] .ms-calendario-lista { display: flex; flex-direction: column; gap: 9px; padding: 0 20px 34px; }
+html[data-shell='phone'] .ms-calendario-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-calendario-item {
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-left: 3px solid var(--text-faint, #5f5e6b);
+  border-radius: 13px;
+  padding: 12px 14px;
+}
+html[data-shell='phone'] .ms-calendario-item--eventos { border-left-color: #42a5f5; }
+html[data-shell='phone'] .ms-calendario-item--tarefas { border-left-color: #9a93ff; }
+html[data-shell='phone'] .ms-calendario-item--habitos { border-left-color: #26a69a; }
+html[data-shell='phone'] .ms-calendario-item--foco { border-left-color: #ef5350; }
+html[data-shell='phone'] .ms-calendario-item--diario { border-left-color: #ff7043; }
+html[data-shell='phone'] .ms-calendario-item__titulo { font-size: 13px; font-weight: 600; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-calendario-item__sub { font-size: 11px; color: var(--text-dim, #9594a0); margin-top: 2px; }
+
+/* ── três saídas de cada bloco: vazio, erro e carregando ── */
+html[data-shell='phone'] .ms-calendario-vazio { margin-top: 10px; font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-calendario-erro {
+  margin-top: 10px; font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-calendario-erro::before {
+  content: '!'; flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
+  border: 1.2px solid currentColor; font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-calendario-head__texto .ms-calendario-erro,
+html[data-shell='phone'] .ms-calendario-head__texto .ms-calendario-skel { margin-top: 3px; }
+html[data-shell='phone'] .ms-calendario-skel { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+html[data-shell='phone'] .ms-calendario-skel span {
+  height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .06);
+  animation: msCalendarioSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-calendario-skel span:nth-child(2) { width: 62%; animation-delay: .2s; }
+html[data-shell='phone'] .ms-calendario-skel span:nth-child(3) { width: 44%; animation-delay: .4s; }
+@keyframes msCalendarioSkel { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
