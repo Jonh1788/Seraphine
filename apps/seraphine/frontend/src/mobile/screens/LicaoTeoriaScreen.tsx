@@ -11,10 +11,11 @@ import type { ScreenProps } from './registry';
 import './LicaoTeoriaScreen.css';
 
 /* ── qual lição a tela abre ────────────────────────────────────────────────
-   `ScreenProps` não carrega id: quem empurra a tela manda só `{key, title}`, e
-   o shell não repassa o título. Então a tela resolve sozinha a lição da vez —
-   a mesma leitura que o mapa de trilhas faz — em vez de inventar um parâmetro
-   que o contrato não tem. */
+   Quem empurra a tela manda o `id` da lição no `onOpen`, e o shell o devolve
+   pelo `ScreenProps` — é ele que manda. Mas o campo é opcional dos dois lados:
+   entrar sem id é caso real (deep link, tela aberta por quem não sabe a lição),
+   e aí a tela resolve sozinha a lição da vez, a mesma leitura que o mapa de
+   trilhas faz. Os dois caminhos existem de propósito. */
 
 /** A trilha em foco: a primeira pronta em andamento; senão a primeira pronta;
  *  senão a primeira que existir (que pode ainda estar sendo gerada). */
@@ -69,7 +70,7 @@ const COMPONENTES = {
 
 /* ── tela ──────────────────────────────────────────────────────────────── */
 
-export function LicaoTeoriaScreen({ onBack, onOpen }: ScreenProps) {
+export function LicaoTeoriaScreen({ id, onBack, onOpen }: ScreenProps) {
   const [curso, setCurso] = useState<Course | null>(null);
   const [no, setNo] = useState<LessonNode | null>(null);
   const [licao, setLicao] = useState<Lesson | null>(null);
@@ -78,8 +79,30 @@ export function LicaoTeoriaScreen({ onBack, onOpen }: ScreenProps) {
 
   useEffect(() => {
     let vivo = true;
+    // Zera antes de buscar: se o `id` trocar, a tela não pode mostrar a lição
+    // anterior enquanto a nova não chega. Na montagem tudo já está assim, e o
+    // React descarta o set redundante.
+    setCarregando(true); setErro(false); setLicao(null); setCurso(null); setNo(null);
     (async () => {
       try {
+        if (id) {
+          const l = await getLesson(id);
+          if (!vivo) return;
+          setLicao(l);
+          // Aqui o curso é enfeite: só serve ao eyebrow (número da lição e nome
+          // da trilha). Se ele cair, a lição já carregada continua legível — não
+          // faz sentido esconder a teoria porque o índice do curso falhou.
+          try {
+            const c = await getCourse(l.course_id);
+            if (!vivo) return;
+            setCurso(c);
+            setNo(c.lessons.find((n) => n.id === l.id) ?? null);
+          } catch { /* eyebrow degrada; a lição fica */ }
+          if (!vivo) return;
+          setCarregando(false);
+          return;
+        }
+
         const cursos = await listCourses();
         if (!vivo) return;
         const foco = trilhaDaVez(cursos);
@@ -103,7 +126,7 @@ export function LicaoTeoriaScreen({ onBack, onOpen }: ScreenProps) {
       }
     })();
     return () => { vivo = false; };
-  }, []);
+  }, [id]);
 
   const trilha = curso ? (curso.title || curso.topic) : '';
   const conceito = licao?.concept_md.trim() ?? '';
@@ -115,7 +138,8 @@ export function LicaoTeoriaScreen({ onBack, onOpen }: ScreenProps) {
 
   const comecar = () => {
     if (!licao || exercicios === 0) return;
-    onOpen?.({ key: 'licao-exercicio', title: licao.title });
+    // O id viaja junto: a tela de exercício não precisa adivinhar a lição.
+    onOpen?.({ key: 'licao-exercicio', title: licao.title, id: licao.id });
   };
 
   return (
@@ -143,16 +167,22 @@ export function LicaoTeoriaScreen({ onBack, onOpen }: ScreenProps) {
       </header>
 
       <div className="ms-licao-teoria-corpo">
+        {/* a lição vem primeiro: com `id`, ela pode existir mesmo sem o curso */}
         {carregando ? <Skel />
           : erro ? <Erro>Não consegui carregar esta lição.</Erro>
-          : !curso ? <Vazio>Você ainda não começou nenhuma trilha — crie uma no Mac e ela aparece aqui.</Vazio>
-          : !no ? <Vazio>A Seraphine ainda está montando as lições desta trilha — volte em instantes.</Vazio>
-          : !licao ? <Erro>Não consegui carregar esta lição.</Erro>
+          : !licao
+            ? !curso ? <Vazio>Você ainda não começou nenhuma trilha — crie uma no Mac e ela aparece aqui.</Vazio>
+              : !no ? <Vazio>A Seraphine ainda está montando as lições desta trilha — volte em instantes.</Vazio>
+              : <Erro>Não consegui carregar esta lição.</Erro>
           : (
             <>
               <div>
                 <p className="ms-licao-teoria-eyebrow">
-                  LIÇÃO {no.order_idx + 1} · {trilha.toLocaleUpperCase('pt-BR')}
+                  {no && curso
+                    ? <>LIÇÃO {no.order_idx + 1} · {trilha.toLocaleUpperCase('pt-BR')}</>
+                    /* sem o curso não há número nem nome de trilha para mostrar;
+                       o rótulo cai no do player do desktop em vez de inventar */
+                    : 'TEORIA DA LIÇÃO'}
                 </p>
                 <h1 className="ms-licao-teoria-titulo">{licao.title}</h1>
               </div>

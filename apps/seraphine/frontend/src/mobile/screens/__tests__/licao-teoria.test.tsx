@@ -134,11 +134,52 @@ describe('LicaoTeoriaScreen', () => {
     expect(document.body.textContent).not.toMatch(/min\b/);
   });
 
-  it('o CTA empurra a tela de exercício com o título da lição', async () => {
+  it('o CTA empurra a tela de exercício com o título e o id da lição', async () => {
     const onOpen = vi.fn();
     render(<LicaoTeoriaScreen onOpen={onOpen} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Começar exercícios' }));
-    expect(onOpen).toHaveBeenCalledWith({ key: 'licao-exercicio', title: 'Ownership' });
+    // o id viaja: a tela de exercício não pode ter que adivinhar a lição
+    expect(onOpen).toHaveBeenCalledWith({ key: 'licao-exercicio', title: 'Ownership', id: 'l3' });
+  });
+
+  // O `id` do ScreenProps é quem manda: tocar numa lição concluída do mapa tem
+  // que abrir AQUELA, não a destravada que a tela escolheria sozinha.
+  it('com id abre aquela lição, não a que resolveria sozinha', async () => {
+    vi.mocked(getLesson).mockResolvedValue(licao({ id: 'l1', title: 'Variáveis', concept_md: 'Começando.' }));
+    render(<LicaoTeoriaScreen id="l1" />);
+
+    await waitFor(() => expect(screen.getByText('Variáveis')).toBeTruthy());
+    expect(vi.mocked(getLesson)).toHaveBeenCalledWith('l1');
+    // com id não há por que varrer a lista de trilhas
+    expect(vi.mocked(listCourses)).not.toHaveBeenCalled();
+    // o curso ainda vem, só para o eyebrow saber o número e a trilha
+    expect(vi.mocked(getCourse)).toHaveBeenCalledWith('c1');
+    expect(screen.getByText('LIÇÃO 1 · RUST DO ZERO')).toBeTruthy();
+  });
+
+  it('sem id continua resolvendo a lição da vez sozinha', async () => {
+    render(<LicaoTeoriaScreen />);
+    await waitFor(() => expect(screen.getByText('Ownership')).toBeTruthy());
+    expect(vi.mocked(listCourses)).toHaveBeenCalled();
+    expect(vi.mocked(getLesson)).toHaveBeenCalledWith('l3');
+  });
+
+  // O curso, no caminho com id, só alimenta o eyebrow: se ele cair, esconder a
+  // teoria já carregada seria perder conteúdo que está na mão.
+  it('com id, curso fora do ar não derruba a lição', async () => {
+    vi.mocked(getCourse).mockRejectedValue(new Error('rede'));
+    render(<LicaoTeoriaScreen id="l3" />);
+
+    await waitFor(() => expect(screen.getByText('Ownership')).toBeTruthy());
+    expect(screen.getByText(/cada valor tem um único/)).toBeTruthy();
+    expect(screen.getByText('TEORIA DA LIÇÃO')).toBeTruthy();
+    expect(screen.queryByText(/não consegui carregar esta lição/i)).toBeNull();
+  });
+
+  it('com id, lição fora do ar mostra erro', async () => {
+    vi.mocked(getLesson).mockRejectedValue(new Error('rede'));
+    render(<LicaoTeoriaScreen id="l3" />);
+    await waitFor(() => expect(screen.getByText(/não consegui carregar esta lição/i)).toBeTruthy());
   });
 
   it('lição sem exercícios avisa e não empurra tela nenhuma', async () => {
