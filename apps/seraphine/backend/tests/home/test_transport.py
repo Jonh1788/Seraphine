@@ -14,7 +14,10 @@ import pytest
 
 from seraphine.home.transport import (
     DEFAULT_BASE,
+    HomeAppClosed,
+    HomeDeviceUnreachable,
     HomeHTTPError,
+    HomeRelayRejected,
     HomeUnreachable,
     LanTransport,
 )
@@ -107,7 +110,25 @@ async def test_a_redirect_is_an_answer_from_the_device_not_unreachability(patch_
     assert exc.value.status == 302
 
 
-async def test_no_client_connected_raises_home_unreachable(patch_proxy):
+def test_the_default_base_is_pinned_to_the_rust_allowlist():
+    """O literal, não a constante.
+
+    ALLOWED em src-tauri/src/home.rs também é um literal pinado no teste
+    de lá. Comparar DEFAULT_BASE consigo mesmo (como faz o teste do
+    serviço) passaria depois de qualquer renomeação — e o relé recusaria
+    tudo em produção, com a Seraphine dizendo "não alcanço a casa".
+    """
+    assert DEFAULT_BASE == "http://espmusic.local:8080"
+
+
+# ------------------------------------------------- falhas de alcance
+#
+# As três pedem ações diferentes de quem ouve: abrir o app, ligar o PC,
+# ou alinhar a allowlist. Cada teste confere a classe certa E que não é
+# nenhuma das outras duas — a base sozinha não distingue nada.
+
+
+async def test_no_client_connected_means_the_app_is_closed(patch_proxy):
     patch_proxy(
         ToolResult(
             ok=False,
@@ -115,8 +136,67 @@ async def test_no_client_connected_raises_home_unreachable(patch_proxy):
         )
     )
     t = LanTransport(app_state=object())
-    with pytest.raises(HomeUnreachable):
+    with pytest.raises(HomeAppClosed) as exc:
         await t.request("GET", "/api/status")
+    assert not isinstance(exc.value, HomeDeviceUnreachable)
+    assert not isinstance(exc.value, HomeRelayRejected)
+
+
+async def test_a_client_timeout_also_means_the_app_side_failed(patch_proxy):
+    # O broker desiste antes do cliente responder: o app pode estar
+    # aberto e travado, mas quem resolve continua sendo o lado do Mac.
+    patch_proxy(ToolResult(ok=False, error="client did not respond in time"))
+    t = LanTransport(app_state=object())
+    with pytest.raises(HomeAppClosed):
+        await t.request("GET", "/api/status")
+
+
+async def test_a_relay_network_error_means_the_device_did_not_answer(patch_proxy):
+    """O prefixo "rede:" é o que o relé põe no erro do `send()`.
+
+    É a falha mais provável no dia a dia (PC desligado, `.local` sem
+    resolver, timeout de 20s) e a que mais confunde se virar "abre o
+    app no Mac" — o app está aberto; foi ele que tentou e não alcançou.
+    """
+    patch_proxy(
+        ToolResult(
+            ok=False,
+            error=(
+                "rede: error sending request for url "
+                "(http://espmusic.local:8080/api/play): error trying to connect"
+            ),
+        )
+    )
+    t = LanTransport(app_state=object())
+    with pytest.raises(HomeDeviceUnreachable) as exc:
+        await t.request("POST", "/api/play", json_body={"query": "x"})
+    assert not isinstance(exc.value, HomeAppClosed)
+    assert not isinstance(exc.value, HomeRelayRejected)
+
+
+async def test_a_rejected_host_means_the_allowlist_drifted(patch_proxy):
+    # Mensagem literal de `compose_and_check` em src-tauri/src/home.rs.
+    patch_proxy(
+        ToolResult(
+            ok=False, error="host não permitido: http://espmusic.local:9000/api/status"
+        )
+    )
+    t = LanTransport(app_state=object())
+    with pytest.raises(HomeRelayRejected) as exc:
+        await t.request("GET", "/api/status")
+    assert not isinstance(exc.value, HomeAppClosed)
+    assert not isinstance(exc.value, HomeDeviceUnreachable)
+    # O endereço recusado precisa sobreviver: é o que diz onde a deriva está.
+    assert "espmusic.local:9000" in str(exc.value)
+
+
+async def test_every_reach_failure_is_still_a_home_unreachable(patch_proxy):
+    # Quem só quer saber "não chegou" continua pegando pela base.
+    for error in ("rede: timeout", "host não permitido: x", "no Tauri WebSocket"):
+        patch_proxy(ToolResult(ok=False, error=error))
+        t = LanTransport(app_state=object())
+        with pytest.raises(HomeUnreachable):
+            await t.request("GET", "/api/status")
 
 
 async def test_an_empty_body_decodes_to_an_empty_dict(patch_proxy):

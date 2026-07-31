@@ -39,14 +39,25 @@ def slugify_room(name: str) -> str:
     return "-".join(plain.strip().lower().split())
 
 
+def clamp_pct(pct: float) -> float:
+    """Prende o volume pedido na faixa que existe: 0 a 100.
+
+    Precisa acontecer uma vez só, antes de tudo: o aparelho satura de
+    qualquer jeito, então quem não clampar antes de montar a frase
+    responde "volume em 500%" para um som que foi a 100%.
+    """
+    return max(0.0, min(float(pct), 100.0))
+
+
 def pct_to_db(pct: float) -> float:
     """Porcentagem (como o painel mostra) para dB (como a API quer).
 
     Espelha `dbToPct` em web/src/api.js: pct = 10^(db/20) * 100.
     """
-    if pct <= 0:
+    safe = clamp_pct(pct)
+    if safe <= 0:
         return SILENCE_DB
-    return round(20.0 * math.log10(min(float(pct), 100.0) / 100.0), 2)
+    return round(20.0 * math.log10(safe / 100.0), 2)
 
 
 def _label(device: str) -> str:
@@ -104,19 +115,26 @@ class EspMusicAdapter:
         self, action: str, *, value: float | None = None, room: str | None = None
     ) -> str:
         await self._maybe_select(room)
+        # `room` não é um filtro: `/api/device` religa o áudio na caixa
+        # nova (core.py:743, `set_device` → `rewire`). "aumenta o volume
+        # do quarto" com música na sala move a música junto, porque o
+        # EspMusic toca em uma caixa por vez e o volume é guardado por
+        # caixa. A frase de volta precisa dizer onde foi, senão o som
+        # troca de cômodo em silêncio.
+        where = f" na {room}" if room else ""
 
         if action == "pause":
             await self._t.request("POST", "/api/pause", json_body={"on": True})
-            return "pausado"
+            return f"pausado{where}"
         if action == "resume":
             await self._t.request("POST", "/api/pause", json_body={"on": False})
-            return "voltou a tocar"
+            return f"voltou a tocar{where}"
         if action == "next":
             await self._t.request("POST", "/api/next", json_body={})
-            return "pulei a faixa"
+            return f"pulei a faixa{where}"
         if action == "stop":
             await self._t.request("POST", "/api/stop", json_body={})
-            return "parei e limpei a fila"
+            return f"parei e limpei a fila{where}"
         if action == "mute":
             # /api/mute é um alternador: pedir "muta" com o som já mudo
             # desmutaria. Não dá para consertar isso aqui sem virar um
@@ -124,28 +142,32 @@ class EspMusicAdapter:
             # devolvemos ele em vez de "alternei", e quem leu a frase
             # (usuário ou LLM) enxerga o efeito no mesmo turno.
             data = await self._t.request("POST", "/api/mute", json_body={})
-            return "mudo ligado" if data.get("muted") else "mudo desligado"
+            state = "mudo ligado" if data.get("muted") else "mudo desligado"
+            return f"{state}{where}"
         if action == "volume_up":
             await self._t.request(
                 "POST", "/api/volume", json_body={"delta_db": VOLUME_STEP_DB}
             )
-            return "aumentei o volume"
+            return f"aumentei o volume{where}"
         if action == "volume_down":
             await self._t.request(
                 "POST", "/api/volume", json_body={"delta_db": -VOLUME_STEP_DB}
             )
-            return "abaixei o volume"
+            return f"abaixei o volume{where}"
         if action == "volume_set":
             if value is None:
                 raise ValueError("volume_set precisa de 'value' (0 a 100)")
+            # Clampa uma vez e usa o mesmo número nos dois lugares: o que
+            # vai em dB e o que a Seraphine fala.
+            pct = clamp_pct(value)
             await self._t.request(
-                "POST", "/api/volume", json_body={"db": pct_to_db(float(value))}
+                "POST", "/api/volume", json_body={"db": pct_to_db(pct)}
             )
-            return f"volume em {round(float(value))}%"
+            return f"volume em {round(pct)}%{where}"
         if action in ("radio_on", "radio_off"):
             on = action == "radio_on"
             await self._t.request("POST", "/api/radio", json_body={"on": on})
-            return "rádio ligado" if on else "rádio desligado"
+            return ("rádio ligado" if on else "rádio desligado") + where
 
         raise ValueError(f"ação desconhecida: {action}")
 

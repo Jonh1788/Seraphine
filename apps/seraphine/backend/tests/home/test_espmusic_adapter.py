@@ -182,6 +182,30 @@ async def test_control_with_a_room_selects_the_speaker_first(
     assert transport.calls[2] == ("POST", "/api/volume", {"delta_db": 2.0})
 
 
+async def test_control_with_a_room_says_where_it_acted(
+    adapter: EspMusicAdapter, transport: FakeTransport
+) -> None:
+    """`/api/device` religa o áudio (core.py:743): a música vai junto.
+
+    Sem o cômodo na resposta, "aumenta o volume do quarto" com música
+    tocando na sala move o som de cômodo e a Seraphine responde
+    "aumentei o volume" — nada denuncia a mudança.
+    """
+    assert await adapter.control("volume_up", room="Sala") == (
+        "aumentei o volume na Sala"
+    )
+    transport.responses["/api/mute"] = {"muted": True}
+    assert await adapter.control("mute", room="Sala") == "mudo ligado na Sala"
+    assert await adapter.control("pause", room="Sala") == "pausado na Sala"
+
+
+async def test_control_without_a_room_does_not_invent_a_place(
+    adapter: EspMusicAdapter,
+) -> None:
+    # Sem `room` nada foi movido: a frase não pode sugerir cômodo.
+    assert await adapter.control("volume_up") == "aumentei o volume"
+
+
 async def test_mute_reports_the_resulting_state(
     adapter: EspMusicAdapter, transport: FakeTransport
 ) -> None:
@@ -202,6 +226,26 @@ async def test_volume_set_converts_percent_to_db(
 ) -> None:
     await adapter.control("volume_set", value=50)
     assert ("POST", "/api/volume", {"db": -6.02}) in transport.calls
+
+
+@pytest.mark.parametrize(
+    "value,db,said",
+    [
+        (500, 0.0, "volume em 100%"),
+        (-20, -60.0, "volume em 0%"),
+        (100, 0.0, "volume em 100%"),
+        (0, -60.0, "volume em 0%"),
+    ],
+)
+async def test_volume_set_reports_the_volume_that_was_applied(
+    adapter: EspMusicAdapter, transport: FakeTransport,
+    value: float, db: float, said: str,
+) -> None:
+    # O aparelho satura; a frase precisa saturar junto. Dizer
+    # "volume em 500%" para um som que foi a 100% ensina o usuário (e o
+    # LLM, que lê a resposta) uma escala que não existe.
+    assert await adapter.control("volume_set", value=value) == said
+    assert ("POST", "/api/volume", {"db": db}) in transport.calls
 
 
 async def test_volume_set_without_a_value_is_rejected(

@@ -777,7 +777,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tools.register(HomeControlTool(home_service))
         tools.register(HomeAnnounceTool(home_service))
         tools.register(HomeStatusTool(home_service))
-        logger.info("Home (EspMusic) tools wired")
+        # A base entra no log de propósito: ela precisa bater com a
+        # allowlist do relé (src-tauri/src/home.rs). Sem isso, uma
+        # deriva entre os dois lados só apareceria no primeiro pedido
+        # do usuário, como "não alcanço a casa".
+        logger.info("Home (EspMusic) tools wired (base=%s)", home_service.base)
     except Exception as e:
         logger.warning("Home (EspMusic) tools failed (non-critical): %s", e)
 

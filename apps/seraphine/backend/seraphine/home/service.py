@@ -18,6 +18,9 @@ class HomeService:
         self, app_state: Any, *, base: str = DEFAULT_BASE, tts: Any = None
     ) -> None:
         self._transport = LanTransport(app_state, base=base)
+        # Exposta para o log de boot: a base precisa bater com a
+        # allowlist do relé em src-tauri/src/home.rs.
+        self.base = self._transport.base
         self.music = EspMusicAdapter(self._transport)
         # Usado pelo aviso falado; None desabilita `home_announce`.
         self.tts = tts

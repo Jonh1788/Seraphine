@@ -25,12 +25,56 @@ DEFAULT_BASE = "http://espmusic.local:8080"
 
 # Precisa bater com ALLOWED em
 # apps/seraphine/frontend/src-tauri/src/home.rs — o relé recusa
-# qualquer outra base.
+# qualquer outra base. O teste
+# `test_the_default_base_is_pinned_to_the_rust_allowlist` prende o
+# literal dos dois lados; mudar um sem o outro derruba a suíte.
 
 
 class HomeUnreachable(Exception):
-    """Não deu para falar com a casa: sem cliente conectado, sem rede,
-    ou o aparelho não respondeu."""
+    """Não deu para falar com a casa.
+
+    Base de três falhas que exigem ações diferentes do usuário — o
+    desenho (docs/superpowers/specs/2026-07-30-seraphine-espmusic-design.md,
+    tabela "Tratamento de erro") pede frases distintas. Quem trata
+    escolhe pela subclasse; a base sozinha significa "app fechado",
+    que é o caso genérico.
+    """
+
+
+class HomeAppClosed(HomeUnreachable):
+    """O pedido não saiu do VPS: nenhum app Tauri conectado no broker
+    (ou ele não respondeu a tempo). Quem resolve abre o app no Mac."""
+
+
+class HomeDeviceUnreachable(HomeUnreachable):
+    """O relé rodou dentro de casa e a rede não entregou: `.local` não
+    resolve, conexão recusada, timeout. O app está aberto; quem não
+    respondeu foi o PC do EspMusic."""
+
+
+class HomeRelayRejected(HomeUnreachable):
+    """O relé recusou o endereço antes de discar: a `base` do Python
+    não está na allowlist do Rust. É deriva de configuração entre os
+    dois lados, não falha de rede."""
+
+
+# Prefixo que o relé usa para erro de rede (src-tauri/src/home.rs, no
+# `send()`), e o texto da recusa da allowlist (`compose_and_check`).
+# São as duas assinaturas que separam "casa fora do ar" de "app
+# fechado" — sem elas as três falhas viram a mesma frase.
+_RELAY_NETWORK_PREFIX = "rede:"
+_RELAY_FORBIDDEN_HOST = "host não permitido"
+
+
+def classify_unreachable(error: str | None) -> HomeUnreachable:
+    """Escolhe a exceção pela mensagem que o relé (ou o broker) devolveu."""
+    detail = (error or "").strip()
+    low = detail.lower()
+    if low.startswith(_RELAY_NETWORK_PREFIX) or f" {_RELAY_NETWORK_PREFIX}" in low:
+        return HomeDeviceUnreachable(detail)
+    if _RELAY_FORBIDDEN_HOST in low:
+        return HomeRelayRejected(detail)
+    return HomeAppClosed(detail or "relay failed")
 
 
 class HomeHTTPError(Exception):
@@ -47,6 +91,13 @@ class LanTransport:
         self._app_state = app_state
         self._base = base.rstrip("/")
 
+    @property
+    def base(self) -> str:
+        """Base efetivamente enviada ao relé — logada no boot para que
+        uma deriva contra a allowlist do Rust apareça antes do primeiro
+        pedido do usuário."""
+        return self._base
+
     async def request(
         self,
         method: str,
@@ -58,8 +109,9 @@ class LanTransport:
     ) -> Any:
         """Executa a chamada dentro de casa e devolve o JSON decodificado.
 
-        Levanta HomeHTTPError quando o aparelho respondeu com erro e
-        HomeUnreachable quando a chamada nem chegou lá.
+        Levanta HomeHTTPError quando o aparelho respondeu com erro e uma
+        subclasse de HomeUnreachable (ver `classify_unreachable`) quando
+        a chamada nem chegou lá.
         """
         # Import local: o engine importa tools, que importam este módulo.
         # Importar no topo fecharia o ciclo. Também é o que permite o
@@ -89,7 +141,7 @@ class LanTransport:
             raise HomeHTTPError(status, result.output or "")
         if not result.ok:
             logger.warning("lan_request falhou: %s", result.error)
-            raise HomeUnreachable(result.error or "relay failed")
+            raise classify_unreachable(result.error)
 
         body = result.output or ""
         if not body:

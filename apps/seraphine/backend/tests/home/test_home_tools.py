@@ -12,7 +12,12 @@ import wave
 from typing import Any, AsyncIterator
 
 from seraphine.home.espmusic import UnknownRoom
-from seraphine.home.transport import HomeHTTPError, HomeUnreachable
+from seraphine.home.transport import (
+    HomeAppClosed,
+    HomeDeviceUnreachable,
+    HomeHTTPError,
+    HomeRelayRejected,
+)
 from seraphine.tools.base import ToolResult
 from seraphine.tools.home import (
     HomeAnnounceTool,
@@ -86,17 +91,37 @@ def test_every_tool_declares_a_valid_schema() -> None:
 
 def test_descriptions_gate_on_a_room_and_send_music_to_play_music() -> None:
     # Sem isso o LLM confunde com as tools de navegador de tools/browser.py.
+    # `home_status` inclusive: "o que está tocando?" sem cômodo é sobre o
+    # Mac, e sem o portão essa pergunta cai na casa.
     svc = FakeService()
-    for tool in (HomePlayTool(svc), HomeControlTool(svc), HomeAnnounceTool(svc)):
+    for tool in (
+        HomePlayTool(svc),
+        HomeControlTool(svc),
+        HomeAnnounceTool(svc),
+        HomeStatusTool(svc),
+    ):
         assert "APENAS quando o usuário citar um cômodo" in tool.description
 
     for tool in (HomePlayTool(svc), HomeControlTool(svc)):
         assert "play_music" in tool.description
 
+    # A alternativa certa para o estado do Mac não é `play_music` (que
+    # tocaria algo), é `now_playing`.
+    assert "now_playing" in HomeStatusTool(svc).description
+
     # `play_music` procura no YouTube Music: não sabe falar um aviso.
     # Mandar o modelo para lá num "avisa que o jantar chegou" faria ele
     # buscar a frase como música.
     assert "play_music" not in HomeAnnounceTool(svc).description
+
+
+def test_the_control_description_warns_that_a_room_moves_the_music() -> None:
+    # `room` não filtra: `/api/device` religa o áudio (core.py:743). Sem
+    # esse aviso no texto, "aumenta o volume do quarto" teleporta a
+    # música que tocava na sala e o LLM não tem como saber disso.
+    text = HomeControlTool(FakeService()).description.lower()
+    assert "move" in text
+    assert "uma caixa por vez" in text
 
 
 def test_status_takes_no_arguments() -> None:
@@ -121,6 +146,24 @@ async def test_play_requires_a_query() -> None:
     result = await HomePlayTool(FakeService()).execute({})
     assert not result.ok
     assert "query" in (result.error or "")
+
+
+async def test_play_rejects_a_mode_outside_the_enum() -> None:
+    # Simétrico ao `action` de home_control: um modo desconhecido não
+    # pode degradar para "now", que é justamente o que corta a faixa
+    # tocando. Nada chega ao adaptador.
+    svc = FakeService()
+    result = await HomePlayTool(svc).execute({"query": "djavan", "mode": "agora"})
+    assert not result.ok
+    assert "agora" in (result.error or "")
+    assert svc.music.calls == []
+
+
+async def test_an_absent_mode_still_defaults_to_now() -> None:
+    svc = FakeService()
+    result = await HomePlayTool(svc).execute({"query": "djavan"})
+    assert result.ok
+    assert svc.music.calls[0][1]["mode"] == "now"
 
 
 # -------------------------------------------------------------- control
@@ -186,15 +229,60 @@ async def test_announce_requires_text() -> None:
 # ---------------------------------------------------------------- erros
 
 
+# As três falhas de alcance pedem ações diferentes: abrir o app, ligar o
+# PC, alinhar a allowlist. Cada teste confere o token da sua frase E a
+# ausência dos tokens das outras duas — uma asserção que casa com dois
+# ramos não prende nenhum.
+_APP_TOKEN = "precisa estar aberto"
+_DEVICE_TOKEN = "não respondeu"
+_DRIFT_TOKEN = "allowlist"
+
+
 async def test_no_client_connected_becomes_a_speakable_sentence() -> None:
     svc = FakeService()
-    svc.music.raises = HomeUnreachable("no Tauri WebSocket is connected")
+    svc.music.raises = HomeAppClosed("no Tauri WebSocket is connected")
     result = await HomePlayTool(svc).execute({"query": "x"})
     assert not result.ok
-    assert "app" in (result.error or "").lower()
+    error = result.error or ""
+    assert _APP_TOKEN in error
+    assert _DEVICE_TOKEN not in error
+    assert _DRIFT_TOKEN not in error
     # Nem o erro genérico (que vazaria "WebSocket"), nem o do aparelho.
-    assert "WebSocket" not in (result.error or "")
-    assert "HTTP" not in (result.error or "")
+    assert "WebSocket" not in error
+    assert "HTTP" not in error
+
+
+async def test_the_device_being_off_does_not_blame_the_app() -> None:
+    """A falha mais provável do dia a dia: o PC Windows desligado.
+
+    Mandar abrir um app que já está aberto — foi ele que tentou e não
+    alcançou — é a pior das trocas possíveis aqui.
+    """
+    svc = FakeService()
+    svc.music.raises = HomeDeviceUnreachable("rede: error trying to connect")
+    result = await HomeStatusTool(svc).execute({})
+    assert not result.ok
+    error = result.error or ""
+    assert _DEVICE_TOKEN in error
+    assert _APP_TOKEN not in error
+    assert _DRIFT_TOKEN not in error
+    # E não vaza o erro cru do reqwest.
+    assert "rede:" not in error
+
+
+async def test_an_allowlist_drift_names_the_mismatch() -> None:
+    svc = FakeService()
+    svc.music.raises = HomeRelayRejected(
+        "host não permitido: http://espmusic.local:9000/api/status"
+    )
+    result = await HomeControlTool(svc).execute({"action": "pause"})
+    assert not result.ok
+    error = result.error or ""
+    assert _DRIFT_TOKEN in error
+    assert _APP_TOKEN not in error
+    assert _DEVICE_TOKEN not in error
+    # Sem o endereço, a frase não diz o que consertar.
+    assert "espmusic.local:9000" in error
 
 
 async def test_a_404_from_play_says_the_song_was_not_found() -> None:
@@ -206,6 +294,32 @@ async def test_a_404_from_play_says_the_song_was_not_found() -> None:
     # Nem o status cru nem o corpo do aparelho vazam para o usuário.
     assert "404" not in (result.error or "")
     assert "nada encontrado" not in (result.error or "")
+
+
+async def test_a_404_from_announce_is_not_a_missing_song() -> None:
+    """O `_failure` é compartilhado pelas quatro tools.
+
+    Um 404 no `/api/announce` significa que aquele servidor não tem a
+    rota (o PC pode estar numa versão anterior), e responder "não achei
+    essa música" para "avisa que o jantar chegou" é incompreensível.
+    """
+    svc = FakeService(tts=FakeOggTTS())
+    svc.music.raises = HomeHTTPError(404, "Not Found")
+    result = await HomeAnnounceTool(svc).execute({"text": "o jantar chegou"})
+    assert not result.ok
+    assert "não achei" not in (result.error or "").lower()
+    assert "aviso" in (result.error or "").lower()
+
+
+async def test_a_404_from_status_falls_back_to_the_generic_device_error() -> None:
+    # Sem dica, um 404 é só mais um erro do aparelho — nunca uma música
+    # que não existe.
+    svc = FakeService()
+    svc.music.raises = HomeHTTPError(404, "Not Found")
+    result = await HomeStatusTool(svc).execute({})
+    assert not result.ok
+    assert "não achei" not in (result.error or "").lower()
+    assert "HTTP 404" in (result.error or "")
 
 
 async def test_an_unknown_room_keeps_the_list_of_rooms_in_the_error() -> None:

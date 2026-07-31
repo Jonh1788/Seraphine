@@ -20,6 +20,13 @@ const ALLOWED: &[&str] = &["espmusic.local:8080"];
 /// Verdadeiro quando `base` é uma URL http:// cujo host:porta está na
 /// allowlist. https não é usado na LAN, e recusar qualquer outro esquema
 /// já barra `file://` e amigos.
+///
+/// **Não é o portão de segurança.** Esta função enxerga só o `base`, por
+/// comparação de string, e o `path` — que também entra na URL final —
+/// passa longe dela. Quem decide é `resolved_host_allowed`, que parseia
+/// a URL composta e vale sobre o host que o cliente HTTP realmente vai
+/// discar; `compose_and_check` chama as duas, nessa ordem. Se um dia uma
+/// das duas parecer redundante, a que pode sair é esta.
 pub fn is_allowed(base: &str) -> bool {
     let rest = match base.strip_prefix("http://") {
         Some(r) => r,
@@ -100,22 +107,30 @@ pub struct LanResponse {
     pub body: String,
 }
 
+/// Cliente HTTP do relé: timeout curto e **sem seguir redirect**.
+///
+/// As travas rodam uma vez, sobre a URL composta; seguir um 302 mandaria
+/// o segundo salto para onde o servidor apontasse, sem passar por elas.
+/// Um nome `.local` não é autenticado — qualquer aparelho da LAN pode
+/// responder por `espmusic.local` — e um `Location: http://127.0.0.1:.../`
+/// alcançaria o loopback do Mac, que a LAN não alcança e onde este mesmo
+/// binário sobe o servidor de aprovação do Maestro. Com a política
+/// desligada, um 3xx volta como resposta normal.
+///
+/// Vive fora de `lan_request` pelo mesmo motivo de `compose_and_check`:
+/// para ter um teste que morre se a política sumir.
+pub fn build_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn lan_request(args: LanRequestArgs) -> Result<LanResponse, String> {
     let url = compose_and_check(&args.base, &args.path)?;
-    let client = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        // Sem seguir redirect. As travas rodam uma vez, sobre a URL
-        // composta; seguir um 302 mandaria o segundo salto para onde o
-        // servidor apontasse, sem passar por elas. Um nome `.local` não
-        // é autenticado — qualquer aparelho da LAN pode responder por
-        // `espmusic.local` — e um `Location: http://127.0.0.1:.../`
-        // alcançaria o loopback do Mac, que a LAN não alcança e onde
-        // este mesmo binário sobe o servidor de aprovação do Maestro.
-        // Com a política desligada, um 3xx volta como resposta normal.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = build_client()?;
 
     let req = match args.method.to_uppercase().as_str() {
         "GET" => client.get(&url),
@@ -148,7 +163,61 @@ pub async fn lan_request(args: LanRequestArgs) -> Result<LanResponse, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_and_check, is_allowed, resolved_host_allowed};
+    use super::{build_client, compose_and_check, is_allowed, resolved_host_allowed};
+
+    /// Sobe um servidor de um tiro só no loopback e devolve a porta.
+    /// A resposta vai crua: o teste só precisa de status e headers.
+    fn serve_once(response: String) -> u16 {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind no loopback");
+        let port = listener.local_addr().expect("porta do listener").port();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                // Basta drenar o request; o conteúdo dele não importa.
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        port
+    }
+
+    /// A trava que não aparece em `compose_and_check`: apagar
+    /// `.redirect(Policy::none())` deixaria todos os outros testes
+    /// verdes e reabriria o salto para o loopback do Mac. Aqui a
+    /// política é exercida de verdade, contra dois servidores locais —
+    /// sem depender do `Debug` do `Client`, que muda de versão para
+    /// versão.
+    #[test]
+    fn the_client_does_not_follow_redirects() {
+        let followed = serve_once(
+            "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nseguiu"
+                .to_string(),
+        );
+        let hop = serve_once(format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{followed}/\r\n\
+             Content-Length: 0\r\nConnection: close\r\n\r\n"
+        ));
+
+        let client = build_client().expect("cliente do relé");
+        let status = tauri::async_runtime::block_on(async move {
+            client
+                .get(format!("http://127.0.0.1:{hop}/"))
+                .send()
+                .await
+                .expect("o servidor de teste respondeu")
+                .status()
+                .as_u16()
+        });
+
+        assert_eq!(
+            status, 302,
+            "o relé seguiu o redirect: o segundo salto não passa pela allowlist"
+        );
+    }
 
     #[test]
     fn allows_the_espmusic_mdns_host() {
