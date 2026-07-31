@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from '../api';
 import { Orb } from './Orb';
 import { greeting, monthExpenses } from './hoje';
+import { useFetchJson } from './useFetchJson';
 import { listHabits } from '../habits/api';
 import type { HabitWithStatus } from '../habits/types';
 import { SparkleIcon, CheckIcon } from '../icons/Icons';
@@ -35,18 +36,8 @@ export function HojeScreen({ onOpen }: { onOpen: Open }) {
   );
 }
 
-function useFetchJson<T>(url: string): T | null {
-  const [data, setData] = useState<T | null>(null);
-  useEffect(() => {
-    let ok = true;
-    fetch(url).then((r) => (r.ok ? r.json() : null)).then((d) => { if (ok) setData(d); }).catch(() => {});
-    return () => { ok = false; };
-  }, [url]);
-  return data;
-}
-
 function SugereCard({ onOpen }: { onOpen: Open }) {
-  const data = useFetchJson<{ queue: Notif[] }>(`${API_BASE}/notifications/queue`);
+  const { data } = useFetchJson<{ queue: Notif[] }>(`${API_BASE}/notifications/queue`);
   const [dismissed, setDismissed] = useState<string>(() => localStorage.getItem(DISMISS_KEY) ?? '');
   const today = new Date().toISOString().slice(0, 10);
   const item = (data?.queue ?? []).find((n) => dismissed !== `${n.id}:${today}`);
@@ -84,7 +75,7 @@ type AggDay = { date: string; events?: AggEvent[] };
 
 function AgendaBlock({ onOpen }: { onOpen: Open }) {
   const today = new Date().toISOString().slice(0, 10);
-  const data = useFetchJson<{ days?: AggDay[] }>(
+  const { data } = useFetchJson<{ days?: AggDay[] }>(
     `${API_BASE}/calendar/aggregate?start=${today}&end=${today}`,
   );
   const events = (data?.days?.[0]?.events ?? []).slice(0, 4);
@@ -150,7 +141,7 @@ function HabitosBlock({ onOpen }: { onOpen: Open }) {
 }
 
 function OrcamentoBlock({ onOpen }: { onOpen: Open }) {
-  const data = useFetchJson<{ entries?: { amount: number; kind?: string; type?: string; date?: string; ts?: string }[] }>(
+  const { data } = useFetchJson<{ entries?: { amount: number; kind?: string; type?: string; date?: string; ts?: string }[] }>(
     `${API_BASE}/finance/entries?status=confirmed&limit=100`,
   );
   const total = monthExpenses(data?.entries ?? [], new Date());
