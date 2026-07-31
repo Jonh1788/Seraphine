@@ -8,6 +8,7 @@ import { TransactionList } from './TransactionList';
 import { PendingReview } from './PendingReview';
 import { ArrowLeftIcon, FinanceIcon, SparkleIcon } from '../icons/Icons';
 import { API_BASE } from '../api';
+import { fetchBalance, fetchSummary, listEntries } from './api';
 import { Skeleton, useDelayedFlag } from '../utils';
 
 /** Diagonal up-right arrow (income / healthy) */
@@ -75,18 +76,14 @@ export function FinanceDashboard({ onBack: _onBack }: FinanceDashboardProps): JS
   useEffect(() => {
     setLoading(true);
     setError(null);
+    // `month` is zero-indexed here (Date#getMonth); the API layer forwards
+    // whatever it receives, so the +1 stays at the call site.
     Promise.all([
-      fetch(`${API_BASE}/finance/summary?month=${month + 1}&year=${year}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
-      fetch(`${API_BASE}/finance/entries?month=${month + 1}&year=${year}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
+      fetchSummary(month + 1, year),
+      listEntries({ month: month + 1, year }),
     ])
-      .then(([summary, entriesRes]) => {
-        setData({ ...summary, entries: entriesRes.entries || [] });
+      .then(([summary, entries]) => {
+        setData({ ...summary, entries });
       })
       .catch((err) => {
         setError('Erro ao carregar dados financeiros');
@@ -97,12 +94,8 @@ export function FinanceDashboard({ onBack: _onBack }: FinanceDashboardProps): JS
 
   // Fetch pending entries (not month-filtered)
   useEffect(() => {
-    fetch(`${API_BASE}/finance/entries?status=pending_review`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((res) => setPendingEntries(res.entries || []))
+    listEntries({ status: 'pending_review' })
+      .then((entries) => setPendingEntries(entries))
       .catch(() => {});
   }, [refreshKey]);
 
@@ -116,9 +109,8 @@ export function FinanceDashboard({ onBack: _onBack }: FinanceDashboardProps): JS
 
   // Fetch overall balance
   useEffect(() => {
-    fetch(`${API_BASE}/finance/balance`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((res) => { if (res) setOverallBalance(res.balance); })
+    fetchBalance()
+      .then((res) => setOverallBalance(res.balance))
       .catch(() => {});
   }, [refreshKey]);
 
