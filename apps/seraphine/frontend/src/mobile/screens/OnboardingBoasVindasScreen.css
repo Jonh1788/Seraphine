@@ -1,0 +1,130 @@
+/* src/mobile/screens/OnboardingBoasVindasScreen.css — tela ONBOARDING ·
+   BOAS-VINDAS (handoff linha 593).
+
+   Esta tela NÃO passa pelo `.mshell__content`: o `PhoneShell` a monta direto
+   sob `.mshell` no primeiro lançamento. Então `flex:1`, rolagem e safe areas
+   não vêm de lugar nenhum — são declaradas aqui.
+
+   Medidas do handoff: caixa do orbe 200px com anel/brilho de 160px e orbe de
+   148px; pilha central com 26px de intervalo e 36px de margem lateral; título
+   28px/700 com -0.02em e entrelinha 1.25; apoio 14px em --dim com 280px de
+   largura máxima; ponto ativo 22×7 e os demais 7×7; rodapé 12px/28px/44px com
+   11px de intervalo, CTA de 15px de padding e raio 14.
+
+   O keyframe `ringPulse` é o global de `styles.css` — aqui só reaproveitado.
+   O orbe é o `.morb` de `mobile/obsidian.css`, via `<Orb/>`. */
+
+html[data-shell='phone'] .ms-onb {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text, #ececef);
+  background: radial-gradient(circle at 50% 28%, #181826, var(--app, #0f0f14) 62%);
+  padding-top: env(safe-area-inset-top, 44px);
+}
+
+/* Miolo centralizado. Rola por conta própria: numa tela curta (SE) o orbe de
+   200px mais o texto passam da altura, e sem isto o CTA sairia do alcance. */
+html[data-shell='phone'] .ms-onb-palco {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 12px 36px;
+  text-align: center;
+}
+
+/* ── orbe: anel + brilho + o orbe compartilhado ── */
+html[data-shell='phone'] .ms-onb-orbe {
+  position: relative;
+  flex: none;
+  width: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+html[data-shell='phone'] .ms-onb-anel {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 2px solid var(--accent, #9a93ff);
+  animation: ringPulse 2.6s ease-out infinite;
+}
+html[data-shell='phone'] .ms-onb-brilho {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-hi, #cac5ff), transparent 70%);
+  filter: blur(18px);
+  opacity: .55;
+}
+
+/* ── título e apoio ── */
+html[data-shell='phone'] .ms-onb-titulo {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-onb-sub {
+  margin: 12px auto 0;
+  max-width: 280px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim, #9594a0);
+}
+
+/* ── pontos de progresso ── */
+html[data-shell='phone'] .ms-onb-pontos { flex: none; display: flex; gap: 6px; }
+html[data-shell='phone'] .ms-onb-ponto {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .15);
+}
+html[data-shell='phone'] .ms-onb-ponto--ativo { width: 22px; background: var(--accent, #9a93ff); }
+
+/* ── rodapé: os 44px do handoff são o home indicator (20) + 24 de respiro ── */
+html[data-shell='phone'] .ms-onb-rodape {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 12px 28px calc(24px + env(safe-area-inset-bottom, 20px));
+}
+html[data-shell='phone'] .ms-onb-cta {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: 14px;
+  padding: 15px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-contrast, #14141a);
+  background: var(--accent, #9a93ff);
+  box-shadow: 0 6px 24px rgba(154, 147, 255, .35);
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-onb-link {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  padding: 9px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim, #9594a0);
+  cursor: pointer;
+}
