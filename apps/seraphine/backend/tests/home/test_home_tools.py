@@ -13,6 +13,7 @@ from typing import Any, AsyncIterator
 
 from seraphine.home.espmusic import UnknownRoom
 from seraphine.home.transport import HomeHTTPError, HomeUnreachable
+from seraphine.tools.base import ToolResult
 from seraphine.tools.home import (
     HomeAnnounceTool,
     HomeControlTool,
@@ -231,3 +232,42 @@ async def test_a_500_from_the_device_is_reported_as_a_device_error() -> None:
     assert "HTTP 500" in (result.error or "")
     assert "app" not in (result.error or "").lower()
     assert "boom" not in (result.error or "")
+
+
+# --------------------------------------------------- contrato do serviço
+
+
+def test_the_service_exposes_music_and_tts() -> None:
+    # Contrato que main.py usa ao registrar as tools.
+    from seraphine.home.service import HomeService
+
+    svc = HomeService(app_state=object(), tts="fake-tts")
+    assert svc.tts == "fake-tts"
+    assert hasattr(svc.music, "play")
+    assert hasattr(svc.music, "announce")
+
+
+async def test_the_service_base_defaults_and_can_be_overridden(monkeypatch) -> None:
+    """`base` é o parâmetro que precisa continuar concordando com ALLOWED
+    em src-tauri/src/home.rs: o relé recusa qualquer outra base, e uma
+    renomeação silenciosa só apareceria em produção.
+    """
+    from seraphine.home.service import HomeService
+    from seraphine.home.transport import DEFAULT_BASE
+
+    seen: list[dict[str, Any]] = []
+
+    async def fake_proxy(app_state: Any, tool_name: str, args: dict[str, Any]):
+        seen.append(args)
+        return ToolResult(ok=True, output="{}", metadata={"status": 200})
+
+    monkeypatch.setattr(
+        "seraphine.conversation.engine._proxy_tool_via_client", fake_proxy
+    )
+
+    await HomeService(app_state=object()).music.status()
+    assert seen[-1]["base"] == DEFAULT_BASE
+
+    other = "http://outra.local:9000"
+    await HomeService(app_state=object(), base=other).music.status()
+    assert seen[-1]["base"] == other

@@ -756,6 +756,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         tools.register(WhatsAppSendVoiceTool(whatsapp_client, tts))
 
+    # ------------------------------------------------------------------
+    # Casa (EspMusic) — som distribuído na rede local. Registro tardio:
+    # precisa de `app.state` (o relé sai pelo proxy_broker, resolvido em
+    # tempo de chamada) e de `tts` (a voz dos avisos), que só existem
+    # aqui. Não é gated por nada: sem o app Tauri aberto as tools apenas
+    # respondem "não alcanço a casa", que é a informação certa.
+    # ------------------------------------------------------------------
+    try:
+        from seraphine.home.service import HomeService
+        from seraphine.tools.home import (
+            HomeAnnounceTool,
+            HomeControlTool,
+            HomePlayTool,
+            HomeStatusTool,
+        )
+
+        home_service = HomeService(app.state, tts=tts)
+        tools.register(HomePlayTool(home_service))
+        tools.register(HomeControlTool(home_service))
+        tools.register(HomeAnnounceTool(home_service))
+        tools.register(HomeStatusTool(home_service))
+        logger.info("Home (EspMusic) tools wired")
+    except Exception as e:
+        logger.warning("Home (EspMusic) tools failed (non-critical): %s", e)
+
     # STT backend: local MLX Whisper on Apple Silicon or remote HTTP
     # service on the RTX box (spec 007). Toggle via SERAPHINE_STT_BACKEND.
     # When remote is configured, local MLX is kept as fallback.
