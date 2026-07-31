@@ -1,0 +1,146 @@
+/* src/mobile/screens/FinancasScreen.css — tela FINANÇAS (handoff linha 234).
+   Medidas do handoff: cabeçalho 14/20/10 com botão de 40px e raio 13; corpo
+   2/20/12 com 12px de intervalo; hero de raio 18 e padding 16 em gradiente
+   verde; tiles internos de raio 12 sobre rgba(0,0,0,.2); barras de 7px de
+   altura; linhas de transação de 10px com divisória e chip de 32px.
+   Todas as classes levam o prefixo `ms-financas-` para nunca colidirem com o
+   CSS de outra tela. */
+
+html[data-shell='phone'] .ms-financas { display: flex; flex-direction: column; min-height: 100%; }
+
+/* ── cabeçalho ── */
+html[data-shell='phone'] .ms-financas-head {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 14px 20px 10px;
+}
+/* voltar: a seta das telas empurradas (18px, --text-dim) alinhada opticamente
+   à margem de 20px; a caixa de 34px existe só para o dedo. */
+html[data-shell='phone'] .ms-financas-voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0); font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-financas-head-txt { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-financas-titulo {
+  font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-financas-mes { font-size: 12px; color: var(--text-dim, #9594a0); margin-top: 1px; }
+html[data-shell='phone'] .ms-financas-add {
+  flex: none; width: 40px; height: 40px; border-radius: 13px; border: none; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  box-shadow: 0 4px 14px rgba(154, 147, 255, .35); font: inherit; cursor: pointer;
+}
+
+/* ── corpo ── */
+html[data-shell='phone'] .ms-financas-corpo {
+  flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 2px 20px 12px;
+}
+
+/* ── hero: saldo do mês, receitas e despesas embutidas ── */
+html[data-shell='phone'] .ms-financas-hero {
+  background: linear-gradient(135deg, rgba(74, 222, 128, .13), rgba(74, 222, 128, .03));
+  border: 1px solid rgba(74, 222, 128, .22); border-radius: 18px; padding: 16px;
+}
+/* saldo negativo não pode morar num cartão verde: a cor é parte do número. */
+html[data-shell='phone'] .ms-financas-hero--negativo {
+  background: linear-gradient(135deg, rgba(239, 107, 107, .13), rgba(239, 107, 107, .03));
+  border-color: rgba(239, 107, 107, .22);
+}
+html[data-shell='phone'] .ms-financas-hero-label { font-size: 11px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-financas-saldo {
+  font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin-top: 3px;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-financas-hero--negativo .ms-financas-saldo { color: var(--danger, #ef6b6b); }
+
+html[data-shell='phone'] .ms-financas-tiles { display: flex; gap: 14px; margin-top: 12px; }
+html[data-shell='phone'] .ms-financas-tile {
+  flex: 1; min-width: 0; background: rgba(0, 0, 0, .2); border-radius: 12px; padding: 10px 12px;
+}
+html[data-shell='phone'] .ms-financas-tile-label {
+  display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-financas-tile-label--receita svg { color: #4ade80; }
+html[data-shell='phone'] .ms-financas-tile-label--despesa svg { color: var(--danger, #ef6b6b); }
+html[data-shell='phone'] .ms-financas-tile-valor { display: block; font-size: 15px; font-weight: 700; margin-top: 2px; }
+html[data-shell='phone'] .ms-financas-tile-valor--receita { color: #4ade80; }
+html[data-shell='phone'] .ms-financas-tile-valor--despesa { color: var(--danger, #ef6b6b); }
+
+/* saldo geral (todos os meses), no rodapé do hero */
+html[data-shell='phone'] .ms-financas-geral {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .07);
+}
+html[data-shell='phone'] .ms-financas-geral-txt { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+html[data-shell='phone'] .ms-financas-geral-rotulo { font-size: 10px; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-financas-geral-valor { font-size: 12px; font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-financas-geral-valor--neg { color: var(--danger, #ef6b6b); }
+
+/* ── cartões (categorias e transações) ── */
+html[data-shell='phone'] .ms-financas-card {
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 18px; padding: 15px 16px;
+}
+html[data-shell='phone'] .ms-financas-card-titulo { font-size: 13px; font-weight: 700; margin-bottom: 12px; color: var(--text, #ececef); }
+
+/* ── barras por categoria ── */
+html[data-shell='phone'] .ms-financas-barras { display: flex; flex-direction: column; gap: 10px; }
+html[data-shell='phone'] .ms-financas-barra-topo {
+  display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 5px;
+}
+html[data-shell='phone'] .ms-financas-barra-nome { color: var(--text, #ececef); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-shell='phone'] .ms-financas-barra-valor { flex: none; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-financas-barra-trilho {
+  height: 7px; border-radius: 5px; background: rgba(255, 255, 255, .05); overflow: hidden;
+}
+html[data-shell='phone'] .ms-financas-barra-fill { display: block; height: 100%; border-radius: 5px; }
+
+/* ── lista de transações ── */
+html[data-shell='phone'] .ms-financas-lista { padding: 6px 16px; }
+html[data-shell='phone'] .ms-financas-tx {
+  display: flex; align-items: center; gap: 11px; padding: 10px 0;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08));
+}
+html[data-shell='phone'] .ms-financas-tx:last-child { border-bottom: none; }
+html[data-shell='phone'] .ms-financas-tx-icone {
+  flex: none; width: 32px; height: 32px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+html[data-shell='phone'] .ms-financas-tx-corpo { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-financas-tx-desc {
+  font-size: 13px; font-weight: 500; color: var(--text, #ececef);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-financas-tx-meta { font-size: 10px; color: var(--text-faint, #5f5e6b); margin-top: 1px; }
+html[data-shell='phone'] .ms-financas-tx-valor { flex: none; font-size: 13px; font-weight: 600; }
+html[data-shell='phone'] .ms-financas-tx-valor--receita { color: #4ade80; }
+html[data-shell='phone'] .ms-financas-tx-valor--despesa { color: var(--danger, #ef6b6b); }
+/* vazio e erro dentro do cartão de lista respiram como uma linha da lista */
+html[data-shell='phone'] .ms-financas-lista .ms-financas-vazio,
+html[data-shell='phone'] .ms-financas-lista .ms-financas-erro { padding: 10px 0; }
+
+/* ── três saídas: vazio, erro e carregando ──
+   Nada some por falta de dado; o erro usa a tinta de perigo para nunca ser
+   lido como vazio, e a espera não tem texto para nenhum número piscar. */
+html[data-shell='phone'] .ms-financas-vazio { font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-financas-erro {
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-financas-erro::before {
+  content: '!'; flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
+  border: 1.2px solid currentColor; font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-financas-skel { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+html[data-shell='phone'] .ms-financas-skel span {
+  height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .07);
+  animation: msFinancasSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-financas-hero > .ms-financas-skel span:first-child { height: 26px; width: 58%; border-radius: 7px; }
+html[data-shell='phone'] .ms-financas-skel--barras span { height: 22px; border-radius: 6px; }
+html[data-shell='phone'] .ms-financas-skel--barras span:nth-child(2) { animation-delay: .15s; }
+html[data-shell='phone'] .ms-financas-skel--barras span:nth-child(3) { animation-delay: .3s; }
+html[data-shell='phone'] .ms-financas-skel--linhas span { height: 32px; border-radius: 9px; }
+html[data-shell='phone'] .ms-financas-skel--linhas span:nth-child(2) { animation-delay: .15s; }
+html[data-shell='phone'] .ms-financas-skel--linhas span:nth-child(3) { animation-delay: .3s; }
+
+@keyframes msFinancasSkel { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }

@@ -1,0 +1,122 @@
+/* src/mobile/screens/MemoriaScreen.css — tela MEMÓRIA (handoff linha 491).
+   Medidas tiradas do handoff: cabeçalho 12/20 com gap 12 e título de 20px,
+   campo de busca de raio 13 com 10px 14px de padding, chips de 5px 12px e raio
+   14, cartões de raio 15 com 13px 15px de padding e 9px de intervalo, eyebrow
+   de 9px com 0.05em de tracking e ponto de confiança de 6px.
+   Todas as classes levam o prefixo `ms-memoria-` para nunca colidirem com o
+   CSS de outra tela. */
+
+html[data-shell='phone'] .ms-memoria { display: flex; flex-direction: column; min-height: 100%; }
+
+/* ── cabeçalho ── */
+html[data-shell='phone'] .ms-memoria-head {
+  flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+}
+html[data-shell='phone'] .ms-memoria-head-txt { flex: 1; min-width: 0; }
+/* voltar: a seta do handoff (18px, --dim) alinhada opticamente à margem de 20px;
+   a caixa de 34px existe só para o dedo, por isso a margem negativa. */
+html[data-shell='phone'] .ms-memoria-voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0); font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-memoria-titulo {
+  font-size: 20px; font-weight: 700; letter-spacing: -.01em; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-memoria-sub { font-size: 11px; color: var(--text-dim, #9594a0); margin-top: 1px; }
+
+/* ── busca ── */
+html[data-shell='phone'] .ms-memoria-busca {
+  flex: none; display: flex; align-items: center; gap: 9px; margin: 0 20px 10px;
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 13px; padding: 10px 14px;
+}
+html[data-shell='phone'] .ms-memoria-busca-icone {
+  flex: none; display: inline-flex; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-memoria-busca-campo {
+  flex: 1; min-width: 0; background: none; border: none; outline: none; padding: 0;
+  font: inherit; font-size: 13px; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-memoria-busca-campo::placeholder { color: var(--text-faint, #5f5e6b); }
+html[data-shell='phone'] .ms-memoria-busca-campo::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* ── chips de categoria ── */
+html[data-shell='phone'] .ms-memoria-filtros {
+  flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 10px;
+}
+html[data-shell='phone'] .ms-memoria-chip {
+  font: inherit; font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer;
+  color: var(--text-dim, #9594a0); background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  padding: 5px 12px; border-radius: 14px;
+}
+html[data-shell='phone'] .ms-memoria-chip--on {
+  font-weight: 700; color: var(--accent-contrast, #14141a);
+  background: var(--accent, #9a93ff); border-color: var(--accent, #9a93ff);
+}
+
+/* ── lista de cartões ── */
+html[data-shell='phone'] .ms-memoria-lista {
+  flex: 1; display: flex; flex-direction: column; gap: 9px; padding: 2px 20px 20px;
+}
+html[data-shell='phone'] .ms-memoria-card {
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 15px; padding: 13px 15px;
+}
+html[data-shell='phone'] .ms-memoria-card-topo {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px;
+}
+html[data-shell='phone'] .ms-memoria-eyebrow {
+  font-size: 9px; font-weight: 700; letter-spacing: .05em; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-memoria-conf {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-memoria-dot { width: 6px; height: 6px; border-radius: 50%; }
+html[data-shell='phone'] .ms-memoria-dot--verde { background: #4ade80; }
+html[data-shell='phone'] .ms-memoria-dot--ambar { background: #ffa726; }
+html[data-shell='phone'] .ms-memoria-texto { font-size: 13px; line-height: 1.5; color: var(--text, #ececef); }
+
+/* ── cartão do perfil: mesma casca do cartão de fato, conteúdo em pares ── */
+html[data-shell='phone'] .ms-memoria-perfil-lista { display: flex; flex-direction: column; gap: 5px; }
+html[data-shell='phone'] .ms-memoria-perfil-linha {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+html[data-shell='phone'] .ms-memoria-perfil-rotulo {
+  flex: none; font-size: 11px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-memoria-perfil-valor {
+  min-width: 0; font-size: 12.5px; line-height: 1.4; color: var(--text, #ececef); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── três saídas: vazio, erro e carregando ──
+   Nada some por falta de dado; o erro usa a tinta de perigo para nunca ser
+   lido como vazio, e a espera não tem texto para nada piscar "sem memória". */
+html[data-shell='phone'] .ms-memoria-vazio { font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-memoria-erro {
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-memoria-erro::before {
+  content: '!'; flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
+  border: 1.2px solid currentColor; font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-memoria-skel { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+html[data-shell='phone'] .ms-memoria-skel span {
+  height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .06);
+  animation: msMemoriaSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-memoria-skel span:nth-child(2) { width: 62%; animation-delay: .2s; }
+html[data-shell='phone'] .ms-memoria-head .ms-memoria-skel { margin-top: 5px; max-width: 120px; }
+html[data-shell='phone'] .ms-memoria-skel-cartoes { display: flex; flex-direction: column; gap: 9px; }
+html[data-shell='phone'] .ms-memoria-skel-card {
+  height: 74px; border-radius: 15px; background: rgba(255, 255, 255, .05);
+  animation: msMemoriaSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-memoria-skel-card:nth-child(2) { animation-delay: .15s; }
+html[data-shell='phone'] .ms-memoria-skel-card:nth-child(3) { animation-delay: .3s; }
+html[data-shell='phone'] .ms-memoria-skel-card:nth-child(4) { animation-delay: .45s; }
+
+@keyframes msMemoriaSkel { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }

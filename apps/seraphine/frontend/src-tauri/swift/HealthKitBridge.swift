@@ -434,6 +434,12 @@ private func handleAppRefresh(task: BGAppRefreshTask) {
 
     let queue = DispatchQueue.global(qos: .utility)
     queue.async {
+        // This is the app's only recurring background sync, so it is also
+        // where the lock-screen widget snapshot gets refreshed (SDD task
+        // 26). Runs before the HealthKit guard on purpose: the widget has
+        // nothing to do with HealthKit availability.
+        seraphineWidgetBackgroundRefresh()
+
         guard HKHealthStore.isHealthDataAvailable() else {
             task.setTaskCompleted(success: false)
             return

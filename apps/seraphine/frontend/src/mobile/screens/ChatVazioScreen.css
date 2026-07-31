@@ -1,0 +1,78 @@
+/* src/mobile/screens/ChatVazioScreen.css — ESTADO VAZIO do chat · primeiro uso
+   (handoff `Seraphine Mobile.dc.html`, linha 647). Único estado vazio que o
+   handoff desenha: medidas, raios e pesos vieram de lá tal e qual.
+   Todas as classes têm prefixo `ms-chatvazio-` / `ms-chatvazio__`.
+   O orb NÃO é redefinido aqui: vem do `.morb` / `orbFloat` do obsidian.css,
+   pelo componente `<Orb />`.
+
+   A Task 28 embutiu o MIOLO dentro da conversa do `ChatScreen` e removeu a
+   tela inteira: cabeçalho e composer agora são os do chat, que sabem o estado
+   do socket. Foram-se com ela as regras de `__head`/`__composer` daqui. */
+
+/* ── miolo: orb 88 flutuando, título e sugestões, tudo centrado ──
+   Mora dentro de `.ms-chat__thread`, que é flex-column: o `flex: 1` faz o vazio
+   ocupar a conversa inteira e centrar, como a tela cheia do handoff. */
+html[data-shell='phone'] .ms-chatvazio__miolo {
+  /* Cresce para centrar quando sobra espaço na conversa, e NUNCA encolhe abaixo
+     do próprio conteúdo (`0` no shrink): comprimido, o orb de 88px era a
+     primeira coisa a ser cortada. Faltando altura, quem rola é a conversa. */
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px 32px;
+  text-align: center;
+}
+html[data-shell='phone'] .ms-chatvazio__titulo {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  line-height: 1.3;
+}
+html[data-shell='phone'] .ms-chatvazio__apoio {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-dim, #9594a0);
+  margin-top: 8px;
+}
+
+/* ── as quatro sugestões ── */
+html[data-shell='phone'] .ms-chatvazio__sugestoes {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  max-width: 290px;
+}
+html[data-shell='phone'] .ms-chatvazio__sugestao {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px; /* alvo de toque do iOS; o padding do handoff já dá 44 */
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  background: var(--surface, #17171e);
+  color: var(--text, #ececef);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 13px 16px;
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-chatvazio__sugestao:active {
+  border-color: rgba(154, 147, 255, .28);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+}
+/* No handoff o marcador é um emoji de 15px; aqui é o ícone SVG equivalente,
+   na tinta de acento, ocupando a mesma caixa. */
+html[data-shell='phone'] .ms-chatvazio__sugestao-icone {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--accent, #9a93ff);
+}

@@ -1,0 +1,186 @@
+name: seraphine-desktop
+options:
+  bundleIdPrefix: io.jonhdev.seraphine
+  deploymentTarget:
+    iOS: 14.0
+fileGroups: [../../src]
+configs:
+  debug: debug
+  release: release
+settingGroups:
+  app:
+    base:
+      PRODUCT_NAME: Seraphine
+      PRODUCT_BUNDLE_IDENTIFIER: io.jonhdev.seraphine
+targetTemplates:
+  app:
+    type: application
+    sources:
+      - path: Sources
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      groups: [app]
+targets:
+  seraphine-desktop_iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Assets.xcassets
+      # The Rust static lib lives under Externals/<arch>/<config>/libapp.a
+      # and is linked via `-lapp` + LIBRARY_SEARCH_PATHS. Including the
+      # folder as a source makes xcodegen add the `.a` as a resource,
+      # which Xcode then copies into the .app bundle — App Store Connect
+      # rejects that ("Seraphine.app/libapp.a binary file is not
+      # permitted"). Exclude .a so only metadata (if any) is tracked.
+      - path: Externals
+        excludes:
+          - "**/*.a"
+      - path: seraphine-desktop_iOS
+      - path: assets
+        buildPhase: resources
+        type: folder
+      - path: LaunchScreen.storyboard
+    info:
+      path: seraphine-desktop_iOS/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiredDeviceCapabilities: [arm64, metal]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleShortVersionString: "0.1.0"
+        # Build number — **must increment each App Store Connect upload**,
+        # even if the marketing version stays the same. Integers are the
+        # safest convention.
+        CFBundleVersion: "1"
+        NSHealthShareUsageDescription: Seraphine usa dados do Apple Saude para mostrar resumos diarios de passos, sono, treinos e frequencia cardiaca.
+        NSHealthUpdateUsageDescription: Seraphine pode registrar habitos concluidos no Apple Saude para manter suas metas sincronizadas.
+        NSMicrophoneUsageDescription: Seraphine ouve o microfone no modo conversa por voz (realtime e push-to-talk) para entender o que voce diz.
+        UIBackgroundModes:
+          - fetch
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - io.jonhdev.seraphine.healthsync
+    entitlements:
+      path: seraphine-desktop_iOS/seraphine-desktop_iOS.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        # App Group shared with SeraphineWidget. The app writes
+        # widget-snapshot.json here; the extension only reads it.
+        # Keep in sync with `seraphineAppGroupID` in
+        # ../../ios/SeraphineWidget/SnapshotStore.swift and with
+        # ../../swift/WidgetBridge.swift.
+        com.apple.security.application-groups:
+          - group.io.jonhdev.seraphine
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      base:
+        ENABLE_BITCODE: false
+        ARCHS: [arm64]
+        VALID_ARCHS: arm64
+        LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+        # Automatic signing — Xcode resolves certs + provisioning via the
+        # paid Apple Developer team CDX69HJKGH. Baked here so xcodegen
+        # regens preserve it across builds.
+        DEVELOPMENT_TEAM: CDX69HJKGH
+        CODE_SIGN_STYLE: Automatic
+      groups: [app]
+    dependencies:
+      # WidgetKit extension. `embed: true` makes xcodegen add the
+      # "Embed Foundation Extensions" copy phase, which is what puts
+      # the .appex inside Seraphine.app/PlugIns.
+      - target: SeraphineWidget
+        embed: true
+        codeSign: true
+      - framework: libapp.a
+        embed: false
+      - sdk: Accelerate.framework
+      - sdk: CoreGraphics.framework
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: Security.framework
+      - sdk: UIKit.framework
+      - sdk: WebKit.framework
+    preBuildScripts:
+      - script: pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+        name: Build Rust Code
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
+          - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+
+  # ---------------------------------------------------------------------
+  # WidgetKit extension (SDD task 26).
+  #
+  # Sources live OUTSIDE gen/ on purpose: the repo's .gitignore excludes
+  # `**/src-tauri/gen/`, so anything written under gen/apple is untracked
+  # and would be lost on a fresh clone. `../../ios/SeraphineWidget` is
+  # `src-tauri/ios/SeraphineWidget`, which IS tracked.
+  #
+  # Registering the target here (rather than clicking "New Target" in
+  # Xcode) is what makes it survive the xcodegen run that Tauri performs
+  # on every `tauri ios build` / `tauri ios dev`.
+  # ---------------------------------------------------------------------
+  SeraphineWidget:
+    type: app-extension
+    platform: iOS
+    # Lock-screen (accessory) families need iOS 16; `containerBackground`
+    # needs 17. The host app stays at 14.0 — an extension may require a
+    # newer OS than its container, it simply won't be offered on older
+    # devices.
+    deploymentTarget: "17.0"
+    sources:
+      - path: ../../ios/SeraphineWidget
+    info:
+      path: ../../ios/SeraphineWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Seraphine
+        # Must equal the host app's version or Xcode warns and App Store
+        # Connect rejects. Tauri stamps the app's plist from
+        # tauri.conf.json `version` at build time (currently 0.2.1) —
+        # it does NOT touch this extension plist, so bump both together.
+        CFBundleShortVersionString: "0.2.1"
+        CFBundleVersion: "0.2.1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: ../../ios/SeraphineWidget/SeraphineWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.io.jonhdev.seraphine
+    settings:
+      base:
+        PRODUCT_NAME: SeraphineWidget
+        PRODUCT_BUNDLE_IDENTIFIER: io.jonhdev.seraphine.widget
+        DEVELOPMENT_TEAM: CDX69HJKGH
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: true
+        ENABLE_BITCODE: false
+        GENERATE_INFOPLIST_FILE: false
+        # Extensions must NOT ship their own copy of the Swift runtime —
+        # the host app already embeds it (see the app target above).
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: false
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework

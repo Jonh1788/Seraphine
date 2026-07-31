@@ -27,11 +27,20 @@ mod home;
 mod mac_tools;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod mic;
+// Notificações ricas com ações (SDD task 27). Só o shell mobile: o
+// delegate, as categorias e o App Group são conceitos iOS.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+mod notifications;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod telemetry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod voice_io;
 mod whisper;
+// Widget snapshot bridge — only the mobile shell registers these
+// commands, and the App Group container is an iOS concept, so the module
+// does not exist on the desktop build at all.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+mod widget;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -62,6 +71,21 @@ fn run_mobile() {
             // Casa — relé HTTP para a LAN (EspMusic). Vale nos dois
             // alvos: o iPhone em casa está na mesma rede que o Mac.
             home::lan_request,
+            // Widget de lock screen — snapshot no App Group
+            // compartilhado com SeraphineWidget.appex.
+            widget::widget_write_snapshot,
+            widget::widget_refresh_snapshot,
+            widget::widget_snapshot_status,
+            // Notificação rica: agendar o lembrete de conta, reavaliar o
+            // streak e ler o que as ações fizeram (o botão já sumiu da
+            // tela quando o handler roda).
+            notifications::notifications_status,
+            notifications::notifications_request_authorization,
+            notifications::notifications_schedule_bill,
+            notifications::notifications_sync_streak,
+            notifications::notifications_cancel,
+            notifications::notifications_action_log,
+            notifications::notifications_run_action,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -74,6 +98,17 @@ fn run_mobile() {
                         ios_extend_into_safe_area(webview.inner());
                     });
                 }
+                // Preenche widget-snapshot.json agora e a cada
+                // foreground. É o único gancho de "sync" nativo que
+                // existe hoje — a UI React não precisa saber do widget.
+                widget::install_auto_refresh();
+                // Delegate + categorias das notificações. Precisa rodar
+                // AQUI e não depois: o `setup` acontece antes de
+                // `UIApplicationMain`, então um relançamento em background
+                // disparado por um toque em "Marcar pago" já encontra o
+                // delegate instalado. Não pede permissão — quem pede é o
+                // onboarding.
+                notifications::install();
             }
             Ok(())
         })

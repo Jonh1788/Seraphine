@@ -7,6 +7,8 @@ import { TaskEditorModal } from './TaskEditorModal';
 import { Skeleton, useDelayedFlag } from '../utils';
 
 import { API_BASE } from '../api';
+import { createTask, listTasks, updateTaskStatus } from './api';
+import type { TaskCreateInput } from './types';
 
 type ColumnId = 'pending' | 'in_progress' | 'done' | 'discarded';
 
@@ -460,7 +462,9 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     setError(null);
     try {
       const [tasksRes, pendingEntriesRes, confirmedEntriesRes, recurringRes, remindersRes] = await Promise.all([
-        fetch(`${API_BASE}/tasks?limit=200`).then((r) => (r.ok ? r.json() : { tasks: [] })),
+        // Parity with the previous inline fetch: a failing /tasks yields an
+        // empty board instead of blowing up the whole refresh.
+        listTasks({ limit: 200 }).catch(() => []),
         fetch(`${API_BASE}/finance/entries?status=pending_review&limit=100`).then((r) =>
           r.ok ? r.json() : { entries: [] },
         ),
@@ -474,7 +478,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
           r.ok ? r.json() : { reminders: [] },
         ),
       ]);
-      setTasks(Array.isArray(tasksRes.tasks) ? tasksRes.tasks : []);
+      setTasks(tasksRes);
       setEntries(Array.isArray(pendingEntriesRes.entries) ? pendingEntriesRes.entries : []);
       setConfirmedEntries(
         Array.isArray(confirmedEntriesRes.entries) ? confirmedEntriesRes.entries : [],
@@ -644,24 +648,6 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     });
   };
 
-  const patchTaskStatus = async (taskId: number, status: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) {
-      let msg = `Falha HTTP ${res.status}`;
-      try {
-        const data = await res.json();
-        if (data?.detail) msg = typeof data.detail === 'string' ? data.detail : msg;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(msg);
-    }
-  };
-
   const executeTask = async (taskId: number, params?: Record<string, unknown>): Promise<void> => {
     const body = params ? { params } : {};
     const res = await fetch(`${API_BASE}/tasks/${taskId}/execute`, {
@@ -709,11 +695,11 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       if (card.kind === 'task') {
         const task = card.task;
         if (target === 'pending') {
-          await patchTaskStatus(task.id, 'pending');
+          await updateTaskStatus(task.id, 'pending');
         } else if (target === 'in_progress') {
-          await patchTaskStatus(task.id, 'approved');
+          await updateTaskStatus(task.id, 'approved');
         } else if (target === 'discarded') {
-          await patchTaskStatus(task.id, 'rejected');
+          await updateTaskStatus(task.id, 'rejected');
         } else if (target === 'done') {
           const payload = parsePayload(task.payload);
           if (task.type === 'finance_import') {
@@ -733,7 +719,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
           } else {
             // Other task types (generic, calendar_add, etc.) — just mark
             // completed. execute_task for these returns 501.
-            await patchTaskStatus(task.id, 'completed');
+            await updateTaskStatus(task.id, 'completed');
           }
         }
       } else {
@@ -808,7 +794,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
     try {
       const payload: Record<string, unknown> = {};
       if (data.due_date) payload.due_date = data.due_date;
-      const body: Record<string, unknown> = {
+      const body: TaskCreateInput = {
         type: 'generic',
         title: data.title,
         description: data.description,
@@ -819,19 +805,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
       if (data.due_time) body.due_time = data.due_time;
       if (data.priority) body.priority = data.priority;
       if (data.remind) body.remind = data.remind;
-      const res = await fetch(`${API_BASE}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        let msg = `Falha HTTP ${res.status}`;
-        try {
-          const d = await res.json();
-          if (d?.detail) msg = typeof d.detail === 'string' ? d.detail : msg;
-        } catch { /* ignore */ }
-        throw new Error(msg);
-      }
+      await createTask(body);
       setShowNewTask(false);
       await refresh();
     } catch (e) {

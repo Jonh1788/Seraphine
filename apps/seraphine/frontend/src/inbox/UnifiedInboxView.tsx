@@ -2,6 +2,7 @@ import './obsidian.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../api';
 import { CalendarIcon } from '../icons/Icons';
+import { listInbox } from './api';
 
 type InboxKind = 'task' | 'email' | 'finance' | 'insight' | 'memory' | 'work';
 type InboxSource = 'whatsapp' | 'email' | 'seraphine';
@@ -221,7 +222,10 @@ export function UnifiedInboxView({ onBack, onNavigate, onOpenEmail }: UnifiedInb
 
     const settle = await Promise.allSettled([
       fetch(`${API_BASE}/tasks?limit=80`).then((r) => r.ok ? r.json() : { tasks: [] }),
-      fetch(`${API_BASE}/google/gmail/important?limit=10`).then((r) => r.ok ? r.json() : []),
+      // Gmail rows come from the module's data layer (same limit=10 budget);
+      // a failure rejects here and is absorbed by allSettled, exactly like the
+      // previous `r.ok ? r.json() : []`.
+      listInbox('email'),
       fetch(`${API_BASE}/finance/entries?status=pending_review`).then((r) => r.ok ? r.json() : { entries: [] }),
       fetch(`${API_BASE}/insights`).then((r) => r.ok ? r.json() : { insights: [] }),
       fetch(`${API_BASE}/memory/notifications?limit=20`).then((r) => r.ok ? r.json() : []),
@@ -267,10 +271,12 @@ export function UnifiedInboxView({ onBack, onNavigate, onOpenEmail }: UnifiedInb
         id: `email-${email.id}`,
         kind: 'email',
         source: 'email',
-        title: email.from || email.subject || 'Email importante',
-        detail: email.subject || email.snippet || 'Gmail',
+        // `sender`/`preview` are the api layer's normalised `from || subject`
+        // and `subject || snippet` — the fallbacks below are unchanged.
+        title: email.sender || 'Email importante',
+        detail: email.preview || 'Gmail',
         urgency: 'medium',
-        receivedAt: parseTime(email.date ?? email.received_at ?? email.internal_date),
+        receivedAt: parseTime(email.at),
         actionLabel: 'Marcar lido',
         action: () => resolveItem(`email-${email.id}`, `/google/gmail/messages/${email.id}/mark-read`, {
           method: 'POST',

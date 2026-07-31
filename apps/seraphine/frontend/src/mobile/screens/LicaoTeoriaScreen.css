@@ -1,0 +1,164 @@
+/* src/mobile/screens/LicaoTeoriaScreen.css — tela LIÇÃO · TEORIA (handoff linha 415).
+   Medidas tiradas do handoff: cabeçalho 12/20 com gap 13, X de 34px e raio 10,
+   barra de 11px com raio 7, pill de 11px/700 em accent-soft; corpo com padding
+   10px 24px e 15px de intervalo; eyebrow de 10px com 0.07em de tracking,
+   título de 23px, conceito de 14px/1.7, código mono 12.5px/1.7 em cartão de
+   raio 14 com 14px 16px, dica em accent-soft de raio 13 com 13px 15px, e CTA
+   de 15px/700 com 15px de padding, raio 14 e sombra dura #4b44a8.
+   Todas as classes levam o prefixo `ms-licao-teoria-` para nunca colidirem com
+   o CSS de outra tela. */
+
+html[data-shell='phone'] .ms-licao-teoria {
+  display: flex; flex-direction: column; min-height: 100%;
+  color: var(--text, #ececef);
+}
+
+/* ── cabeçalho: X + progresso + pill "Teoria" ──
+   A tela empurrada é dona do cabeçalho inteiro (o PushedScreen não desenha
+   chrome), então o X daqui é a ÚNICA saída da lição. */
+html[data-shell='phone'] .ms-licao-teoria-topo {
+  flex: none; display: flex; align-items: center; gap: 13px; padding: 12px 20px;
+  /* Grudado no topo (achado no simulador, Task 28): esta tela rola INTEIRA
+     dentro do `.mpushed__body`, então o cabeçalho saía de cena na primeira
+     rolagem — e com ele a única saída da lição, num contêiner que não desenha
+     tab bar nem chevron. `top: 0` é o topo do content box, ou seja, abaixo da
+     safe area; o fundo opaco impede o texto de passar por baixo do X. */
+  position: sticky; top: 0; z-index: 2;
+  background: var(--app, #0f0f14);
+  /* A faixa da safe area pertence ao contêiner, e o texto rolava por baixo dela
+     — ficava legível em cima do relógio. O cabeçalho cresce para dentro dessa
+     faixa (margem negativa) e a devolve como padding próprio, então o fundo
+     opaco cobre o caminho inteiro até o topo do aparelho. */
+  margin-top: calc(-1 * env(safe-area-inset-top, 44px));
+  padding-top: calc(12px + env(safe-area-inset-top, 44px));
+}
+html[data-shell='phone'] .ms-licao-teoria-x {
+  flex: none; width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 10px; border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  background: transparent; color: var(--text-dim, #9594a0); font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-licao-teoria-barra {
+  flex: 1; height: 11px; border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06); overflow: hidden;
+}
+html[data-shell='phone'] .ms-licao-teoria-barra__preenchida {
+  display: block; height: 100%; border-radius: 7px;
+  background: linear-gradient(90deg, var(--accent-dim, #6c63d6), var(--accent, #9a93ff));
+}
+html[data-shell='phone'] .ms-licao-teoria-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  color: var(--accent, #9a93ff); background: var(--accent-soft, rgba(154, 147, 255, .14));
+  padding: 5px 11px; border-radius: 14px;
+}
+
+/* ── corpo ── */
+html[data-shell='phone'] .ms-licao-teoria-corpo {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 15px;
+  padding: 10px 24px;
+}
+html[data-shell='phone'] .ms-licao-teoria-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-licao-teoria-titulo {
+  font-size: 23px; font-weight: 700; letter-spacing: -.01em; margin-top: 5px;
+}
+
+/* ── conceito (markdown) ── */
+html[data-shell='phone'] .ms-licao-teoria-conceito {
+  font-size: 14px; line-height: 1.7; color: var(--text, #ececef);
+  display: flex; flex-direction: column; gap: 15px;
+}
+html[data-shell='phone'] .ms-licao-teoria-conceito > :first-child { margin-top: 0; }
+html[data-shell='phone'] .ms-licao-teoria-forte { font-weight: 700; color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-licao-teoria-conceito h1,
+html[data-shell='phone'] .ms-licao-teoria-conceito h2,
+html[data-shell='phone'] .ms-licao-teoria-conceito h3 {
+  font-size: 15px; font-weight: 700; letter-spacing: -.01em;
+}
+html[data-shell='phone'] .ms-licao-teoria-conceito ul,
+html[data-shell='phone'] .ms-licao-teoria-conceito ol { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+html[data-shell='phone'] .ms-licao-teoria-conceito li { list-style: disc; }
+html[data-shell='phone'] .ms-licao-teoria-conceito ol li { list-style: decimal; }
+html[data-shell='phone'] .ms-licao-teoria-conceito blockquote {
+  border-left: 2px solid var(--border-strong, rgba(255, 255, 255, .12));
+  padding-left: 11px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-licao-teoria-conceito a { color: var(--accent, #9a93ff); }
+/* código inline: continua no corpo do texto, só muda a fonte */
+html[data-shell='phone'] .ms-licao-teoria-conceito code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+}
+
+/* ── bloco de código ──
+   Cor base do handoff (#d4d4d4). As outras tintas do desenho — keywords
+   #c586c0, identificadores #9cdcfe, strings #ce9178, erro #ef6b6b — ficam de
+   fora de propósito: o payload da lição não traz token nenhum, e pintar por
+   regex erra em código real. Ver o comentário no .tsx. */
+html[data-shell='phone'] .ms-licao-teoria-codigo {
+  margin: 0;
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 14px; padding: 14px 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.7; color: #d4d4d4;
+  /* as quebras de linha da lição são conteúdo: preservadas, e o que for largo
+     demais rola só dentro do cartão */
+  white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+html[data-shell='phone'] .ms-licao-teoria-codigo code {
+  font: inherit; color: inherit; background: none; padding: 0;
+}
+
+/* ── dica ── */
+html[data-shell='phone'] .ms-licao-teoria-dica {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14)); border-radius: 13px; padding: 13px 15px;
+  font-size: 12.5px; line-height: 1.55;
+}
+html[data-shell='phone'] .ms-licao-teoria-dica svg { flex: none; margin-top: 2px; color: var(--accent, #9a93ff); }
+
+/* ── rodapé + CTA ── */
+html[data-shell='phone'] .ms-licao-teoria-rodape {
+  flex: none; display: flex; flex-direction: column; gap: 9px; padding: 12px 24px 40px;
+}
+html[data-shell='phone'] .ms-licao-teoria-cta {
+  width: 100%; border: none; border-radius: 14px; padding: 15px;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 0 #4b44a8;
+}
+html[data-shell='phone'] .ms-licao-teoria-cta:disabled {
+  opacity: .45; cursor: default; box-shadow: 0 4px 0 rgba(75, 68, 168, .5);
+}
+
+/* ── as três saídas: vazio, erro e carregando ──
+   Nenhum bloco some por falta de dado; o erro tem tinta própria para não ser
+   confundido com "não há nada". */
+html[data-shell='phone'] .ms-licao-teoria-vazio {
+  font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-licao-teoria-erro {
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-licao-teoria-erro::before {
+  content: '!'; flex: none;
+  width: 15px; height: 15px; margin-top: 1px;
+  border-radius: 50%; border: 1.2px solid currentColor;
+  font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-licao-teoria-skel { display: flex; flex-direction: column; gap: 9px; }
+html[data-shell='phone'] .ms-licao-teoria-skel span {
+  height: 11px; border-radius: 6px; background: rgba(255, 255, 255, 0.06);
+  animation: msLicaoTeoriaSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-licao-teoria-skel span:nth-child(1) { width: 46%; }
+html[data-shell='phone'] .ms-licao-teoria-skel span:nth-child(2) { width: 78%; height: 18px; animation-delay: .2s; }
+html[data-shell='phone'] .ms-licao-teoria-skel span:nth-child(3) { animation-delay: .4s; }
+html[data-shell='phone'] .ms-licao-teoria-skel span:nth-child(4) { width: 62%; height: 74px; animation-delay: .6s; }
+
+@keyframes msLicaoTeoriaSkel {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}

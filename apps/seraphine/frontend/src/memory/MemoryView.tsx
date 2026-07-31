@@ -6,6 +6,8 @@ import type { SeraphineWS } from '../ws/client';
 import type { ServerMessage } from '../ws/types';
 
 import { API_BASE } from '../api';
+import { fetchProfile as apiFetchProfile, listFacts } from './api';
+import type { Fact, MemoryProfile, ProfileSection } from './types';
 
 // Category filter chips (mockup). 'Tudo' shows everything.
 const CATEGORY_FILTERS = ['Tudo', 'Preferencias', 'Pessoas', 'Trabalho', 'Rotina', 'Metas'] as const;
@@ -76,42 +78,12 @@ function factSourceLabel(s: string): string {
 const TAB_KEYS = ['Timeline', 'Perfil', 'Facts', 'Auditoria', 'Tudo'] as const;
 type Tab = (typeof TAB_KEYS)[number];
 
-interface Fact {
-  id: string;
-  text: string;
-  source: string;
-  confidence: number;
-  created_at: string;
-  superseded_by: string | null;
-  // Real backend field (GET /memory/facts model_dump): timestamp the fact was
-  // last revalidated/used. Null until the fact is recalled at least once.
-  last_used_at: string | null;
-  // Server-derived category eyebrow (METAS / TRABALHO / ROTINA / PESSOAS /
-  // LOCAL / PREFERENCIA / OUTROS). Persisted on the facts table. May be
-  // absent on very old payloads — the card falls back to deriveCategory().
-  category?: string | null;
-}
-
 interface TimelineEvent {
   id: string;
   event_type: string;
   summary: string;
   source?: string;
   created_at: string;
-}
-
-type ProfileSection = Record<string, unknown>;
-
-interface Profile {
-  identity?: ProfileSection;
-  preferences?: ProfileSection;
-  work?: ProfileSection;
-  contacts?: ProfileSection | unknown[];
-  finances?: ProfileSection;
-  health?: ProfileSection;
-  goals?: unknown[];
-  activity?: ProfileSection;
-  [key: string]: unknown;
 }
 
 interface MemoryViewProps {
@@ -257,7 +229,7 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
   const [timelineError, setTimelineError] = useState<string | null>(null);
 
   // Profile
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<MemoryProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -318,14 +290,8 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
     setProfileLoading(true);
     setProfileError(null);
     try {
-      const res = await fetch(`${API_BASE}/memory/profile`);
-      if (res.status === 404) {
-        setProfile(null);
-        return;
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json() as { profile: Profile };
-      setProfile(body.profile ?? null);
+      // 404 (profile not built yet) resolves to null, not an error.
+      setProfile(await apiFetchProfile());
     } catch (e) {
       setProfileError(String(e));
       setProfile(null);
@@ -338,10 +304,7 @@ export function MemoryView({ onBack, ws }: MemoryViewProps): JSX.Element {
     setFactsLoading(true);
     setFactsError(null);
     try {
-      const res = await fetch(`${API_BASE}/memory/facts?limit=100`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: Fact[] = await res.json();
-      setFacts(data);
+      setFacts(await listFacts({ limit: 100 }));
     } catch (e) {
       setFactsError(String(e));
     } finally {

@@ -1,0 +1,253 @@
+/* src/mobile/screens/VozScreen.css — tela VOZ · REALTIME (handoff linha 122).
+   Todas as classes têm prefixo `ms-voz-` / `ms-voz__` para nunca colidirem com
+   outra tela. Medidas, raios e pesos vieram do handoff tal e qual.
+
+   ANIMAÇÕES REAPROVEITADAS, NÃO REDECLARADAS:
+   - a esfera é o `.morb` de `mobile/obsidian.css`, via `<Orb size={158} float />`
+     — daí vêm `orbFloat` e o gradiente;
+   - `ringPulse` e `statusBlink` são os keyframes globais de `src/styles.css`;
+   - o handoff chama a onda de `wave`; no projeto o mesmo keyframe (scaleY .28 ↔ 1)
+     já existe e se chama `waveBar`, também em `src/styles.css`. Usamos o que
+     existe em vez de declarar um `wave` duplicado.
+
+   O contêiner da tela empurrada (`.mpushed__body`) já reserva as safe areas em
+   padding. Aqui o fundo precisa sangrar até a borda do aparelho, então a tela
+   cancela esse padding com margem negativa e devolve o topo como padding
+   próprio (12px + inset = os 56px do handoff); o `min-height` soma os dois
+   insets de volta para a coluna continuar valendo a tela inteira. */
+
+html[data-shell='phone'] .ms-voz {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100% + env(safe-area-inset-top, 44px) + env(safe-area-inset-bottom, 20px));
+  margin: calc(-1 * env(safe-area-inset-top, 44px)) 0 calc(-1 * env(safe-area-inset-bottom, 20px));
+  padding-top: calc(12px + env(safe-area-inset-top, 44px));
+  background: radial-gradient(circle at 50% 30%, #16161f, var(--app, #0f0f14) 60%);
+  color: var(--text, #ececef);
+}
+
+/* ── topo: pill de estado + relógio da sessão ── */
+html[data-shell='phone'] .ms-voz__topo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+}
+html[data-shell='phone'] .ms-voz__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 18px;
+}
+/* O ponto herda a cor da pill — cada estado se pinta uma vez só. */
+html[data-shell='phone'] .ms-voz__ponto {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+html[data-shell='phone'] .ms-voz__pill--vivo {
+  color: var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+}
+html[data-shell='phone'] .ms-voz__pill--vivo .ms-voz__ponto {
+  animation: statusBlink 1.5s ease-in-out infinite;
+}
+/* Conectando: pisca mais devagar, para não se confundir com o "ao vivo". */
+html[data-shell='phone'] .ms-voz__pill--espera {
+  color: var(--text-dim, #9594a0);
+  background: rgba(255, 255, 255, .05);
+}
+html[data-shell='phone'] .ms-voz__pill--espera .ms-voz__ponto {
+  animation: statusBlink 2.4s ease-in-out infinite;
+}
+/* Encerrada e sem conexão NÃO piscam: nada mais está acontecendo. */
+html[data-shell='phone'] .ms-voz__pill--fim {
+  color: var(--text-faint, #5f5e6b);
+  background: rgba(255, 255, 255, .05);
+}
+html[data-shell='phone'] .ms-voz__pill--erro {
+  color: var(--danger, #ef6b6b);
+  background: rgba(239, 107, 107, .12);
+}
+html[data-shell='phone'] .ms-voz__timer {
+  font-size: 13px;
+  color: var(--text-dim, #9594a0);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── palco: esfera, transcrição e onda ── */
+html[data-shell='phone'] .ms-voz__palco {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 0 32px;
+}
+html[data-shell='phone'] .ms-voz__orbe {
+  position: relative;
+  flex: none;
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Os anéis vêm ANTES da esfera no DOM; a `.morb-wrap` já é `position:relative`
+   (obsidian.css), então a esfera é pintada por cima deles e do brilho. */
+html[data-shell='phone'] .ms-voz__anel {
+  position: absolute;
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  border: 2px solid var(--accent, #9a93ff);
+  animation: ringPulse 2.4s ease-out infinite;
+}
+html[data-shell='phone'] .ms-voz__anel--2 { animation-delay: 1.2s; }
+html[data-shell='phone'] .ms-voz__brilho {
+  position: absolute;
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent, #9a93ff), transparent 70%);
+  filter: blur(16px);
+  opacity: .5;
+}
+
+html[data-shell='phone'] .ms-voz__fala {
+  min-height: 0;
+  overflow-y: auto;
+  text-align: center;
+}
+html[data-shell='phone'] .ms-voz__resposta {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.01em;
+  color: var(--text, #ececef);
+}
+/* Vazio é estado desenhado, não sumiço: mesma tipografia, tinta apagada. */
+html[data-shell='phone'] .ms-voz__resposta--vazia { color: var(--text-dim, #9594a0); }
+html[data-shell='phone'] .ms-voz__ouvi {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-voz__ouvi--vazio { color: var(--text-faint, #5f5e6b); }
+
+html[data-shell='phone'] .ms-voz__onda {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 30px;
+}
+html[data-shell='phone'] .ms-voz__barra {
+  width: 4px;
+  height: 30px;
+  border-radius: 3px;
+  background: var(--accent, #9a93ff);
+  transform-origin: bottom;
+  animation: waveBar .9s ease-in-out infinite;
+}
+/* Mudo (ou sessão fora do ar): a onda para de vez. Uma onda mexendo com o
+   microfone desligado seria a tela mentindo sobre estar ouvindo. */
+html[data-shell='phone'] .ms-voz__onda--mudo .ms-voz__barra {
+  animation: none;
+  transform: scaleY(.18);
+  background: var(--text-faint, #5f5e6b);
+}
+
+/* ── controles: mudo / encerrar / teclado ── */
+html[data-shell='phone'] .ms-voz__controles {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px 0 calc(24px + env(safe-area-inset-bottom, 20px));
+}
+html[data-shell='phone'] .ms-voz__ctrl {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  background: var(--surface, #17171e);
+  color: var(--text, #ececef);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  cursor: pointer;
+}
+/* Sem rota para o chat, o botão do teclado não tem para onde levar. Ele fica
+   apagado e inerte em vez de sumir — o handoff desenha os três controles, e um
+   botão que some é a tela mudando de forma sem avisar. */
+html[data-shell='phone'] .ms-voz__ctrl:disabled {
+  opacity: .35;
+  cursor: default;
+}
+html[data-shell='phone'] .ms-voz__ctrl--on {
+  color: var(--danger, #ef6b6b);
+  border-color: rgba(239, 107, 107, .4);
+  background: rgba(239, 107, 107, .12);
+}
+html[data-shell='phone'] .ms-voz__fim {
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger, #ef6b6b);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(239, 107, 107, .4);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ── falha e espera ── */
+html[data-shell='phone'] .ms-voz-erro {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-voz-skel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+html[data-shell='phone'] .ms-voz-skel span {
+  width: 220px;
+  height: 13px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .06);
+  animation: msVozSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-voz-skel span:nth-child(2) { width: 140px; animation-delay: .2s; }
+@keyframes msVozSkel { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* O motor (RealtimeController) é montado, não desenhado: ele traz o palco do
+   desktop inteiro. Caixa de tamanho zero — `visibility:hidden` também o tira da
+   árvore de acessibilidade, então o `role="alert"` dele não vira um segundo
+   aviso fantasma nesta tela. Suprimir o aviso dele obriga a tela a dizer a
+   falha do microfone com a própria voz: é o que a prop `onError` carrega. */
+html[data-shell='phone'] .ms-voz__motor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}

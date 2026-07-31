@@ -4,6 +4,8 @@ import { listEvents } from '../google/api';
 import type { CalendarEvent } from '../google/types';
 import type { FinanceEntry, SeraphineTask } from '../finance/types';
 import { API_BASE } from '../api';
+import { fetchAggregate as apiFetchAggregate, fetchTasksByRange } from './api';
+import type { AggregateDay as DayAggregate } from './types';
 import {
   WEEKDAY_LABELS,
   chipColor,
@@ -63,48 +65,7 @@ interface Reminder {
   next_run: string | null;
 }
 
-/* -- Aggregate types (SDD 083) -- */
-
-interface AggTaskSummary {
-  id: number;
-  title: string;
-  status: string;
-}
-
-interface AggHabitLog {
-  habit_id: string;
-  name: string;
-  completed: boolean;
-}
-
-interface AggHealth {
-  steps: number;
-  sleep_minutes: number | null;
-  sleep_hours: number | null;
-  calories: number;
-  resting_hr: number | null;
-}
-
-interface AggWater {
-  intake_ml: number;
-  goal_ml: number;
-}
-
-interface AggEvent {
-  title: string;
-  start: string;
-  end: string;
-}
-
-interface DayAggregate {
-  date: string;
-  tasks: AggTaskSummary[];
-  habits: AggHabitLog[];
-  health: AggHealth | null;
-  water: AggWater | null;
-  events: AggEvent[];
-  score: number;
-}
+/* -- Aggregate types (SDD 083) live in ./types, shared with ./api -- */
 
 /* ------------------------------------------------------------------ */
 /*  PT-BR formatters                                                   */
@@ -1319,17 +1280,7 @@ export function CalendarView({ onNavigateToTask }: CalendarViewProps): JSX.Eleme
       return;
     }
     try {
-      const params = new URLSearchParams({
-        start: toIsoDate(rangeStart),
-        end: toIsoDate(rangeEnd),
-      });
-      const res = await fetch(`${API_BASE}/tasks/by-date-range?${params.toString()}`);
-      if (!res.ok) {
-        setTasks([]);
-        return;
-      }
-      const data = await res.json();
-      setTasks(Array.isArray(data.tasks) ? (data.tasks as SeraphineTask[]) : []);
+      setTasks(await fetchTasksByRange(toIsoDate(rangeStart), toIsoDate(rangeEnd)));
     } catch {
       setTasks([]);
     }
@@ -1373,17 +1324,7 @@ export function CalendarView({ onNavigateToTask }: CalendarViewProps): JSX.Eleme
     if (viewMode !== 'heatmap') return;
     setAggLoading(true);
     try {
-      const params = new URLSearchParams({
-        start: toIsoDate(rangeStart),
-        end: toIsoDate(rangeEnd),
-      });
-      const res = await fetch(`${API_BASE}/calendar/aggregate?${params.toString()}`);
-      if (!res.ok) {
-        setAggregates(new Map());
-        return;
-      }
-      const data = await res.json();
-      const days: DayAggregate[] = Array.isArray(data.days) ? data.days : [];
+      const days = await apiFetchAggregate(toIsoDate(rangeStart), toIsoDate(rangeEnd));
       const m = new Map<string, DayAggregate>();
       for (const d of days) {
         m.set(d.date, d);

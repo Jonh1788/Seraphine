@@ -15,11 +15,37 @@ export interface CategorySummary {
   count: number;
 }
 
-export interface DashboardData {
+/** Body of `GET /finance/summary?month=&year=` (month is 1-indexed on the wire). */
+export interface FinanceSummary {
   income: number;
   expenses: number;
   balance: number;
   by_category: CategorySummary[];
+}
+
+/** Envelope of `GET /finance/entries`. */
+export interface FinanceEntryListResponse {
+  entries: FinanceEntry[];
+}
+
+/** Query params accepted by `GET /finance/entries` (`month` is 1-indexed). */
+export interface ListEntriesParams {
+  status?: 'confirmed' | 'pending_review';
+  limit?: number;
+  year?: number;
+  month?: number;
+}
+
+/** Body of `GET /finance/balance`. */
+export interface FinanceBalance {
+  balance: number;
+  total_income?: number;
+  total_expenses?: number;
+  adjustment?: number;
+}
+
+/** Monthly summary plus the month's entries — what the dashboard renders. */
+export interface DashboardData extends FinanceSummary {
   entries: FinanceEntry[];
 }
 
