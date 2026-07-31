@@ -104,10 +104,14 @@ fn compile_healthkit_bridge() {
     // WidgetBridge.swift touches WidgetCenter/UIKit, both iOS-only here
     // (the whole file is `#if os(iOS)` on macOS), so link them only for
     // the iOS SDKs and leave the desktop link line untouched.
+    // NotificationBridge.swift precisa de UserNotifications; como o
+    // arquivo inteiro é `#if os(iOS)` fora do iOS, o framework só entra
+    // nos SDKs iOS — a linha de link do desktop segue intacta.
     if sdk_name_opt.is_some() {
         println!("cargo:rustc-link-lib=framework=WidgetKit");
         println!("cargo:rustc-link-lib=framework=UIKit");
         println!("cargo:rustc-link-lib=framework=SwiftUI");
+        println!("cargo:rustc-link-lib=framework=UserNotifications");
     }
     // Swift runtime: macOS has it at /usr/lib/swift; iOS bundles it
     // into the app via Xcode. Only need to hint the linker on macOS.
