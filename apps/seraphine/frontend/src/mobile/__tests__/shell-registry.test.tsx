@@ -35,6 +35,24 @@ vi.mock('../screens/registry', () => ({
         </div>
       ),
     })),
+    // Par usado pelo teste do parâmetro: `inbox` empurra `whatsapp` COM id, e
+    // a empurrada mostra o que recebeu. Uma tela empurrada sem id (a própria
+    // `inbox`, que o Mais abre) mostra `undefined` — é o caso das quinze telas
+    // que não mandam nem leem o campo.
+    inbox: lazy(async () => ({
+      default: ({ onOpen, id }: ScreenProps) => (
+        <div>
+          <span>inbox-id:{String(id)}</span>
+          <button type="button"
+            onClick={() => onOpen?.({ key: 'whatsapp', title: 'Ana', id: '5511999999999@c.us' })}>
+            abrir-thread
+          </button>
+        </div>
+      ),
+    })),
+    whatsapp: lazy(async () => ({
+      default: ({ id }: ScreenProps) => <div>thread:{id ?? 'sem-id'}</div>,
+    })),
     'onboarding-boas-vindas': lazy(async () => ({
       default: ({ onDone }: ScreenProps) => (
         <button type="button" onClick={onDone}>ob1-avancar</button>
@@ -131,6 +149,26 @@ describe('PhoneShell monta pelo registry', () => {
     fireEvent.click(queryAllByLabelText('Voltar')[0]); // o ‹ da tela fecha a pilha
     expect(queryByText('Junho')).toBeNull();
     expect(container.querySelector('.mtabbar')).toBeTruthy();
+    await settle();
+  });
+
+  // O buraco que este teste tranca: `Pushed` levava só `{key, title}`, então
+  // uma tela empurrada não tinha como saber QUAL lição/conversa abrir — e três
+  // telas da onda resolviam uma por conta própria (a Trilhas abria a lição
+  // destravada mesmo quando você tocava numa já concluída).
+  it('entrega à tela empurrada o id que quem empurrou mandou', async () => {
+    jaOnboardou();
+    const { getByText, findByText } = render(<PhoneShell />);
+    fireEvent.click(getByText('Mais'));
+    await settle();
+
+    // empurrada sem id: o campo chega `undefined`, não some nem vira ''
+    fireEvent.click(getByText('Inbox'));
+    expect(await findByText('inbox-id:undefined')).toBeTruthy();
+
+    // ela empurra outra COM id, e o id atravessa o estado do shell até a tela
+    fireEvent.click(getByText('abrir-thread'));
+    expect(await findByText('thread:5511999999999@c.us')).toBeTruthy();
     await settle();
   });
 

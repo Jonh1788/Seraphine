@@ -2,9 +2,17 @@ import { lazy } from 'react';
 
 export interface ScreenProps {
   onBack?: () => void;
-  onOpen?: (p: { key: ScreenKey; title: string }) => void;
+  onOpen?: (p: { key: ScreenKey; title: string; id?: string }) => void;
   /** Só as telas de onboarding usam: avança o passo, e no último conclui o fluxo. */
   onDone?: () => void;
+  /** O QUE a tela deve mostrar: identificador opaco escolhido por quem a
+   *  empurrou — id de lição, id de chat. O shell não interpreta o valor, só
+   *  repassa o que veio no `onOpen`.
+   *
+   *  Opcional dos dois lados de propósito: a maioria das telas não manda nem lê
+   *  o campo, e quem lê recebe `undefined` quando ninguém mandou (aí a tela
+   *  decide sozinha o que abrir, como fazia antes). */
+  id?: string;
 }
 
 export type ScreenKey =
