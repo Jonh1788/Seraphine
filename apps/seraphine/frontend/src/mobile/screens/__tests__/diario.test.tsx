@@ -115,7 +115,7 @@ describe('DiarioScreen', () => {
     ));
     // salvou: o campo esvazia e a tela recarrega o que o servidor tem
     await waitFor(() => expect((campo as HTMLTextAreaElement).value).toBe(''));
-    expect(vi.mocked(fetchJournalEntries).mock.calls.length).toBeGreaterThan(1);
+    await waitFor(() => expect(vi.mocked(fetchJournalStats).mock.calls.length).toBeGreaterThan(1));
   });
 
   it('Salvar sem texto não chama a api', async () => {
@@ -179,6 +179,54 @@ describe('DiarioScreen', () => {
       });
       expect(screen.queryByText(/ainda não registrou humor neste mês/i)).toBeNull();
     }
+  });
+
+  it('não afirma "sem humor" enquanto as entradas do mês ainda estão no ar', async () => {
+    // O mapa tem duas fontes. A tendência costuma chegar primeiro e VAZIA —
+    // é o caso normal de quem só escreve no diário, porque o POST /journal não
+    // escreve mood_log. Com o portão preso só nela, o cartão afirmava o vazio e
+    // se desmentia meio segundo depois, quando o mês chegasse.
+    const hoje = diaLocal(HOJE);
+    let entregarMes: (r: { entries: JournalEntry[]; total: number }) => void = () => {};
+    vi.mocked(fetchJournalEntries).mockImplementation((params) => {
+      if (params?.month != null) {
+        return new Promise((resolve) => { entregarMes = resolve; });
+      }
+      return Promise.resolve({ entries: [entrada({ date: hoje })], total: 1 });
+    });
+    vi.mocked(fetchMoodTrend).mockResolvedValue({ days: [] });
+
+    const { container } = render(<DiarioScreen />);
+    // a última entrada já chegou (consulta sem mês) — logo a tendência vazia já
+    // passou por várias voltas do microtask e o mês ainda não voltou
+    await waitFor(() => expect(screen.getByText(/Hoje · Dia produtivo/)).toBeTruthy());
+    expect(screen.queryByText(/ainda não registrou humor neste mês/i)).toBeNull();
+    expect(container.querySelector('.ms-diario-skel-grade')).toBeTruthy();
+
+    entregarMes({ entries: [entrada({ date: hoje, mood_valence: 0.85 })], total: 1 });
+    await waitFor(() => expect(container.querySelectorAll('.ms-diario-mapa-cel--com').length).toBeGreaterThan(0));
+    expect(screen.queryByText(/ainda não registrou humor neste mês/i)).toBeNull();
+  });
+
+  it('o esqueleto do mapa tem o tamanho da grade que vem', async () => {
+    let entregar: (r: { days: never[] }) => void = () => {};
+    vi.mocked(fetchMoodTrend).mockImplementation(() => new Promise((resolve) => { entregar = resolve; }));
+    const { container } = render(<DiarioScreen />);
+    await waitFor(() => expect(container.querySelector('.ms-diario-skel-grade')).toBeTruthy());
+    expect(container.querySelectorAll('.ms-diario-skel-grade span')).toHaveLength(HOJE.getDate());
+    entregar({ days: [] });
+    await waitFor(() => expect(container.querySelectorAll('.ms-diario-mapa-cel')).toHaveLength(HOJE.getDate()));
+  });
+
+  it('pede o mês inteiro ao servidor em vez de cortar no cliente', async () => {
+    render(<DiarioScreen />);
+    // recorte no servidor: nenhum dia do mês cai fora da grade em silêncio
+    await waitFor(() => expect(vi.mocked(fetchJournalEntries)).toHaveBeenCalledWith(
+      expect.objectContaining({ month: HOJE.getMonth() + 1, year: HOJE.getFullYear() }),
+    ));
+    // e a última entrada é buscada sem recorte de mês, senão o cartão mentiria
+    // "você ainda não escreveu nada" no dia 1 de quem escreveu ontem
+    expect(vi.mocked(fetchJournalEntries)).toHaveBeenCalledWith({ limit: 1 });
   });
 
   // O shell deixou de desenhar chrome (PushedScreen virou só corpo): sem a seta

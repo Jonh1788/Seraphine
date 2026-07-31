@@ -35,11 +35,25 @@ const MESES = [
 export function DiarioScreen({ onBack }: ScreenProps) {
   const agora = new Date();
   const diaHoje = agora.getDate();
-  const prefixoMes = `${agora.getFullYear()}-${dois(agora.getMonth() + 1)}`;
+  const mesHoje = agora.getMonth() + 1;
+  const anoHoje = agora.getFullYear();
+  const prefixoMes = `${anoHoje}-${dois(mesHoje)}`;
 
-  const [entradas, setEntradas] = useState<JournalEntry[] | null>(null);
-  const [erroEntradas, setErroEntradas] = useState(false);
-  const [carregandoEntradas, setCarregandoEntradas] = useState(true);
+  // Duas consultas ao /journal, com recortes diferentes de propósito:
+  // `ultima` é a entrada mais recente SEJA QUANDO FOR (o backend ordena
+  // date DESC), e o mapa precisa do mês inteiro. Uma consulta só não serve às
+  // duas: recortada no mês, o cartão da última entrada mentiria "você ainda
+  // não escreveu nada" no dia 1 de quem escreveu ontem; sem recorte, o mês
+  // chega truncado pelo limite (o /journal também emite entradas `proactive` e
+  // `voice`, então 30 acabam antes do fim do mês e os dias mais antigos somem
+  // do mapa sem aviso).
+  const [ultima, setUltima] = useState<JournalEntry | null>(null);
+  const [erroUltima, setErroUltima] = useState(false);
+  const [carregandoUltima, setCarregandoUltima] = useState(true);
+
+  const [doMes, setDoMes] = useState<JournalEntry[] | null>(null);
+  const [erroMes, setErroMes] = useState(false);
+  const [carregandoMes, setCarregandoMes] = useState(true);
 
   const [tendencia, setTendencia] = useState<MoodTrendDay[] | null>(null);
   const [erroTendencia, setErroTendencia] = useState(false);
@@ -63,10 +77,17 @@ export function DiarioScreen({ onBack }: ScreenProps) {
   // Cada fonte carrega e erra por conta própria: uma falha no /mood/trend não
   // pode levar junto a última entrada, que vem de outra rota.
   const carregar = useCallback(() => {
-    fetchJournalEntries({ limit: 30 })
-      .then((r) => { if (vivo.current) { setEntradas(r.entries); setErroEntradas(false); } })
-      .catch(() => { if (vivo.current) { setEntradas(null); setErroEntradas(true); } })
-      .finally(() => { if (vivo.current) setCarregandoEntradas(false); });
+    fetchJournalEntries({ limit: 1 })
+      .then((r) => { if (vivo.current) { setUltima(r.entries[0] ?? null); setErroUltima(false); } })
+      .catch(() => { if (vivo.current) { setUltima(null); setErroUltima(true); } })
+      .finally(() => { if (vivo.current) setCarregandoUltima(false); });
+
+    // O mês do mapa: recorte no servidor em vez de teto no cliente, para
+    // nenhum dia cair fora da grade em silêncio. O backend aceita até 500.
+    fetchJournalEntries({ month: mesHoje, year: anoHoje, limit: 200 })
+      .then((r) => { if (vivo.current) { setDoMes(r.entries); setErroMes(false); } })
+      .catch(() => { if (vivo.current) { setDoMes(null); setErroMes(true); } })
+      .finally(() => { if (vivo.current) setCarregandoMes(false); });
 
     // /mood/trend?days=N devolve os últimos N dias terminando hoje; pedir
     // `diaHoje` cobre exatamente do dia 1 do mês até hoje, que é a grade.
@@ -79,7 +100,7 @@ export function DiarioScreen({ onBack }: ScreenProps) {
       .then((s) => { if (vivo.current) { setStats(s); setErroStats(false); } })
       .catch(() => { if (vivo.current) { setStats(null); setErroStats(true); } })
       .finally(() => { if (vivo.current) setCarregandoStats(false); });
-  }, [diaHoje]);
+  }, [diaHoje, mesHoje, anoHoje]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -95,7 +116,7 @@ export function DiarioScreen({ onBack }: ScreenProps) {
     if (Number.isFinite(dia)) porDia.set(dia, d.avg_valence);
   }
   if (porDia.size === 0) {
-    for (const e of entradas ?? []) {
+    for (const e of doMes ?? []) {
       const data = (e.date ?? '').slice(0, 10);
       if (!data.startsWith(prefixoMes) || e.mood_valence == null) continue;
       const dia = Number(data.slice(8, 10));
@@ -104,9 +125,14 @@ export function DiarioScreen({ onBack }: ScreenProps) {
     }
   }
 
+  // O mapa tem DUAS fontes, então só está pronto quando as duas chegaram. Com o
+  // portão preso só na tendência, o caso comum (usuário que só escreve no
+  // diário, cujo humor nunca vira mood_log) desenhava a grade vazia e afirmava
+  // "você ainda não registrou humor neste mês" enquanto as entradas ainda
+  // estavam no ar — para se corrigir sozinho um instante depois.
+  const carregandoMapa = carregandoTendencia || carregandoMes;
   const ultimaValencia = [...porDia.entries()].sort((a, b) => b[0] - a[0])[0]?.[1];
   const humorAtual = ultimaValencia == null ? null : moodFromValence(ultimaValencia);
-  const ultima = (entradas ?? [])[0] ?? null;
   const streak = stats?.current_streak ?? 0;
 
   const chip = (semente: string) => {
@@ -241,7 +267,7 @@ export function DiarioScreen({ onBack }: ScreenProps) {
               </span>
             )}
           </div>
-          {carregandoTendencia ? <SkelMapa />
+          {carregandoMapa ? <SkelMapa dias={diaHoje} />
             : (
               <>
                 <div className="ms-diario-mapa-grade">
@@ -265,7 +291,8 @@ export function DiarioScreen({ onBack }: ScreenProps) {
                     tendência fora do ar o mapa pode estar completo pelo
                     fallback das entradas, e calar isso seria vender um mês
                     inteiro de humor que ninguém conferiu. */}
-                {erroTendencia ? <Erro>Não consegui carregar seu mapa de humor.</Erro>
+                {erroTendencia || (erroMes && porDia.size === 0)
+                  ? <Erro>Não consegui carregar seu mapa de humor.</Erro>
                   : porDia.size === 0 ? <Vazio>você ainda não registrou humor neste mês — escolha uma carinha acima</Vazio>
                   : null}
               </>
@@ -274,8 +301,8 @@ export function DiarioScreen({ onBack }: ScreenProps) {
 
         {/* ── última entrada ── */}
         <section className="ms-diario-card ms-diario-ultima">
-          {carregandoEntradas ? <Skel linhas={2} />
-            : erroEntradas ? <Erro>Não consegui carregar sua última entrada.</Erro>
+          {carregandoUltima ? <Skel linhas={2} />
+            : erroUltima ? <Erro>Não consegui carregar sua última entrada.</Erro>
             : ultima ? (
               <>
                 <div className="ms-diario-ultima-head">
@@ -347,11 +374,13 @@ function Skel({ linhas = 2 }: { linhas?: number }) {
   );
 }
 
-/** Esqueleto da grade: os mesmos quadrados, sem cor e sem texto. */
-function SkelMapa() {
+/** Esqueleto da grade: exatamente os quadrados que virão (um por dia até hoje),
+ *  sem cor e sem texto — um número fixo faria a espera ter uma altura e o dado
+ *  outra, e o cartão saltaria no lugar de simplesmente preencher. */
+function SkelMapa({ dias }: { dias: number }) {
   return (
     <div className="ms-diario-skel-grade" aria-hidden="true">
-      {Array.from({ length: 20 }, (_, i) => <span key={i} />)}
+      {Array.from({ length: dias }, (_, i) => <span key={i} />)}
     </div>
   );
 }
