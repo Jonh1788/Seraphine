@@ -42,12 +42,26 @@ function chave(item: InboxItem): string {
   return `${item.source}:${item.id}`;
 }
 
+/** O resultado de UMA carga, com o filtro a que ele pertence.
+ *
+ *  Guardar o filtro junto não é zelo: `pedidas` cai de 2 (Tudo) para 1 no mesmo
+ *  quadro em que o chip muda, e a carga anterior só é substituída quando o fetch
+ *  novo volta. Com `falhas` solto num state próprio, uma falha PARCIAL de "Tudo"
+ *  virava falha TOTAL de "WhatsApp" — e a tela pintava "não consegui carregar
+ *  sua inbox", com `role="alert"` junto, num quadro que o navegador chega a
+ *  desenhar. Zerar dentro do efeito não resolve: efeito roda depois da pintura.
+ *  Amarrado o resultado ao filtro, o quadro do meio deixa de existir — dado de
+ *  um filtro nunca é lido sob outro; ele simplesmente ainda não chegou. */
+interface Carga {
+  filtro: InboxFilter;
+  itens: InboxItem[] | null;
+  falhas: InboxSourceError[];
+  caiuTudo: boolean;
+}
+
 export function InboxScreen({ onBack, onOpen }: ScreenProps) {
   const [filtro, setFiltro] = useState<InboxFilter>('all');
-  const [itens, setItens] = useState<InboxItem[] | null>(null);
-  const [falhas, setFalhas] = useState<InboxSourceError[]>([]);
-  const [caiuTudo, setCaiuTudo] = useState(false);
-  const [carregando, setCarregando] = useState(true);
+  const [carga, setCarga] = useState<Carga | null>(null);
   // "Lido" local: a api da Inbox não expõe marcar-como-lido (nem no Gmail nem na
   // bridge), então o botão de check do cabeçalho apaga os pontos só nesta
   // sessão. Ver o relatório da task: falta endpoint, não é esquecimento.
@@ -55,29 +69,29 @@ export function InboxScreen({ onBack, onOpen }: ScreenProps) {
 
   useEffect(() => {
     let vivo = true;
-    setCarregando(true);
     listInboxDetailed(filtro)
       .then((res) => {
         if (!vivo) return;
-        setItens(res.items);
-        setFalhas(res.errors);
-        setCaiuTudo(false);
-        setCarregando(false);
+        setCarga({ filtro, itens: res.items, falhas: res.errors, caiuTudo: false });
       })
       .catch(() => {
         if (!vivo) return;
-        setItens(null);
-        setFalhas([]);
-        setCaiuTudo(true);
-        setCarregando(false);
+        setCarga({ filtro, itens: null, falhas: [], caiuTudo: true });
       });
     return () => { vivo = false; };
   }, [filtro]);
 
+  // Carga de outro filtro é carga que ainda não chegou: some inteira, e a tela
+  // volta ao esqueleto em vez de misturar dado velho com pergunta nova.
+  const atual = carga && carga.filtro === filtro ? carga : null;
+  const carregando = atual === null;
+  const falhas = atual?.falhas ?? [];
+  const caiuTudo = atual?.caiuTudo ?? false;
+
   // O filtro também é aplicado aqui, e não só no argumento da api: a tela é dona
   // do que mostra, e uma fonte que devolvesse item alheio não vazaria para a
   // aba errada.
-  const visiveis = (itens ?? []).filter((i) => filtro === 'all' || i.source === filtro);
+  const visiveis = (atual?.itens ?? []).filter((i) => filtro === 'all' || i.source === filtro);
   const naoLida = (i: InboxItem) => i.unread && !lidasAqui.has(chave(i));
   const quantasNaoLidas = visiveis.filter(naoLida).length;
 

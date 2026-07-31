@@ -216,6 +216,59 @@ describe('InboxScreen', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  /* Task 28 (minor acumulado da onda). Em "Tudo" são 2 fontes pedidas, no chip
+     de um canal só é 1. Enquanto `falhas` só zerava dentro do `.then`/`.catch`,
+     trocar de filtro depois de uma falha PARCIAL fazia `falhas.length >= pedidas`
+     virar verdade por um quadro: a tela piscava a falha TOTAL, com `role="alert"`
+     junto, antes mesmo de o fetch novo sair. */
+  it('não pisca "não consegui carregar sua inbox" ao trocar de filtro depois de falha parcial', async () => {
+    vi.mocked(listInboxDetailed).mockResolvedValue({
+      items: [email()],
+      errors: [{ source: 'whatsapp', message: 'HTTP 502' }],
+    });
+    render(<InboxScreen />);
+    await waitFor(() => expect(screen.getByText('GitHub')).toBeTruthy());
+
+    // a falha parcial está na tela, e é essa que tem de continuar sendo a verdade
+    expect(screen.getByText(/pode estar incompleto/i)).toBeTruthy();
+
+    // O clique NÃO pode passar pelo `fireEvent` do RTL: ele embrulha em `act()`,
+    // que descarrega o efeito antes de devolver o controle — o quadro do meio
+    // deixa de existir e o teste fica verde com ou sem a correção (verificado
+    // por mutação). Despachado cru, o React commita o DOM do clique de forma
+    // síncrona e o efeito passivo fica para depois, que é exatamente o que o
+    // navegador faz: ele PINTA esse quadro.
+    vi.mocked(listInboxDetailed).mockReturnValue(new Promise(() => {}));
+    // Sair do ambiente de `act` é o que faz o quadro do meio existir: dentro
+    // dele o React enfileira o update e só descarrega no fim do `act`, junto com
+    // o efeito — o commit do clique e o do efeito viram um só, e o teste fica
+    // verde com ou sem correção (verificado por mutação). Fora, o clique é
+    // evento discreto: commita síncrono, e o efeito passivo fica para depois.
+    // É a ordem do navegador, que PINTA esse quadro.
+    const g = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const antes = g.IS_REACT_ACT_ENVIRONMENT;
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      screen.getByRole('button', { name: 'WhatsApp' })
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // O render do clique é descarregado numa MICROTAREFA; o efeito passivo é
+      // agendado pelo Scheduler, que é macrotarefa. Esperar uma microtarefa
+      // aterrissa exatamente entre os dois — o quadro que o navegador pinta.
+      await Promise.resolve();
+
+      // o quadro do meio existe mesmo: o clique já commitou (o chip virou ativo)
+      expect(screen.getByRole('button', { name: 'WhatsApp' }).getAttribute('aria-pressed')).toBe('true');
+      // e nele a tela está CARREGANDO, não afirmando falha da carga anterior
+      expect(document.querySelectorAll('.ms-inbox-skel-linha').length).toBeGreaterThan(0);
+      expect(screen.queryByText(/não consegui carregar sua inbox/i)).toBeNull();
+      expect(screen.queryByText(/não consegui contar as não lidas/i)).toBeNull();
+      expect(screen.queryByText(/pode estar incompleto/i)).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      g.IS_REACT_ACT_ENVIRONMENT = antes;
+    }
+  });
+
   // `InboxItem.id` só é único DENTRO da fonte: a chave da lista é `fonte:id`.
   it('dois itens de fontes diferentes com o mesmo id convivem na lista', async () => {
     const aviso = vi.spyOn(console, 'error').mockImplementation(() => {});

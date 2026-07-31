@@ -129,7 +129,12 @@ export function LicaoTeoriaScreen({ id, onBack, onOpen }: ScreenProps) {
   }, [id]);
 
   const trilha = curso ? (curso.title || curso.topic) : '';
-  const conceito = licao?.concept_md.trim() ?? '';
+  // `?.` no campo, e não só na lição: `concept_md` é nullable no banco
+  // (`courses/schema.py:18`). Hoje todo insert coage para "", mas um `null`
+  // vindo do servidor estouraria aqui e deixaria a tela em branco.
+  const conceito = licao?.concept_md?.trim() ?? '';
+  // A dica fala do exemplo; só há exemplo quando a teoria traz bloco de código.
+  const temExemplo = /```/.test(conceito);
   const exercicios = licao?.exercises.length ?? 0;
   // A barra mede o passo dentro da lição: teoria é o primeiro de
   // (1 teoria + N exercícios). Nada de tempo estimado — o payload não tem
@@ -201,10 +206,19 @@ export function LicaoTeoriaScreen({ id, onBack, onOpen }: ScreenProps) {
                 )
                 : <Vazio>Esta lição ainda não tem a teoria escrita — os exercícios já valem.</Vazio>}
 
-              <div className="ms-licao-teoria-dica">
-                <SparkleIcon size={15} />
-                <span>Leia o exemplo com calma: os exercícios usam exatamente esses conceitos.</span>
-              </div>
+              {/* Sem teoria escrita não há o que ler com calma, e sem bloco de
+                  código não há "o exemplo": a dica apontava para algo que não
+                  estava na tela. O que continua verdade nos dois casos é a
+                  segunda metade da frase. */}
+              {conceito && (
+                <div className="ms-licao-teoria-dica">
+                  <SparkleIcon size={15} />
+                  <span>
+                    {temExemplo ? 'Leia o exemplo com calma: os' : 'Os'} exercícios usam
+                    exatamente esses conceitos.
+                  </span>
+                </div>
+              )}
             </>
           )}
       </div>

@@ -183,6 +183,18 @@ describe('WhatsAppThreadScreen', () => {
     expect(screen.getByText(/ainda não dá para responder por aqui/i)).toBeTruthy();
   });
 
+  // Task 28 (minor acumulado da onda): a tese desta tela é não afirmar o que a
+  // fonte não entrega, e ela a violava numa palavra. `inbox/api.ts:203-210`
+  // descarta `hasMedia`/`type`, então corpo vazio é corpo vazio — pode ser áudio,
+  // figurinha, ou uma mensagem apagada. Só "sem texto" é verdade.
+  it('mensagem sem corpo diz que não tem texto, sem chamar de mídia', async () => {
+    vi.mocked(listWhatsAppMessages).mockResolvedValue([msg({ id: 'm9', body: '' })]);
+    render(<WhatsAppThreadScreen id={CHAT} />);
+
+    await waitFor(() => expect(screen.getByText('sem texto')).toBeTruthy());
+    expect(screen.queryByText(/mídia/i)).toBeNull();
+  });
+
   it('troca de conversa recarrega a thread', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
     const { rerender } = render(<WhatsAppThreadScreen id={CHAT} />);

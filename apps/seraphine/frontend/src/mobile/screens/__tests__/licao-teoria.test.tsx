@@ -252,6 +252,43 @@ describe('LicaoTeoriaScreen', () => {
     await waitFor(() => expect(screen.getByText('Ownership')).toBeTruthy());
   });
 
+  /* Task 28 — dois minors acumulados da onda, ambos sobre a tela afirmar o que
+     não tem à vista. */
+  describe('a dica não aponta para o que não está na tela', () => {
+    it('sem bloco de código, não manda ler "o exemplo"', async () => {
+      vi.mocked(getLesson).mockResolvedValue(licao({ concept_md: 'Ownership em uma frase, sem código.' }));
+      render(<LicaoTeoriaScreen />);
+
+      await waitFor(() => expect(screen.getByText(/Ownership em uma frase/)).toBeTruthy());
+      expect(screen.getByText(/exercícios usam exatamente esses conceitos/)).toBeTruthy();
+      expect(screen.queryByText(/Leia o exemplo/)).toBeNull();
+    });
+
+    it('com bloco de código, manda — porque aí o exemplo existe', async () => {
+      render(<LicaoTeoriaScreen />);
+      await waitFor(() => expect(screen.getByText('Ownership')).toBeTruthy());
+      expect(screen.getByText(/Leia o exemplo com calma/)).toBeTruthy();
+    });
+
+    it('sem teoria escrita, a dica some inteira', async () => {
+      vi.mocked(getLesson).mockResolvedValue(licao({ concept_md: '' }));
+      render(<LicaoTeoriaScreen />);
+
+      await waitFor(() => expect(screen.getByText(/ainda não tem a teoria escrita/)).toBeTruthy());
+      expect(screen.queryByText(/exercícios usam exatamente esses conceitos/)).toBeNull();
+    });
+  });
+
+  // `concept_md` é nullable no banco (`courses/schema.py:18`). Sem o `?.` a tela
+  // estourava no `.trim()` e ficava em branco, em vez de cair no estado vazio.
+  it('aguenta concept_md nulo sem estourar', async () => {
+    vi.mocked(getLesson).mockResolvedValue(licao({ concept_md: null as unknown as string }));
+    render(<LicaoTeoriaScreen />);
+
+    await waitFor(() => expect(screen.getByText(/ainda não tem a teoria escrita/)).toBeTruthy());
+    expect(screen.getByText('Ownership')).toBeTruthy();
+  });
+
   it('licaoEmFoco pega a desbloqueada; trilha inteira feita, a última', () => {
     expect(licaoEmFoco(curso().lessons)!.id).toBe('l3');
     const feitas = curso().lessons.map((l) => ({ ...l, lock: 'done' as const }));

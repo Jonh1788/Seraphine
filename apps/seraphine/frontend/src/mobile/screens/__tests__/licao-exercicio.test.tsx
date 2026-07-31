@@ -288,6 +288,24 @@ describe('LicaoExercicioScreen', () => {
     expect(screen.getByText('Pular por agora')).toBeTruthy();
   });
 
+  // Task 28 (minor acumulado da onda): com opções e SEM `answer_idx`,
+  // `checkMCQ(undefined, i)` é false para toda escolha — a tela reprovava as
+  // quatro e nunca revelava a certa, afirmando "errado" sobre o que não sabe.
+  it('mcq com alternativas e sem gabarito não reprova a escolha: declara impasse', async () => {
+    const SEM_GABARITO: Exercise = {
+      id: 'e8', order_idx: 0, type: 'mcq', prompt: 'O que o move faz?',
+      payload: { options: ['uma', 'outra'] }, explanation: null,
+    };
+    felizes([SEM_GABARITO]);
+    render(<LicaoExercicioScreen />);
+
+    await waitFor(() => expect(screen.getByText(/não consigo corrigir a sua escolha/i)).toBeTruthy());
+    // nenhuma alternativa é oferecida como se fosse corrigível
+    expect(screen.queryByText('uma')).toBeNull();
+    expect(screen.queryByText('Quase…')).toBeNull();
+    expect(screen.getByText('Pular por agora')).toBeTruthy();
+  });
+
   /* ── três saídas ────────────────────────────────────────────────────── */
 
   it('mostra estado vazio quando a lição não tem exercícios', async () => {

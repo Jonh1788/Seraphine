@@ -116,6 +116,17 @@ function ExMultipla({ ex, corrigir, respondido }:
     );
   }
 
+  // Sem gabarito não há correção: `checkMCQ(undefined, i)` é `false` para toda
+  // opção, então a tela reprovaria as quatro e nunca revelaria a certa —
+  // afirmaria "errado" sobre algo que não sabe. O desktop faz exatamente isso
+  // (`courses/exercises/ExerciseMCQ.tsx:16`); aqui vira impasse declarado.
+  if (ex.payload.answer_idx === undefined) {
+    return (
+      <Impasse ex={ex} corrigir={corrigir} respondido={respondido}
+        motivo="Esta pergunta veio sem gabarito — não consigo corrigir a sua escolha." />
+    );
+  }
+
   const escolher = (i: number) => {
     if (respondido || escolhida !== null) return;
     setEscolhida(i);

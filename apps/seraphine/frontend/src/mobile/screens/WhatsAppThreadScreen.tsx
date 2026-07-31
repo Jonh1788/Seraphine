@@ -159,7 +159,10 @@ function Bolha({ msg }: { msg: WhatsAppMessage }) {
           ? <p className="ms-whatsapp-corpo">{msg.body}</p>
           // Áudio, figurinha e imagem chegam com `body` vazio: dizer que não há
           // texto é honesto; sumir com a mensagem esconderia que ela existiu.
-          : <p className="ms-whatsapp-corpo ms-whatsapp-corpo--sem-texto">sem texto (mídia)</p>}
+          // "(mídia)" saiu: esta tela NÃO sabe que é mídia — `hasMedia`/`type`
+          // são descartados em `inbox/api.ts:203-210`. Corpo vazio é o que ela
+          // vê, e é só isso que ela pode dizer.
+          : <p className="ms-whatsapp-corpo ms-whatsapp-corpo--sem-texto">sem texto</p>}
         <span className="ms-whatsapp-hora">{hora(msg.at)}</span>
       </div>
     </div>

@@ -18,6 +18,19 @@ html[data-shell='phone'] .ms-licao-teoria {
    chrome), então o X daqui é a ÚNICA saída da lição. */
 html[data-shell='phone'] .ms-licao-teoria-topo {
   flex: none; display: flex; align-items: center; gap: 13px; padding: 12px 20px;
+  /* Grudado no topo (achado no simulador, Task 28): esta tela rola INTEIRA
+     dentro do `.mpushed__body`, então o cabeçalho saía de cena na primeira
+     rolagem — e com ele a única saída da lição, num contêiner que não desenha
+     tab bar nem chevron. `top: 0` é o topo do content box, ou seja, abaixo da
+     safe area; o fundo opaco impede o texto de passar por baixo do X. */
+  position: sticky; top: 0; z-index: 2;
+  background: var(--app, #0f0f14);
+  /* A faixa da safe area pertence ao contêiner, e o texto rolava por baixo dela
+     — ficava legível em cima do relógio. O cabeçalho cresce para dentro dessa
+     faixa (margem negativa) e a devolve como padding próprio, então o fundo
+     opaco cobre o caminho inteiro até o topo do aparelho. */
+  margin-top: calc(-1 * env(safe-area-inset-top, 44px));
+  padding-top: calc(12px + env(safe-area-inset-top, 44px));
 }
 html[data-shell='phone'] .ms-licao-teoria-x {
   flex: none; width: 34px; height: 34px; padding: 0;
