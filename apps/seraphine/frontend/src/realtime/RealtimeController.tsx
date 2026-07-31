@@ -50,6 +50,21 @@ interface RealtimeControllerProps {
    */
   manualMute: boolean;
   onManualMuteToggle: () => void;
+  /**
+   * Publica a falha de inicialização (microfone/permissão) para fora, e
+   * `null` quando ela sai de cena.
+   *
+   * Existe porque este controller também é montado ESCONDIDO — o
+   * `AvatarCompanion` e a tela Voz do telefone o usam só pelo ciclo de vida do
+   * VAD e desenham a própria interface por cima. Nesse arranjo o
+   * `role="alert"` interno (abaixo, no `realtime-stage__error`) cai numa
+   * subárvore suprimida e não é visto por ninguém: um microfone negado ficaria
+   * invisível. Quem esconde a UI do motor assina isto e diz a falha com a
+   * própria voz.
+   *
+   * Opcional de propósito: `ChatView` e `AvatarCompanion` seguem inalterados.
+   */
+  onError?: (message: string | null) => void;
 }
 
 const STATE_LABELS: Record<RealtimeState, string> = {
@@ -160,6 +175,7 @@ export function RealtimeController({
   think = false,
   manualMute,
   onManualMuteToggle,
+  onError,
 }: RealtimeControllerProps): JSX.Element {
   const [state, setState] = useState<RealtimeState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -232,6 +248,14 @@ export function RealtimeController({
   const botRmsRef = useRef<number>(0);
   const manualMuteRef = useRef<boolean>(manualMute);
   manualMuteRef.current = manualMute;
+  const onErrorRef = useRef<RealtimeControllerProps['onError']>(onError);
+  onErrorRef.current = onError;
+
+  // Espelha o erro para fora. Pelo ref, para que trocar a identidade do
+  // callback a cada render de quem monta não reemita a mesma falha.
+  useEffect(() => {
+    onErrorRef.current?.(error);
+  }, [error]);
 
   // Helper: send a single PCM frame as binary to the backend.
   const sendFrame = useCallback((frame: Float32Array): void => {

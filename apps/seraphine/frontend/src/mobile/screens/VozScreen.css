@@ -189,6 +189,13 @@ html[data-shell='phone'] .ms-voz__ctrl {
   font: inherit;
   cursor: pointer;
 }
+/* Sem rota para o chat, o botão do teclado não tem para onde levar. Ele fica
+   apagado e inerte em vez de sumir — o handoff desenha os três controles, e um
+   botão que some é a tela mudando de forma sem avisar. */
+html[data-shell='phone'] .ms-voz__ctrl:disabled {
+  opacity: .35;
+  cursor: default;
+}
 html[data-shell='phone'] .ms-voz__ctrl--on {
   color: var(--danger, #ef6b6b);
   border-color: rgba(239, 107, 107, .4);
@@ -235,7 +242,8 @@ html[data-shell='phone'] .ms-voz-skel span:nth-child(2) { width: 140px; animatio
 /* O motor (RealtimeController) é montado, não desenhado: ele traz o palco do
    desktop inteiro. Caixa de tamanho zero — `visibility:hidden` também o tira da
    árvore de acessibilidade, então o `role="alert"` dele não vira um segundo
-   aviso fantasma nesta tela. */
+   aviso fantasma nesta tela. Suprimir o aviso dele obriga a tela a dizer a
+   falha do microfone com a própria voz: é o que a prop `onError` carrega. */
 html[data-shell='phone'] .ms-voz__motor {
   position: absolute;
   width: 0;
