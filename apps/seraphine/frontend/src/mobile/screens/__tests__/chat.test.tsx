@@ -250,6 +250,41 @@ describe('ChatScreen', () => {
     expect(onOpen).toHaveBeenCalledWith({ key: 'voz', title: 'Voz' });
   });
 
+  // O Chat é as DUAS coisas: aba (a tab bar é a saída, e o handoff não desenha
+  // seta) e alvo de push — as Finanças o abrem com `onOpen({key:'chat'})`, e o
+  // ramo empurrado do PhoneShell não monta tab bar nenhuma. O `PushedScreen`
+  // não desenha mais chrome, então sem seta própria a tela é beco sem saída.
+  // `onBack` só chega no ramo empurrado: é ele que separa os dois casos.
+  it('empurrada: tem exatamente um voltar, e ele chama o onBack', () => {
+    const onBack = vi.fn();
+    montar({ onBack });
+    const voltas = screen.getAllByRole('button', { name: 'Voltar' });
+    expect(voltas).toHaveLength(1);
+    fireEvent.click(voltas[0]);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('na aba: nenhum voltar — quem tira dali é a tab bar', () => {
+    montar();
+    expect(screen.queryAllByRole('button', { name: 'Voltar' })).toHaveLength(0);
+  });
+
+  it('empurrada: não repete a compensação de padding do contêiner de aba', () => {
+    // `.mshell__content` tem padding (12px + safe-area, 16px nas laterais) e a
+    // tela o cancela com margem negativa. `.mpushed__body` não tem nenhum
+    // desses: a mesma conta passaria 12px por cima do notch e vazaria 16px
+    // para fora dos dois lados.
+    const { container } = montar({ onBack: () => {} });
+    expect(container.querySelector('.ms-chat--empurrada')).toBeTruthy();
+    expect(container.querySelector('.ms-chat')).toBeTruthy();
+  });
+
+  it('na aba: mantém a compensação, que ali é a conta certa', () => {
+    const { container } = montar();
+    expect(container.querySelector('.ms-chat')).toBeTruthy();
+    expect(container.querySelector('.ms-chat--empurrada')).toBeNull();
+  });
+
   it('não pede histórico quando ainda não há conversa salva', () => {
     montar();
     expect(fetchConversationTurns).not.toHaveBeenCalled();

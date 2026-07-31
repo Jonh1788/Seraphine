@@ -16,6 +16,13 @@ html[data-shell='phone'] .ms-chat {
   color: var(--text, #ececef);
 }
 
+/* Empurrada (as Finanças abrem o Chat assim), o contêiner é `.mpushed__body`,
+   que já entrega as safe areas e NÃO tem padding lateral nem os 12px do topo.
+   A compensação acima é a conta do `.mshell__content`: aqui ela passaria 12px
+   por cima do notch e vazaria 16px para fora dos dois lados. A tela continua
+   de ponta a ponta — só que por já estar, e não por puxar. */
+html[data-shell='phone'] .ms-chat--empurrada { margin: 0; padding-top: 0; }
+
 /* ── cabeçalho: orb + nome + presença ── */
 html[data-shell='phone'] .ms-chat__head {
   flex: none;
@@ -24,6 +31,21 @@ html[data-shell='phone'] .ms-chat__head {
   gap: 11px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08));
+}
+/* Só existe na tela empurrada. Alvo de 44px sem empurrar o orb: a caixa cresce
+   para fora com margem negativa, dentro do padding de 20px do cabeçalho. */
+html[data-shell='phone'] .ms-chat__voltar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: -4px -6px -4px -12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim, #9594a0);
+  cursor: pointer;
 }
 html[data-shell='phone'] .ms-chat__quem { flex: 1; min-width: 0; }
 html[data-shell='phone'] .ms-chat__nome { font-size: 15px; font-weight: 700; }

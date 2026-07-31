@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { useAppRefs } from '../../stores/RefsContext';
 import { useChatStore } from '../../stores/chatStore';
 import { Orb } from '../Orb';
-import { MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../../icons/Icons';
 import { updateTaskStatus } from '../../tasks/api';
 import { fetchConversationTurns } from '../../chat/api';
 import type { ConversationTurn } from '../../chat/types';
@@ -56,7 +56,7 @@ interface Bolha {
   orfa?: boolean;
 }
 
-export function ChatScreen({ onOpen }: ScreenProps) {
+export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   const { wsRef } = useAppRefs();
   const [ws, setWs] = useState<SeraphineWS | null>(() => wsRef.current);
   const [desistiu, setDesistiu] = useState(false);
@@ -231,8 +231,18 @@ export function ChatScreen({ onOpen }: ScreenProps) {
   const carregando = (!ws && !desistiu) || restaurando;
 
   return (
-    <div className="ms-chat">
+    <div className={`ms-chat${onBack ? ' ms-chat--empurrada' : ''}`}>
       <header className="ms-chat__head">
+        {/* O Chat é aba E alvo de push (as Finanças o abrem). No ramo empurrado
+            o shell não monta tab bar e o `PushedScreen` não desenha chrome, então
+            sem esta seta a tela é beco sem saída. Na aba ela não existe: quem
+            tira dali é a tab bar, e o handoff não desenha volta nenhuma.
+            `onBack` só chega no ramo empurrado — é o que separa os dois. */}
+        {onBack && (
+          <button type="button" className="ms-chat__voltar" aria-label="Voltar" onClick={onBack}>
+            <ArrowLeftIcon size={18} />
+          </button>
+        )}
         <Orb size={38} halo />
         <div className="ms-chat__quem">
           <p className="ms-chat__nome">Seraphine</p>
