@@ -32,6 +32,11 @@ mod telemetry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod voice_io;
 mod whisper;
+// Widget snapshot bridge — only the mobile shell registers these
+// commands, and the App Group container is an iOS concept, so the module
+// does not exist on the desktop build at all.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+mod widget;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -62,6 +67,11 @@ fn run_mobile() {
             // Casa — relé HTTP para a LAN (EspMusic). Vale nos dois
             // alvos: o iPhone em casa está na mesma rede que o Mac.
             home::lan_request,
+            // Widget de lock screen — snapshot no App Group
+            // compartilhado com SeraphineWidget.appex.
+            widget::widget_write_snapshot,
+            widget::widget_refresh_snapshot,
+            widget::widget_snapshot_status,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -74,6 +84,10 @@ fn run_mobile() {
                         ios_extend_into_safe_area(webview.inner());
                     });
                 }
+                // Preenche widget-snapshot.json agora e a cada
+                // foreground. É o único gancho de "sync" nativo que
+                // existe hoje — a UI React não precisa saber do widget.
+                widget::install_auto_refresh();
             }
             Ok(())
         })

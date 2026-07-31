@@ -101,6 +101,14 @@ fn compile_healthkit_bridge() {
     // SpeechBridge.swift needs Speech + AVFoundation.
     println!("cargo:rustc-link-lib=framework=Speech");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
+    // WidgetBridge.swift touches WidgetCenter/UIKit, both iOS-only here
+    // (the whole file is `#if os(iOS)` on macOS), so link them only for
+    // the iOS SDKs and leave the desktop link line untouched.
+    if sdk_name_opt.is_some() {
+        println!("cargo:rustc-link-lib=framework=WidgetKit");
+        println!("cargo:rustc-link-lib=framework=UIKit");
+        println!("cargo:rustc-link-lib=framework=SwiftUI");
+    }
     // Swift runtime: macOS has it at /usr/lib/swift; iOS bundles it
     // into the app via Xcode. Only need to hint the linker on macOS.
     if sdk_name_opt.is_none() {
