@@ -43,6 +43,18 @@ Antes de tratar tudo como redesenho, medi o que de fato falha:
 | Telas nativas | **Dentro do escopo** — widget WidgetKit e notificação rica com ações. Reverte a exclusão da Fase 1. |
 | Dados | **Reais em todas as telas.** Nada de dado de exemplo. |
 | Arquitetura | **Opção A** — telas mobile próprias em `src/mobile/`, consumindo camada de dados extraída e compartilhada com o desktop. |
+| Execução | **Em ondas, com tasks paralelas dentro de cada onda.** Exige as duas mudanças abaixo. |
+
+### Duas mudanças que o paralelismo exige
+
+Sem elas, toda task de tela tocaria os mesmos dois arquivos e os agentes conflitariam:
+
+1. **CSS por tela** — cada tela tem `mobile/screens/<Tela>.css`. O `mobile/obsidian.css` compartilhado fica só com o que é de fato comum (orb, card, eyebrow, animações, layout do shell). Elimina o conflito e é melhor estrutura de qualquer forma.
+2. **Scaffolding único na onda 0** — uma task registra as 19 telas no `PhoneShell.tsx` de uma vez, apontando para placeholders. Depois disso, cada task de tela substitui **só o próprio arquivo** e ninguém mais toca no shell.
+
+Ondas: **0** fundação (sequencial) → **1** as cinco camadas de dados (paralelo) → **2** as telas (paralelo, cada uma esperando seu `api.ts`) → **3** nativo (paralelo com tudo, é Swift) → **4** integração no simulador (sequencial).
+
+Registrado: o review continua sequencial, passando pelo autor. O ganho do paralelismo é de relógio na escrita, não no esforço total.
 
 Opções descartadas, com o motivo: **responsivo nos componentes de desktop** (o handoff pede outra estrutura — mapa serpenteado em SVG, headers com orb, tab bar com orb elevado, telas empurradas; CSS não transforma um master-detail nisso, e cada mexida arrisca o app do Mac); **duplicar o fetch no mobile** (duas cópias de cada chamada divergem, e uma mudança de backend quebra o mobile em silêncio).
 
@@ -77,14 +89,15 @@ src/
 
 O fetch hoje mora dentro de views enormes. Para cada módulo abaixo, o fetch e as mutações saem para `<modulo>/api.ts` (funções puras que devolvem tipos de `types.ts`), e **a view de desktop passa a importar dessa camada** — sem mudança visual no desktop.
 
-| Módulo | View | Linhas | Estado |
-|---|---|---|---|
-| `habits/` | HabitsView | 575 | **já extraído** — é o modelo a seguir |
-| `tasks/` | TasksView | 1561 | extrair |
-| `calendar/` | CalendarView | 1734 | extrair |
-| `memory/` | MemoryView | 1194 | extrair |
-| `journal/` | JournalView | 575 | extrair |
-| `finance/`, `inbox/`, `insights/`, `notes/`, `courses/` | — | — | extrair **apenas o que a tela mobile daquele módulo consumir** — a task da tela nomeia as funções antes de escrevê-las |
+Inventário verificado no código (não presumido):
+
+| Já tem `api.ts` | Precisa extrair |
+|---|---|
+| `habits/` · `journal/` · `courses/` · `insights/` · `notes/` · `mood/` | `tasks/` (1561 linhas) · `calendar/` (1734) · `memory/` (1194) · `finance/` · `inbox/` |
+
+São **cinco** extrações, em cinco diretórios disjuntos. Cada uma extrai **apenas o que a tela mobile daquele módulo consome** — a task da tela nomeia as funções antes de escrevê-las. `habits/api.ts` é o modelo de formato.
+
+Nota sobre `tasks/`: a `TasksView` também busca finanças, recorrências e lembretes — é parte do porquê das 1561 linhas. A extração cobre **só a parte de tarefas**; o resto fica onde está.
 
 Essa extração é o principal risco de regressão no desktop e por isso cada uma é task própria, com os testes da view rodando antes e depois.
 
