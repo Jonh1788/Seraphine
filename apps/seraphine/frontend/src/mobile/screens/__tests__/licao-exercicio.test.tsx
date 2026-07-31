@@ -93,6 +93,49 @@ describe('LicaoExercicioScreen', () => {
     expect(licaoEmFoco(CURSO.lessons)?.id).toBe('l3');
   });
 
+  /* ── qual lição abrir: o `id` do shell manda ────────────────────────── */
+
+  it('abre a lição que o `id` pede, não a que ela escolheria sozinha', async () => {
+    // A auto-resolução daria 'l3' (a destravada). O `id` pede a 'l1', concluída.
+    felizes();
+    vi.mocked(getLesson).mockResolvedValue({
+      ...licaoCom([MCQ]), id: 'l1', title: 'O que é Rust',
+    });
+    render(<LicaoExercicioScreen id="l1" />);
+    await waitFor(() => expect(vi.mocked(getLesson)).toHaveBeenCalledWith('l1'));
+    expect(vi.mocked(getLesson)).not.toHaveBeenCalledWith('l3');
+    // com o id em mãos, nem precisa varrer as trilhas
+    expect(vi.mocked(listCourses)).not.toHaveBeenCalled();
+    expect(vi.mocked(getCourse)).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText('O valor é copiado')).toBeTruthy());
+  });
+
+  it('conclui a lição que o `id` pediu', async () => {
+    const onBack = vi.fn();
+    felizes();
+    vi.mocked(getLesson).mockResolvedValue({ ...licaoCom([MCQ]), id: 'l1' });
+    render(<LicaoExercicioScreen id="l1" onBack={onBack} />);
+    await waitFor(() => expect(screen.getByText('O valor é copiado')).toBeTruthy());
+    fireEvent.click(screen.getByText('A variável original deixa de valer'));
+    await waitFor(() => expect(screen.getByText('Concluir')).toBeTruthy());
+    fireEvent.click(screen.getByText('Concluir'));
+    await waitFor(() => expect(vi.mocked(completeLesson)).toHaveBeenCalledWith('l1', 1));
+  });
+
+  it('sem `id`, resolve sozinha a lição destravada', async () => {
+    felizes([MCQ]);
+    render(<LicaoExercicioScreen />);
+    await waitFor(() => expect(vi.mocked(getLesson)).toHaveBeenCalledWith('l3'));
+    expect(vi.mocked(listCourses)).toHaveBeenCalled();
+  });
+
+  it('erro ao abrir a lição pedida pelo `id` vira estado de erro', async () => {
+    vi.mocked(getLesson).mockRejectedValue(new Error('rede'));
+    render(<LicaoExercicioScreen id="l9" />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByText(/não consegui carregar/i)).toBeTruthy();
+  });
+
   /* ── caso feliz: MCQ do handoff ─────────────────────────────────────── */
 
   it('renderiza a pergunta, as alternativas numeradas e o progresso', async () => {

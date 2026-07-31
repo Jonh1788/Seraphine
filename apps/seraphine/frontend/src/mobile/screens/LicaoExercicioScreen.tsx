@@ -20,10 +20,14 @@ import './LicaoExercicioScreen.css';
    deu para corrigir em vez de chutar um veredito. */
 
 /* ── escolha do que abrir ──────────────────────────────────────────────────
-   `ScreenProps` não carrega id de lição — nenhuma tela empurrada recebe
-   parâmetro (o `onOpen` do registry leva só `key` e `title`). Então a tela
-   resolve sozinha o que abrir, pela mesma regra do mapa: a trilha em
-   andamento, e dentro dela a lição destravada. */
+   Quem empurra a tela diz QUAL lição abrir pelo `id` do `ScreenProps` — é o
+   caminho normal, e é por ele que a tela de teoria manda o aluno para cá sem
+   trocar de lição no meio.
+
+   O `id` é opcional dos dois lados, então `undefined` é caso real (a tela
+   montada direto pelo registry, sem ninguém ter empurrado). Aí ela resolve
+   sozinha, pela mesma regra do mapa: a trilha em andamento, e dentro dela a
+   lição destravada. As duas funções abaixo são esse plano B. */
 
 /** A trilha que a tela abre: a primeira pronta e inacabada; senão a primeira
  *  pronta; senão a primeira que existir. `null` quando não há nenhuma. */
@@ -353,7 +357,7 @@ function ExRelacionar({ ex, corrigir, respondido }:
 
 /* ── tela ──────────────────────────────────────────────────────────────── */
 
-export function LicaoExercicioScreen({ onBack }: ScreenProps) {
+export function LicaoExercicioScreen({ onBack, id }: ScreenProps) {
   const [licao, setLicao] = useState<Lesson | null>(null);
   const [vazio, setVazio] = useState<string | null>(null);
   const [erro, setErro] = useState(false);
@@ -365,25 +369,39 @@ export function LicaoExercicioScreen({ onBack }: ScreenProps) {
 
   useEffect(() => {
     let vivo = true;
+    // Trocar de lição é recomeçar: sem isto, o índice e o placar da lição
+    // anterior sobreviveriam à nova.
+    setCarregando(true);
+    setErro(false);
+    setVazio(null);
+    setLicao(null);
+    setIdx(0);
+    setVeredito(null);
+    setAcertos(0);
     (async () => {
       try {
-        const cursos = await listCourses();
-        if (!vivo) return;
-        const curso = cursoEmFoco(cursos);
-        if (!curso) {
-          setVazio('Você ainda não começou nenhuma trilha — crie uma no Mac e os exercícios aparecem aqui.');
-          setCarregando(false);
-          return;
+        // Caminho normal: quem empurrou disse qual lição. Nem lista cursos.
+        let licaoId = id;
+        if (!licaoId) {
+          const cursos = await listCourses();
+          if (!vivo) return;
+          const curso = cursoEmFoco(cursos);
+          if (!curso) {
+            setVazio('Você ainda não começou nenhuma trilha — crie uma no Mac e os exercícios aparecem aqui.');
+            setCarregando(false);
+            return;
+          }
+          const cheio: Course = await getCourse(curso.id);
+          if (!vivo) return;
+          const alvo = licaoEmFoco(cheio.lessons);
+          if (!alvo) {
+            setVazio('A Seraphine ainda está montando as lições desta trilha — volte em instantes.');
+            setCarregando(false);
+            return;
+          }
+          licaoId = alvo.id;
         }
-        const cheio: Course = await getCourse(curso.id);
-        if (!vivo) return;
-        const alvo = licaoEmFoco(cheio.lessons);
-        if (!alvo) {
-          setVazio('A Seraphine ainda está montando as lições desta trilha — volte em instantes.');
-          setCarregando(false);
-          return;
-        }
-        const l = await getLesson(alvo.id);
+        const l = await getLesson(licaoId);
         if (!vivo) return;
         setLicao(l);
         setVazio(l.exercises.length ? null : 'Esta lição ainda não tem exercícios — por enquanto ela é só teoria.');
@@ -395,7 +413,7 @@ export function LicaoExercicioScreen({ onBack }: ScreenProps) {
       }
     })();
     return () => { vivo = false; };
-  }, []);
+  }, [id]);
 
   const exercicios = licao?.exercises ?? [];
   const total = exercicios.length;
