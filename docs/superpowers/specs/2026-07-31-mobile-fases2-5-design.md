@@ -154,3 +154,36 @@ Igualmente: `useFetchJson` passa a distinguir **erro** de **vazio**, e o erro ap
 1. **Extrair dados de views de 1.500 linhas** é onde mora a chance de quebrar o app do Mac. Mitigação: uma task por módulo, testes da view antes e depois.
 2. **O widget nativo é outro ofício** (Swift, App Group, target no Xcode) e a regeneração do projeto pelo Tauri pode apagá-lo se ele for adicionado à mão. Mitigação: tratar como target versionado desde a primeira task.
 3. **20 telas num plano só** deixa o review raso — decisão consciente do autor, registrada aqui para o review final saber que não foi descuido.
+
+## Verificação (Task 28 — passada de integração)
+
+Simulador iPhone 17 / iOS 26.3, `pnpm tauri ios dev`. `gen/apple/assets` conferido como symlink
+para `../../../dist` antes de qualquer conclusão — sem isso o build carrega o frontend de abril
+e toda observação é falsa.
+
+**Passou:** 18 das 20 telas foram percorridas no aparelho. Nenhum bloco some por falta de dado;
+Hoje, Finanças, Insights, Calendário, Tarefas e Inbox desenham o vazio com frase própria, e a
+Inbox declara honestamente a queda das duas fontes em vez de parecer vazia. Nenhum número é
+fabricado: os ausentes viram travessão, não zero. Nenhuma tela de `src/mobile/` monta view de
+desktop (grep do Step 4 volta só com três comentários em prosa). `tsc --noEmit` limpo na árvore
+inteira; 324 testes de `src/mobile` verdes.
+
+**Ficou:**
+
+1. **A verificação visual do DESKTOP segue por fazer** — adiada da Onda 1 para cá e ainda não
+   cumprida. Causa agora identificada e alheia à branch: `pnpm tauri dev` morre no boot em
+   `VrmAvatarController` → `new WebGLRenderer` porque a webview do dev não entrega contexto
+   WebGL neste Mac. O app empacotado (`Seraphine.app` instalado, build de `main`) renderiza
+   tudo, então o problema é do modo dev, não do código. As cinco extrações da Onda 1 seguem
+   apoiadas em evidência estática e de review.
+2. **Duas telas não foram vistas no aparelho**, por falta de estado alcançável: Onboarding ·
+   permissões (a flag já estava gravada) e WhatsApp · thread (só se chega pela Inbox, que está
+   com as duas fontes fora do ar).
+3. **Enunciado de exercício mostra LaTeX cru.** A tela de teoria renderiza markdown+KaTeX; a de
+   exercício imprime `prompt`/`explanation` como texto puro. Sem dono.
+4. **Microfone e VPIO seguem quentes ao sair da Voz** (`src/realtime/RealtimeController.tsx` não
+   tem cleanup de unmount). Fora do escopo desta branch por decisão registrada; afeta também
+   `ChatView` e `AvatarCompanion`. Merece task própria.
+5. **`gen/` é gitignored**, então o symlink que faz o build de iOS levar o frontend certo não é
+   versionado. Um clone limpo o recria via `tauri ios init`; uma cópia ou restauro da pasta traz
+   o defeito de volta em silêncio.
