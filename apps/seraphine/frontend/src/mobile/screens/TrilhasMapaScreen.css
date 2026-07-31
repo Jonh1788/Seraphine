@@ -1,0 +1,188 @@
+/* src/mobile/screens/TrilhasMapaScreen.css — TRILHAS · mapa (handoff linha 192).
+   Todas as classes levam o prefixo `ms-trilhas-`; as regras de layout ficam sob
+   html[data-shell='phone'] como as do Hoje, porque a tela só existe no shell. */
+
+html[data-shell='phone'] .ms-trilhas {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* ── cabeçalho: ‹ + título + streak ── */
+html[data-shell='phone'] .ms-trilhas-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+html[data-shell='phone'] .ms-trilhas-topo__esq { display: flex; align-items: center; gap: 9px; min-width: 0; }
+html[data-shell='phone'] .ms-trilhas-voltar {
+  /* o padding negativo cria o alvo de 44px sem deslocar o ícone de 17px */
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  padding: 13px; margin: -13px -13px -13px -13px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-trilhas-voltar svg { stroke-width: 1.8; }
+html[data-shell='phone'] .ms-trilhas-titulo {
+  font-size: 18px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text, #ececef);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-trilhas-streak {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; color: #ff8a4c;
+}
+
+/* ── progresso em gradiente ── */
+html[data-shell='phone'] .ms-trilhas-progresso {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px;
+}
+html[data-shell='phone'] .ms-trilhas-barra {
+  flex: 1; height: 8px; border-radius: 6px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+html[data-shell='phone'] .ms-trilhas-barra__preenchida {
+  display: block; height: 100%; border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent-dim, #6c63d6), var(--accent, #9a93ff));
+  transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+html[data-shell='phone'] .ms-trilhas-fracao {
+  flex: none; font-size: 11px; font-weight: 700; color: var(--text-dim, #9594a0);
+}
+
+/* ── o mapa: sangra a lateral do shell para o caminho usar a largura toda ── */
+html[data-shell='phone'] .ms-trilhas-mapa {
+  position: relative;
+  margin: 12px -16px 14px;
+  min-height: 120px;
+}
+html[data-shell='phone'] .ms-trilhas-caminho {
+  position: absolute; left: 0; top: 0; width: 100%;
+}
+
+/* ── nós ── */
+html[data-shell='phone'] .ms-trilhas-no {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 72px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 0; background: none; border: none; font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-trilhas-no:disabled { cursor: default; }
+html[data-shell='phone'] .ms-trilhas-no:not(:disabled):active .ms-trilhas-bola {
+  transform: translateY(3px);
+  box-shadow: none;
+}
+html[data-shell='phone'] .ms-trilhas-bolawrap { position: relative; display: block; }
+html[data-shell='phone'] .ms-trilhas-bola {
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms;
+}
+html[data-shell='phone'] .ms-trilhas-bola--feito {
+  background: linear-gradient(160deg, #8bc34a, #4ade80);
+  box-shadow: 0 5px 0 #2c7a4b;
+  color: #0d0d11;
+}
+html[data-shell='phone'] .ms-trilhas-bola--feito svg { stroke-width: 3; }
+html[data-shell='phone'] .ms-trilhas-bola--ativo {
+  width: 60px; height: 60px;
+  background: linear-gradient(160deg, var(--accent-hi, #cac5ff), var(--accent-dim, #6c63d6));
+  box-shadow: 0 6px 0 #4b44a8;
+}
+/* o play do handoff é sólido, não contornado */
+html[data-shell='phone'] .ms-trilhas-bola--ativo svg { fill: #14141a; stroke: none; }
+html[data-shell='phone'] .ms-trilhas-bola--travado {
+  background: var(--elev, #1f1f27);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 5px 0 #101016;
+  color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-trilhas-bola--travado svg { stroke-width: 1.8; }
+html[data-shell='phone'] .ms-trilhas-comecar {
+  position: absolute; left: 50%; top: -27px; transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  font-size: 10px; font-weight: 700; padding: 4px 11px; border-radius: 8px;
+}
+html[data-shell='phone'] .ms-trilhas-rotulo {
+  font-size: 10px; font-weight: 600; line-height: 1.25; text-align: center;
+  color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-trilhas-no--ativo .ms-trilhas-rotulo { font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-trilhas-no--travado .ms-trilhas-rotulo { color: var(--text-faint, #5f5e6b); }
+
+/* ── troféu do fim: dourado tracejado ── */
+html[data-shell='phone'] .ms-trilhas-trofeu {
+  position: absolute; transform: translateX(-50%);
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 213, 79, 0.08);
+  border: 1px dashed rgba(255, 213, 79, 0.35);
+  color: #ffd54f;
+}
+html[data-shell='phone'] .ms-trilhas-trofeu svg { stroke-width: 1.7; }
+
+/* ── barra "Continuar": gruda no rodapé do conteúdo rolável ── */
+html[data-shell='phone'] .ms-trilhas-rodape {
+  position: sticky; bottom: 0; z-index: 2;
+  margin-top: auto;
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 15px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+html[data-shell='phone'] .ms-trilhas-rodape__texto { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-trilhas-rodape__titulo {
+  font-size: 13px; font-weight: 700; color: var(--text, #ececef);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-trilhas-rodape__sub { font-size: 11px; color: var(--text-dim, #9594a0); margin-top: 1px; }
+html[data-shell='phone'] .ms-trilhas-continuar {
+  flex: none; border: none; cursor: pointer;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  font: inherit; font-size: 12px; font-weight: 700;
+  padding: 10px 18px; min-height: 44px; border-radius: 11px;
+  box-shadow: 0 4px 0 #4b44a8;
+}
+html[data-shell='phone'] .ms-trilhas-continuar:active { transform: translateY(2px); box-shadow: 0 2px 0 #4b44a8; }
+
+/* ── as três saídas: vazio, erro e carregando ──
+   Nenhum bloco some por falta de dado; o erro tem tinta própria para não ser
+   confundido com "não há nada". */
+html[data-shell='phone'] .ms-trilhas-vazio {
+  font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-trilhas-mapa .ms-trilhas-vazio,
+html[data-shell='phone'] .ms-trilhas-mapa .ms-trilhas-erro { padding: 26px 16px 0; }
+html[data-shell='phone'] .ms-trilhas-erro {
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+  display: flex; align-items: flex-start; gap: 6px;
+}
+html[data-shell='phone'] .ms-trilhas-erro::before {
+  content: '!'; flex: none;
+  width: 15px; height: 15px; margin-top: 1px;
+  border-radius: 50%; border: 1.2px solid currentColor;
+  font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-trilhas-erro--curto { font-size: 11px; font-weight: 700; }
+html[data-shell='phone'] .ms-trilhas-erro--curto::before { display: none; }
+html[data-shell='phone'] .ms-trilhas-skel { display: flex; flex-direction: column; gap: 9px; padding: 8px 16px 0; }
+html[data-shell='phone'] .ms-trilhas-skel span {
+  height: 11px; border-radius: 6px; background: rgba(255, 255, 255, 0.06);
+  animation: msTrilhasSkel 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-trilhas-skel span:nth-child(2) { width: 72%; animation-delay: 0.2s; }
+html[data-shell='phone'] .ms-trilhas-skel span:nth-child(3) { width: 55%; animation-delay: 0.4s; }
+html[data-shell='phone'] .ms-trilhas-skel span:nth-child(4) { width: 66%; animation-delay: 0.6s; }
+html[data-shell='phone'] .ms-trilhas-skel--titulo { padding: 0; width: 140px; }
+html[data-shell='phone'] .ms-trilhas-skel--titulo span { height: 15px; }
+html[data-shell='phone'] .ms-trilhas-rodape .ms-trilhas-skel { padding: 0; flex: 1; }
+
+@keyframes msTrilhasSkel {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
