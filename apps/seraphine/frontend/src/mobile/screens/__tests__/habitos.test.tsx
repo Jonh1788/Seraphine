@@ -112,6 +112,23 @@ describe('HabitosScreen', () => {
     expect(screen.getByText('Ler 20 min')).toBeTruthy();
   });
 
+  // O shell deixou de desenhar chrome (PushedScreen virou só corpo): sem a seta
+  // aqui, quem entra em Hábitos fica preso na tela.
+  it('tem o voltar do handoff e chama onBack ao tocar', async () => {
+    vi.mocked(listHabits).mockResolvedValue(dois());
+    const onBack = vi.fn();
+    render(<HabitosScreen onBack={onBack} />);
+    fireEvent.click(await screen.findByLabelText('Voltar'));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('sem onBack não mostra o voltar nem quebra a tela', async () => {
+    vi.mocked(listHabits).mockResolvedValue(dois());
+    render(<HabitosScreen />);
+    await waitFor(() => expect(screen.getByText('Meditar')).toBeTruthy());
+    expect(screen.queryByLabelText('Voltar')).toBeNull();
+  });
+
   it('destaca o pendente da vez com a borda accent', async () => {
     vi.mocked(listHabits).mockResolvedValue(dois());
     const { container } = render(<HabitosScreen />);

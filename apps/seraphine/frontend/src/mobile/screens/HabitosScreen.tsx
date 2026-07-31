@@ -4,7 +4,7 @@ import type { HabitWithStatus } from '../../habits/types';
 import { addWaterIntake, getWaterToday } from '../../water/api';
 import type { WaterToday } from '../../water/types';
 import { habitIcon } from '../../habits/HabitIconMap';
-import { CheckIcon, DropletIcon, FlameIcon, PlusIcon, SparkleIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, CheckIcon, DropletIcon, FlameIcon, PlusIcon, SparkleIcon } from '../../icons/Icons';
 import type { ScreenProps } from './registry';
 import './HabitosScreen.css';
 
@@ -19,7 +19,7 @@ import './HabitosScreen.css';
 /** Um copo. É o incremento do "+" da água, igual ao do widget do desktop. */
 const COPO_ML = 250;
 
-export function HabitosScreen(_props: ScreenProps) {
+export function HabitosScreen({ onBack }: ScreenProps) {
   const [habits, setHabits] = useState<HabitWithStatus[] | null>(null);
   const [erro, setErro] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -64,6 +64,15 @@ export function HabitosScreen(_props: ScreenProps) {
   return (
     <div className="ms-habitos">
       <header className="ms-habitos-head">
+        {/* O shell não desenha mais chrome nenhum: a seta de voltar é da tela.
+            É o mesmo arrow-left das telas empurradas do handoff (18px, --dim).
+            `onBack` é opcional no ScreenProps — sem ele não há para onde voltar,
+            então o controle não aparece em vez de virar um botão morto. */}
+        {onBack && (
+          <button type="button" className="ms-habitos-voltar" aria-label="Voltar" onClick={onBack}>
+            <ArrowLeftIcon size={18} />
+          </button>
+        )}
         <div className="ms-habitos-head-txt">
           <h1 className="ms-habitos-titulo">Hábitos</h1>
           {loading ? <Skel linhas={1} />
