@@ -74,7 +74,11 @@ describe('TarefasScreen', () => {
     render(<TarefasScreen />);
 
     await waitFor(() => expect(screen.getByText(/não consegui carregar/i)).toBeTruthy());
-    expect(screen.getByRole('alert')).toBeTruthy();
+    // cada bloco erra com a SUA frase, e nenhum erro se disfarça de vazio:
+    // lista de abertas, concluídas e contagem do cabeçalho, os três em alerta.
+    expect(screen.getAllByRole('alert').length).toBe(3);
+    expect(screen.getByText(/lista de concluídas também não carregou/i)).toBeTruthy();
+    expect(screen.getByText(/sem contagem/i)).toBeTruthy();
   });
 
   it('o filtro Semana muda a lista', async () => {
@@ -109,6 +113,32 @@ describe('TarefasScreen', () => {
     expect(vi.mocked(updateTaskStatus)).toHaveBeenCalledWith(7, 'completed');
     // otimista: a linha muda de seção sem esperar novo GET (o PATCH devolve só {ok})
     await waitFor(() => expect(screen.getByRole('button', { name: /reabrir pagar aluguel/i })).toBeTruthy());
+  });
+
+  it('a tarefa recém-concluída continua na tela, mesmo com a lista de concluídas cheia', async () => {
+    // Produção tem 26 concluídas e tarefas abertas paradas há semanas. Ordenar
+    // as concluídas só pelo `updated_at` do servidor jogava a linha recém-marcada
+    // para depois do corte: ela saía das abertas e não aparecia nas concluídas —
+    // sumia da tela inteira, que é justamente a falha que esta onda existe para evitar.
+    const velhas = Array.from({ length: 9 }, (_, i) => tarefa({
+      id: 100 + i,
+      title: `Feita ${i}`,
+      status: 'completed',
+      created_at: `${dia(-1)}T10:00:00`,
+      updated_at: `${dia(-1)}T10:00:00`,
+    }));
+    vi.mocked(listTasks).mockResolvedValue([
+      tarefa({ id: 7, title: 'Renovar o RG', created_at: `${dia(-40)}T09:00:00`, updated_at: `${dia(-40)}T09:00:00` }),
+      ...velhas,
+    ]);
+    vi.mocked(updateTaskStatus).mockResolvedValue(undefined);
+    render(<TarefasScreen />);
+
+    await waitFor(() => expect(screen.getByText('Renovar o RG')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /concluir renovar o rg/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /reabrir renovar o rg/i })).toBeTruthy());
+    expect(screen.getByText('Renovar o RG')).toBeTruthy();
   });
 
   it('desfaz a marcação e avisa quando o PATCH falha', async () => {

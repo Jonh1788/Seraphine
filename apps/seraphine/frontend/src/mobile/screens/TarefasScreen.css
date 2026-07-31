@@ -1,6 +1,7 @@
 /* src/mobile/screens/TarefasScreen.css — tela TAREFAS (handoff mobile, linha 159).
    Medidas tiradas do handoff: cabeçalho 22/700 com botão 40px raio 13; pílulas
-   de filtro 12px raio 16 com 6px 13px; linhas raio 15, padding 13px 14px, gap 9px;
+   de filtro 12px raio 16 com 8px 13px (o handoff dá 6px; os 2px extras são o
+   alvo de toque que o próprio README exige); linhas raio 15, padding 13px 14px, gap 9px;
    checkbox 22px raio 7 borda 2px; chips 10/600 raio 7; barra do foco 5px; a seção
    CONCLUÍDAS a opacity .55.
    Todo seletor leva o prefixo `ms-tarefas-` para nunca colidir com o CSS das
@@ -117,6 +118,7 @@ html[data-shell='phone'] .ms-tarefas-erro::before {
   content: '!'; flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
   border: 1.2px solid currentColor; font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
 }
+html[data-shell='phone'] .ms-tarefas-erro--sub { margin-top: 2px; font-size: 12px; }
 html[data-shell='phone'] .ms-tarefas-skel { display: flex; flex-direction: column; gap: 9px; }
 html[data-shell='phone'] .ms-tarefas-skel > span {
   height: 48px; border-radius: 15px; background: rgba(255,255,255,.06);

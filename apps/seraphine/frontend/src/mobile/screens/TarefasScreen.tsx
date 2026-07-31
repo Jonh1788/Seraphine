@@ -17,9 +17,10 @@ import './TarefasScreen.css';
    em produção as 26 tarefas vêm todas `completed`, então a lista de abertas
    é legitimamente vazia e precisa DIZER isso. */
 
-/** Status que fecham a tarefa: saem da lista de abertas. `rejected`/`failed`
- *  não são "concluídas" — somem das duas listas, e é de propósito. */
-const FECHADOS = new Set(['completed', 'rejected', 'failed', 'discarded', 'cancelled']);
+/** Status que fecham a tarefa: saem da lista de abertas. São os três de
+ *  `TaskStatus` (tasks/types.ts) que encerram — `rejected`/`failed` não são
+ *  "concluídas", então somem das duas listas, e é de propósito. */
+const FECHADOS = new Set(['completed', 'rejected', 'failed']);
 
 type Filtro = 'hoje' | 'semana' | 'todas';
 
@@ -122,8 +123,12 @@ export function TarefasScreen(_props: ScreenProps) {
   const [recarga, setRecarga] = useState(0);
   const [filtro, setFiltro] = useState<Filtro>('hoje');
   /** Marcações que já valem na tela e ainda não voltaram do servidor. O PATCH
-   *  responde só `{ok}` — não devolve a linha —, então o estado novo é nosso. */
-  const [otimista, setOtimista] = useState<Record<number, TaskStatus>>({});
+   *  responde só `{ok}` — não devolve a linha —, então o estado novo é nosso.
+   *  Guarda também QUANDO a marcação aconteceu (relógio local, em ms): sem isso
+   *  a linha recém-concluída era ordenada pelo `updated_at` VELHO do servidor,
+   *  caía abaixo do corte das 8 e sumia das duas listas — o usuário marcava a
+   *  caixa e a tarefa desaparecia da tela. */
+  const [otimista, setOtimista] = useState<Record<number, { status: TaskStatus; em: number }>>({});
   const [falha, setFalha] = useState<string | null>(null);
   const [expandida, setExpandida] = useState<number | null>(null);
   const [compondo, setCompondo] = useState(false);
@@ -137,6 +142,9 @@ export function TarefasScreen(_props: ScreenProps) {
       .then((ts) => {
         if (!vivo) return;
         setTarefas(ts);
+        // A lista nova JÁ traz o que marcamos: manter as marcações locais aqui
+        // faria elas sobreporem para sempre o que o servidor diz.
+        setOtimista({});
         setErro(null);
         setCarregando(false);
       })
@@ -155,7 +163,7 @@ export function TarefasScreen(_props: ScreenProps) {
   const fimDaSemana = diaLocal(maisDias(new Date(), 6));
   const conf = FILTROS.find((f) => f.id === filtro) ?? FILTROS[0];
 
-  const statusDe = (t: Task): string => otimista[t.id] ?? t.status;
+  const statusDe = (t: Task): string => otimista[t.id]?.status ?? t.status;
 
   /** Tarefa sem prazo aparece em TODOS os filtros: esconder no filtro padrão a
    *  tarefa que ninguém datou é exatamente como o Hoje "sumia". */
@@ -180,14 +188,24 @@ export function TarefasScreen(_props: ScreenProps) {
       const prio = (PESO_PRIO[b.priority ?? ''] ?? 0) - (PESO_PRIO[a.priority ?? ''] ?? 0);
       return prio || a.id - b.id;
     });
+  // O que ACABOU de ser marcado vai para o topo — antes de qualquer ordenação
+  // pelo relógio do servidor, que não sabe da marcação ainda. É o que garante
+  // que a linha sobreviva ao corte de MAX_CONCLUIDAS e continue na tela.
   const concluidas = todas
     .filter((t) => statusDe(t) === 'completed')
-    .sort((a, b) => String(b.updated_at ?? b.created_at).localeCompare(String(a.updated_at ?? a.created_at)));
+    .sort((a, b) => {
+      const ma = otimista[a.id]?.em ?? null;
+      const mb = otimista[b.id]?.em ?? null;
+      if (ma !== null && mb !== null) return mb - ma;
+      if (ma !== null) return -1;
+      if (mb !== null) return 1;
+      return String(b.updated_at ?? b.created_at).localeCompare(String(a.updated_at ?? a.created_at));
+    });
   const foco = abertas[0]?.id ?? null;
 
   const concluir = async (t: Task, para: TaskStatus) => {
     const antes = statusDe(t);
-    setOtimista((o) => ({ ...o, [t.id]: para }));
+    setOtimista((o) => ({ ...o, [t.id]: { status: para, em: Date.now() } }));
     setFalha(null);
     try {
       await updateTaskStatus(t.id, para);
@@ -195,7 +213,7 @@ export function TarefasScreen(_props: ScreenProps) {
       setOtimista((o) => {
         const copia = { ...o };
         if (antes === t.status) delete copia[t.id];
-        else copia[t.id] = antes as TaskStatus;
+        else copia[t.id] = { status: antes as TaskStatus, em: Date.now() };
         return copia;
       });
       setFalha(e instanceof Error ? e.message : String(e));
@@ -226,7 +244,7 @@ export function TarefasScreen(_props: ScreenProps) {
         <div>
           <h1 className="ms-tarefas__title">Tarefas</h1>
           {carregando ? <Skel linhas={1} className="ms-tarefas__sub-skel" />
-            : erro ? <p className="ms-tarefas__sub">contagem indisponível</p>
+            : erro ? <p className="ms-tarefas-erro ms-tarefas-erro--sub" role="alert" title={erro}>sem contagem: a lista não carregou</p>
             : (
               <p className="ms-tarefas__sub">
                 {abertas.length} {conf.palavra} · {concluidas.length === 1 ? '1 concluída' : `${concluidas.length} concluídas`}
@@ -316,7 +334,9 @@ export function TarefasScreen(_props: ScreenProps) {
         {carregando ? (
           <li className="ms-tarefas__estado"><Skel linhas={2} /></li>
         ) : erro ? (
-          <li className="ms-tarefas__estado"><p className="ms-tarefas-vazio">A lista de concluídas também não carregou.</p></li>
+          <li className="ms-tarefas__estado">
+            <p className="ms-tarefas-erro" role="alert" title={erro}>A lista de concluídas também não carregou.</p>
+          </li>
         ) : concluidas.length ? (
           <>
             {concluidas.slice(0, MAX_CONCLUIDAS).map((t) => (
