@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import type { ScreenProps } from './registry';
 import { listTasks, updateTaskStatus, createTask } from '../../tasks/api';
 import type { Task, TaskStatus } from '../../tasks/types';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from '../../finance/types';
-import { CheckIcon, PlusIcon, ChevronRightIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, CheckIcon, PlusIcon, ChevronRightIcon } from '../../icons/Icons';
 import './TarefasScreen.css';
 
 /* Tela TAREFAS do handoff mobile (linha 159 de `Seraphine Mobile.dc.html`).
@@ -114,9 +114,45 @@ function corAlfa(hex: string, alfa: number): string {
 
 const PESO_PRIO: Record<string, number> = { high: 3, med: 2, low: 1 };
 
+/* ── em qual contêiner eu estou? ───────────────────────────────────────── */
+
+/** ESTA tela vive em dois contextos: é a aba `tarefas` E a tela empurrada
+ *  `tarefas-view` — `registry.ts` manda as duas chaves para o mesmo componente,
+ *  e a versão empurrada é aberta de três lugares (o eyebrow "Tarefas" do Hoje,
+ *  o "Resolver" de qualquer sugestão de tipo `task` e o "+" do Calendário).
+ *  Os dois contextos pedem coisas diferentes:
+ *
+ *   - SAÍDA: no ramo empurrado o `PhoneShell` não monta tab bar, e o
+ *     `PushedScreen` deixou de desenhar o ‹ (cada tela é dona do seu cabeçalho).
+ *     Sem um voltar próprio, quem entrava aqui ficava preso até reiniciar o app.
+ *     Na aba a saída é a tab bar, e o handoff não põe seta nenhuma no cabeçalho
+ *     da tela TAREFAS (linha 159 do `Seraphine Mobile.dc.html`).
+ *   - PADDING: `.mshell__content` dá `calc(12px + safe-area) 16px 16px`;
+ *     `.mpushed__body` dá só as safe areas. O CSS desta tela foi escrito para o
+ *     primeiro, então na pilha os cartões sangravam até a borda do telefone.
+ *
+ *  O que NÃO distingue os dois é o `onBack`: o shell o passa nos DOIS ramos —
+ *  `PhoneShell.tsx:49` na pilha e `PhoneShell.tsx:59` na aba, onde ele volta
+ *  para o Hoje. Guardar o botão por `onBack &&`, como fazem as telas que só
+ *  existem empurradas (Hábitos, Notas), daria uma seta sobrando na aba.
+ *  Quem distingue de verdade é o contêiner, e a pergunta é feita ao DOM.
+ *
+ *  A pergunta é "estou FORA da aba?" e não "estou na pilha?" de propósito: se um
+ *  dia as classes do shell mudarem, o pior caso vira uma seta a mais — não o
+ *  beco sem saída que esta função existe para fechar. */
+function useForaDaAba(alvo: { current: HTMLElement | null }): boolean {
+  const [fora, setFora] = useState(false);
+  // `useLayoutEffect` e não `useEffect`: a resposta entra antes da pintura, então
+  // não há um quadro sem seta e sem padding piscando antes do certo.
+  useLayoutEffect(() => { setFora(!alvo.current?.closest('.mshell__content')); }, [alvo]);
+  return fora;
+}
+
 /* ── tela ──────────────────────────────────────────────────────────────── */
 
-export function TarefasScreen(_props: ScreenProps) {
+export function TarefasScreen({ onBack }: ScreenProps) {
+  const raiz = useRef<HTMLDivElement>(null);
+  const empurrada = useForaDaAba(raiz);
   const [tarefas, setTarefas] = useState<Task[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -239,9 +275,17 @@ export function TarefasScreen(_props: ScreenProps) {
   };
 
   return (
-    <div className="ms-tarefas">
+    <div className={`ms-tarefas${empurrada ? ' ms-tarefas--empurrada' : ''}`} ref={raiz}>
       <header className="ms-tarefas__head">
-        <div>
+        {/* Mesmo arrow-left das outras telas empurradas (18px, --dim). Só na
+            pilha: na aba ele seria um segundo caminho para fora, que o handoff
+            não desenha e que a tab bar já cobre. */}
+        {empurrada && onBack && (
+          <button type="button" className="ms-tarefas__voltar" aria-label="Voltar" onClick={onBack}>
+            <ArrowLeftIcon size={18} />
+          </button>
+        )}
+        <div className="ms-tarefas__head-txt">
           <h1 className="ms-tarefas__title">Tarefas</h1>
           {carregando ? <Skel linhas={1} className="ms-tarefas__sub-skel" />
             : erro ? <p className="ms-tarefas-erro ms-tarefas-erro--sub" role="alert" title={erro}>sem contagem: a lista não carregou</p>

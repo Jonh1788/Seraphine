@@ -172,4 +172,66 @@ describe('TarefasScreen', () => {
     ));
     await waitFor(() => expect(vi.mocked(listTasks).mock.calls.length).toBeGreaterThan(1));
   });
+
+  /* A MESMA tela é a aba `tarefas` e a tela empurrada `tarefas-view` (registry.ts
+     aponta as duas chaves para cá). Ela é empurrada de três lugares — o eyebrow
+     "Tarefas" do Hoje, o "Resolver" de qualquer sugestão de tipo `task` e o "+"
+     do Calendário — e o contêiner empurrado (`PhoneShell`, ramo `pushed`) NÃO
+     desenha tab bar. Sem um controle de saída próprio o usuário fica preso.
+
+     O que distingue os dois contextos NÃO é o `onBack`: o shell o passa também
+     na aba (`PhoneShell.tsx:59`, `onBack={() => setTab('hoje')}`). Quem distingue
+     é o contêiner — `.mshell__content` na aba, `.mpushed` na pilha —, então os
+     testes montam a tela dentro do contêiner REAL de cada caso. */
+  describe('saída da tela', () => {
+    const naPilha = (props = {}) => render(
+      <div className="mpushed"><div className="mpushed__body"><TarefasScreen {...props} /></div></div>,
+    );
+    const naAba = (props = {}) => render(
+      <main className="mshell__content"><TarefasScreen {...props} /></main>,
+    );
+    const voltares = () => screen.queryAllByRole('button', { name: /voltar/i });
+
+    it('empurrada: desenha UM voltar, e ele chama o onBack', async () => {
+      vi.mocked(listTasks).mockResolvedValue([]);
+      const onBack = vi.fn();
+      naPilha({ onBack });
+
+      await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
+      expect(voltares().length).toBe(1);
+
+      fireEvent.click(voltares()[0]);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it('empurrada: paga o padding que o contêiner da pilha não dá', async () => {
+      // `.mpushed__body` só entrega as safe areas; `.mshell__content` entrega
+      // `calc(12px + inset) 16px 16px`. Sem compensar, a tela sangra na borda.
+      vi.mocked(listTasks).mockResolvedValue([]);
+      const { container } = naPilha({ onBack: vi.fn() });
+
+      await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
+      expect(container.querySelector('.ms-tarefas')?.className).toContain('ms-tarefas--empurrada');
+    });
+
+    it('na aba: nenhum voltar, mesmo com o onBack que o shell passa', async () => {
+      // `PhoneShell.tsx:59` passa `onBack` na aba. Guardar o botão só por
+      // `onBack &&` faria a aba crescer uma seta que o handoff não tem — lá a
+      // saída é a tab bar. Este teste é o que impede essa "correção".
+      vi.mocked(listTasks).mockResolvedValue([]);
+      const { container } = naAba({ onBack: vi.fn() });
+
+      await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
+      expect(voltares().length).toBe(0);
+      expect(container.querySelector('.ms-tarefas')?.className).not.toContain('ms-tarefas--empurrada');
+    });
+
+    it('na aba sem onBack: nenhum voltar', async () => {
+      vi.mocked(listTasks).mockResolvedValue([]);
+      naAba();
+
+      await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
+      expect(voltares().length).toBe(0);
+    });
+  });
 });

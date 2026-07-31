@@ -9,8 +9,24 @@
 
 html[data-shell='phone'] .ms-tarefas { display: flex; flex-direction: column; gap: 9px; }
 
+/* Empurrada (chave `tarefas-view`), a tela troca de contêiner: `.mpushed__body`
+   entrega só as safe areas, enquanto a aba roda dentro de `.mshell__content`,
+   que entrega `calc(12px + safe-area) 16px 16px`. Este modificador repõe
+   exatamente a diferença — o topo da safe area já veio do `.mpushed__body` —,
+   para a tela ser a MESMA nos dois lugares em vez de sangrar até a borda.
+   Quem põe a classe é a tela, ao descobrir em qual contêiner nasceu. */
+html[data-shell='phone'] .ms-tarefas--empurrada { padding: 12px 16px 16px; }
+
 /* ── cabeçalho ── */
 html[data-shell='phone'] .ms-tarefas__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 1px; }
+html[data-shell='phone'] .ms-tarefas__head-txt { flex: 1; min-width: 0; }
+/* voltar: a seta das telas empurradas (18px, --dim). A caixa de 34px é o alvo
+   do dedo; a margem negativa devolve o título à margem do resto da tela. */
+html[data-shell='phone'] .ms-tarefas__voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0); font: inherit; cursor: pointer;
+}
 html[data-shell='phone'] .ms-tarefas__title { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--text, #ececef); }
 html[data-shell='phone'] .ms-tarefas__sub { margin: 1px 0 0; font-size: 12px; color: var(--text-dim, #9594a0); }
 html[data-shell='phone'] .ms-tarefas__novo {
