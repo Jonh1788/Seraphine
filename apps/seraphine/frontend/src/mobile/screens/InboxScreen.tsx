@@ -32,7 +32,12 @@ const NOME_DA_FONTE: Record<InboxSource, string> = {
 };
 
 /** `InboxItem.id` só é único DENTRO da fonte (id do Gmail x id do chat): a
- *  chave da lista tem de carregar a fonte junto. */
+ *  chave da LISTA tem de carregar a fonte junto.
+ *
+ *  Atenção: isto é chave de render, não identificador de conversa. O `id` que
+ *  vai no `onOpen` é o `item.id` cru — a thread chama `listWhatsAppMessages(id)`
+ *  e engasgaria com um `whatsapp:` na frente. Só empurramos linha de WhatsApp,
+ *  então a ambiguidade entre fontes não existe nesse caminho. */
 function chave(item: InboxItem): string {
   return `${item.source}:${item.id}`;
 }
@@ -154,7 +159,7 @@ export function InboxScreen({ onBack, onOpen }: ScreenProps) {
               item={item}
               naoLida={naoLida(item)}
               onAbrir={onOpen && item.source === 'whatsapp'
-                ? () => onOpen({ key: 'whatsapp', title: nomeDe(item.sender) })
+                ? () => onOpen({ key: 'whatsapp', title: nomeDe(item.sender), id: item.id })
                 : undefined}
             />
           ))
@@ -173,7 +178,11 @@ export function InboxScreen({ onBack, onOpen }: ScreenProps) {
               <button
                 type="button"
                 className="ms-inbox-sim"
-                onClick={() => onOpen?.({ key: 'whatsapp', title: nomeDe(paraResponder.sender) })}
+                onClick={() => onOpen?.({
+                  key: 'whatsapp',
+                  title: nomeDe(paraResponder.sender),
+                  id: paraResponder.id,
+                })}
               >
                 Sim
               </button>

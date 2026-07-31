@@ -154,21 +154,26 @@ describe('InboxScreen', () => {
     expect(lida?.querySelector('.ms-inbox-ponto')).toBeNull();
   });
 
-  it('tocar numa linha do WhatsApp abre a conversa', async () => {
+  // O `id` vai junto porque a tela da thread chama `listWhatsAppMessages(id)`:
+  // sem ele, ela abre no estado "nenhuma conversa selecionada". E vai CRU — a
+  // chave composta `whatsapp:<id>` é da lista, não da bridge.
+  it('tocar numa linha do WhatsApp abre a conversa com o id do chat', async () => {
     vi.mocked(listInboxDetailed).mockResolvedValue(ok([zap()]));
     const onOpen = vi.fn();
     render(<InboxScreen onOpen={onOpen} />);
     fireEvent.click(await screen.findByRole('button', { name: /Ana/ }));
-    expect(onOpen).toHaveBeenCalledWith({ key: 'whatsapp', title: 'Ana' });
+    expect(onOpen).toHaveBeenCalledWith({ key: 'whatsapp', title: 'Ana', id: '5511@c.us' });
+    expect(onOpen.mock.calls[0][0].id).not.toMatch(/^whatsapp:/);
   });
 
-  it('o card da Seraphine oferece responder e o Sim abre a conversa', async () => {
+  it('o card da Seraphine oferece responder e o Sim abre a conversa com o id do chat', async () => {
     vi.mocked(listInboxDetailed).mockResolvedValue(ok([zap()]));
     const onOpen = vi.fn();
     render(<InboxScreen onOpen={onOpen} />);
     await waitFor(() => expect(screen.getByText(/respondo a Ana/i)).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Sim' }));
-    expect(onOpen).toHaveBeenCalledWith({ key: 'whatsapp', title: 'Ana' });
+    expect(onOpen).toHaveBeenCalledWith({ key: 'whatsapp', title: 'Ana', id: '5511@c.us' });
+    expect(onOpen.mock.calls[0][0].id).not.toMatch(/^whatsapp:/);
   });
 
   it('o card da Seraphine não some quando não há nada para responder', async () => {
