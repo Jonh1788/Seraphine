@@ -135,6 +135,88 @@ describe('ChatScreen', () => {
     await waitFor(() => expect(screen.getByText('Concluída')).toBeTruthy());
   });
 
+  // O engine corta o stream de tokens no primeiro pedaço que traz `tool_calls`
+  // (`conversation/engine.py:1122`): quando o modelo vai DIRETO à ferramenta, o
+  // `tool_result` chega sem nenhum `token` antes dele. É o próprio caso do
+  // handoff — "Feito! ... Também adicionei como tarefa" é texto pós-ferramenta.
+  it('mostra o cartão quando a ferramenta roda antes de ela falar', () => {
+    const { ws } = montar();
+    ws.emite({
+      type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+      metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending', due_time: '08:00' } },
+    });
+    expect(screen.getByText('Pagar aluguel')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Concluir' })).toBeTruthy();
+  });
+
+  it('o texto que vem depois da ferramenta entra na MESMA bolha do cartão', () => {
+    const { ws, container } = montar();
+    ws.emite({
+      type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+      metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending' } },
+    });
+    ws.emite(token('Feito! Também adicionei como tarefa.'));
+
+    const falas = container.querySelectorAll('.ms-chat-linha--sera');
+    expect(falas).toHaveLength(1);
+    expect(falas[0].textContent).toContain('Feito! Também adicionei como tarefa.');
+    expect(falas[0].textContent).toContain('Pagar aluguel');
+  });
+
+  it('o cartão não gruda na resposta anterior: entra depois da pergunta nova', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockResolvedValue([
+      { id: 't0', conversation_id: 'conv-1', role: 'assistant', content: 'resposta de ontem', created_at: '2026-07-30T10:00:00' },
+    ]);
+    const { ws, container } = montar();
+    await screen.findByText('resposta de ontem');
+
+    escrever(container, 'me lembra do aluguel');
+    ws.emite({
+      type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+      metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending' } },
+    });
+
+    const linhas = [...container.querySelectorAll('.ms-chat-linha')];
+    const daPergunta = linhas.findIndex((l) => l.textContent?.includes('me lembra do aluguel'));
+    const doCartao = linhas.findIndex((l) => l.textContent?.includes('Pagar aluguel'));
+    expect(daPergunta).toBeGreaterThanOrEqual(0);
+    // O cartão vem DEPOIS da pergunta que o gerou, nunca colado na fala de ontem.
+    expect(doCartao).toBeGreaterThan(daPergunta);
+    expect(linhas[0].textContent).toContain('resposta de ontem');
+    expect(linhas[0].textContent).not.toContain('Pagar aluguel');
+  });
+
+  it('deixa rastro quando a ferramenta falha, em vez de engolir', () => {
+    const { ws } = montar();
+    ws.emite(token('Deixa comigo.'));
+    ws.emite({
+      type: 'tool_result', request_id: 'r1', ok: false, output: null,
+      error: 'agenda fora do ar', metadata: null,
+    });
+    const rastro = screen.getByText(/agenda fora do ar/i);
+    expect(rastro.getAttribute('role')).toBe('alert');
+  });
+
+  it('não edita o texto do usuário: colchetes dele são dele', () => {
+    const { ws, container } = montar();
+    escrever(container, 'me manda o [array] em JSON');
+    expect(screen.getByText('me manda o [array] em JSON')).toBeTruthy();
+    expect(ws.enviadas[0].content).toBe('me manda o [array] em JSON');
+  });
+
+  it('mês estourado não diz que sobrou dinheiro', () => {
+    const { ws } = montar();
+    ws.emite(token('Passou.'));
+    ws.emite({
+      type: 'tool_result', request_id: 'r2', ok: true, output: 'ok', error: null,
+      metadata: { dashboard_data: { income: 3000, expenses: 3340, balance: -340 } },
+    });
+    expect(screen.getByText(/R\$ 340 acima/)).toBeTruthy();
+    expect(screen.queryByText(/livre/)).toBeNull();
+    expect(screen.queryByText(/-340/)).toBeNull();
+  });
+
   it('avisa quando não consegue concluir a tarefa do cartão', async () => {
     vi.mocked(updateTaskStatus).mockRejectedValue(new Error('rede'));
     const { ws } = montar();
@@ -247,6 +329,24 @@ describe('ChatScreen — restaura o transcrito', () => {
     // O ao vivo continua de pé: a falha é do histórico, não do socket.
     escrever(container, 'e o orçamento, como tá?');
     expect(ws.enviadas).toHaveLength(1);
+  });
+
+  it('deixa mandar mensagem — e mostra a bolha — com o histórico ainda voltando', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    let entrega: (t: unknown[]) => void = () => {};
+    vi.mocked(fetchConversationTurns).mockReturnValue(
+      new Promise((r) => { entrega = r as (t: unknown[]) => void; }) as never,
+    );
+    const { ws, container } = montar();
+
+    // Ainda restaurando: o composer aceita, então a bolha TEM que aparecer —
+    // digitar e ver a própria mensagem sumir é pior que um campo desabilitado.
+    escrever(container, 'e o orçamento, como tá?');
+    expect(ws.enviadas).toHaveLength(1);
+    expect(screen.getByText('e o orçamento, como tá?')).toBeTruthy();
+
+    await act(async () => { entrega([]); });
+    expect(screen.getByText('e o orçamento, como tá?')).toBeTruthy();
   });
 
   it('o que chegou ao vivo não é atropelado quando o histórico volta depois', async () => {

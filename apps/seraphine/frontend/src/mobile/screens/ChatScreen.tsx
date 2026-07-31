@@ -49,6 +49,11 @@ interface Bolha {
   streaming?: boolean;
   tarefas?: CardTarefa[];
   orcamento?: Orcamento;
+  /** Motivo da ferramenta que falhou neste turno. */
+  erroFerramenta?: string;
+  /** Bolha aberta por um `tool_result` que chegou antes de ela falar: o
+   *  próximo turno de texto a adota, para o cartão e a frase ficarem juntos. */
+  orfa?: boolean;
 }
 
 export function ChatScreen({ onOpen }: ScreenProps) {
@@ -142,10 +147,21 @@ export function ChatScreen({ onOpen }: ScreenProps) {
         setFalha(null);
         setBolhas((prev) => {
           const i = prev.findIndex((b) => b.id === turnId);
-          if (i === -1) return [...prev, { id: turnId, autor: 'sera', texto, streaming: true }];
-          const next = prev.slice();
-          next[i] = { ...next[i], texto: next[i].texto + texto };
-          return next;
+          if (i !== -1) {
+            const next = prev.slice();
+            next[i] = { ...next[i], texto: next[i].texto + texto };
+            return next;
+          }
+          // Adota a bolha que um `tool_result` abriu antes de ela falar, para o
+          // texto pós-ferramenta e o cartão ficarem na MESMA fala, como no
+          // handoff — em vez de virarem duas falas seguidas.
+          const ultimo = prev.length - 1;
+          if (ultimo >= 0 && prev[ultimo].orfa) {
+            const next = prev.slice();
+            next[ultimo] = { ...next[ultimo], id: turnId, texto, streaming: true, orfa: false };
+            return next;
+          }
+          return [...prev, { id: turnId, autor: 'sera', texto, streaming: true }];
         });
         return;
       }
@@ -171,7 +187,13 @@ export function ChatScreen({ onOpen }: ScreenProps) {
         return;
       }
 
-      if (msg.type === 'tool_result' && msg.ok) {
+      if (msg.type === 'tool_result') {
+        if (!msg.ok) {
+          // Ferramenta que falha calada é ação que o usuário acha que aconteceu.
+          const motivo = String(msg.error ?? '').trim() || 'a ferramenta não respondeu';
+          setBolhas((prev) => anexar(prev, (b) => ({ ...b, erroFerramenta: motivo })));
+          return;
+        }
         const meta = (msg.metadata ?? null) as Record<string, unknown> | null;
         if (!meta) return;
         const tarefas = tarefasDe(meta.task);
@@ -243,28 +265,37 @@ export function ChatScreen({ onOpen }: ScreenProps) {
           <span className="ms-chat__dia-linha" aria-hidden="true" />
         </div>
 
-        {carregando && <Skel linhas={3} />}
+        {/* O esqueleto só cobre o VAZIO da espera. Havendo bolha — a que o
+            usuário acabou de mandar, inclusive — ela aparece na hora: o
+            composer aceita texto durante o restauro, e ver a própria mensagem
+            sumir é pior do que esperar. */}
+        {carregando && !bolhas.length && <Skel linhas={3} />}
 
         {!carregando && falhaHistorico && <Erro>Não consegui carregar a conversa anterior.</Erro>}
 
-        {!carregando && bolhas.map((b) => (
-          b.autor === 'voce'
-            ? (
+        {bolhas.map((b) => {
+          // A limpeza existe para a marcação que ELA emite. O que o usuário
+          // digitou vai para a tela como foi digitado, colchetes e tudo.
+          if (b.autor === 'voce') {
+            return (
               <div key={b.id} className="ms-chat-linha ms-chat-linha--voce">
-                <div className="ms-chat-bolha ms-chat-bolha--voce">{limpar(b.texto)}</div>
+                <div className="ms-chat-bolha ms-chat-bolha--voce">{b.texto}</div>
               </div>
-            )
-            : (
-              <div key={b.id} className="ms-chat-linha ms-chat-linha--sera">
-                <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
-                <div className={`ms-chat-bolha ms-chat-bolha--sera${b.streaming ? ' ms-chat-bolha--vindo' : ''}`}>
-                  <p className="ms-chat-bolha__texto">{limpar(b.texto)}</p>
-                  {(b.tarefas ?? []).map((t) => <CardDeTarefa key={t.id} tarefa={t} />)}
-                  {b.orcamento && <BarraDeOrcamento orcamento={b.orcamento} />}
-                </div>
+            );
+          }
+          const texto = limpar(b.texto);
+          return (
+            <div key={b.id} className="ms-chat-linha ms-chat-linha--sera">
+              <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
+              <div className={`ms-chat-bolha ms-chat-bolha--sera${b.streaming ? ' ms-chat-bolha--vindo' : ''}`}>
+                {texto && <p className="ms-chat-bolha__texto">{texto}</p>}
+                {(b.tarefas ?? []).map((t) => <CardDeTarefa key={t.id} tarefa={t} />)}
+                {b.orcamento && <BarraDeOrcamento orcamento={b.orcamento} />}
+                {b.erroFerramenta && <Erro>Uma ação falhou: {b.erroFerramenta}.</Erro>}
               </div>
-            )
-        ))}
+            </div>
+          );
+        })}
 
         {!carregando && !bolhas.length && !falha && !desistiu && !falhaHistorico && (
           <Vazio>Ainda não trocamos nenhuma mensagem hoje — me diga o que você precisa.</Vazio>
@@ -364,7 +395,11 @@ function BarraDeOrcamento({ orcamento }: { orcamento: Orcamento }) {
         ? (
           <div className="ms-chat-orc__legenda">
             <span className="ms-chat-orc__usado">{pct}% usado</span>
-            <span className="ms-chat-orc__livre">{brl(livre)} livre</span>
+            {/* Mês estourado não tem nada "livre": o saldo negativo vira o
+                quanto passou, e não um "R$ -340 livre". */}
+            {livre >= 0
+              ? <span className="ms-chat-orc__livre">{brl(livre)} livre</span>
+              : <span className="ms-chat-orc__livre ms-chat-orc__livre--acima">{brl(-livre)} acima</span>}
           </div>
         )
         : <Vazio>Ainda não há receita lançada no mês para comparar.</Vazio>}
@@ -372,12 +407,26 @@ function BarraDeOrcamento({ orcamento }: { orcamento: Orcamento }) {
   );
 }
 
-/** Acha a bolha da Seraphine que deve receber o cartão: a que está sendo
- *  escrita agora e, na falta dela, a última que ela disse. */
+/**
+ * Acha a bolha da Seraphine que deve receber o cartão.
+ *
+ * A que está sendo escrita agora; na falta dela, a ÚLTIMA da conversa, e só se
+ * for dela — uma fala dela mais acima é de outro turno, e o cartão apareceria
+ * acima da pergunta que o gerou.
+ *
+ * Se não houver alvo, abre bolha nova em vez de descartar. É o caso comum, não
+ * a exceção: o engine corta o stream no primeiro pedaço que traz `tool_calls`
+ * (`conversation/engine.py:1122`), então quando o modelo vai direto à
+ * ferramenta o `tool_result` chega antes de qualquer `token`.
+ */
 function anexar(bolhas: Bolha[], mut: (b: Bolha) => Bolha): Bolha[] {
   let i = bolhas.findIndex((b) => b.streaming);
-  if (i === -1) for (let k = bolhas.length - 1; k >= 0; k--) if (bolhas[k].autor === 'sera') { i = k; break; }
-  if (i === -1) return bolhas;
+  const ultimo = bolhas.length - 1;
+  if (i === -1 && ultimo >= 0 && bolhas[ultimo].autor === 'sera') i = ultimo;
+  if (i === -1) {
+    const nova: Bolha = { id: `cartao-${bolhas.length}-${Date.now()}`, autor: 'sera', texto: '', orfa: true };
+    return [...bolhas, mut(nova)];
+  }
   const next = bolhas.slice();
   next[i] = mut(next[i]);
   return next;

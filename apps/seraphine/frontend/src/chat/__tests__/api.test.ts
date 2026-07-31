@@ -90,4 +90,35 @@ describe('chat/api — fetchConversationTurns', () => {
     vi.mocked(global.fetch).mockRejectedValue(new Error('Failed to fetch'));
     await expect(fetchConversationTurns('conv-1')).rejects.toThrow(/Failed to fetch/);
   });
+
+  it('desiste sozinho quando a requisição pendura', async () => {
+    // Sem prazo, uma requisição que nunca volta deixa a tela em esqueleto para
+    // sempre — bloco sumido pintado de cinza, com um composer aceitando texto
+    // por cima. O prazo transforma o pendurado em erro desenhado.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(global.fetch).mockReturnValue(new Promise(() => {}) as never);
+      // O `rejects` precisa estar pendurado ANTES de o relógio andar, senão a
+      // rejeição acontece sem ninguém escutando.
+      const esperado = expect(fetchConversationTurns('conv-1')).rejects.toThrow(/tempo esgotado/i);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await esperado;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborta o pedido pendurado, não só a espera', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(global.fetch).mockReturnValue(new Promise(() => {}) as never);
+      const pego = fetchConversationTurns('conv-1').catch(() => null);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await pego;
+      const init = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+      expect(init.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

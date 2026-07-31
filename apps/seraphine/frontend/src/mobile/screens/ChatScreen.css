@@ -189,6 +189,7 @@ html[data-shell='phone'] .ms-chat-orc__legenda {
 }
 html[data-shell='phone'] .ms-chat-orc__usado { color: var(--text-dim, #9594a0); }
 html[data-shell='phone'] .ms-chat-orc__livre { font-weight: 600; }
+html[data-shell='phone'] .ms-chat-orc__livre--acima { color: var(--danger, #ef6b6b); }
 
 /* ── composer ──
    O handoff reserva 34px embaixo para o home indicator; aqui a tab bar do
