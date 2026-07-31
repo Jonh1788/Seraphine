@@ -40,24 +40,23 @@ import './WhatsAppThreadScreen.css';
 // duplo-check. O slot fica, com a única coisa verdadeira que a thread sabe
 // dizer sobre atividade: quando foi a última mensagem.
 
-export interface WhatsAppThreadProps extends ScreenProps {
-  /** Id do chat na bridge (ex.: `5511999999999@c.us`). Sem ele não há conversa
-   *  para abrir — ver a nota do relatório sobre o `PhoneShell` não repassar id
-   *  nenhum às telas empurradas. */
-  chatId?: string;
-  /** Nome do contato para o cabeçalho. O histórico traz `chatName`, mas
-   *  `inbox/api.ts` devolve só as mensagens; quem empurra a tela é quem sabe o
-   *  nome. Sem ele, o cabeçalho mostra o número do próprio id. */
-  contato?: string;
-}
+// QUAL conversa: o `id` do `ScreenProps` — identificador opaco que o shell
+// repassa cru de quem empurrou a tela (`onOpen({ key, title, id })`). Aqui ele é
+// o id do chat na bridge (`5511999999999@c.us`). É opcional no contrato, e
+// `undefined` é caso real: sem ele a tela AVISA, nunca adivinha uma conversa.
+//
+// A tela não tem prop própria nenhuma: o que ela recebe é exatamente o contrato
+// do shell. O nome do contato continua sem canal — o shell guarda o `title` mas
+// não o repassa, e `inbox/api.ts` descarta o `chatName` do histórico —, então o
+// cabeçalho mostra o número que o próprio id carrega em vez de inventar um nome.
 
-export function WhatsAppThreadScreen({ onBack, chatId, contato }: WhatsAppThreadProps) {
+export function WhatsAppThreadScreen({ onBack, id }: ScreenProps) {
   const [mensagens, setMensagens] = useState<WhatsAppMessage[] | null>(null);
   const [erro, setErro] = useState(false);
-  const [carregando, setCarregando] = useState(Boolean(chatId));
+  const [carregando, setCarregando] = useState(Boolean(id));
 
   useEffect(() => {
-    if (!chatId) {
+    if (!id) {
       setMensagens(null);
       setErro(false);
       setCarregando(false);
@@ -65,15 +64,15 @@ export function WhatsAppThreadScreen({ onBack, chatId, contato }: WhatsAppThread
     }
     let vivo = true;
     setCarregando(true);
-    listWhatsAppMessages(chatId)
+    listWhatsAppMessages(id)
       .then((m) => { if (vivo) { setMensagens(m); setErro(false); setCarregando(false); } })
       .catch(() => { if (vivo) { setMensagens(null); setErro(true); setCarregando(false); } });
     return () => { vivo = false; };
-  }, [chatId]);
+  }, [id]);
 
   const ordenadas = useMemo(() => emOrdemDeConversa(mensagens ?? []), [mensagens]);
-  const nome = nomeDoContato(contato, chatId);
-  const semConversa = !chatId;
+  const nome = nomeDoContato(id);
+  const semConversa = !id;
 
   // Conversa abre no fim: o que interessa ao abrir é a última mensagem, não a
   // mais antiga do histórico. (Sem asserção no teste: o jsdom não tem layout,
@@ -221,11 +220,11 @@ function atividade(msgs: WhatsAppMessage[]): string {
   return `${msgs.length} ${msgs.length === 1 ? 'mensagem' : 'mensagens'}`;
 }
 
-/** Nome do contato; sem ele, o número que o id do chat carrega (`5511…@c.us`).
- *  Mostrar o número é feio, inventar um nome é pior. */
-function nomeDoContato(contato: string | undefined, chatId: string | undefined): string {
-  const nome = (contato || '').trim();
-  if (nome) return nome;
+/** O que dá para chamar a conversa: o número que o id do chat carrega
+ *  (`5511…@c.us` → `5511…`). Ninguém entrega o nome do contato à tela — o shell
+ *  não repassa o `title` e `inbox/api.ts` descarta o `chatName` do histórico.
+ *  Mostrar o número é feio; inventar um nome é pior. */
+function nomeDoContato(chatId: string | undefined): string {
   const id = (chatId || '').trim();
   if (!id) return 'Conversa';
   return id.split('@')[0] || id;

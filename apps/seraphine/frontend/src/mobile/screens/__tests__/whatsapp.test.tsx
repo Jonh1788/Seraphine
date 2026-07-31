@@ -34,20 +34,32 @@ describe('WhatsAppThreadScreen', () => {
     vi.mocked(listWhatsAppMessages).mockReset().mockResolvedValue([]);
   });
 
-  it('mostra a conversa e pede à api o chat que recebeu', async () => {
+  it('mostra a conversa que o id do shell aponta', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    render(<WhatsAppThreadScreen id={CHAT} />);
 
     await waitFor(() => expect(screen.getByText('confirmado o jantar hoje?')).toBeTruthy());
     expect(screen.getByText('Confirmadíssimo! 19h no lugar de sempre')).toBeTruthy();
     expect(screen.getByText('perfeito!! te vejo lá')).toBeTruthy();
-    expect(screen.getByText('Ana')).toBeTruthy();
-    expect(vi.mocked(listWhatsAppMessages)).toHaveBeenCalledWith(CHAT);
+  });
+
+  // O `id` do ScreenProps é o contrato do shell para dizer QUAL conversa abrir
+  // (PhoneShell repassa cru o que veio no `onOpen`). Se a tela ignorasse o
+  // campo, abriria a conversa errada — ou nenhuma.
+  it('o id recebido é o chat pedido à api, e só ele', async () => {
+    vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
+    render(<WhatsAppThreadScreen id={CHAT} />);
+
+    await waitFor(() => expect(vi.mocked(listWhatsAppMessages)).toHaveBeenCalledWith(CHAT));
+    expect(vi.mocked(listWhatsAppMessages)).toHaveBeenCalledTimes(1);
+    // sem nome vindo do shell, o cabeçalho mostra o número do próprio id —
+    // nunca um nome inventado
+    expect(screen.getByText('5511999999999')).toBeTruthy();
   });
 
   it('enviada e recebida têm classes distintas, não só cor', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(bolhas(container).length).toBe(3));
 
     const [recebida, enviada] = bolhas(container);
@@ -59,7 +71,7 @@ describe('WhatsAppThreadScreen', () => {
 
   it('mostra estado vazio, não some, quando a conversa não tem mensagem', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue([]);
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText(/nenhuma mensagem nesta conversa/i)).toBeTruthy());
     // vazio é vazio, nunca erro: o alerta é reservado para falha de verdade
     expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -67,23 +79,24 @@ describe('WhatsAppThreadScreen', () => {
 
   it('mostra erro quando a api falha', async () => {
     vi.mocked(listWhatsAppMessages).mockRejectedValue(new Error('rede'));
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText(/não consegui carregar esta conversa/i)).toBeTruthy());
     expect(screen.getByText(/não consegui carregar esta conversa/i).getAttribute('role')).toBe('alert');
   });
 
   it('enquanto carrega mostra esqueleto sem texto, sem piscar "sem mensagem"', async () => {
     vi.mocked(listWhatsAppMessages).mockReturnValue(new Promise(() => {}));
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     expect(container.querySelector('.ms-whatsapp-skel-bolhas')).toBeTruthy();
     expect(screen.queryByText(/nenhuma mensagem nesta conversa/i)).toBeNull();
     expect(screen.queryByText(/não consegui carregar/i)).toBeNull();
   });
 
-  // O shell não entrega o id do chat (PhoneShell só repassa a chave da tela).
-  // Sem id não há conversa possível: a tela tem de DIZER isso, não ficar branca.
-  it('sem chatId avisa em vez de chamar a api ou ficar em branco', async () => {
-    render(<WhatsAppThreadScreen contato="Ana" />);
+  // `id` é opcional no ScreenProps e `undefined` é caso real (quem empurra pode
+  // não mandar). Sem id não há conversa possível: a tela tem de DIZER isso, não
+  // ficar branca nem chutar um chat.
+  it('sem id avisa em vez de chamar a api ou ficar em branco', async () => {
+    render(<WhatsAppThreadScreen />);
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(screen.getByRole('alert').textContent).toMatch(/qual conversa/i);
     expect(vi.mocked(listWhatsAppMessages)).not.toHaveBeenCalled();
@@ -98,7 +111,7 @@ describe('WhatsAppThreadScreen', () => {
       msg({ id: 'a', body: 'primeira de verdade', at: '2026-07-31T22:32:00.000Z' }),
       msg({ id: 'b', body: 'segunda de verdade', at: '2026-07-31T22:34:00.000Z' }),
     ]);
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(bolhas(container).length).toBe(3));
 
     const textos = bolhas(container).map((b) => b.textContent ?? '');
@@ -112,7 +125,7 @@ describe('WhatsAppThreadScreen', () => {
   // mensagem comum, senão rotula errado.
   it('não carimba "enviada pela Seraphine" em mensagem comum', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText('Confirmadíssimo! 19h no lugar de sempre')).toBeTruthy());
     expect(screen.queryByText(/enviada pela Seraphine/i)).toBeNull();
   });
@@ -121,7 +134,7 @@ describe('WhatsAppThreadScreen', () => {
   // fromMe): um check sempre aceso mentiria que a mensagem chegou.
   it('não inventa estado de entrega nas enviadas', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(bolhas(container).length).toBe(3));
     expect(container.querySelector('.ms-whatsapp-ack')).toBeNull();
     expect(screen.queryByLabelText(/entregue|lida|enviada/i)).toBeNull();
@@ -132,7 +145,7 @@ describe('WhatsAppThreadScreen', () => {
       msg({ id: 'a', body: 'com data', at: '2026-07-31T22:32:00.000Z' }),
       msg({ id: 'sem', body: 'sem data', at: '' }),
     ]);
-    const { container } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { container } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(bolhas(container).length).toBe(2));
 
     const horas = Array.from(container.querySelectorAll('.ms-whatsapp-hora')).map((h) => h.textContent);
@@ -144,14 +157,14 @@ describe('WhatsAppThreadScreen', () => {
   it('tem o voltar do handoff e chama onBack ao tocar', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
     const onBack = vi.fn();
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" onBack={onBack} />);
+    render(<WhatsAppThreadScreen id={CHAT} onBack={onBack} />);
     fireEvent.click(await screen.findByLabelText('Voltar'));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it('sem onBack não mostra o voltar nem quebra a tela', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText('confirmado o jantar hoje?')).toBeTruthy());
     expect(screen.queryByLabelText('Voltar')).toBeNull();
   });
@@ -161,7 +174,7 @@ describe('WhatsAppThreadScreen', () => {
   // quê — botão que finge enviar é pior que botão desabilitado.
   it('o composer aparece desligado e explica por quê', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText('confirmado o jantar hoje?')).toBeTruthy());
 
     const enviar = screen.getByRole('button', { name: /enviar/i }) as HTMLButtonElement;
@@ -172,11 +185,11 @@ describe('WhatsAppThreadScreen', () => {
 
   it('troca de conversa recarrega a thread', async () => {
     vi.mocked(listWhatsAppMessages).mockResolvedValue(conversa());
-    const { rerender } = render(<WhatsAppThreadScreen chatId={CHAT} contato="Ana" />);
+    const { rerender } = render(<WhatsAppThreadScreen id={CHAT} />);
     await waitFor(() => expect(screen.getByText('confirmado o jantar hoje?')).toBeTruthy());
 
     vi.mocked(listWhatsAppMessages).mockResolvedValue([msg({ id: 'z', body: 'oi do outro chat' })]);
-    rerender(<WhatsAppThreadScreen chatId="5511888888888@c.us" contato="Bruno" />);
+    rerender(<WhatsAppThreadScreen id="5511888888888@c.us" />);
     await waitFor(() => expect(screen.getByText('oi do outro chat')).toBeTruthy());
     expect(vi.mocked(listWhatsAppMessages)).toHaveBeenLastCalledWith('5511888888888@c.us');
   });
