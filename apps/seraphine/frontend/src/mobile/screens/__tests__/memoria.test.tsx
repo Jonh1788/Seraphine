@@ -74,6 +74,10 @@ describe('MemoriaScreen', () => {
     vi.mocked(listFacts).mockResolvedValue([]);
     fireEvent.change(screen.getByLabelText(/buscar na memória/i), { target: { value: 'xpto' } });
     await waitFor(() => expect(screen.getByText(/nada na memória casa com “xpto”/i)).toBeTruthy());
+    // A linha do cabeçalho tem SUJEITO: "nenhuma casa com a busca" era frase
+    // quebrada — sem o substantivo, "casa" vira o cômodo, não o verbo. O
+    // substantivo desta tela é lembrança, o mesmo da contagem ("3 lembranças").
+    expect(screen.getByText('nenhuma lembrança casa com a busca')).toBeTruthy();
   });
 
   it('confiança baixa rende o ponto âmbar; alta, o verde', async () => {

@@ -117,7 +117,7 @@ export function MemoriaScreen({ onBack }: ScreenProps) {
           {carregando ? <Skel linhas={1} />
             : erro ? <Erro>Não consegui contar suas lembranças.</Erro>
             : ativos.length ? <p className="ms-memoria-sub">{ativos.length} {ativos.length === 1 ? 'lembrança' : 'lembranças'}</p>
-            : termo ? <Vazio>nenhuma casa com a busca</Vazio>
+            : termo ? <Vazio>nenhuma lembrança casa com a busca</Vazio>
             : <Vazio>nenhuma lembrança guardada ainda</Vazio>}
         </div>
       </header>

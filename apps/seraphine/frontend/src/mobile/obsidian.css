@@ -51,6 +51,29 @@ html[data-shell='phone'] .mpushed { display: flex; flex-direction: column; heigh
 html[data-shell='phone'] .mpushed__body { flex: 1; min-height: 0; overflow-y: auto; padding-top: env(safe-area-inset-top, 44px); padding-bottom: env(safe-area-inset-bottom, 20px); }
 html[data-shell='phone'] .mshell-pending { padding: 40px 16px; text-align: center; color: var(--text-faint, #5f5e6b); }
 
+/* Alvo de 44pt (HIG) do controle de sair da tela — o mesmo mínimo que a tab bar
+   já cumpre acima. A garantia morava no chrome do shell; quando cada tela
+   passou a desenhar o próprio cabeçalho, cada uma redesenhou o ‹ sem ela, e as
+   caixas ficaram entre 22px e 43px. Ela volta AQUI, uma vez para todas as telas
+   (as de hoje e as de amanhã), presa ao rótulo — que é o que define o controle,
+   não a classe, que cada tela nomeia do seu jeito.
+   Por que num pseudo-elemento e não em `min-width`: `min-width` de fato vence
+   `width` (o valor usado é sempre limitado pelo mínimo), mas engordar a caixa
+   moveria o glifo, que estas telas alinham opticamente à margem de 20px, e
+   faria a caixa DESENHADA da lição (34px com borda) virar 44px. O pseudo cresce
+   por fora, centrado: o dedo acerta o botão em qualquer ponto dos 44×44 e nada
+   se move nem muda de tamanho na tela. Ele cabe nas folgas dos cabeçalhos (a
+   menor é a de 9px do mapa de Trilhas), então não rouba toque de vizinho.
+   Fora de `.mpushed__body` de propósito: o mapa de Trilhas desenha o mesmo ‹
+   sendo ABA (ver PhoneShell), fora do contêiner empurrado. */
+html[data-shell='phone'] button[aria-label='Voltar'],
+html[data-shell='phone'] button[aria-label='Sair da lição'] { position: relative; }
+html[data-shell='phone'] button[aria-label='Voltar']::after,
+html[data-shell='phone'] button[aria-label='Sair da lição']::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+
 /* ── hoje: mudou-se para screens/Hoje.css, que o HojeScreen importa ── */
 
 /* ── mais ── */
