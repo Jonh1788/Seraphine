@@ -62,7 +62,10 @@ describe('PhoneShell monta pelo registry', () => {
   it('renderiza a tela do registry nas abas que não são Hoje/Mais', async () => {
     jaOnboardou();
     const { getByText, findByText } = render(<PhoneShell />);
-    fireEvent.click(getByText('Tarefas'));
+    // "Tarefas" aparece duas vezes enquanto o Hoje está montado: no rótulo da
+    // aba e no cartão de tarefas do Hoje — que agora fica de pé mesmo sem
+    // tarefa aberta, em vez de sumir. O clique é na ABA.
+    fireEvent.click(getByText('Tarefas', { selector: '.mtab__label' }));
     expect(await findByText('tela:tarefas')).toBeTruthy();
     fireEvent.click(getByText('Chat'));
     expect(await findByText('tela:chat')).toBeTruthy();
