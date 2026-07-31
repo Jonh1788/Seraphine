@@ -214,8 +214,13 @@ Timeouts: 20s no Rust, 90s no proxy (`_PROXY_TIMEOUT_SECONDS`,
 - Avisos automáticos (lembretes, email urgente, rotinas) — decisão explícita de
   não dar autonomia agora.
 - Acesso de fora de casa — v2, via bridge outbound.
-- Luzes, garagem, piscina — cada um vira um adaptador em `home/` depois, sem
-  mexer em Rust nem em TS.
+- Luzes, garagem, piscina — cada um vira um adaptador em `home/` depois.
+  O TypeScript não muda (a `base` é repasse puro) e o Python é só um módulo
+  irmão com o seu próprio `LanTransport(base=…)`. No Rust, muda **uma linha**:
+  cada aparelho novo é um `host:porta` novo, e a allowlist é constante de
+  compilação — então entra também um `pnpm tauri:install`. Foi assim de
+  propósito: a allowlist só protege enquanto for código revisado, não
+  configuração.
 
 ## Deploy
 

@@ -1909,6 +1909,8 @@ No PC Windows, o EspMusic já está atualizado pela Task 1.
 
 Pré-condições: EspMusic no ar, ao menos uma caixa ligada, app da Seraphine aberto no Mac e na mesma rede.
 
+0. No log de boot do backend, confirmar a linha `Home (EspMusic) tools wired`. Nenhum teste automatizado executa o bloco de registro (os únicos testes que sobem o lifespan real falham por ambiente), então esta é a primeira confirmação de que as quatro tools existem em produção.
+
 Na Seraphine, pedir e conferir:
 
 1. "o que está tocando na casa?" → `home_status` responde com cômodo, volume e caixas.
