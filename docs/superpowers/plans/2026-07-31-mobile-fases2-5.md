@@ -31,7 +31,14 @@ Toda task de tela:
 3. Importa seu CSS no topo: `import './<Nome>.css';`
 4. Prefixa **todas** as classes com `ms-<tela>-` (ex.: `ms-tarefas-row`), para dois CSS de tela nunca colidirem.
 5. Consome só funções do `<modulo>/api.ts` declarado na task. Zero `fetch` direto, zero `API_BASE` importado.
-6. **Estado vazio obrigatório.** Nenhum bloco pode sumir por falta de dado — lista vazia mostra o estado vazio desenhado no handoff. Erro de carregamento mostra mensagem de erro, distinta de vazio.
+6. **Estado vazio obrigatório.** Nenhum bloco pode sumir por falta de dado, e nenhum pode `return null`. Todo bloco tem três saídas: dado, vazio e erro.
+
+   **O handoff NÃO desenha estados vazios** — o único é o do chat (tela 19). Não procure: não está lá. O padrão a seguir é o que a Task 3 estabeleceu no `HojeScreen`, já revisado e aprovado:
+   - vazio → uma linha em `--text-dim` dizendo o que de fato não há ("nada na agenda hoje"), dentro do card, nunca um card em branco;
+   - erro → texto em `--danger` com `role="alert"`, visualmente distinto do vazio, dizendo que não deu para carregar;
+   - carregando → barras de esqueleto **sem texto**, para nenhum card piscar "tudo em dia" antes do dado chegar.
+
+   Escreva a frase de vazio específica do domínio. "Nenhum item" é preguiça; "você ainda não registrou nenhum hábito" informa.
 7. Abre o trecho do handoff pela âncora da task e recria fielmente: espaçamentos, raios, pesos de fonte, ordem dos elementos.
 8. Testes em `src/mobile/screens/__tests__/<nome>.test.tsx`, mockando o módulo de api com `vi.mock`. Três casos no mínimo: **(a)** renderiza com dados; **(b)** renderiza o estado vazio quando a lista vem vazia; **(c)** renderiza erro quando a api rejeita. Mais casos conforme a task pedir.
 
