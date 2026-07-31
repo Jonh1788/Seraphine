@@ -40,7 +40,9 @@ export function PhoneShell() {
   if (pushed) {
     return (
       <div className="mshell">
-        <PushedScreen title={pushed.title} onBack={() => setPushed(null)}>
+        {/* O título fica no estado (a tela pode querer saber quem a abriu), mas
+            quem o desenha é a tela: o contêiner não tem cabeçalho. */}
+        <PushedScreen>
           <ScreenHost keyName={pushed.key} onBack={() => setPushed(null)} onOpen={setPushed} />
         </PushedScreen>
       </div>
@@ -62,8 +64,10 @@ export function PhoneShell() {
 }
 
 // Única ponte entre o shell e as telas: acha a tela pela chave no registry.
-// O Suspense fica AQUI (dentro do conteúdo) para a tab bar e o cabeçalho da
-// tela empurrada continuarem montados enquanto o chunk carrega.
+// O Suspense fica AQUI (dentro do conteúdo) para a tab bar continuar montada
+// enquanto o chunk carrega. Na pilha não há chrome para segurar: a tela
+// empurrada desenha o próprio cabeçalho, então o contêiner fica vazio até ela
+// resolver.
 function ScreenHost({ keyName, onBack, onOpen, onDone }: {
   keyName: string;
   onBack?: () => void;

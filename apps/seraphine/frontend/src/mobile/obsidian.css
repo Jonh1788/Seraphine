@@ -41,11 +41,14 @@ html[data-shell='phone'] .mtab--active { color: var(--accent, #9a93ff); }
 html[data-shell='phone'] .mtab--active .mtab__label { font-weight: 700; }
 html[data-shell='phone'] .mtab--chat { margin-top: -22px; }
 html[data-shell='phone'] .mtab--chat .morb { box-shadow: inset -5px -7px 14px rgba(15,10,60,.55), inset 3px 4px 8px rgba(255,255,255,.35), 0 6px 20px rgba(154,147,255,.4), 0 0 0 5px var(--app, #0f0f14); }
+/* Tela empurrada: o contêiner NÃO tem cabeçalho — cada tela desenha o seu (o ‹
+   inclusive). Aqui só o que nenhuma tela deve reinventar: altura cheia, rolagem
+   e as safe areas. O inset do topo, que morava no cabeçalho genérico, passou
+   para o corpo: com ele, um cabeçalho de tela com 12px de padding cai nos ~56px
+   do handoff. Quem quiser sangrar até a borda anula com margin negativa, como o
+   ChatScreen já faz sob .mshell__content. */
 html[data-shell='phone'] .mpushed { display: flex; flex-direction: column; height: 100dvh; background: var(--app, #0f0f14); }
-html[data-shell='phone'] .mpushed__head { flex: none; display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top, 44px)) 14px 10px; border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); }
-html[data-shell='phone'] .mpushed__back { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: var(--text-dim, #9594a0); cursor: pointer; }
-html[data-shell='phone'] .mpushed__title { font-size: 16px; font-weight: 700; color: var(--text, #ececef); }
-html[data-shell='phone'] .mpushed__body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom, 20px); }
+html[data-shell='phone'] .mpushed__body { flex: 1; min-height: 0; overflow-y: auto; padding-top: env(safe-area-inset-top, 44px); padding-bottom: env(safe-area-inset-bottom, 20px); }
 html[data-shell='phone'] .mshell-pending { padding: 40px 16px; text-align: center; color: var(--text-faint, #5f5e6b); }
 
 /* ── hoje: mudou-se para screens/Hoje.css, que o HojeScreen importa ── */

@@ -1,6 +1,7 @@
 import { lazy } from 'react';
 import { render, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ArrowLeftIcon } from '../../icons/Icons';
 import type { ScreenProps } from '../screens/registry';
 
 // O registry real é trocado por telas de mentira: este teste é sobre a MONTAGEM
@@ -19,6 +20,19 @@ vi.mock('../screens/registry', () => ({
     financas: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => (
         <button type="button" onClick={onBack}>fechar-financas</button>
+      ),
+    })),
+    // Tela empurrada como o handoff manda: o cabeçalho (com o ‹) é DELA.
+    calendario: lazy(async () => ({
+      default: ({ onBack }: ScreenProps) => (
+        <div>
+          <header>
+            <button type="button" aria-label="Voltar" onClick={onBack}>
+              <ArrowLeftIcon size={18} />
+            </button>
+            <h1>Junho</h1>
+          </header>
+        </div>
       ),
     })),
     'onboarding-boas-vindas': lazy(async () => ({
@@ -86,13 +100,38 @@ describe('PhoneShell monta pelo registry', () => {
     fireEvent.click(getByText('Mais'));
     await settle(); // deixa o fetch de stats do Mais assentar
     fireEvent.click(getByText('Finanças'));
-    // cabeçalho da tela empurrada visível ANTES de a tela resolver
-    expect(container.querySelector('.mpushed__title')?.textContent).toBe('Finanças');
-    expect(visivel(container.querySelector('.mpushed__back'))).toBe(true);
+    // O contêiner monta VAZIO enquanto o chunk carrega: quem desenha cabeçalho
+    // é a tela, então o shell não tem nada a mostrar antes dela resolver.
+    expect(visivel(container.querySelector('.mpushed'))).toBe(true);
+    expect(container.querySelector('.mpushed')?.textContent).toBe('');
+    expect(container.querySelector('.mtabbar')).toBeNull(); // empurrada = sem tab bar
     fireEvent.click(await findByText('fechar-financas'));
     expect(queryByText('fechar-financas')).toBeNull();
     expect(container.querySelector('.mtabbar')).toBeTruthy();
     await settle(); // o Mais remonta ao voltar e refaz o fetch de stats
+  });
+
+  // A regressão que este teste tranca: o shell voltar a desenhar chrome próprio
+  // — dois ‹ na mesma tela, ou o título repetido (aconteceu duas vezes na onda).
+  it('não desenha chrome: o voltar da tela empurrada é o único da árvore', async () => {
+    jaOnboardou();
+    const { container, getByText, findByText, queryByText, queryAllByText, queryAllByLabelText } =
+      render(<PhoneShell />);
+    fireEvent.click(getByText('Mais'));
+    await settle();
+    fireEvent.click(getByText('Calendário'));
+    await findByText('Junho'); // a tela resolveu e desenhou o cabeçalho dela
+
+    expect(queryAllByLabelText('Voltar')).toHaveLength(1); // o dela, e só
+    expect(container.querySelector('.mpushed__head')).toBeNull();
+    // o título que o shell empilhava ('Calendário') não é mais renderizado por
+    // ninguém: a tela diz o próprio nome ('Junho')
+    expect(queryAllByText('Calendário')).toHaveLength(0);
+
+    fireEvent.click(queryAllByLabelText('Voltar')[0]); // o ‹ da tela fecha a pilha
+    expect(queryByText('Junho')).toBeNull();
+    expect(container.querySelector('.mtabbar')).toBeTruthy();
+    await settle();
   });
 
   it('cai no "em construção" quando a chave empurrada não existe no registry', async () => {
