@@ -574,7 +574,10 @@ As outras quatro fontes do desktop ficam fora: o handoff desenha uma caixa de me
 ### Task 15: InboxScreen — âncora linha 353
 
 **Files:** Rewrite `src/mobile/screens/InboxScreen.tsx` + `.css` + teste
-**Api:** `inbox/api.ts` (Task 8)
+**Api:** `inbox/api.ts` — **use `listInboxDetailed(filter)`, NÃO `listInbox`** (Task 8)
+
+> `listInbox` devolve `InboxItem[]` e não tem onde carregar erro parcial: com o filtro "Tudo" e o WhatsApp fora do ar, ele renderiza só os e-mails **em silêncio**, sem avisar que metade da caixa sumiu. `listInboxDetailed` devolve `{items, errors}` — mostre os itens que vieram e sinalize a fonte que falhou. Esta é a razão de a Task 8 ter criado a segunda função.
+
 **Obrigatório:** filtros Tudo/E-mail/WhatsApp; rows com avatar da fonte, ícone do canal, hora e ponto de não-lido; lidas em `opacity:.7`; card da Seraphine oferecendo responder com botão Sim.
 **Asserções extras:** o filtro E-mail remove itens de WhatsApp; item lido não mostra o ponto.
 
@@ -617,7 +620,9 @@ As outras quatro fontes do desktop ficam fora: o handoff desenha uma caixa de me
 
 **Files:** Rewrite `src/mobile/screens/WhatsAppThreadScreen.tsx` + `.css` + teste
 **Api:** `inbox/api.ts` — `listWhatsAppMessages(chatId)` (Task 8)
-**Obrigatório:** header ‹ + avatar + "online"; recebidas em `--surface` à esquerda, enviadas em `rgba(37,211,102,.16)` à direita com duplo-check azul; selo central "enviada pela Seraphine com sua aprovação"; card da Seraphine confirmando ação na agenda; composer com botão de enviar verde.
+**Obrigatório:** header ‹ + avatar + "online"; recebidas em `--surface` à esquerda, enviadas em `rgba(37,211,102,.16)` à direita; selo central "enviada pela Seraphine com sua aprovação"; card da Seraphine confirmando ação na agenda; composer com botão de enviar verde.
+
+> **O duplo-check azul do handoff NÃO é implementável hoje, e a causa não está nesta camada.** O tipo `WhatsAppMessage` já declara `ack?: number`, mas o bridge nunca envia o campo: `services/whatsapp-bridge/src/routes/messages.ts:88-92` mapeia só `id/body/timestamp/fromMe`, e o token `ack` não existe em `services/whatsapp-bridge/src`. Renderize as enviadas **sem** o duplo-check e não invente um estado de entrega que o dado não sustenta. Quando o bridge passar a mandar `ack`, esta tela funciona sem mudança — o `api.ts` já repassa o campo.
 **Asserções extras:** mensagem enviada e recebida têm classes distintas; o selo só aparece nas enviadas pela Seraphine.
 
 ### Task 22: VozScreen — âncora linha 122
