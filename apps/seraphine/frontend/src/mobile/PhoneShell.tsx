@@ -56,7 +56,13 @@ export function PhoneShell() {
     <div className="mshell">
       <main className="mshell__content">
         {tab === 'hoje' && <HojeScreen onOpen={setPushed} />}
-        {tab === 'tarefas' && <ScreenHost keyName="tarefas" onBack={() => setTab('hoje')} onOpen={setPushed} />}
+        {/* Sem `onBack`: a aba não tem para onde voltar — quem tira dali é a tab
+            bar, e o handoff não desenha seta no cabeçalho da tela TAREFAS.
+            Enquanto o shell o passava aqui, `onBack` deixava de distinguir aba
+            de pilha e a tela tinha de perguntar ao DOM em qual contêiner nasceu.
+            A linha da Trilhas abaixo NÃO é o mesmo caso: lá o handoff desenha o
+            ‹ de verdade na tela do mapa (README tela 5), com tab bar e tudo. */}
+        {tab === 'tarefas' && <ScreenHost keyName="tarefas" onOpen={setPushed} />}
         {tab === 'chat' && <ScreenHost keyName="chat" onOpen={setPushed} />}
         {tab === 'trilhas' && <ScreenHost keyName="trilhas" onBack={() => setTab('hoje')} onOpen={setPushed} />}
         {tab === 'mais' && <MaisScreen onOpen={setPushed} />}

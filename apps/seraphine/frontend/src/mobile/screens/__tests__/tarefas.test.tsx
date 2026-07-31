@@ -179,13 +179,15 @@ describe('TarefasScreen', () => {
      do Calendário — e o contêiner empurrado (`PhoneShell`, ramo `pushed`) NÃO
      desenha tab bar. Sem um controle de saída próprio o usuário fica preso.
 
-     O que distingue os dois contextos NÃO é o `onBack`: o shell o passa também
-     na aba (`PhoneShell.tsx:59`, `onBack={() => setTab('hoje')}`). Quem distingue
-     é o contêiner — `.mshell__content` na aba, `.mpushed` na pilha —, então os
-     testes montam a tela dentro do contêiner REAL de cada caso. */
+     Quem distingue os dois contextos é o `onBack`: o shell só o passa no ramo da
+     pilha. Era ele também na aba (`PhoneShell.tsx:59` voltava para o Hoje, saída
+     que o handoff não desenha) e por isso esta tela perguntava ao DOM em qual
+     contêiner nascera; a Task 28 tirou a exceção do shell e o sniff junto.
+     Os testes seguem montando dentro do contêiner REAL de cada caso — o que
+     mudou é que só a pilha entrega `onBack`, e é isso que a tela lê. */
   describe('saída da tela', () => {
     const naPilha = (props = {}) => render(
-      <div className="mpushed"><div className="mpushed__body"><TarefasScreen {...props} /></div></div>,
+      <div className="mpushed"><div className="mpushed__body"><TarefasScreen onBack={() => {}} {...props} /></div></div>,
     );
     const naAba = (props = {}) => render(
       <main className="mshell__content"><TarefasScreen {...props} /></main>,
@@ -214,24 +216,16 @@ describe('TarefasScreen', () => {
       expect(container.querySelector('.ms-tarefas')?.className).toContain('ms-tarefas--empurrada');
     });
 
-    it('na aba: nenhum voltar, mesmo com o onBack que o shell passa', async () => {
-      // `PhoneShell.tsx:59` passa `onBack` na aba. Guardar o botão só por
-      // `onBack &&` faria a aba crescer uma seta que o handoff não tem — lá a
-      // saída é a tab bar. Este teste é o que impede essa "correção".
+    it('na aba: nenhum voltar, e nenhuma compensação de padding', async () => {
+      // A aba não recebe `onBack` (PhoneShell), e é isso que a tela lê. Uma seta
+      // aqui seria um segundo caminho para fora que o handoff não desenha; a
+      // compensação de padding aqui seria padding em dobro.
       vi.mocked(listTasks).mockResolvedValue([]);
-      const { container } = naAba({ onBack: vi.fn() });
+      const { container } = naAba();
 
       await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
       expect(voltares().length).toBe(0);
       expect(container.querySelector('.ms-tarefas')?.className).not.toContain('ms-tarefas--empurrada');
-    });
-
-    it('na aba sem onBack: nenhum voltar', async () => {
-      vi.mocked(listTasks).mockResolvedValue([]);
-      naAba();
-
-      await waitFor(() => expect(screen.getByText('Tarefas')).toBeTruthy());
-      expect(voltares().length).toBe(0);
     });
   });
 });

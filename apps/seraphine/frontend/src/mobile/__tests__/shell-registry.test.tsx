@@ -14,8 +14,16 @@ import type { ScreenProps } from '../screens/registry';
 vi.mock('../screens/registry', () => ({
   SCREEN_KEYS: [],
   SCREENS: {
-    tarefas: lazy(async () => ({ default: () => <div>tela:tarefas</div> })),
-    chat: lazy(async () => ({ default: () => <div>tela:chat</div> })),
+    // Estas duas dizem se receberam `onBack`: nas ABAS elas não podem receber.
+    // É a assimetria que a Task 28 desfez — enquanto a aba `tarefas` ganhava um
+    // `onBack` que voltava para o Hoje, a tela não podia usar `onBack &&` para
+    // saber se estava empurrada e tinha de perguntar ao DOM.
+    tarefas: lazy(async () => ({
+      default: ({ onBack }: ScreenProps) => <div>tela:tarefas{onBack ? ':com-onBack' : ''}</div>,
+    })),
+    chat: lazy(async () => ({
+      default: ({ onBack }: ScreenProps) => <div>tela:chat{onBack ? ':com-onBack' : ''}</div>,
+    })),
     trilhas: lazy(() => new Promise<{ default: () => JSX.Element }>(() => {})),
     financas: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => (
@@ -98,6 +106,9 @@ describe('PhoneShell monta pelo registry', () => {
     // aba e no cartão de tarefas do Hoje — que agora fica de pé mesmo sem
     // tarefa aberta, em vez de sumir. O clique é na ABA.
     fireEvent.click(getByText('Tarefas', { selector: '.mtab__label' }));
+    // O sufixo é a asserção: a aba NÃO recebe `onBack`. Se voltar a receber,
+    // este texto muda e o teste cai — e é o que faz a tela poder decidir a seta
+    // de voltar por `onBack &&` em vez de perguntar ao DOM.
     expect(await findByText('tela:tarefas')).toBeTruthy();
     fireEvent.click(getByText('Chat'));
     expect(await findByText('tela:chat')).toBeTruthy();
