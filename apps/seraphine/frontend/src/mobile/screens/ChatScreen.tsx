@@ -4,6 +4,8 @@ import { useChatStore } from '../../stores/chatStore';
 import { Orb } from '../Orb';
 import { MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../../icons/Icons';
 import { updateTaskStatus } from '../../tasks/api';
+import { fetchConversationTurns } from '../../chat/api';
+import type { ConversationTurn } from '../../chat/types';
 import type { SeraphineWS } from '../../ws/client';
 import type { ScreenProps } from './registry';
 import './ChatScreen.css';
@@ -62,6 +64,9 @@ export function ChatScreen({ onOpen }: ScreenProps) {
   const [bolhas, setBolhas] = useState<Bolha[]>([]);
   const [falha, setFalha] = useState<string | null>(null);
   const [rascunho, setRascunho] = useState('');
+  // Restauro do transcrito: só há o que esperar se já existe conversa gravada.
+  const [restaurando, setRestaurando] = useState(() => !!localStorage.getItem(CONV_KEY));
+  const [falhaHistorico, setFalhaHistorico] = useState(false);
   const speak = useChatStore((s) => s.speak);
   const setSpeak = useChatStore((s) => s.setSpeak);
   const conversaRef = useRef<string | undefined>(localStorage.getItem(CONV_KEY) || undefined);
@@ -90,6 +95,29 @@ export function ChatScreen({ onOpen }: ScreenProps) {
     }, 100);
     return () => clearInterval(t);
   }, [wsRef]);
+
+  // A aba Chat desmonta ao trocar de aba, e o socket só entrega o que ainda vai
+  // acontecer: sem este restauro, voltar para a aba apagava a conversa da tela
+  // (o backend seguia com o contexto — a perda era só visual, e total).
+  useEffect(() => {
+    const conversa = conversaRef.current;
+    if (!conversa) return;
+    let vivo = true;
+    fetchConversationTurns(conversa)
+      .then((turnos) => {
+        if (!vivo) return;
+        // Merge por id, e não substituição: se um turno ao vivo chegou
+        // enquanto o histórico voltava, ele não pode ser atropelado.
+        setBolhas((prev) => {
+          const antigos = turnos.map(deTurno).filter((b) => !prev.some((p) => p.id === b.id));
+          return [...antigos, ...prev];
+        });
+        setFalhaHistorico(false);
+      })
+      .catch(() => { if (vivo) setFalhaHistorico(true); })
+      .finally(() => { if (vivo) setRestaurando(false); });
+    return () => { vivo = false; };
+  }, []);
 
   useEffect(() => {
     if (!ws) return;
@@ -176,7 +204,9 @@ export function ChatScreen({ onOpen }: ScreenProps) {
     });
   };
 
-  const carregando = !ws && !desistiu;
+  // A conversa espera pelas duas pontas: o socket que ainda vai nascer e o
+  // transcrito que ainda vai voltar.
+  const carregando = (!ws && !desistiu) || restaurando;
 
   return (
     <div className="ms-chat">
@@ -215,6 +245,8 @@ export function ChatScreen({ onOpen }: ScreenProps) {
 
         {carregando && <Skel linhas={3} />}
 
+        {!carregando && falhaHistorico && <Erro>Não consegui carregar a conversa anterior.</Erro>}
+
         {!carregando && bolhas.map((b) => (
           b.autor === 'voce'
             ? (
@@ -234,7 +266,7 @@ export function ChatScreen({ onOpen }: ScreenProps) {
             )
         ))}
 
-        {!carregando && !bolhas.length && !falha && !desistiu && (
+        {!carregando && !bolhas.length && !falha && !desistiu && !falhaHistorico && (
           <Vazio>Ainda não trocamos nenhuma mensagem hoje — me diga o que você precisa.</Vazio>
         )}
         {desistiu && <Erro>Não consegui abrir a conversa com a Seraphine.</Erro>}
@@ -351,6 +383,36 @@ function anexar(bolhas: Bolha[], mut: (b: Bolha) => Bolha): Bolha[] {
   return next;
 }
 
+/** Um turno gravado vira bolha. `role` é `string` no contrato: só `user` é
+ *  do usuário, o resto (hoje `assistant`) é fala dela. */
+function deTurno(t: ConversationTurn): Bolha {
+  const tarefas = tarefasGravadas(t.content);
+  return {
+    id: t.id,
+    autor: t.role === 'user' ? 'voce' : 'sera',
+    texto: t.content,
+    ...(tarefas.length ? { tarefas } : {}),
+  };
+}
+
+/** O backend grava o cartão de tarefa no próprio texto do turno, como
+ *  comentário (`conversation/engine.py`), justamente para o frontend
+ *  reconstruí-lo ao recarregar. Sem esta leitura o `limpar()` apagaria a
+ *  marcação e o cartão sumiria calado do transcrito restaurado. */
+const TASK_DATA_RE = /<!--task-data:(\{[\s\S]*?\})-->/g;
+
+function tarefasGravadas(conteudo: string): CardTarefa[] {
+  const achadas: CardTarefa[] = [];
+  for (const m of conteudo.matchAll(TASK_DATA_RE)) {
+    try {
+      achadas.push(...tarefasDe(JSON.parse(m[1])));
+    } catch {
+      // Comentário corrompido: perde-se o cartão, não o turno.
+    }
+  }
+  return achadas;
+}
+
 /** `metadata.task` chega como uma tarefa só ou como `{ tasks: [...] }`. */
 function tarefasDe(meta: unknown): CardTarefa[] {
   if (typeof meta !== 'object' || meta === null) return [];
@@ -397,9 +459,14 @@ const brl = (n: number) => `R$ ${Math.round(n).toLocaleString('pt-BR')}`;
 /** Os tokens carregam marcações que só o avatar do desktop consome
  *  (`[happy]`, `[anim:acenar]`) e comentários de dado estruturado que já
  *  viraram cartão. Some com eles na hora de desenhar — e não ao acumular,
- *  senão uma tag partida entre dois tokens nunca fecharia. */
+ *  senão uma tag partida entre dois tokens nunca fecharia.
+ *
+ *  O `<!--card-->…<!--/card-->` precisa sair INTEIRO e antes dos outros: é
+ *  HTML do dashboard do desktop gravado no turno, e tirar só os marcadores
+ *  despejaria a marcação crua dentro da bolha. */
 function limpar(texto: string): string {
   return texto
+    .replace(/<!--card-->[\s\S]*?<!--\/card-->/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/\[anim:[a-z0-9_-]+\]/gi, '')
     .replace(/\[[a-zA-Z]+\]/g, '')

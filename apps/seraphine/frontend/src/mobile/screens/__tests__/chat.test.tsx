@@ -7,9 +7,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const h = vi.hoisted(() => ({ refs: { wsRef: { current: null as unknown } } }));
 vi.mock('../../../stores/RefsContext', () => ({ useAppRefs: () => h.refs }));
 vi.mock('../../../tasks/api', () => ({ updateTaskStatus: vi.fn() }));
+vi.mock('../../../chat/api', () => ({ fetchConversationTurns: vi.fn() }));
 
 import { updateTaskStatus } from '../../../tasks/api';
+import { fetchConversationTurns } from '../../../chat/api';
 import { ChatScreen } from '../ChatScreen';
+
+/** A chave onde o id da conversa mora — a mesma que o desktop usa. */
+const CONV_KEY = 'seraphine_conversation_id';
 
 type Ouvinte = (m: unknown) => void;
 
@@ -44,8 +49,11 @@ const token = (texto: string, turn = 't1') =>
 
 beforeEach(() => {
   h.refs.wsRef.current = null;
+  localStorage.clear();
   vi.mocked(updateTaskStatus).mockReset();
   vi.mocked(updateTaskStatus).mockResolvedValue(undefined);
+  vi.mocked(fetchConversationTurns).mockReset();
+  vi.mocked(fetchConversationTurns).mockResolvedValue([]);
 });
 
 afterEach(() => { vi.useRealTimers(); });
@@ -160,6 +168,12 @@ describe('ChatScreen', () => {
     expect(onOpen).toHaveBeenCalledWith({ key: 'voz', title: 'Voz' });
   });
 
+  it('não pede histórico quando ainda não há conversa salva', () => {
+    montar();
+    expect(fetchConversationTurns).not.toHaveBeenCalled();
+    expect(screen.getByText(/ainda não trocamos/i)).toBeTruthy();
+  });
+
   it('troca a presença por um alerta quando o socket cai', () => {
     const { ws } = montar();
     ws.conexao('connected');
@@ -168,5 +182,84 @@ describe('ChatScreen', () => {
     const alerta = screen.getByText(/sem conexão/i);
     expect(alerta.getAttribute('role')).toBe('alert');
     expect(screen.queryByText(/ouvindo/i)).toBeNull();
+  });
+});
+
+// A aba Chat desmonta ao trocar de aba: sem restaurar, voltar para ela apagava
+// a conversa inteira da tela. É o que o `ChatTab` (que esta tela substituiu)
+// fazia certo, pela `ChatView`.
+describe('ChatScreen — restaura o transcrito', () => {
+  const turno = (id: string, role: string, content: string) => ({
+    id, conversation_id: 'conv-1', role, content, created_at: '2026-07-31T09:41:00',
+  });
+
+  it('traz de volta a conversa salva ao montar', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockResolvedValue([
+      turno('t1', 'user', 'me lembra de pagar o aluguel amanhã cedo'),
+      turno('t2', 'assistant', 'Feito! Lembrete pra amanhã às 08:00.'),
+    ]);
+    const { container } = montar();
+
+    expect(await screen.findByText('me lembra de pagar o aluguel amanhã cedo')).toBeTruthy();
+    expect(screen.getByText('Feito! Lembrete pra amanhã às 08:00.')).toBeTruthy();
+    expect(fetchConversationTurns).toHaveBeenCalledWith('conv-1');
+    // Os papéis do servidor viram os dois lados da tela, não um lado só.
+    expect(container.querySelector('.ms-chat-bolha--voce')).toBeTruthy();
+    expect(container.querySelector('.ms-chat-bolha--sera')).toBeTruthy();
+    expect(screen.queryByText(/ainda não trocamos/i)).toBeNull();
+  });
+
+  it('remonta o cartão de tarefa que ficou gravado no turno', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockResolvedValue([
+      turno('t2', 'assistant',
+        'Adicionei como tarefa.\n<!--task-data:{"id":7,"title":"Pagar aluguel","due_time":"08:00"}-->'),
+    ]);
+    montar();
+
+    expect(await screen.findByText('Pagar aluguel')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Concluir' })).toBeTruthy();
+    // A marcação some do texto: o cartão a substitui, não a duplica.
+    expect(screen.getByText('Adicionei como tarefa.')).toBeTruthy();
+    expect(screen.queryByText(/task-data/)).toBeNull();
+  });
+
+  it('não despeja o HTML do cartão salvo dentro da bolha', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockResolvedValue([
+      turno('t2', 'assistant',
+        'Seu painel:\n<!--card--><div class="rich-card"><b>Receitas</b></div><!--/card-->'),
+    ]);
+    montar();
+
+    expect(await screen.findByText('Seu painel:')).toBeTruthy();
+    expect(screen.queryByText(/rich-card|Receitas/)).toBeNull();
+  });
+
+  it('mostra erro próprio quando o histórico não carrega, e deixa conversar', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockRejectedValue(new Error('HTTP 503'));
+    const { ws, container } = montar();
+
+    const erro = await screen.findByText(/não consegui carregar a conversa anterior/i);
+    expect(erro.getAttribute('role')).toBe('alert');
+    // O ao vivo continua de pé: a falha é do histórico, não do socket.
+    escrever(container, 'e o orçamento, como tá?');
+    expect(ws.enviadas).toHaveLength(1);
+  });
+
+  it('o que chegou ao vivo não é atropelado quando o histórico volta depois', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    let entrega: (t: unknown[]) => void = () => {};
+    vi.mocked(fetchConversationTurns).mockReturnValue(
+      new Promise((r) => { entrega = r as (t: unknown[]) => void; }) as never,
+    );
+    const { ws } = montar();
+    ws.emite(token('resposta ao vivo', 'turno-ao-vivo'));
+
+    await act(async () => { entrega([turno('t1', 'user', 'pergunta antiga')]); });
+    expect(screen.getByText('pergunta antiga')).toBeTruthy();
+    expect(screen.getByText('resposta ao vivo')).toBeTruthy();
   });
 });
