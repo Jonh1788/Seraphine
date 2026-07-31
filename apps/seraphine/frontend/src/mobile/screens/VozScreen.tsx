@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAppRefs } from '../../stores/RefsContext';
 import { useChatStore } from '../../stores/chatStore';
 import { useRealtimeStore } from '../../stores/realtimeStore';
@@ -83,6 +83,9 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
   const [desistiu, setDesistiu] = useState(false);
   /** Falha do motor ao subir o microfone, publicada pelo `onError` dele. */
   const [falhaMic, setFalhaMic] = useState<string | null>(null);
+  /** O motor ESTOUROU no render (ver `MotorContido`). Diferente de `falhaMic`:
+   *  ali o motor está de pé e recusa o microfone; aqui ele nem existe. */
+  const [falhaMotor, setFalhaMotor] = useState<string | null>(null);
 
   const [encerrada, setEncerrada] = useState(false);
   const [segundos, setSegundos] = useState(0);
@@ -173,11 +176,13 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
     });
   }, [ws]);
 
-  /** COMANDO ao motor. Firme através de oscilação de rede, de propósito. */
-  const sessaoLigada = !!ws && !encerrada;
+  /** COMANDO ao motor. Firme através de oscilação de rede, de propósito —
+   *  menos quando não há motor: mandar `active` para uma subárvore que estourou
+   *  é pedir o estouro de novo a cada render. */
+  const sessaoLigada = !!ws && !encerrada && !falhaMotor;
 
   /** AFIRMAÇÃO ao usuário. Nada aqui olha para a existência do objeto `ws`. */
-  const aoVivo = conectado && !encerrada && !falhaMic;
+  const aoVivo = conectado && !encerrada && !falhaMic && !falhaMotor;
 
   // O relógio da sessão só anda com ela de pé — um timer correndo numa sessão
   // que não abriu (ou que caiu) mentiria sobre estar gravando. Ele congela na
@@ -218,7 +223,9 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
     ? { classe: 'ms-voz__pill--vivo', rotulo: 'ao vivo' }
     : encerrada
       ? { classe: 'ms-voz__pill--fim', rotulo: 'sessão encerrada' }
-      : falhaMic
+      : falhaMotor
+        ? { classe: 'ms-voz__pill--erro', rotulo: 'voz indisponível' }
+        : falhaMic
         ? { classe: 'ms-voz__pill--erro', rotulo: 'sem microfone' }
         : desistiu
           ? { classe: 'ms-voz__pill--erro', rotulo: 'sem conexão' }
@@ -228,7 +235,7 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
 
   /** Esqueleto só na PRIMEIRA espera. Depois de já ter conectado uma vez, uma
    *  queda mostra texto, não um cinza que se lê como carregando. */
-  const primeiraEspera = !jaConectou && !desistiu && !falhaMic && !encerrada;
+  const primeiraEspera = !jaConectou && !desistiu && !falhaMic && !falhaMotor && !encerrada;
 
   return (
     <div className="ms-voz">
@@ -257,7 +264,8 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
               <>
                 <p className={`ms-voz__resposta${resposta ? '' : ' ms-voz__resposta--vazia'}`}>
                   {resposta || frasePrincipal({
-                    encerrada, falhaMic: !!falhaMic, desistiu, jaConectou, conectado, manualMute,
+                    encerrada, falhaMotor: !!falhaMotor, falhaMic: !!falhaMic,
+                    desistiu, jaConectou, conectado, manualMute,
                   })}
                 </p>
                 <p className={`ms-voz__ouvi${ouvi ? '' : ' ms-voz__ouvi--vazio'}`}>
@@ -266,7 +274,13 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
                 {/* O motor grita a falha do microfone dentro da subárvore que
                     esta tela esconde; aqui ela é dita de novo, com a voz da
                     tela e com o passo que resolve. */}
-                {!encerrada && falhaMic && (
+                {!encerrada && falhaMotor && (
+                  <Erro>
+                    O motor de voz não subiu neste aparelho ({falhaMotor}). Use o teclado
+                    do chat por enquanto.
+                  </Erro>
+                )}
+                {!encerrada && !falhaMotor && falhaMic && (
                   <Erro>
                     Não consegui ligar o microfone. Verifique a permissão do microfone
                     para a Seraphine nos Ajustes do aparelho.
@@ -338,21 +352,57 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
         {/* `playbackRef.current` lido no render é seguro aqui: o `AppBootstrap`
             cria o `PCMPlayback` ANTES do socket, então todo render em que `ws`
             existe já enxerga o playback. */}
-        <RealtimeController
-          ws={ws}
-          playback={playbackRef.current}
-          active={sessaoLigada}
-          onToggle={encerrar}
-          conversationId={conversa.current}
-          speak={speak}
-          think={think}
-          manualMute={manualMute}
-          onManualMuteToggle={toggleManualMute}
-          onError={setFalhaMic}
-        />
+        <MotorContido onQuebrou={setFalhaMotor}>
+          <RealtimeController
+            ws={ws}
+            playback={playbackRef.current}
+            active={sessaoLigada}
+            onToggle={encerrar}
+            conversationId={conversa.current}
+            speak={speak}
+            think={think}
+            manualMute={manualMute}
+            onManualMuteToggle={toggleManualMute}
+            onError={setFalhaMic}
+          />
+        </MotorContido>
       </div>
     </div>
   );
+}
+
+/**
+ * Cerca em volta do motor.
+ *
+ * O `RealtimeController` monta o `VrmAvatar`, que constrói um `WebGLRenderer`.
+ * Onde a webview não entrega contexto WebGL — o simulador de iOS e o `tauri dev`
+ * do Mac são dois lugares onde isso acontece hoje — o construtor estoura no
+ * RENDER, e um estouro de render sobe até o boundary mais próximo: sem esta
+ * cerca, o único acima é o de `main.tsx`, e o app INTEIRO virava a página
+ * "Algo quebrou" — sem abas, sem volta. Tocar o microfone do chat derrubava a
+ * Seraphine.
+ *
+ * Aqui a queda para no motor: a subárvore some, a tela continua de pé e diz que
+ * a voz não subiu. Não conserta o WebGL e não finge que consertou — a tela
+ * deixa de afirmar sessão (`aoVivo`) e manda usar o teclado.
+ */
+class MotorContido extends Component<{ onQuebrou: (m: string) => void; children: ReactNode }, { caiu: boolean }> {
+  state = { caiu: false };
+
+  static getDerivedStateFromError(): { caiu: boolean } {
+    return { caiu: true };
+  }
+
+  componentDidCatch(erro: Error): void {
+    console.error('[VozScreen] o motor de realtime estourou', erro);
+    // Nunca vazio: um motivo em branco viraria um parêntese oco na tela.
+    this.props.onQuebrou(erro.message?.trim() || 'motivo desconhecido');
+  }
+
+  render(): ReactNode {
+    // Caído, NÃO remonta: o mesmo render estouraria de novo a cada quadro.
+    return this.state.caiu ? null : this.props.children;
+  }
 }
 
 /**
@@ -365,6 +415,7 @@ export function VozScreen({ onBack, onOpen }: ScreenProps) {
  */
 function frasePrincipal(s: {
   encerrada: boolean;
+  falhaMotor: boolean;
   falhaMic: boolean;
   desistiu: boolean;
   jaConectou: boolean;
@@ -372,6 +423,8 @@ function frasePrincipal(s: {
   manualMute: boolean;
 }): string {
   if (s.encerrada) return 'Conversa encerrada. Toque no microfone do chat para começar outra.';
+  // Antes do microfone: sem motor não há microfone para negar nem para abrir.
+  if (s.falhaMotor) return 'A voz não está disponível neste aparelho.';
   if (s.falhaMic) return 'O microfone não iniciou — sem ele não dá para te escutar.';
   if (s.desistiu) {
     return s.jaConectou

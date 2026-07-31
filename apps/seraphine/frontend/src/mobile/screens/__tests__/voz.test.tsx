@@ -17,15 +17,16 @@ const h = vi.hoisted(() => ({
 
 vi.mock('../../../stores/RefsContext', () => ({ useAppRefs: () => h.refs }));
 vi.mock('../../../realtime', () => ({
-  RealtimeController: (p: Record<string, unknown>) => {
+  RealtimeController: vi.fn((p: Record<string, unknown>) => {
     h.props = p;
     h.montagens += 1;
     return null;
-  },
+  }),
 }));
 
 import { useChatStore } from '../../../stores/chatStore';
 import { useRealtimeStore } from '../../../stores/realtimeStore';
+import { RealtimeController } from '../../../realtime';
 import { VozScreen } from '../VozScreen';
 
 type Ouvinte = (m: unknown) => void;
@@ -85,6 +86,12 @@ beforeEach(() => {
   h.refs.playbackRef.current = null;
   h.props = null;
   h.montagens = 0;
+  // O duplo volta ao normal: um teste da cerca o troca por um que estoura.
+  vi.mocked(RealtimeController).mockImplementation(((p: Record<string, unknown>) => {
+    h.props = p;
+    h.montagens += 1;
+    return null;
+  }) as unknown as typeof RealtimeController);
   localStorage.clear();
   useRealtimeStore.setState({ realtimeActive: false, manualMute: false });
   // O `AppBootstrap` mantém este campo; a tela o usa como semente porque
@@ -329,5 +336,45 @@ describe('VozScreen', () => {
     ws.emite({ type: 'error', message: 'o modelo caiu' });
     const alerta = screen.getByRole('alert');
     expect(alerta.textContent).toMatch(/o modelo caiu/);
+  });
+
+  /* Task 28 — achado do simulador: o `RealtimeController` monta o `VrmAvatar`,
+     que constrói um `WebGLRenderer`. Onde a webview não dá contexto WebGL (o
+     simulador de iOS e o `tauri dev` do Mac, hoje), o construtor estoura no
+     RENDER — e sem cerca o estouro subia até o boundary de `main.tsx`, levando
+     o APP INTEIRO para a página "Algo quebrou": sem abas, sem volta. Um toque
+     no microfone do chat derrubava a Seraphine. */
+  describe('motor que estoura não derruba o app', () => {
+    const quebrar = () => {
+      vi.mocked(RealtimeController).mockImplementation((() => {
+        throw new Error('null is not an object (evaluating \'gl.getShaderPrecisionFormat\')');
+      }) as unknown as typeof RealtimeController);
+    };
+
+    it('a tela continua de pé e diz que a voz não subiu', () => {
+      const aviso = vi.spyOn(console, 'error').mockImplementation(() => {});
+      quebrar();
+      const { container } = montar();
+
+      // a tela existe — não é a página do boundary da raiz
+      expect(container.querySelector('.ms-voz')).toBeTruthy();
+      expect(screen.queryByText('Algo quebrou.')).toBeNull();
+      // e diz o que houve, com o motivo, em vez de ficar muda
+      expect(screen.getByText('A voz não está disponível neste aparelho.')).toBeTruthy();
+      expect(screen.getByRole('alert').textContent).toMatch(/motor de voz não subiu/);
+      aviso.mockRestore();
+    });
+
+    it('não afirma sessão que não existe', () => {
+      const aviso = vi.spyOn(console, 'error').mockImplementation(() => {});
+      quebrar();
+      const { ws } = montar();
+      ws.conecta(); // socket de pé E MESMO ASSIM não há voz: o motor não existe
+
+      expect(screen.queryByText('ao vivo')).toBeNull();
+      expect(screen.getByText('voz indisponível')).toBeTruthy();
+      expect(screen.queryByText(OUVINDO)).toBeNull();
+      aviso.mockRestore();
+    });
   });
 });
