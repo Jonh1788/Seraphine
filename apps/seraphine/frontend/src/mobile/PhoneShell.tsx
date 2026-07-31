@@ -8,9 +8,34 @@ import './obsidian.css';
 
 export type Pushed = { key: string; title: string } | null;
 
+// Onboarding: os únicos passos que ninguém alcança por `onOpen`, porque vêm
+// ANTES das abas. Concluído uma vez, some para sempre.
+const ONBOARDING_KEY = 'seraphine.onboarding.done';
+const ONBOARDING: ScreenKey[] = ['onboarding-boas-vindas', 'onboarding-permissoes'];
+
 export function PhoneShell() {
   const [tab, setTab] = useState<Tab>('hoje');
   const [pushed, setPushed] = useState<Pushed>(null);
+  // índice do passo de onboarding, ou null quando o fluxo já foi concluído
+  const [passo, setPasso] = useState<number | null>(
+    () => (localStorage.getItem(ONBOARDING_KEY) ? null : 0),
+  );
+
+  if (passo !== null) {
+    const proximo = passo + 1;
+    const acabou = proximo >= ONBOARDING.length;
+    return (
+      <div className="mshell">
+        <ScreenHost
+          keyName={ONBOARDING[passo]}
+          onDone={() => {
+            if (acabou) localStorage.setItem(ONBOARDING_KEY, '1');
+            setPasso(acabou ? null : proximo);
+          }}
+        />
+      </div>
+    );
+  }
 
   if (pushed) {
     return (
@@ -39,16 +64,17 @@ export function PhoneShell() {
 // Única ponte entre o shell e as telas: acha a tela pela chave no registry.
 // O Suspense fica AQUI (dentro do conteúdo) para a tab bar e o cabeçalho da
 // tela empurrada continuarem montados enquanto o chunk carrega.
-function ScreenHost({ keyName, onBack, onOpen }: {
+function ScreenHost({ keyName, onBack, onOpen, onDone }: {
   keyName: string;
   onBack?: () => void;
-  onOpen: (p: { key: ScreenKey; title: string }) => void;
+  onOpen?: (p: { key: ScreenKey; title: string }) => void;
+  onDone?: () => void;
 }) {
   const Screen = keyName in SCREENS ? SCREENS[keyName as ScreenKey] : null;
   if (!Screen) return <div className="mshell-pending">Em construção</div>;
   return (
     <Suspense fallback={null}>
-      <Screen onBack={onBack} onOpen={onOpen} />
+      <Screen onBack={onBack} onOpen={onOpen} onDone={onDone} />
     </Suspense>
   );
 }

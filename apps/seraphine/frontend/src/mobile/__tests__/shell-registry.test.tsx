@@ -21,12 +21,27 @@ vi.mock('../screens/registry', () => ({
         <button type="button" onClick={onBack}>fechar-financas</button>
       ),
     })),
+    'onboarding-boas-vindas': lazy(async () => ({
+      default: ({ onDone }: ScreenProps) => (
+        <button type="button" onClick={onDone}>ob1-avancar</button>
+      ),
+    })),
+    'onboarding-permissoes': lazy(async () => ({
+      default: ({ onDone }: ScreenProps) => (
+        <button type="button" onClick={onDone}>ob2-concluir</button>
+      ),
+    })),
   },
 }));
 
 const { PhoneShell } = await import('../PhoneShell');
 
+const ONBOARDING_KEY = 'seraphine.onboarding.done';
+/** O gate de primeiro lançamento fica fora do caminho dos testes de aba. */
+const jaOnboardou = () => localStorage.setItem(ONBOARDING_KEY, '1');
+
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
 });
 
@@ -45,6 +60,7 @@ function visivel(el: Element | null): boolean {
 
 describe('PhoneShell monta pelo registry', () => {
   it('renderiza a tela do registry nas abas que não são Hoje/Mais', async () => {
+    jaOnboardou();
     const { getByText, findByText } = render(<PhoneShell />);
     fireEvent.click(getByText('Tarefas'));
     expect(await findByText('tela:tarefas')).toBeTruthy();
@@ -53,6 +69,7 @@ describe('PhoneShell monta pelo registry', () => {
   });
 
   it('mantém a tab bar visível enquanto a tela da aba ainda carrega', () => {
+    jaOnboardou();
     const { container, getByText } = render(<PhoneShell />);
     fireEvent.click(getByText('Trilhas')); // suspende e nunca resolve
     expect(container.querySelector('.mshell__content')?.innerHTML).toBe('');
@@ -61,6 +78,7 @@ describe('PhoneShell monta pelo registry', () => {
   });
 
   it('empurra o módulo pelo registry e volta pelo onBack da tela', async () => {
+    jaOnboardou();
     const { container, getByText, findByText, queryByText } = render(<PhoneShell />);
     fireEvent.click(getByText('Mais'));
     await settle(); // deixa o fetch de stats do Mais assentar
@@ -75,10 +93,46 @@ describe('PhoneShell monta pelo registry', () => {
   });
 
   it('cai no "em construção" quando a chave empurrada não existe no registry', async () => {
+    jaOnboardou();
     const { container, getByText } = render(<PhoneShell />);
     fireEvent.click(getByText('Mais'));
     await settle();
     fireEvent.click(getByText('Memória')); // não está no registry de mentira
     expect(container.querySelector('.mshell-pending')?.textContent).toBe('Em construção');
+  });
+});
+
+describe('gate de primeiro lançamento', () => {
+  it('sem a flag, mostra o onboarding e NÃO monta a tab bar', async () => {
+    const { container, findByText } = render(<PhoneShell />);
+    expect(await findByText('ob1-avancar')).toBeTruthy();
+    // NÃO MONTADA, não apenas escondida: o onboarding entra no LUGAR do shell
+    // de abas. `visivel() === false` aceitaria uma tab bar com display:none.
+    expect(container.querySelector('.mtabbar')).toBeNull();
+  });
+
+  it('com a flag, mostra o shell de abas e nenhum passo de onboarding', async () => {
+    jaOnboardou();
+    const { container, queryByText } = render(<PhoneShell />);
+    await settle();
+    expect(visivel(container.querySelector('.mtabbar'))).toBe(true);
+    expect(queryByText('ob1-avancar')).toBeNull();
+    expect(queryByText('ob2-concluir')).toBeNull();
+  });
+
+  it('avança os passos e no último grava a flag e libera as abas', async () => {
+    const { container, findByText, queryByText } = render(<PhoneShell />);
+    fireEvent.click(await findByText('ob1-avancar'));
+
+    // segundo passo: ainda sem tab bar e sem flag gravada
+    expect(await findByText('ob2-concluir')).toBeTruthy();
+    expect(container.querySelector('.mtabbar')).toBeNull();
+    expect(localStorage.getItem(ONBOARDING_KEY)).toBeNull();
+
+    fireEvent.click(await findByText('ob2-concluir'));
+    expect(localStorage.getItem(ONBOARDING_KEY)).toBe('1');
+    expect(queryByText('ob2-concluir')).toBeNull();
+    expect(visivel(container.querySelector('.mtabbar'))).toBe(true);
+    await settle(); // o Hoje monta ao final e dispara seus fetches
   });
 });

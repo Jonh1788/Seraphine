@@ -3,6 +3,8 @@ import { lazy } from 'react';
 export interface ScreenProps {
   onBack?: () => void;
   onOpen?: (p: { key: ScreenKey; title: string }) => void;
+  /** Só as telas de onboarding usam: avança o passo, e no último conclui o fluxo. */
+  onDone?: () => void;
 }
 
 export type ScreenKey =
