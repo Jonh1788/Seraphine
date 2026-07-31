@@ -1,7 +1,6 @@
-import { useState, type ComponentType, type FormEvent } from 'react';
+import { type ComponentType } from 'react';
 import { Orb } from '../Orb';
-import { BrainIcon, CalendarIcon, FinanceIcon, MicIcon, TargetIcon } from '../../icons/Icons';
-import type { ScreenProps } from './registry';
+import { BrainIcon, CalendarIcon, FinanceIcon, TargetIcon } from '../../icons/Icons';
 import './ChatVazioScreen.css';
 
 /**
@@ -9,31 +8,22 @@ import './ChatVazioScreen.css';
  * linha 647 (`<!-- ==== ESTADO VAZIO ==== -->`). É o único estado vazio que o
  * handoff de fato desenha, então aqui a fidelidade se confere contra o mock.
  *
- * ─── CONTRATO PARA A TASK 28 (integração com o ChatScreen) ───────────────────
- * Esta tela é autônoma: não busca nada, não conhece o WebSocket e não decide
- * quando aparecer. Quem integra escolhe uma das duas portas:
+ * ─── DECISÃO DA INTEGRAÇÃO (Task 28) ────────────────────────────────────────
+ * A Task 23 entregou duas portas — a tela inteira (`ChatVazioScreen`, com
+ * cabeçalho e composer próprios) e só o miolo — para a integração escolher uma.
+ * Escolhido o MIOLO, embutido em `ChatScreen`, e a tela inteira foi removida
+ * junto com a chave `chat-vazio` do registry (que navegação nenhuma alcançava).
  *
- *   1. `<ChatVazioScreen onPrimeiraMensagem={(texto) => …} />`
- *      A tela inteira do handoff — cabeçalho (orb 38 + "Seraphine" + "pronta"),
- *      miolo e composer. Serve para ser renderizada NO LUGAR do ChatScreen
- *      enquanto não há histórico. `onPrimeiraMensagem` recebe o texto da
- *      sugestão tocada OU o que foi digitado no composer; é o texto cru, para
- *      quem integra mandar como primeira mensagem.
+ * O motivo é honestidade, não economia: o cabeçalho daquela tela afirmava
+ * "pronta" com uma bolinha verde piscando sem saber NADA da conexão — montado
+ * no lugar do ChatScreen, diria "pronta" com o socket caído. O cabeçalho do
+ * `ChatScreen` deriva a presença do `onStatus` do socket de verdade, e o
+ * composer dele tem botão de enviar (o daqui só tinha o microfone, que navegava
+ * para a Voz DESCARTANDO o rascunho). Embutir o miolo herda os dois honestos.
  *
- *   2. `<ChatVazioMiolo onSugestao={(texto) => …} />`
- *      Só orb 88 + título + as quatro sugestões, sem cabeçalho e sem composer.
- *      Serve para cair DENTRO da conversa do ChatScreen, que já tem os seus —
- *      assim a integração não duplica cabeçalho nem campo de texto.
- *
- * `onPrimeiraMensagem` é opcional porque o `registry` tipa toda tela como
- * `ComponentType<ScreenProps>`; sem ele a tela ainda desenha e os toques viram
- * no-op (nunca `null`, nunca exceção). O `registry` NÃO foi tocado.
+ * Este arquivo, portanto, não exporta mais tela: exporta o bloco vazio do chat.
+ * O nome foi mantido porque é o que os relatórios da onda citam.
  */
-
-export interface ChatVazioProps extends ScreenProps {
-  /** Texto da primeira mensagem: sugestão tocada ou digitada no composer. */
-  onPrimeiraMensagem?: (texto: string) => void;
-}
 
 export interface Sugestao {
   texto: string;
@@ -50,63 +40,9 @@ export const SUGESTOES: Sugestao[] = [
   { texto: 'Me ensina algo novo', Icone: BrainIcon },
 ];
 
-export function ChatVazioScreen({ onPrimeiraMensagem, onOpen }: ChatVazioProps) {
-  const [rascunho, setRascunho] = useState('');
-
-  const enviar = (e: FormEvent) => {
-    e.preventDefault();
-    const texto = rascunho.trim();
-    // Mensagem em branco não abre conversa: sem isto, um Enter distraído
-    // mandaria uma string vazia como primeira fala do usuário.
-    if (!texto) return;
-    setRascunho('');
-    onPrimeiraMensagem?.(texto);
-  };
-
-  return (
-    <div className="ms-chatvazio">
-      <header className="ms-chatvazio__head">
-        <Orb size={38} />
-        <div className="ms-chatvazio__quem">
-          <p className="ms-chatvazio__nome">Seraphine</p>
-          <p className="ms-chatvazio__presenca">
-            <span className="ms-chatvazio__ponto" aria-hidden="true" />
-            pronta
-          </p>
-        </div>
-      </header>
-
-      <ChatVazioMiolo onSugestao={(texto) => onPrimeiraMensagem?.(texto)} />
-
-      <form className="ms-chatvazio__composer" onSubmit={enviar}>
-        <div className="ms-chatvazio__pill">
-          <input
-            className="ms-chatvazio__campo"
-            placeholder="Mensagem…"
-            value={rascunho}
-            onChange={(e) => setRascunho(e.target.value)}
-            enterKeyHint="send"
-            autoComplete="off"
-          />
-          {/* No handoff o botão do composer vazio é o microfone, não o avião:
-              antes da primeira palavra o caminho oferecido é falar. */}
-          <button
-            type="button"
-            className="ms-chatvazio__mic"
-            aria-label="Falar por voz"
-            onClick={() => onOpen?.({ key: 'voz', title: 'Voz' })}
-          >
-            <MicIcon size={18} />
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-/** Miolo centrado: orb de 88px, título e as quatro sugestões. Exportado à parte
- *  para a Task 28 poder embuti-lo na conversa do ChatScreen sem arrastar junto
- *  um segundo cabeçalho e um segundo composer. */
+/** Miolo centrado: orb de 88px, título e as quatro sugestões — o vazio do chat
+ *  sem cabeçalho e sem composer, para cair DENTRO da conversa do `ChatScreen`,
+ *  que já tem os seus e os tem honestos. */
 export function ChatVazioMiolo({ onSugestao }: { onSugestao?: (texto: string) => void }) {
   return (
     <div className="ms-chatvazio__miolo">

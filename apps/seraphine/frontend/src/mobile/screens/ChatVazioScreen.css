@@ -1,54 +1,22 @@
-/* src/mobile/screens/ChatVazioScreen.css — ESTADO VAZIO · primeiro uso
+/* src/mobile/screens/ChatVazioScreen.css — ESTADO VAZIO do chat · primeiro uso
    (handoff `Seraphine Mobile.dc.html`, linha 647). Único estado vazio que o
    handoff desenha: medidas, raios e pesos vieram de lá tal e qual.
    Todas as classes têm prefixo `ms-chatvazio-` / `ms-chatvazio__`.
    O orb NÃO é redefinido aqui: vem do `.morb` / `orbFloat` do obsidian.css,
-   pelo componente `<Orb />`. */
+   pelo componente `<Orb />`.
 
-/* Como o ChatScreen: a tela precisa de altura cheia e das bordas de ponta a
-   ponta, então cancela o padding do `.mshell__content` com margem negativa e
-   devolve o inset do topo como padding próprio. */
-html[data-shell='phone'] .ms-chatvazio {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  margin: calc(-12px - env(safe-area-inset-top, 44px)) -16px -16px;
-  padding-top: calc(12px + env(safe-area-inset-top, 44px));
-  color: var(--text, #ececef);
-}
-
-/* ── cabeçalho: orb 38 + nome + presença ── */
-html[data-shell='phone'] .ms-chatvazio__head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08));
-}
-html[data-shell='phone'] .ms-chatvazio__quem { flex: 1; min-width: 0; }
-html[data-shell='phone'] .ms-chatvazio__nome { font-size: 15px; font-weight: 700; }
-html[data-shell='phone'] .ms-chatvazio__presenca {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-dim, #9594a0);
-}
-html[data-shell='phone'] .ms-chatvazio__ponto {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #4ade80;
-  animation: statusBlink 2.4s ease-in-out infinite;
-}
+   A Task 28 embutiu o MIOLO dentro da conversa do `ChatScreen` e removeu a
+   tela inteira: cabeçalho e composer agora são os do chat, que sabem o estado
+   do socket. Foram-se com ela as regras de `__head`/`__composer` daqui. */
 
 /* ── miolo: orb 88 flutuando, título e sugestões, tudo centrado ──
-   Também vale fora da tela cheia (a Task 28 pode embutir só o miolo dentro da
-   conversa do ChatScreen), por isso o `flex: 1` convive com `min-height: 0`. */
+   Mora dentro de `.ms-chat__thread`, que é flex-column: o `flex: 1` faz o vazio
+   ocupar a conversa inteira e centrar, como a tela cheia do handoff. */
 html[data-shell='phone'] .ms-chatvazio__miolo {
-  flex: 1;
-  min-height: 0;
+  /* Cresce para centrar quando sobra espaço na conversa, e NUNCA encolhe abaixo
+     do próprio conteúdo (`0` no shrink): comprimido, o orb de 88px era a
+     primeira coisa a ser cortada. Faltando altura, quem rola é a conversa. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -107,43 +75,4 @@ html[data-shell='phone'] .ms-chatvazio__sugestao-icone {
   justify-content: center;
   width: 18px;
   color: var(--accent, #9a93ff);
-}
-
-/* ── composer ──
-   O handoff reserva 34px embaixo para o home indicator; como no ChatScreen, a
-   tab bar do shell já cobre essa faixa e sobra o respiro do próprio pill. */
-html[data-shell='phone'] .ms-chatvazio__composer { flex: none; padding: 10px 16px 12px; }
-html[data-shell='phone'] .ms-chatvazio__pill {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: var(--surface, #17171e);
-  border: 1px solid var(--border, rgba(255, 255, 255, .08));
-  border-radius: 22px;
-  padding: 7px 7px 7px 16px;
-}
-html[data-shell='phone'] .ms-chatvazio__campo {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  outline: none;
-  font: inherit;
-  font-size: 14px;
-  color: var(--text, #ececef);
-}
-html[data-shell='phone'] .ms-chatvazio__campo::placeholder { color: var(--text-faint, #5f5e6b); }
-html[data-shell='phone'] .ms-chatvazio__mic {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent, #9a93ff);
-  color: var(--accent-contrast, #14141a);
-  box-shadow: 0 4px 12px rgba(154, 147, 255, .35);
-  cursor: pointer;
 }

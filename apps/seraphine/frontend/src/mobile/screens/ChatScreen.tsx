@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAppRefs } from '../../stores/RefsContext';
 import { useChatStore } from '../../stores/chatStore';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 import { Orb } from '../Orb';
 import { ArrowLeftIcon, MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../../icons/Icons';
+import { ChatVazioMiolo } from './ChatVazioScreen';
 import { updateTaskStatus } from '../../tasks/api';
 import { fetchConversationTurns } from '../../chat/api';
 import type { ConversationTurn } from '../../chat/types';
@@ -74,6 +76,13 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   const [falhaHistorico, setFalhaHistorico] = useState(false);
   const speak = useChatStore((s) => s.speak);
   const setSpeak = useChatStore((s) => s.setSpeak);
+  // A frase do handoff ("ouvindo 'oi Sera'") afirma escuta passiva, que é uma
+  // coisa DIFERENTE de socket aberto: quem escuta é o `useWakeWord`, que só roda
+  // com `wakeWordEnabled` ligado (padrão desligado, `realtimeStore.ts:25`) e só
+  // dentro do Tauri com o `whisper_transcribe_pcm` do Mac. No iPhone, portanto,
+  // quase nunca. Conectada e ouvindo são dois estados, e a tela agora diz o que
+  // sabe de cada um em vez de trocar um pelo outro.
+  const escutando = useRealtimeStore((s) => s.wakeWordEnabled);
   const conversaRef = useRef<string | undefined>(localStorage.getItem(CONV_KEY) || undefined);
   const fimRef = useRef<HTMLDivElement | null>(null);
 
@@ -209,26 +218,50 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   }, [ws]);
 
   // Rola para a última bolha. `scrollIntoView` não existe no jsdom, daí o guarda.
-  useEffect(() => { fimRef.current?.scrollIntoView?.({ block: 'end' }); }, [bolhas]);
+  // Só havendo bolha: numa conversa vazia não existe "última", e rolar até o fim
+  // empurrava o estado vazio para cima até cortar o orb no topo da conversa.
+  useEffect(() => {
+    if (!bolhas.length) return;
+    fimRef.current?.scrollIntoView?.({ block: 'end' });
+  }, [bolhas]);
 
-  const enviar = (e: FormEvent) => {
-    e.preventDefault();
-    const texto = rascunho.trim();
-    if (!texto || !ws) return;
+  /**
+   * Manda UM texto pelo socket. Existe separado do `enviar` do formulário
+   * porque a primeira mensagem também pode vir de fora do composer: tocar numa
+   * das quatro sugestões do estado vazio manda o texto da sugestão.
+   *
+   * Devolve se mandou: quem chama pelo composer só limpa o campo quando mandou,
+   * senão um envio sem socket comeria o que a pessoa escreveu.
+   */
+  const enviarTexto = (bruto: string): boolean => {
+    const texto = bruto.trim();
+    if (!texto || !ws) return false;
     setBolhas((prev) => [...prev, { id: `voce-${prev.length}-${Date.now()}`, autor: 'voce', texto }]);
     setFalha(null);
-    setRascunho('');
     ws.send({
       type: 'user_message',
       conversation_id: conversaRef.current,
       content: texto,
       speak,
     });
+    return true;
+  };
+
+  const enviar = (e: FormEvent) => {
+    e.preventDefault();
+    if (enviarTexto(rascunho)) setRascunho('');
   };
 
   // A conversa espera pelas duas pontas: o socket que ainda vai nascer e o
   // transcrito que ainda vai voltar.
   const carregando = (!ws && !desistiu) || restaurando;
+
+  // Conversa nova de verdade: nada carregando, nada falhando e nenhuma bolha.
+  // É a única situação em que o vazio do handoff (orb 88 + sugestões) aparece —
+  // e nela `ws` já existe, porque `carregando` cobre o socket que ainda não
+  // nasceu e `desistiu` cobre o que nunca nasceu. Por isso tocar numa sugestão
+  // nunca cai no `return false` mudo do `enviarTexto`.
+  const vazio = !carregando && !bolhas.length && !falha && !desistiu && !falhaHistorico;
 
   return (
     <div className={`ms-chat${onBack ? ' ms-chat--empurrada' : ''}`}>
@@ -252,7 +285,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
               ? (
                 <p className="ms-chat__presenca">
                   <span className="ms-chat__ponto" aria-hidden="true" />
-                  ouvindo &ldquo;oi Sera&rdquo;
+                  {escutando ? <>ouvindo &ldquo;oi Sera&rdquo;</> : 'conectada'}
                 </p>
               )
               : <Erro>sem conexão</Erro>}
@@ -269,11 +302,16 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       </header>
 
       <div className="ms-chat__thread">
-        <div className="ms-chat__dia">
-          <span className="ms-chat__dia-linha" aria-hidden="true" />
-          <span className="ms-chat__dia-rotulo">Hoje</span>
-          <span className="ms-chat__dia-linha" aria-hidden="true" />
-        </div>
+        {/* Separador de dia é rótulo de um grupo de mensagens: numa conversa que
+            ainda não começou ele nomearia coisa nenhuma, e o handoff não o
+            desenha no estado vazio (linha 647). */}
+        {!vazio && (
+          <div className="ms-chat__dia">
+            <span className="ms-chat__dia-linha" aria-hidden="true" />
+            <span className="ms-chat__dia-rotulo">Hoje</span>
+            <span className="ms-chat__dia-linha" aria-hidden="true" />
+          </div>
+        )}
 
         {/* O esqueleto só cobre o VAZIO da espera. Havendo bolha — a que o
             usuário acabou de mandar, inclusive — ela aparece na hora: o
@@ -307,9 +345,13 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
           );
         })}
 
-        {!carregando && !bolhas.length && !falha && !desistiu && !falhaHistorico && (
-          <Vazio>Ainda não trocamos nenhuma mensagem hoje — me diga o que você precisa.</Vazio>
-        )}
+        {/* O vazio do handoff (tela 19), embutido: orb de 88px, "Sobre o que a
+            gente conversa primeiro?" e as quatro sugestões. Tocar numa manda o
+            texto dela como primeira mensagem — antes disso as quatro eram
+            botões mortos, porque nada montava a tela onde elas viviam.
+            Só o MIOLO entra: o cabeçalho e o composer são os desta tela, que
+            sabem se o socket está de pé. */}
+        {vazio && <ChatVazioMiolo onSugestao={enviarTexto} />}
         {desistiu && <Erro>Não consegui abrir a conversa com a Seraphine.</Erro>}
         {falha && <Erro>Não consegui responder: {falha}.</Erro>}
         <div ref={fimRef} />

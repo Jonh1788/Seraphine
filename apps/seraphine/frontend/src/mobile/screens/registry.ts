@@ -19,13 +19,13 @@ export type ScreenKey =
   | 'chat' | 'voz' | 'tarefas' | 'trilhas' | 'financas' | 'habitos' | 'diario'
   | 'inbox' | 'memoria' | 'calendario' | 'insights' | 'licao-teoria'
   | 'licao-exercicio' | 'whatsapp' | 'onboarding-boas-vindas'
-  | 'onboarding-permissoes' | 'chat-vazio' | 'notas' | 'tarefas-view';
+  | 'onboarding-permissoes' | 'notas' | 'tarefas-view';
 
 export const SCREEN_KEYS: ScreenKey[] = [
   'chat', 'voz', 'tarefas', 'trilhas', 'financas', 'habitos', 'diario',
   'inbox', 'memoria', 'calendario', 'insights', 'licao-teoria',
   'licao-exercicio', 'whatsapp', 'onboarding-boas-vindas',
-  'onboarding-permissoes', 'chat-vazio', 'notas', 'tarefas-view',
+  'onboarding-permissoes', 'notas', 'tarefas-view',
 ];
 
 /** Cada tela é um arquivo próprio, carregado sob demanda. É o que permite
@@ -47,7 +47,10 @@ export const SCREENS: Record<ScreenKey, React.LazyExoticComponent<React.Componen
   'whatsapp': lazy(() => import('./WhatsAppThreadScreen').then((m) => ({ default: m.WhatsAppThreadScreen }))),
   'onboarding-boas-vindas': lazy(() => import('./OnboardingBoasVindasScreen').then((m) => ({ default: m.OnboardingBoasVindasScreen }))),
   'onboarding-permissoes': lazy(() => import('./OnboardingPermissoesScreen').then((m) => ({ default: m.OnboardingPermissoesScreen }))),
-  'chat-vazio': lazy(() => import('./ChatVazioScreen').then((m) => ({ default: m.ChatVazioScreen }))),
+  /* Não há chave `chat-vazio`: o estado vazio do chat não é destino de
+     navegação nenhuma — é um bloco DENTRO do `ChatScreen`, montado quando a
+     conversa está vazia (Task 28). Enquanto foi chave, era a única do registry
+     que navegação alguma alcançava. */
   'notas': lazy(() => import('./NotasScreen').then((m) => ({ default: m.NotasScreen }))),
   'tarefas-view': lazy(() => import('./TarefasScreen').then((m) => ({ default: m.TarefasScreen }))),
 };

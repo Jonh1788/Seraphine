@@ -10,7 +10,13 @@
 html[data-shell='phone'] .ms-chat {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* `100%` sozinho é a ALTURA DO CONTENT BOX do `.mshell__content` — ou seja,
+     já sem o padding dele. A margem negativa acima puxa o topo de volta para a
+     borda, mas a altura continua curta, e o composer (último item da coluna)
+     parava `12px + safe-area + 16px` ACIMA da tab bar, com um vão morto embaixo.
+     Some-se aqui exatamente o que o padding tirou e a coluna volta a chegar ao
+     fim: composer colado na barra, como no handoff. */
+  height: calc(100% + 12px + env(safe-area-inset-top, 44px) + 16px);
   margin: calc(-12px - env(safe-area-inset-top, 44px)) -16px -16px;
   padding-top: calc(12px + env(safe-area-inset-top, 44px));
   color: var(--text, #ececef);
@@ -21,7 +27,13 @@ html[data-shell='phone'] .ms-chat {
    A compensação acima é a conta do `.mshell__content`: aqui ela passaria 12px
    por cima do notch e vazaria 16px para fora dos dois lados. A tela continua
    de ponta a ponta — só que por já estar, e não por puxar. */
-html[data-shell='phone'] .ms-chat--empurrada { margin: 0; padding-top: 0; }
+html[data-shell='phone'] .ms-chat--empurrada {
+  margin: 0;
+  padding-top: 0;
+  /* Aqui `100%` já é a conta certa: sem margem negativa, a tela ocupa o content
+     box do `.mpushed__body` inteiro. A compensação da aba sobraria embaixo. */
+  height: 100%;
+}
 
 /* ── cabeçalho: orb + nome + presença ── */
 html[data-shell='phone'] .ms-chat__head {

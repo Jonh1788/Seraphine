@@ -11,6 +11,7 @@ vi.mock('../../../chat/api', () => ({ fetchConversationTurns: vi.fn() }));
 
 import { updateTaskStatus } from '../../../tasks/api';
 import { fetchConversationTurns } from '../../../chat/api';
+import { useRealtimeStore } from '../../../stores/realtimeStore';
 import { ChatScreen } from '../ChatScreen';
 
 /** A chave onde o id da conversa mora — a mesma que o desktop usa. */
@@ -47,6 +48,9 @@ function escrever(container: HTMLElement, texto: string) {
 const token = (texto: string, turn = 't1') =>
   ({ type: 'token', conversation_id: 'c1', turn_id: turn, text: texto });
 
+/** O título do estado vazio do handoff (tela 19), que a Task 28 embutiu aqui. */
+const TITULO_VAZIO = 'Sobre o que a gente conversa primeiro?';
+
 beforeEach(() => {
   h.refs.wsRef.current = null;
   localStorage.clear();
@@ -77,7 +81,7 @@ describe('ChatScreen', () => {
 
   it('mostra estado vazio, não some, quando ainda não há mensagem', () => {
     montar();
-    expect(screen.getByText(/ainda não trocamos/i)).toBeTruthy();
+    expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
   });
 
   it('mostra erro quando o servidor devolve um quadro de erro', () => {
@@ -92,7 +96,7 @@ describe('ChatScreen', () => {
     h.refs.wsRef.current = null;
     const { container } = render(<ChatScreen />);
     expect(container.querySelector('.ms-chat-skel')).toBeTruthy();
-    expect(screen.queryByText(/ainda não trocamos/i)).toBeNull();
+    expect(screen.queryByText(TITULO_VAZIO)).toBeNull();
     expect(screen.queryByText(/em construção/i)).toBeNull();
   });
 
@@ -288,17 +292,167 @@ describe('ChatScreen', () => {
   it('não pede histórico quando ainda não há conversa salva', () => {
     montar();
     expect(fetchConversationTurns).not.toHaveBeenCalled();
-    expect(screen.getByText(/ainda não trocamos/i)).toBeTruthy();
+    expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
   });
 
   it('troca a presença por um alerta quando o socket cai', () => {
     const { ws } = montar();
     ws.conexao('connected');
-    expect(screen.getByText(/ouvindo/i)).toBeTruthy();
+    expect(screen.getByText(/conectada/i)).toBeTruthy();
     ws.conexao('disconnected');
     const alerta = screen.getByText(/sem conexão/i);
     expect(alerta.getAttribute('role')).toBe('alert');
-    expect(screen.queryByText(/ouvindo/i)).toBeNull();
+    expect(screen.queryByText(/conectada/i)).toBeNull();
+  });
+
+  /* A frase do handoff afirma escuta PASSIVA — coisa diferente de socket aberto.
+     Quem escuta é o `useWakeWord`, que exige `wakeWordEnabled` (padrão desligado)
+     e o whisper do Mac; no iPhone praticamente nunca roda. Dizer "ouvindo" só
+     porque o socket subiu é a mesma falha do "pronta" hardcoded da tela vazia. */
+  describe('presença não promete escuta que não existe', () => {
+    afterEach(() => { useRealtimeStore.setState({ wakeWordEnabled: false }); });
+
+    it('socket de pé e wake word desligada: diz conectada, não "ouvindo"', () => {
+      useRealtimeStore.setState({ wakeWordEnabled: false });
+      const { ws } = montar();
+      ws.conexao('connected');
+      expect(screen.getByText('conectada')).toBeTruthy();
+      expect(screen.queryByText(/ouvindo/i)).toBeNull();
+    });
+
+    it('com a wake word ligada, aí sim diz que está ouvindo', () => {
+      useRealtimeStore.setState({ wakeWordEnabled: true });
+      const { ws } = montar();
+      ws.conexao('connected');
+      expect(screen.getByText(/ouvindo/)).toBeTruthy();
+      expect(screen.queryByText('conectada')).toBeNull();
+    });
+  });
+});
+
+// Task 28 — a integração com o estado vazio do handoff (tela 19). Antes disto a
+// `ChatVazioScreen` era inalcançável e as quatro sugestões eram botões mortos.
+describe('ChatScreen — o vazio do handoff embutido', () => {
+  const SUGESTOES = [
+    'Organiza minha semana',
+    'Me ajuda a controlar gastos',
+    'Quero criar um hábito novo',
+    'Me ensina algo novo',
+  ];
+
+  it('desenha o orb de 88px, o título e as quatro sugestões na conversa vazia', () => {
+    const { container } = montar();
+    expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
+    expect(SUGESTOES.map((t) => screen.getByRole('button', { name: t }).textContent)).toEqual(SUGESTOES);
+    // o orb grande do vazio, além do de 38px do cabeçalho da tela
+    const orbs = Array.from(container.querySelectorAll<HTMLElement>('.morb')).map((o) => o.style.width);
+    expect(orbs).toContain('88px');
+  });
+
+  // O que a integração existe para consertar: a sugestão vira mensagem. Um laço
+  // e não um clique só — um handler que ignorasse o texto passaria no caso único.
+  it.each(SUGESTOES)('tocar em "%s" manda esse texto pelo socket', (texto) => {
+    const { ws } = montar();
+    fireEvent.click(screen.getByRole('button', { name: texto }));
+
+    expect(ws.enviadas).toHaveLength(1);
+    expect(ws.enviadas[0].type).toBe('user_message');
+    expect(ws.enviadas[0].content).toBe(texto);
+    // e vira bolha do usuário na hora, como se tivesse sido digitada
+    expect(screen.getByText(texto, { selector: '.ms-chat-bolha--voce' })).toBeTruthy();
+    // o vazio sai de cena: a conversa começou
+    expect(screen.queryByText(TITULO_VAZIO)).toBeNull();
+  });
+
+  // A armadilha nº 1 do despacho: montar a TELA vazia inteira traria um segundo
+  // cabeçalho e um segundo composer para dentro do chat. Só o miolo entra.
+  it('não duplica cabeçalho nem composer', () => {
+    montar();
+    expect(screen.getAllByPlaceholderText('Mensagem…')).toHaveLength(1);
+    expect(screen.getAllByText('Seraphine')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Enviar' })).toHaveLength(1);
+  });
+
+  /* O defeito que apareceu no simulador: o composer aparecia logo abaixo da
+     quarta sugestão, com um vão morto até a tab bar. A causa foi de ALTURA do
+     contêiner, mas o que precisa ficar travado é a ESTRUTURA — o composer é o
+     último filho da coluna da tela, irmão da conversa, e não mora dentro da
+     área que rola. Enquanto isso valer, ele acompanha o fim da coluna. */
+  it('o composer é o último filho da tela, fora da área que rola', () => {
+    const { container } = montar();
+    const raiz = container.querySelector('.ms-chat') as HTMLElement;
+    const composer = container.querySelector('.ms-chat__composer') as HTMLElement;
+
+    expect(raiz.lastElementChild).toBe(composer);
+    expect(composer.parentElement).toBe(raiz);
+    // dentro da conversa não há composer nenhum…
+    expect(container.querySelector('.ms-chat__thread .ms-chat__composer')).toBeNull();
+    // …e o vazio está lá dentro, que é onde ele deve rolar junto com as bolhas
+    expect(container.querySelector('.ms-chat__thread .ms-chatvazio__miolo')).toBeTruthy();
+    // e o vazio não arrasta consigo um composer próprio
+    expect(container.querySelectorAll('.ms-chatvazio__composer')).toHaveLength(0);
+    expect(container.querySelectorAll('form')).toHaveLength(1);
+  });
+
+  /* O outro defeito: o orb de 88px saía cortado no topo. A tela rolava até o
+     fim ao montar — e numa conversa vazia não existe "fim" para onde rolar. */
+  it('não rola a conversa quando não há bolha nenhuma', () => {
+    const rolou = vi.fn();
+    const antes = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = rolou;
+    try {
+      const { ws } = montar();
+      expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
+      expect(rolou).not.toHaveBeenCalled();
+
+      // chegando a primeira fala, aí sim: o fim passa a existir
+      ws.emite(token('oi!'));
+      expect(rolou).toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = antes;
+    }
+  });
+
+  // A armadilha nº 4: a tela vazia afirmava "pronta" com bolinha verde sem saber
+  // nada de conexão. Aqui a presença é a do socket, inclusive no vazio.
+  it('não afirma "pronta": no vazio a presença ainda é a do socket', () => {
+    const { ws } = montar();
+    ws.conexao('connected');
+    expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
+    expect(screen.queryByText('pronta')).toBeNull();
+    expect(screen.getByText('conectada')).toBeTruthy();
+
+    ws.conexao('disconnected');
+    // vazio E sem conexão convivem: um é sobre a conversa, o outro sobre a rede
+    expect(screen.getByText(TITULO_VAZIO)).toBeTruthy();
+    expect(screen.getByText(/sem conexão/i).getAttribute('role')).toBe('alert');
+  });
+
+  it('não põe o separador de dia acima de uma conversa que não começou', () => {
+    const { ws, container } = montar();
+    expect(container.querySelector('.ms-chat__dia')).toBeNull();
+
+    ws.emite(token('oi!'));
+    expect(container.querySelector('.ms-chat__dia')).toBeTruthy();
+  });
+
+  it('some quando a conversa falha: erro no lugar do vazio, nunca os dois', () => {
+    vi.useFakeTimers();
+    h.refs.wsRef.current = null;
+    render(<ChatScreen />);
+    act(() => { vi.advanceTimersByTime(5000); });
+
+    expect(screen.getByText(/não consegui abrir a conversa/i)).toBeTruthy();
+    expect(screen.queryByText(TITULO_VAZIO)).toBeNull();
+  });
+
+  it('some quando o histórico falha: quem manda é o erro, não o convite', async () => {
+    localStorage.setItem(CONV_KEY, 'conv-1');
+    vi.mocked(fetchConversationTurns).mockRejectedValue(new Error('HTTP 503'));
+    montar();
+
+    await screen.findByText(/não consegui carregar a conversa anterior/i);
+    expect(screen.queryByText(TITULO_VAZIO)).toBeNull();
   });
 });
 
@@ -324,7 +478,7 @@ describe('ChatScreen — restaura o transcrito', () => {
     // Os papéis do servidor viram os dois lados da tela, não um lado só.
     expect(container.querySelector('.ms-chat-bolha--voce')).toBeTruthy();
     expect(container.querySelector('.ms-chat-bolha--sera')).toBeTruthy();
-    expect(screen.queryByText(/ainda não trocamos/i)).toBeNull();
+    expect(screen.queryByText(TITULO_VAZIO)).toBeNull();
   });
 
   it('remonta o cartão de tarefa que ficou gravado no turno', async () => {
