@@ -19,13 +19,20 @@ export type ScreenKey =
   | 'chat' | 'voz' | 'tarefas' | 'trilhas' | 'financas' | 'habitos' | 'diario'
   | 'inbox' | 'memoria' | 'calendario' | 'insights' | 'licao-teoria'
   | 'licao-exercicio' | 'whatsapp' | 'onboarding-boas-vindas'
-  | 'onboarding-permissoes' | 'notas' | 'tarefas-view';
+  | 'onboarding-permissoes' | 'notas' | 'tarefas-view'
+  // v3 — registradas ANTES das telas existirem, com placeholder, para que
+  // nenhuma task da Fase 1 precise editar este arquivo. Os três modais NÃO
+  // entram: são sobreposições sobre a tela atual, não destinos de navegação.
+  | 'configuracoes' | 'trilhas-lista' | 'planejamento'
+  | 'seletor-modelo' | 'custos' | 'custos-detalhe';
 
 export const SCREEN_KEYS: ScreenKey[] = [
   'chat', 'voz', 'tarefas', 'trilhas', 'financas', 'habitos', 'diario',
   'inbox', 'memoria', 'calendario', 'insights', 'licao-teoria',
   'licao-exercicio', 'whatsapp', 'onboarding-boas-vindas',
   'onboarding-permissoes', 'notas', 'tarefas-view',
+  'configuracoes', 'trilhas-lista', 'planejamento',
+  'seletor-modelo', 'custos', 'custos-detalhe',
 ];
 
 /** Cada tela é um arquivo próprio, carregado sob demanda. É o que permite
@@ -53,4 +60,10 @@ export const SCREENS: Record<ScreenKey, React.LazyExoticComponent<React.Componen
      que navegação alguma alcançava. */
   'notas': lazy(() => import('./NotasScreen').then((m) => ({ default: m.NotasScreen }))),
   'tarefas-view': lazy(() => import('./TarefasScreen').then((m) => ({ default: m.TarefasScreen }))),
+  'configuracoes': lazy(() => import('./ConfiguracoesScreen').then((m) => ({ default: m.ConfiguracoesScreen }))),
+  'trilhas-lista': lazy(() => import('./TrilhasListaScreen').then((m) => ({ default: m.TrilhasListaScreen }))),
+  'planejamento': lazy(() => import('./PlanejamentoScreen').then((m) => ({ default: m.PlanejamentoScreen }))),
+  'seletor-modelo': lazy(() => import('./SeletorModeloScreen').then((m) => ({ default: m.SeletorModeloScreen }))),
+  'custos': lazy(() => import('./CustosScreen').then((m) => ({ default: m.CustosScreen }))),
+  'custos-detalhe': lazy(() => import('./CustosDetalheScreen').then((m) => ({ default: m.CustosDetalheScreen }))),
 };
