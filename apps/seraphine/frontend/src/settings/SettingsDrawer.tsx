@@ -205,7 +205,9 @@ export function SettingsDrawer({
               />
             </label>
             <p className="settings-drawer__hint">
-              Mantem o microfone em espera para ativar a conversa por voz quando o realtime estiver desligado.
+              Escuta "Ei Seraphine" para ativar a conversa por voz quando o realtime estiver desligado.
+              A deteccao roda no proprio aparelho e nada e gravado ou enviado ate voce chamar por ela.
+              No iPhone o microfone continua ativo com a tela desligada (indicador laranja aceso).
             </p>
           </section>
 

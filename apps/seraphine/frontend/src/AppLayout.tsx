@@ -319,7 +319,7 @@ export function AppLayout(): JSX.Element {
           {wakeWordEnabled && !realtimeActive && (
             <span
               className="wake-word-indicator"
-              title="Mic em segundo plano, atento a 'oi Sera'"
+              title="Mic em segundo plano, atento a 'Ei Seraphine'"
               aria-label="Escutando por voz"
             >
               <span className="wake-word-indicator__dot" aria-hidden />

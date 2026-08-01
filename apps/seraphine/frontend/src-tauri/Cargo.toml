@@ -50,6 +50,19 @@ tiny_http = "0.12"
 # dependências fica pequena.
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "json"] }
 
+# Wake word — openWakeWord chain (melspectrogram -> speech embedding ->
+# ei_seraphine_v9 classifier) run natively so detection survives the iOS
+# webview being suspended with the screen off.
+#
+# tract instead of `ort`/onnxruntime: tract is pure Rust with no C++
+# dependency, so it cross-compiles to aarch64-apple-ios and
+# aarch64-apple-ios-sim with the same `cargo build` as the Mac, and links
+# statically into libapp.a. `ort` would need an ONNX Runtime native
+# library built and shipped per target — a build-time download plus an
+# extra binary in the app bundle, for a 3-model chain whose ops (Conv,
+# LeakyRelu, MaxPool, Gemm, Sigmoid, ...) tract covers.
+tract-onnx = { version = "0.23", default-features = false }
+
 [dev-dependencies]
 tempfile = "3"
 
