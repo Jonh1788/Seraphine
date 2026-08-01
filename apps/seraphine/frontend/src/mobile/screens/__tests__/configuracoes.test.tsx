@@ -8,11 +8,17 @@ import { resolve } from 'node:path';
 // teste do caminho feliz passaria pelo caminho de erro sem perceber.
 vi.mock('../../../google/api', () => ({ getAuthStatus: vi.fn(), startOAuth: vi.fn() }));
 vi.mock('../../../memory/api', () => ({ listFacts: vi.fn() }));
+vi.mock('../../../notifications/api', () => ({
+  getNotificationSettings: vi.fn(),
+  setNotificationType: vi.fn(),
+}));
 vi.mock('../../../research/api', () => ({ getChatModel: vi.fn() }));
 vi.mock('../../../whatsapp/api', () => ({ fetchWhatsappChats: vi.fn() }));
 
 import { getAuthStatus, startOAuth } from '../../../google/api';
 import { listFacts } from '../../../memory/api';
+import { getNotificationSettings, setNotificationType } from '../../../notifications/api';
+import type { NotificationSettings } from '../../../notifications/api';
 import { getChatModel } from '../../../research/api';
 import { fetchWhatsappChats } from '../../../whatsapp/api';
 import { useChatStore } from '../../../stores/chatStore';
@@ -33,8 +39,33 @@ const fato = (id: string): Fact => ({
 
 const nFatos = (n: number): Fact[] => Array.from({ length: n }, (_, i) => fato(`f${i}`));
 
+/** O que `GET /notifications/settings` devolve de verdade (defaults da 094). */
+const prefs = (over: Partial<NotificationSettings> = {}): NotificationSettings => ({
+  quiet_hours_start: '23:00',
+  quiet_hours_end: '07:00',
+  dnd_apps: [],
+  batching_enabled: true,
+  per_type_enabled: {
+    water: true,
+    reminder_timed: true,
+    opener: true,
+    insight: true,
+    day_review: true,
+    weekly_reflection: true,
+    task_deadline: true,
+    whatsapp_mention: true,
+    stalled_task: true,
+  },
+  ...over,
+});
+
 /** Estado "tudo respondeu e tudo está ligado". */
 function comDado(): void {
+  vi.mocked(getNotificationSettings).mockResolvedValue(prefs());
+  vi.mocked(setNotificationType).mockImplementation(async (atual, tipo, ligado) => ({
+    ...atual,
+    per_type_enabled: { ...atual.per_type_enabled, [tipo]: ligado },
+  }));
   vi.mocked(getChatModel).mockResolvedValue({ chat_model: 'cliproxy' });
   vi.mocked(getAuthStatus).mockResolvedValue({
     authed: true,
@@ -54,6 +85,8 @@ const assentar = (): Promise<void> =>
 describe('ConfiguracoesScreen', () => {
   beforeEach(() => {
     vi.mocked(getChatModel).mockReset();
+    vi.mocked(getNotificationSettings).mockReset();
+    vi.mocked(setNotificationType).mockReset();
     vi.mocked(getAuthStatus).mockReset();
     vi.mocked(startOAuth).mockReset();
     vi.mocked(fetchWhatsappChats).mockReset();
@@ -77,6 +110,7 @@ describe('ConfiguracoesScreen', () => {
 
     expect(screen.getByRole('heading', { name: 'Configurações' })).toBeTruthy();
     expect(screen.getByText('ASSISTENTE')).toBeTruthy();
+    expect(screen.getByText('NOTIFICAÇÕES')).toBeTruthy();
     expect(screen.getByText('CONEXÕES')).toBeTruthy();
     expect(screen.getByText('DADOS')).toBeTruthy();
 
@@ -118,6 +152,7 @@ describe('ConfiguracoesScreen', () => {
 
   it('erro nomeia o que falhou num alerta só, e os interruptores continuam de pé', async () => {
     vi.mocked(getChatModel).mockRejectedValue(new Error('rede'));
+    vi.mocked(getNotificationSettings).mockRejectedValue(new Error('HTTP 503'));
     vi.mocked(getAuthStatus).mockRejectedValue(new Error('rede'));
     vi.mocked(fetchWhatsappChats).mockRejectedValue(new Error('rede'));
     vi.mocked(listFacts).mockRejectedValue(new Error('rede'));
@@ -126,6 +161,7 @@ describe('ConfiguracoesScreen', () => {
     await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
     const alerta = screen.getByRole('alert');
     expect(alerta.textContent).toContain('modelo');
+    expect(alerta.textContent).toContain('notificações');
     expect(alerta.textContent).toContain('Google Agenda');
     expect(alerta.textContent).toContain('WhatsApp');
     expect(alerta.textContent).toContain('memória');
@@ -181,7 +217,7 @@ describe('ConfiguracoesScreen', () => {
     render(<ConfiguracoesScreen />);
     await assentar();
     const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(3);
+    expect(switches).toHaveLength(4);
     for (const sw of switches) {
       const linha = sw.closest('.ms-config-linha')!;
       const nome = linha.querySelector('.ms-config-nome')!.textContent;
@@ -215,6 +251,91 @@ describe('ConfiguracoesScreen', () => {
     expect(screen.getByRole('switch', { name: 'Wake word "Ei Seraphine"' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('switch', { name: 'Responder com voz' }).getAttribute('aria-checked')).toBe('false');
     expect(screen.getByRole('switch', { name: 'Pensar antes de responder' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  // ── NOTIFICAÇÕES: o outro "proposta" do README que existe de verdade ──────
+
+  // O README do handoff marca "Não perturbe" e "Lembretes" como proposta. Os
+  // dois existem desde a 094 (`quiet_hours_*` e `per_type_enabled`), como
+  // "Modelo" existia — mesmo erro, segunda ocorrência.
+  it('mostra a janela real do Não perturbe e o interruptor real de Lembretes', async () => {
+    render(<ConfiguracoesScreen />);
+
+    await waitFor(() => expect(screen.getByText('23h – 7h')).toBeTruthy());
+    const lembretes = screen.getByRole('switch', { name: 'Lembretes' });
+    expect(lembretes.getAttribute('aria-checked')).toBe('true');
+    expect(vi.mocked(getNotificationSettings)).toHaveBeenCalled();
+  });
+
+  it('a janela reflete o que está gravado, minuto quebrado inclusive', async () => {
+    vi.mocked(getNotificationSettings).mockResolvedValue(
+      prefs({ quiet_hours_start: '22:30', quiet_hours_end: '06:45' }),
+    );
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByText('22h30 – 6h45')).toBeTruthy());
+  });
+
+  it('sem janela gravada, diz que não há — e isso não é erro', async () => {
+    vi.mocked(getNotificationSettings).mockResolvedValue(
+      prefs({ quiet_hours_start: '', quiet_hours_end: '' }),
+    );
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByText('não definido')).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('o interruptor de Lembretes grava pela camada que preserva os outros tipos', async () => {
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Lembretes' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Lembretes' }));
+
+    await waitFor(() => expect(vi.mocked(setNotificationType)).toHaveBeenCalledTimes(1));
+    const [enviado, tipo, ligado] = vi.mocked(setNotificationType).mock.calls[0];
+    expect(tipo).toBe('reminder_timed');
+    expect(ligado).toBe(false);
+    // o mapa inteiro vai junto — o backend SUBSTITUI `per_type_enabled`
+    expect(Object.keys(enviado.per_type_enabled)).toContain('stalled_task');
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: 'Lembretes' }).getAttribute('aria-checked')).toBe('false'),
+    );
+  });
+
+  // Um interruptor que fica ligado sem ter sido salvo é a mentira mais cara
+  // desta tela: da próxima vez que a pessoa abrir, ele estará como antes.
+  it('PATCH que falha volta o interruptor e diz que não salvou', async () => {
+    vi.mocked(setNotificationType).mockRejectedValue(new Error('HTTP 500'));
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Lembretes' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Lembretes' }));
+
+    await waitFor(() => expect(screen.getByText(/não consegui salvar/i)).toBeTruthy());
+    expect(screen.getByRole('switch', { name: 'Lembretes' }).getAttribute('aria-checked')).toBe('true');
+    // falha de salvar é da linha, não da tela: quem grita é o aviso do topo
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('sem a chave do tipo no payload, não inventa interruptor', async () => {
+    vi.mocked(getNotificationSettings).mockResolvedValue(
+      prefs({ per_type_enabled: { water: true } }),
+    );
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByText('23h – 7h')).toBeTruthy());
+
+    expect(screen.queryByRole('switch', { name: 'Lembretes' })).toBeNull();
+    expect(screen.getByText('Lembretes')).toBeTruthy();
+    expect(screen.getByText(/este backend não expõe/i)).toBeTruthy();
+  });
+
+  it('leitura das preferências que falha não desenha interruptor nenhum', async () => {
+    vi.mocked(getNotificationSettings).mockRejectedValue(new Error('HTTP 503'));
+    render(<ConfiguracoesScreen />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+
+    expect(screen.queryByRole('switch', { name: 'Lembretes' })).toBeNull();
+    expect(screen.queryByText('23h – 7h')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('notificações');
   });
 
   // ── RISCO DISTINTIVO 2: "Modelo" não é proposta ───────────────────────────
@@ -274,16 +395,13 @@ describe('ConfiguracoesScreen', () => {
     for (const ausente of [
       'Personalidade',        // não existe nada de persona no backend nem no front
       'Calorosa',
-      'Não perturbe',         // quiet hours existem, mas só via fetch cru
-      'Lembretes',
-      'Streak em risco',
+      'Streak em risco',      // não existe nem no backend: sem chave em per_type_enabled
       'YouTube Music',        // não há vínculo de conta: é AppleScript no Chrome do Mac
       'Apagar histórico',     // não há DELETE de conversas no backend
       'Sincronizado com o Mac',
     ]) {
       expect(tudo).not.toContain(ausente);
     }
-    expect(screen.queryByText('NOTIFICAÇÕES')).toBeNull();
   });
 
   // ── carregamento é esqueleto, nunca valor chutado ────────────────────────
@@ -291,6 +409,7 @@ describe('ConfiguracoesScreen', () => {
   it('enquanto lê, mostra esqueleto sem texto — não pisca "conectado"', () => {
     const nunca = () => new Promise<never>(() => {});
     vi.mocked(getChatModel).mockImplementation(nunca);
+    vi.mocked(getNotificationSettings).mockImplementation(nunca);
     vi.mocked(getAuthStatus).mockImplementation(nunca);
     vi.mocked(fetchWhatsappChats).mockImplementation(nunca);
     vi.mocked(listFacts).mockImplementation(nunca);
@@ -300,6 +419,20 @@ describe('ConfiguracoesScreen', () => {
     expect(tudo).not.toContain('conectado');
     expect(tudo).not.toContain('Padrão');
     expect(tudo).not.toContain('itens');
+
+    // Um interruptor desenhado antes de saber o próprio estado mostraria
+    // "desligado" — os três daqui são locais e já sabem; o de Lembretes não.
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(tudo).not.toContain('23h');
+
+    // Contar interruptores não basta: tirar o ramo de esqueleto faz a linha
+    // cair no ramo de "chave ausente" e ANUNCIAR uma indisponibilidade que
+    // ainda não se sabe se existe. Enquanto lê, a linha diz só o próprio nome.
+    for (const nome of ['Lembretes', 'Não perturbe']) {
+      const linha = screen.getByText(nome).closest('.ms-config-linha')!;
+      expect(`${nome}: ${linha.textContent}`).toBe(`${nome}: ${nome}`);
+      expect(linha.querySelector('.ms-config-skel')).toBeTruthy();
+    }
 
     const skels = container.querySelectorAll('.ms-config-skel');
     expect(skels.length).toBeGreaterThan(0);

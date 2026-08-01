@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeftIcon,
+  BellIcon,
   BrainIcon,
   CalendarIcon,
   ChevronRightIcon,
+  ClockIcon,
   SparkleIcon,
   SystemIcon,
   VolumeIcon,
@@ -12,6 +14,8 @@ import {
 import { getAuthStatus, startOAuth } from '../../google/api';
 import type { GoogleAuthStatus } from '../../google/types';
 import { listFacts } from '../../memory/api';
+import { getNotificationSettings, setNotificationType } from '../../notifications/api';
+import type { NotificationSettings } from '../../notifications/api';
 import { getChatModel } from '../../research/api';
 import { fetchWhatsappChats } from '../../whatsapp/api';
 import { useChatStore } from '../../stores/chatStore';
@@ -30,14 +34,13 @@ import './ConfiguracoesScreen.css';
  *
  *  Personalidade / "Calorosa"  não existe persona em lugar nenhum — nem no
  *                              backend, nem em store, nem em prompt exposto.
- *  NOTIFICAÇÕES (Lembretes,    `quiet_hours_*` e `per_type_enabled` EXISTEM em
- *  Streak em risco,            GET/PATCH /notifications/settings, mas não há
- *  Não perturbe)               camada de api de domínio para eles (só o
- *                              `NotificationSettingsPanel` do desktop, com
- *                              `fetch` cru) e a task proíbe `fetch`/`API_BASE`
- *                              na tela e proíbe criar arquivo de outro dono.
- *                              "Streak em risco" não existe nem no backend:
- *                              `per_type_enabled` não tem essa chave.
+ *  Streak em risco             não existe nem no backend: `per_type_enabled`
+ *                              não tem essa chave e `BASE_PRIORITY` não tem
+ *                              esse tipo. Lembretes e Não perturbe, ao lado
+ *                              dele no mockup, EXISTEM — o README os marcava
+ *                              como proposta, mesmo erro que cometeu com
+ *                              "Modelo" — e entraram pela camada nova
+ *                              `notifications/api`.
  *  YouTube Music "Conectar"    não há vínculo de conta a estabelecer: a música
  *                              é dirigida por AppleScript no Chrome do Mac
  *                              (`tools/browser.py`). O botão não teria alvo.
@@ -72,9 +75,34 @@ const MODELO_PADRAO = 'cliproxy';
  *  resposta cheia, a tela diz "N+" em vez de afirmar um total que não viu. */
 const TETO_FATOS = 200;
 
+/** A chave que o backend usa para os lembretes com hora
+ *  (`notifications/types.py`, `per_type_enabled`). "Streak em risco", ao lado
+ *  dele no mockup, não tem chave nenhuma — por isso não está na tela. */
+const TIPO_LEMBRETE = 'reminder_timed';
+
 /** Versão real do app. O "2.4.0" do mockup é literal de desenho; a fonte é o
  *  `tauri.conf.json`, o mesmo arquivo de onde o bundle iOS tira a dele. */
 const VERSAO = versaoDoApp.version;
+
+/** "23:00" vira "23h"; "22:30" vira "22h30". `null` quando não dá para ler o
+ *  horário — aí a tela diz que não há janela em vez de inventar uma. */
+function hora(hhmm: string): string | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm || '').trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return min === 0 ? `${h}h` : `${h}h${m[2]}`;
+}
+
+/** A janela do "Não perturbe" como o handoff a escreve ("22h – 7h"), montada
+ *  dos dois horários gravados. Meia janela não é janela: falhando um lado, a
+ *  linha diz que não há. */
+function janelaDeSilencio(s: NotificationSettings): string | null {
+  const inicio = hora(s.quiet_hours_start);
+  const fim = hora(s.quiet_hours_end);
+  return inicio && fim ? `${inicio} \u2013 ${fim}` : null;
+}
 
 interface Leitura<T> {
   valor: T | null;
@@ -103,6 +131,9 @@ export function ConfiguracoesScreen({ onBack, onOpen }: ScreenProps) {
   const [google, setGoogle] = useState<Leitura<GoogleAuthStatus>>(LENDO);
   const [ponte, setPonte] = useState<Leitura<boolean>>(LENDO);
   const [itens, setItens] = useState<Leitura<{ total: number; noTeto: boolean }>>(LENDO);
+  const [notif, setNotif] = useState<Leitura<NotificationSettings>>(LENDO);
+  const [salvandoNotif, setSalvandoNotif] = useState(false);
+  const [erroSalvarNotif, setErroSalvarNotif] = useState(false);
   const [conectando, setConectando] = useState(false);
 
   const vivo = useRef(true);
@@ -111,6 +142,10 @@ export function ConfiguracoesScreen({ onBack, onOpen }: ScreenProps) {
     getChatModel()
       .then((r) => { if (vivo.current) setModelo({ valor: r.chat_model || MODELO_PADRAO, erro: false, lendo: false }); })
       .catch(() => { if (vivo.current) setModelo({ valor: null, erro: true, lendo: false }); });
+
+    getNotificationSettings()
+      .then((s) => { if (vivo.current) setNotif({ valor: s, erro: false, lendo: false }); })
+      .catch(() => { if (vivo.current) setNotif({ valor: null, erro: true, lendo: false }); });
 
     getAuthStatus()
       .then((s) => { if (vivo.current) setGoogle({ valor: s, erro: false, lendo: false }); })
@@ -153,6 +188,35 @@ export function ConfiguracoesScreen({ onBack, onOpen }: ScreenProps) {
     };
   }, [ler]);
 
+  // Otimista com volta atrás: o interruptor responde ao dedo na hora, mas se o
+  // PATCH cair ele VOLTA. Um interruptor que fica ligado sem ter sido salvo é
+  // a mentira mais cara desta tela — na próxima abertura ele estará como antes
+  // e ninguém saberá por quê.
+  const virarLembretes = useCallback(async (ligado: boolean) => {
+    const antes = notif.valor;
+    if (!antes) return;
+    setErroSalvarNotif(false);
+    setSalvandoNotif(true);
+    setNotif({
+      valor: { ...antes, per_type_enabled: { ...antes.per_type_enabled, [TIPO_LEMBRETE]: ligado } },
+      erro: false,
+      lendo: false,
+    });
+    try {
+      // Quem sabe que `per_type_enabled` é SUBSTITUÍDO (e não mesclado) pelo
+      // backend é a camada de api; a tela só pede para virar uma chave.
+      const salvo = await setNotificationType(antes, TIPO_LEMBRETE, ligado);
+      if (vivo.current) setNotif({ valor: salvo, erro: false, lendo: false });
+    } catch {
+      if (vivo.current) {
+        setNotif({ valor: antes, erro: false, lendo: false });
+        setErroSalvarNotif(true);
+      }
+    } finally {
+      if (vivo.current) setSalvandoNotif(false);
+    }
+  }, [notif.valor]);
+
   const conectarGoogle = useCallback(async () => {
     setConectando(true);
     try {
@@ -179,12 +243,15 @@ export function ConfiguracoesScreen({ onBack, onOpen }: ScreenProps) {
 
   const falhas = [
     modelo.erro ? 'modelo' : '',
+    notif.erro ? 'notificações' : '',
     google.erro ? 'Google Agenda' : '',
     ponte.erro ? 'WhatsApp' : '',
     itens.erro ? 'memória' : '',
   ].filter(Boolean);
 
   const rotuloModelo = modelo.valor === MODELO_PADRAO ? 'Padrão' : modelo.valor;
+  const lembretes = notif.valor?.per_type_enabled[TIPO_LEMBRETE];
+  const janela = notif.valor ? janelaDeSilencio(notif.valor) : null;
 
   return (
     <div className="ms-config">
@@ -253,6 +320,45 @@ export function ConfiguracoesScreen({ onBack, onOpen }: ScreenProps) {
               modelo.lendo ? <Skel largura={54} />
                 : modelo.erro ? <Status>não consegui verificar</Status>
                 : <span className="ms-config-valor ms-config-valor--accent">{rotuloModelo}</span>
+            }
+          />
+        </Grupo>
+
+        <Grupo rotulo="NOTIFICAÇÕES">
+          <Linha
+            nome="Lembretes"
+            subNo={erroSalvarNotif ? <Status>não consegui salvar</Status> : undefined}
+            icone={<BellIcon size={16} />}
+            tom="ambar"
+            controle={
+              notif.lendo ? <Skel largura={44} alto={26} />
+                : notif.erro ? <Status>não consegui verificar</Status>
+                : lembretes === undefined ? <Status>este backend não expõe este tipo</Status>
+                : (
+                  <Interruptor
+                    nome="Lembretes"
+                    ligado={lembretes}
+                    desabilitado={salvandoNotif}
+                    onMudar={(v) => void virarLembretes(v)}
+                  />
+                )
+            }
+          />
+          <Divisoria />
+          {/* Leitura, não controle: a janela é real (`quiet_hours_*`), mas não
+              existe destino de edição no telefone — nenhum seletor de horário
+              e nenhuma chave no registry. Por isso não tem chevron: chevron
+              sem destino promete navegação que não acontece. Editar continua
+              sendo do painel de desktop. */}
+          <Linha
+            nome="Não perturbe"
+            icone={<ClockIcon size={16} />}
+            tom="ambar"
+            controle={
+              notif.lendo ? <Skel largura={62} />
+                : notif.erro ? <Status>não consegui verificar</Status>
+                : janela ? <span className="ms-config-valor">{janela}</span>
+                : <span className="ms-config-valor">não definido</span>
             }
           />
         </Grupo>
@@ -344,7 +450,7 @@ function Linha({
   /** Sub que não é texto puro (esqueleto, status, contagem). */
   subNo?: ReactNode;
   icone: ReactNode;
-  tom: 'accent' | 'teal' | 'verde';
+  tom: 'accent' | 'ambar' | 'teal' | 'verde';
   controle?: ReactNode;
   aoAbrir?: () => void;
 }) {
@@ -374,10 +480,13 @@ function Linha({
 /** Interruptor 44×26 com bola de 22, como o handoff. O `aria-label` é o MESMO
  *  string do nome visível: é o que o VoiceOver dita, e divergir dele é dizer
  *  uma coisa na tela e outra no ouvido. */
-function Interruptor({ nome, ligado, onMudar }: {
+function Interruptor({ nome, ligado, onMudar, desabilitado = false }: {
   nome: string;
   ligado: boolean;
   onMudar: (v: boolean) => void;
+  /** Ligado enquanto um PATCH está em voo: evita a segunda batida virar o
+   *  estado a partir de um valor que o backend ainda não confirmou. */
+  desabilitado?: boolean;
 }) {
   return (
     <button
@@ -385,6 +494,7 @@ function Interruptor({ nome, ligado, onMudar }: {
       role="switch"
       aria-checked={ligado}
       aria-label={nome}
+      disabled={desabilitado}
       className={`ms-config-switch${ligado ? ' ms-config-switch--on' : ''}`}
       onClick={() => onMudar(!ligado)}
     >

@@ -69,6 +69,9 @@ html[data-shell='phone'] .ms-config-icone {
 html[data-shell='phone'] .ms-config-icone--accent {
   background: var(--accent-soft, rgba(154, 147, 255, .14)); color: var(--accent, #9a93ff);
 }
+html[data-shell='phone'] .ms-config-icone--ambar {
+  background: rgba(255, 167, 38, .13); color: var(--warning, #ffa726);
+}
 html[data-shell='phone'] .ms-config-icone--teal { background: rgba(38, 166, 154, .13); color: #26a69a; }
 html[data-shell='phone'] .ms-config-icone--verde { background: rgba(37, 211, 102, .13); color: #25d366; }
 
@@ -125,6 +128,7 @@ html[data-shell='phone'] .ms-config-switch {
   background: rgba(255, 255, 255, .12); transition: background .16s ease;
 }
 html[data-shell='phone'] .ms-config-switch--on { background: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-config-switch:disabled { opacity: .7; cursor: default; }
 html[data-shell='phone'] .ms-config-switch::after {
   content: ''; position: absolute; top: 50%; left: 50%;
   width: 44px; height: 44px; transform: translate(-50%, -50%);
