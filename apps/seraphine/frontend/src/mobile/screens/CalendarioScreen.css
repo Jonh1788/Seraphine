@@ -79,6 +79,43 @@ html[data-shell='phone'] .ms-calendario-item--diario { border-left-color: #ff704
 html[data-shell='phone'] .ms-calendario-item__titulo { font-size: 13px; font-weight: 600; color: var(--text, #ececef); }
 html[data-shell='phone'] .ms-calendario-item__sub { font-size: 11px; color: var(--text-dim, #9594a0); margin-top: 2px; }
 
+/* ── apagar evento: botão na linha, confirmação por extenso ──
+   O alvo tem os 44pt do iOS. As margens negativas deixam o alvo grande sem
+   engordar a linha: elas comem o padding do cartão, não o toque. */
+html[data-shell='phone'] .ms-calendario-item__linha { display: flex; align-items: center; gap: 8px; }
+html[data-shell='phone'] .ms-calendario-item__texto { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-calendario-item__apagar {
+  flex: none; width: 44px; height: 44px; margin: -7px -9px -7px 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: none; border-radius: 12px; background: none;
+  color: var(--text-faint, #5f5e6b); cursor: pointer;
+}
+html[data-shell='phone'] .ms-calendario-item__apagar:active { color: var(--danger, #ef6b6b); background: rgba(239, 107, 107, .12); }
+html[data-shell='phone'] .ms-calendario-item__apagar:disabled { opacity: .4; cursor: default; }
+
+html[data-shell='phone'] .ms-calendario-confirma { margin-top: 10px; }
+html[data-shell='phone'] .ms-calendario-confirma__texto {
+  font-size: 12.5px; line-height: 1.4; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-calendario-confirma__acoes { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+html[data-shell='phone'] .ms-calendario-confirma__botao {
+  min-width: 64px; min-height: 44px; padding: 0 14px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 12px;
+  background: none; color: var(--text, #ececef); cursor: pointer;
+}
+html[data-shell='phone'] .ms-calendario-confirma__botao--perigo {
+  border-color: rgba(239, 107, 107, .45); color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-calendario-confirma__botao:disabled { opacity: .5; cursor: default; }
+html[data-shell='phone'] .ms-calendario-confirma__estado { font-size: 11px; color: var(--text-dim, #9594a0); }
+
+/* A falha da exclusão em tinta de perigo: ela NUNCA pode ser lida como
+   "pronto, apaguei" — a linha continua na tela de propósito. */
+html[data-shell='phone'] .ms-calendario-item__erro {
+  margin-top: 8px; font-size: 11.5px; line-height: 1.4; color: var(--danger, #ef6b6b);
+}
+
 /* ── três saídas de cada bloco: vazio, erro e carregando ── */
 html[data-shell='phone'] .ms-calendario-vazio { margin-top: 10px; font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0); }
 html[data-shell='phone'] .ms-calendario-erro {

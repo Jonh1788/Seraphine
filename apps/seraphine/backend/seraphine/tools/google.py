@@ -32,6 +32,7 @@ from typing import Any, Optional
 from google_integration.client import (
     CALENDAR_API,
     GMAIL_API,
+    GoogleAPIError,
     GoogleAuthError,
     GoogleClient,
     _rfc3339,
@@ -733,20 +734,22 @@ class CalendarDeleteEventTool(Tool):
             return ToolResult(ok=False, error="event_id is required")
         calendar_id = str(args.get("calendar_id") or "primary")
 
-        url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{event_id}"
+        # UM caminho de exclusão, compartilhado com DELETE
+        # /google/calendar/events/{id}. Este método montava a URL na mão — uma
+        # segunda cópia de `client.delete_event`, que já invalida o cache e,
+        # agora, valida o identificador. O id daqui vem de um LLM, a fonte
+        # menos confiável de todas: um ".." alucinado apagaria o CALENDÁRIO.
         try:
             if not await self._client.is_authed():
                 return _not_authed_result()
-            await self._client._authed_request("DELETE", url)
+            await self._client.delete_event(event_id, calendar_id=calendar_id)
         except GoogleAuthError:
             return _not_authed_result()
+        except ValueError as e:
+            return ToolResult(ok=False, error=str(e))
         except Exception as e:
             return ToolResult(ok=False, error=f"calendar delete failed: {e}")
 
-        try:
-            self._client.event_cache.invalidate_calendar(calendar_id)
-        except Exception:
-            pass
         return ToolResult(
             ok=True,
             output=f"Evento {event_id} deletado.",
@@ -815,18 +818,24 @@ class CalendarBulkDeleteEventsTool(Tool):
             return ToolResult(ok=False, error=f"auth check failed: {e}")
 
         async def _delete_one(eid: str) -> tuple[str, bool, str | None]:
-            url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{eid}"
+            # Pelo mesmo caminho de escrita do tool unitário e da rota: é o
+            # que traz o guarda do identificador para o lote, onde a lista
+            # inteira veio de um LLM.
             try:
-                resp = await self._client._authed_request("DELETE", url)
-                # Google returns 204 No Content on success; 410 Gone is
-                # acceptable too (already-deleted / cancelled).
-                if resp.status_code in (204, 200, 410):
-                    return eid, True, None
-                return eid, False, f"HTTP {resp.status_code}"
+                await self._client.delete_event(eid, calendar_id=calendar_id)
             except GoogleAuthError as e:
                 return eid, False, f"auth: {e}"
+            except GoogleAPIError as e:
+                # "Já não estava lá" conta como apagado — o resultado para quem
+                # pediu é o mesmo. O ramo anterior dizia aceitar 410, mas era
+                # código morto: `_authed_request` levanta em tudo >= 400, então
+                # um evento já apagado contava como FALHA do lote.
+                if e.status_code in (404, 410):
+                    return eid, True, None
+                return eid, False, str(e)
             except Exception as e:
                 return eid, False, str(e)
+            return eid, True, None
 
         # Fire all deletes in parallel. Google's per-user quota is ~10 r/s;
         # asyncio.gather means we submit them all at once and let httpx

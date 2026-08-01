@@ -224,3 +224,104 @@ export async function criarEvento(evento: NovoEventoEntrada): Promise<EventoCria
     repeticao: Array.isArray(corpo.recurrence) ? corpo.recurrence.map(String) : [],
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Exclusão de evento — DELETE /google/calendar/events/{id}           */
+/* ------------------------------------------------------------------ */
+
+/** O que o backend confirmou ter apagado. */
+export interface EventoApagado {
+  /** O id que o servidor disse ter apagado — conferido contra o pedido. */
+  id: string;
+  /** O evento já não estava no Google (404/410): apagado pela web, por outro
+   *  aparelho, ou por um toque anterior que a tela não viu voltar. O resultado
+   *  é o mesmo — não está na agenda —, mas não foi ESTA chamada que apagou. */
+  jaNaoExistia: boolean;
+}
+
+/** Falha ao apagar. Mesmo contrato do `ErroCriarEvento`: `retentavel` separa "o
+ *  mundo estava ruim" de "este pedido não serve". */
+export class ErroApagarEvento extends Error {
+  readonly retentavel: boolean;
+  readonly status: number | null;
+
+  constructor(mensagem: string, opts: { retentavel: boolean; status?: number | null }) {
+    super(mensagem);
+    this.name = 'ErroApagarEvento';
+    this.retentavel = opts.retentavel;
+    this.status = opts.status ?? null;
+  }
+}
+
+/**
+ * O mesmo alfabeto de `google_integration/client.py::EVENT_ID_RE`.
+ *
+ * NÃO é zelo decorativo, e o dano não se mede em linha — mede-se em
+ * CALENDÁRIO. O id entra direto no caminho da requisição que o backend monta,
+ * e o httpx normaliza segmentos de ponto antes de enviar: um id de ".." vira
+ *
+ *     DELETE .../calendars/primary/events/..   →   DELETE .../calendars/primary
+ *
+ * que apaga a agenda inteira. "../../outro" alcança um calendário qualquer. O
+ * backend tem o guarda dele (é ele que vale); este existe para a recusa chegar
+ * como frase em português na tela, sem gastar uma ida à rede.
+ *
+ * Permissivo com o que o Google realmente emite: instância de recorrente traz
+ * "_" e maiúsculas (`abc_20260620T120000Z`), importado traz "@", e o teto
+ * documentado é 1024.
+ */
+const ID_DE_EVENTO = /^(?=.*[A-Za-z0-9])[A-Za-z0-9_@.-]{1,1024}$/;
+
+/**
+ * Apaga um evento do calendário. `DELETE /google/calendar/events/{id}` → 200
+ *
+ * O QUE ESTA CAMADA GARANTE QUE A TELA NÃO PRECISA SABER:
+ *
+ * 1. **O id é conferido antes de sair** (ver `ID_DE_EVENTO`).
+ * 2. **Sucesso é sucesso.** Um 200 sem `ok:true`, ou que confirme um id
+ *    DIFERENTE do pedido, levanta erro: numa exclusão, acreditar num "ok"
+ *    frouxo faz a linha certa sumir da tela com o compromisso ainda no Google
+ *    — ou pior, a linha errada sumir.
+ * 3. **"Já não existia" é um resultado, não um erro** — mas vem marcado.
+ */
+export async function apagarEvento(id: string): Promise<EventoApagado> {
+  if (!ID_DE_EVENTO.test(id ?? '')) {
+    throw new ErroApagarEvento(
+      `identificador de evento inválido: "${id}". Recarregue a agenda e tente de novo.`,
+      { retentavel: false },
+    );
+  }
+
+  const res = await fetch(`${API_BASE}/google/calendar/events/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    const detalhado = await detalhe(res);
+    const mensagem =
+      res.status === 401
+        ? detalhado || 'Google não está conectado — conecte o Google e tente de novo.'
+        : detalhado || `HTTP ${res.status}`;
+    throw new ErroApagarEvento(mensagem, { retentavel: true, status: res.status });
+  }
+
+  const corpo = (await res.json()) as {
+    ok?: unknown;
+    id?: unknown;
+    ja_nao_existia?: unknown;
+  };
+  if (corpo.ok !== true) {
+    throw new ErroApagarEvento('o servidor respondeu mas não confirmou a exclusão.', {
+      retentavel: true,
+      status: res.status,
+    });
+  }
+  const confirmado = typeof corpo.id === 'string' ? corpo.id : '';
+  if (confirmado !== id) {
+    throw new ErroApagarEvento(
+      `o servidor confirmou ter apagado outro evento ("${confirmado}"), não o que foi pedido.`,
+      { retentavel: false, status: res.status },
+    );
+  }
+  return { id: confirmado, jaNaoExistia: corpo.ja_nao_existia === true };
+}

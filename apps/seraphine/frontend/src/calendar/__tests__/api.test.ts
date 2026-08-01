@@ -307,6 +307,141 @@ describe('criarEvento', () => {
   });
 });
 
+describe('apagarEvento', () => {
+  function jsonResponse(body: unknown, status = 200) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : String(status),
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    };
+  }
+
+  const APAGADO = { ok: true, id: 'evt-1', ja_nao_existia: false };
+
+  it('DELETEa /google/calendar/events/<id> e confirma qual sumiu', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(APAGADO)));
+
+    const apagado = await api.apagarEvento('evt-1');
+
+    expect(lastUrl()).toContain('/google/calendar/events/evt-1');
+    const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect((calls[0][1] as RequestInit).method).toBe('DELETE');
+    expect(apagado).toEqual({ id: 'evt-1', jaNaoExistia: false });
+  });
+
+  it('o id viaja como UM segmento de caminho, escapado', async () => {
+    // Um id de evento importado é "<uid>@google.com"; instância de recorrente
+    // leva "_". Nenhum dos dois pode virar caminho a mais.
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ ...APAGADO, id: 'importado@google.com' }),
+    ));
+    await api.apagarEvento('importado@google.com');
+    expect(lastUrl()).toContain('/google/calendar/events/importado%40google.com');
+  });
+
+  it('EVENTO QUE JÁ SUMIU volta marcado, não confundido com "eu apaguei"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ ok: true, id: 'evt-1', ja_nao_existia: true }),
+    ));
+    await expect(api.apagarEvento('evt-1')).resolves.toEqual({
+      id: 'evt-1',
+      jaNaoExistia: true,
+    });
+  });
+
+  it('recusa um id vazio SEM ir à rede, e não é retentável', async () => {
+    const spy = vi.fn(async () => jsonResponse(APAGADO));
+    vi.stubGlobal('fetch', spy);
+
+    await expect(api.apagarEvento('')).rejects.toThrow(/identificador/i);
+    await expect(api.apagarEvento('   ')).rejects.toThrow(/identificador/i);
+    expect(spy).not.toHaveBeenCalled();
+
+    await api.apagarEvento('').catch((e) => {
+      expect(e.retentavel).toBe(false);
+      expect(e.status).toBeNull();
+    });
+  });
+
+  it('recusa o id que escaparia do recurso, SEM ir à rede', async () => {
+    // O PIOR DANO DESTA CAMADA, e não é hipótese: um ".." faz o backend (via
+    // httpx, que normaliza segmentos de ponto) mandar um DELETE no CALENDÁRIO
+    // inteiro em vez de no evento. O backend tem o guarda dele; este aqui
+    // existe para a recusa chegar como frase, não como 422 seco.
+    const spy = vi.fn(async () => jsonResponse(APAGADO));
+    vi.stubGlobal('fetch', spy);
+
+    for (const id of ['..', '.', '../..', 'a/b', 'evt 1', 'evt#1', 'a'.repeat(1025)]) {
+      await expect(api.apagarEvento(id)).rejects.toThrow(/identificador/i);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('aceita os ids que o Google realmente emite', async () => {
+    const spy = vi.fn(async (url: string) =>
+      jsonResponse({ ...APAGADO, id: decodeURIComponent(String(url).split('/').pop() ?? '') }),
+    );
+    vi.stubGlobal('fetch', spy);
+
+    for (const id of [
+      'evt-1',
+      'abc123_20260620T120000Z',
+      '6d3n0l6qk8vp6b9k6ss30b9k6c',
+      'importado@google.com',
+    ]) {
+      await expect(api.apagarEvento(id)).resolves.toEqual({ id, jaNaoExistia: false });
+    }
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it('GOOGLE DESCONECTADO: repassa o que o backend disse, e é retentável', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse(
+        { detail: 'Google não está conectado — conecte em /google/oauth/start' },
+        401,
+      ),
+    ));
+
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow(/google.*conectado/i);
+    await api.apagarEvento('evt-1').catch((e) => {
+      expect(e.status).toBe(401);
+      expect(e.retentavel).toBe(true);
+    });
+  });
+
+  it('401 sem detalhe ainda diz que o Google não está conectado', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 401)));
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow(/google/i);
+  });
+
+  it('repassa o detalhe PT-BR dos outros erros, e sem detalhe cai no status', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ detail: 'apagar evento: reconecte o Google em /google/oauth/start' }, 403),
+    ));
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow(/reconecte o Google/);
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 502)));
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow('HTTP 502');
+  });
+
+  it('um "ok" que não é `true` não conta como exclusão', async () => {
+    // A lição do `/planning/accept`, do lado destrutivo: se isto passasse, a
+    // linha sumiria da tela com o compromisso ainda no Google.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...APAGADO, ok: false })));
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow(/n[ãa]o (confirmou|apagou)/i);
+  });
+
+  it('um OK que confirma OUTRO id não conta como exclusão', async () => {
+    // "Apaguei" sobre um id diferente do pedido é a pior forma de mentira
+    // possível aqui: some a linha errada da tela.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...APAGADO, id: 'evt-2' })));
+    await expect(api.apagarEvento('evt-1')).rejects.toThrow(/outro evento|evt-2/i);
+  });
+});
+
 describe('fetchTasksByRange', () => {
   it('hits /tasks/by-date-range with the start and end range', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ tasks: [TASK] })));

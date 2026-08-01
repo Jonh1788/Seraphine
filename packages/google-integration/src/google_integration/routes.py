@@ -27,7 +27,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from seraphine.config import settings
-from google_integration.client import GoogleAPIError, GoogleAuthError, GoogleClient
+from google_integration.client import (
+    EVENT_ID_RE,
+    GoogleAPIError,
+    GoogleAuthError,
+    GoogleClient,
+    ensure_event_id,
+)
 from google_integration.oauth import OAuthFlow, WebOAuthFlow
 
 router = APIRouter(prefix="/google", tags=["google"])
@@ -460,6 +466,82 @@ async def calendar_create_event(
         all_day=payload.all_day,
         recurrence=[rrule] if rrule else [],
     )
+
+
+# ── EXCLUSÃO DE EVENTO ───────────────────────────────────────────────────
+#
+# O que destrava o teste da criação: criar pelo celular e apagar pelo celular,
+# sem abrir o Google.
+#
+# O IDENTIFICADOR é o campo perigoso desta rota, e o dano não se mede em linha
+# — mede-se em calendário. O httpx normaliza segmentos de ponto antes de
+# mandar, então um id de ".." transforma o DELETE do evento num DELETE do
+# CALENDÁRIO INTEIRO (medido em ``test_calendar_delete_route.py``). O guarda
+# canônico mora em ``client.delete_event``, onde nenhum chamador o contorna;
+# aqui ele é chamado ANTES para o cliente receber um 422 que diz o que houve,
+# em vez de um 502 vindo de dentro.
+#
+# E o único ``ok:true`` que não apagou nada nesta chamada — o evento que já não
+# existia — vem MARCADO. A ``/planning/accept`` responde ``ok:true`` com zero
+# eventos quando não há Google, e a tela de Planejamento teve que desmentir
+# isso na mão; "não estava lá" e "eu apaguei" não podem ser a mesma resposta.
+
+# Reexportado para os testes lerem a forma canônica sem importar o cliente.
+_ID_DE_EVENTO = EVENT_ID_RE
+
+
+class CalendarEventDeleted(BaseModel):
+    ok: bool
+    # O id de VOLTA: é como quem chamou confere que sumiu o que pediu.
+    id: str
+    ja_nao_existia: bool = False
+
+
+@router.delete("/calendar/events/{event_id}", response_model=CalendarEventDeleted)
+async def calendar_delete_event(
+    request: Request, event_id: str
+) -> CalendarEventDeleted:
+    """Apaga um evento do calendário que este app lê."""
+    client = _client_or_503(request)
+
+    try:
+        ensure_event_id(event_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        autenticado = await client.is_authed()
+    except Exception as e:
+        logger.warning("calendar delete: auth check failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"apagar evento: {e}")
+    if not autenticado:
+        raise HTTPException(
+            status_code=401,
+            detail="Google não está conectado — conecte em /google/oauth/start",
+        )
+
+    try:
+        await client.delete_event(event_id)
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Google: {e}")
+    except GoogleAPIError as e:
+        # 404/410: alguém já tinha apagado (a web, outro aparelho). O evento
+        # não está na agenda, que é o que foi pedido — mas a resposta diz que
+        # não foi esta chamada que o apagou.
+        if e.status_code in (404, 410):
+            logger.info("calendar delete: evento %s já não existia", event_id)
+            return CalendarEventDeleted(ok=True, id=event_id, ja_nao_existia=True)
+        _raise_google_api_error(e, action="apagar evento")
+        raise  # unreachable; keeps type-checkers happy
+    except ValueError as e:
+        # Rede de segurança: o guarda do cliente é o canônico, e um id que
+        # passasse aqui e falhasse lá é 422, nunca 502.
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("unexpected error deleting calendar event")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return CalendarEventDeleted(ok=True, id=event_id, ja_nao_existia=False)
 
 
 @router.get("/calendar/calendars")
