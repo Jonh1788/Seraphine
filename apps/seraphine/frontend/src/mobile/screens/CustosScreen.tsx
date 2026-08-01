@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftIcon, GaugeIcon, RefreshIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, ChevronRightIcon, GaugeIcon, InsightsIcon, RefreshIcon } from '../../icons/Icons';
 import {
   fetchEngineInfo,
   fetchTelemetrySummary,
@@ -144,7 +144,7 @@ interface Divisao {
   pctFlat: number;
 }
 
-export function CustosScreen({ onBack }: ScreenProps) {
+export function CustosScreen({ onBack, onOpen }: ScreenProps) {
   const [periodo, setPeriodo] = useState<Periodo>(7);
   const [resumo, setResumo] = useState<TelemetrySummary | null>(null);
   const [erro, setErro] = useState(false);
@@ -340,6 +340,37 @@ export function CustosScreen({ onBack }: ScreenProps) {
             </>
           )}
         </section>
+
+        {/* ── onde foi o custo ──
+            O frame do handoff desenha as duas telas de Custos e não desenha o
+            controle entre elas; sem ele a tela B fica inalcançável. Esta linha
+            é a mesma peça das Configurações (ícone 30 + nome + sub + chevron),
+            e não um botão novo: é a forma que o app já usa para "esta linha
+            leva a outra tela".
+
+            Ela nasce logo ABAIXO do herói porque é o desdobramento DELE — o
+            herói diz quanto custou, a tela B diz onde foi. E o sub diz "7
+            dias" porque a tela B não tem seletor de período: com o chip em 30
+            dias, entrar ali troca a janela, e uma tela de dinheiro não pode
+            trocar a janela em silêncio.
+
+            Botão que não navega é botão morto: só existe com `onOpen`. */}
+        {onOpen && (
+          <button
+            type="button"
+            className="ms-custos-detalhe"
+            onClick={() => onOpen({ key: 'custos-detalhe', title: 'Onde foi o custo' })}
+          >
+            <span className="ms-custos-detalhe__icone" aria-hidden="true"><InsightsIcon size={16} /></span>
+            <span className="ms-custos-detalhe__txt">
+              <span className="ms-custos-detalhe__nome">Onde foi o custo</span>
+              <span className="ms-custos-detalhe__sub">
+                Por funcionalidade, por modelo e a energia do Mac · últimos 7 dias
+              </span>
+            </span>
+            <ChevronRightIcon size={16} className="ms-custos-detalhe__chevron" />
+          </button>
+        )}
 
         {/* ── teto do mês ── */}
         <section className="ms-custos-teto">

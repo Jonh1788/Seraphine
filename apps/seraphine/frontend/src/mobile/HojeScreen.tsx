@@ -5,7 +5,7 @@ import { greeting, monthExpenses } from './hoje';
 import { useFetchJson } from './useFetchJson';
 import { listHabits } from '../habits/api';
 import type { HabitWithStatus } from '../habits/types';
-import { SparkleIcon, CheckIcon } from '../icons/Icons';
+import { SparkleIcon, CheckIcon, PlanningIcon } from '../icons/Icons';
 import './screens/Hoje.css';
 
 type Notif = { id: string; type: string; title: string; body: string };
@@ -32,6 +32,19 @@ export function HojeScreen({ onOpen }: { onOpen: Open }) {
           <p className="mhoje__hi">{greeting(new Date().getHours())}</p>
           <p className="mhoje__sub">aqui está o seu dia</p>
         </div>
+        {/* A única porta do Planejamento, e ela fica aqui porque é a MESMA
+            matéria do cabeçalho: o Hoje diz "aqui está o seu dia" e mostra o
+            dia que já existe; o Planejamento ("Seu dia") é onde ele se monta.
+            Nos blocos abaixo o botão brigaria com o toque do cartão, que já
+            abre o módulo inteiro. */}
+        <button
+          type="button"
+          className="mhoje__planejar"
+          onClick={() => onOpen({ key: 'planejamento', title: 'Seu dia' })}
+        >
+          <PlanningIcon size={15} />
+          Planejar
+        </button>
       </header>
       <SugereCard onOpen={onOpen} />
       <AgendaBlock onOpen={onOpen} />

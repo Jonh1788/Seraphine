@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HojeScreen } from '../HojeScreen';
 
@@ -51,5 +51,16 @@ describe('HojeScreen — blocos nunca somem', () => {
     ] }));
     render(<HojeScreen onOpen={() => {}} />);
     await waitFor(() => expect(screen.getByText(/nenhum gasto/i)).toBeTruthy());
+  });
+
+  // A ÚNICA porta do Planejamento. Ela mora no cabeçalho, e não num bloco,
+  // porque cada bloco já gasta o próprio toque abrindo o módulo dele.
+  it('o botão Planejar empurra o Planejamento', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json({}));
+    const onOpen = vi.fn();
+    render(<HojeScreen onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button', { name: /Planejar/ }));
+    expect(onOpen).toHaveBeenCalledWith({ key: 'planejamento', title: 'Seu dia' });
+    await waitFor(() => expect(screen.getByText(/nada na agenda/i)).toBeTruthy());
   });
 });

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftIcon, CheckIcon, FlameIcon, SparkleIcon, TrilhasIcon, ZapIcon } from '../../icons/Icons';
+import {
+  ArrowLeftIcon, CheckIcon, ChevronRightIcon, FlameIcon, SparkleIcon, TrilhasIcon, ZapIcon,
+} from '../../icons/Icons';
 import { createCourse, getStats, listCourses } from '../../courses/api';
 import type { CourseSummary, Stats } from '../../courses/api';
 import type { ScreenProps } from './registry';
@@ -70,7 +72,7 @@ function Esqueleto({ linhas = 3 }: { linhas?: number }) {
   );
 }
 
-export function TrilhasListaScreen({ onBack }: ScreenProps) {
+export function TrilhasListaScreen({ onBack, onOpen }: ScreenProps) {
   const [cursos, setCursos] = useState<CourseSummary[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState(false);
@@ -221,12 +223,37 @@ export function TrilhasListaScreen({ onBack }: ScreenProps) {
                   <li
                     key={c.id}
                     data-testid={`ms-trilhaslista-card-${c.id}`}
-                    className={`ms-trilhaslista-card ms-trilhaslista-card--${estado}`}
+                    className={`ms-trilhaslista-card ms-trilhaslista-card--${estado}${onOpen ? ' ms-trilhaslista-card--abre' : ''}`}
                   >
                     <span className="ms-trilhaslista-icone" aria-hidden="true"><TrilhasIcon size={22} /></span>
                     <div className="ms-trilhaslista-corpo">
                       <div className="ms-trilhaslista-cabeca">
-                        <span className="ms-trilhaslista-nome">{nome}</span>
+                        {/* O nome é o botão, e o `::after` dele cobre o cartão
+                            inteiro (76px de alto): o alvo é o cartão, sem que o
+                            selo e a barra virem filhos de um botão.
+
+                            O `id` VIAJA — sem ele o mapa escolhe a trilha em
+                            foco por conta própria e tocar em "Estatística
+                            aplicada" abriria "Rust do zero". Foi por isso que
+                            estes cartões nasceram só informativos.
+
+                            Todo estado abre, inclusive `gerando` e `falhou`: o
+                            mapa desenha "ainda montando as lições" e "não
+                            consegui carregar" com voz própria, e um cartão que
+                            não responde ao toque é indistinguível de um app
+                            travado. Sem `onOpen` (tela solta) volta a ser
+                            texto, em vez de virar botão morto. */}
+                        {onOpen ? (
+                          <button
+                            type="button"
+                            className="ms-trilhaslista-nome ms-trilhaslista-abrir"
+                            onClick={() => onOpen({ key: 'trilhas', title: nome, id: c.id })}
+                          >
+                            {nome}
+                          </button>
+                        ) : (
+                          <span className="ms-trilhaslista-nome">{nome}</span>
+                        )}
                         <span className={`ms-trilhaslista-badge ms-trilhaslista-badge--${estado}`}>
                           {estado === 'gerando' && <span className="ms-trilhaslista-ponto" aria-hidden="true" />}
                           {estado === 'concluida' && <CheckIcon size={11} />}
@@ -262,6 +289,13 @@ export function TrilhasListaScreen({ onBack }: ScreenProps) {
                         <div className="ms-trilhaslista-barra" aria-hidden="true" />
                       )}
                     </div>
+                    {/* O chevron é a afirmação visual de que o cartão abre —
+                        sem ele, um cartão tocável é indistinguível de um painel
+                        de leitura. Decorativo: quem carrega o nome acessível e
+                        o clique é o botão do nome, logo acima. */}
+                    {onOpen && (
+                      <ChevronRightIcon size={16} className="ms-trilhaslista-seta" />
+                    )}
                   </li>
                 );
               })}

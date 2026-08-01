@@ -170,6 +170,34 @@ html[data-shell='phone'] .ms-custos-teto__convite {
   font-size: 12px; line-height: 1.4; margin-top: 8px; color: var(--text-dim, #9594a0);
 }
 
+/* ── onde foi o custo (leva à tela de detalhe) ──
+   A mesma linha das Configurações: cartão de superfície, ícone 30 em caixa de
+   raio 9, nome + sub e o chevron à direita. `min-height: 44px` na própria
+   caixa cumpre o alvo da HIG — este controle ENTRA na pilha, então a regra do
+   shell (presa ao rótulo dos controles de saída) não vale para ele. */
+html[data-shell='phone'] .ms-custos-detalhe {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  min-height: 44px; padding: 13px 14px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 16px;
+  font: inherit; text-align: left; cursor: pointer;
+}
+html[data-shell='phone'] .ms-custos-detalhe__icone {
+  flex: none; width: 30px; height: 30px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-custos-detalhe__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+html[data-shell='phone'] .ms-custos-detalhe__nome {
+  font-size: 13px; font-weight: 600; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custos-detalhe__sub {
+  font-size: 10.5px; line-height: 1.35; margin-top: 2px; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-custos-detalhe__chevron { flex: none; color: var(--text-faint, #5f5e6b); }
+
 /* ── tiles ── */
 html[data-shell='phone'] .ms-custos-tiles { display: flex; gap: 10px; }
 html[data-shell='phone'] .ms-custos-tile {

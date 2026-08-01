@@ -8,6 +8,19 @@ html[data-shell='phone'] .mhoje { display: flex; flex-direction: column; gap: 14
 html[data-shell='phone'] .mhoje__head { display: flex; align-items: center; gap: 12px; padding: 4px 0 2px; }
 html[data-shell='phone'] .mhoje__hi { font-size: 22px; font-weight: 700; color: var(--text, #ececef); }
 html[data-shell='phone'] .mhoje__sub { font-size: 13px; color: var(--text-dim, #9594a0); }
+/* Pílula de accent-soft, a mesma tinta do cartão de sugestão: é convite, não
+   ação primária. O `min-height` é o alvo de 44pt da HIG na própria caixa —
+   aqui não dá para reusar a regra do shell, que está presa ao rótulo dos
+   controles de SAÍDA e este entra na pilha em vez de sair dela. */
+html[data-shell='phone'] .mhoje__planejar {
+  margin-left: auto; flex: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 44px; padding: 0 13px; border-radius: 12px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  border: 1px solid rgba(154, 147, 255, .22);
+  color: var(--accent, #9a93ff);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
 html[data-shell='phone'] .msugere {
   display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 16px;
   background: linear-gradient(135deg, rgba(154,147,255,.14), rgba(154,147,255,.04));

@@ -426,6 +426,44 @@ describe('CustosScreen', () => {
     expect(() => fireEvent.click(screen.getByLabelText('Voltar'))).not.toThrow();
   });
 
+  /* ── a porta para a tela de detalhe ─────────────────────────────── */
+
+  // O frame do handoff desenha as duas telas de Custos e NÃO desenha o controle
+  // entre elas. Sem esta linha, `custos-detalhe` fica no registry, com teste
+  // próprio passando, e inalcançável no app — que foi como ela nasceu.
+  it('a linha "Onde foi o custo" empurra a tela de detalhe', async () => {
+    comDado();
+    const onOpen = vi.fn();
+    render(<CustosScreen onOpen={onOpen} />);
+    await waitFor(() => expect(screen.getByText('$2,84')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Onde foi o custo/ }));
+    expect(onOpen).toHaveBeenCalledWith({ key: 'custos-detalhe', title: 'Onde foi o custo' });
+  });
+
+  // A tela B não tem seletor de período: ela é sempre o recorte de 7 dias. Com
+  // o chip em 30, entrar ali TROCA a janela — e numa tela de dinheiro a janela
+  // não pode mudar em silêncio.
+  it('a linha avisa que o detalhe é de 7 dias, mesmo com o chip em 30', async () => {
+    comDado();
+    render(<CustosScreen onOpen={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('$2,84')).toBeTruthy());
+
+    vi.mocked(fetchTelemetrySummary).mockResolvedValue(resumo({ days: 30 }));
+    fireEvent.click(screen.getByRole('button', { name: '30 dias' }));
+    await waitFor(() => expect(screen.getByText(/Nuvem \(medido\) · últimos 30 dias/i)).toBeTruthy());
+
+    expect(screen.getByRole('button', { name: /Onde foi o custo/ }).textContent)
+      .toMatch(/últimos 7 dias/);
+  });
+
+  it('sem onOpen a linha não existe — botão que não navega é botão morto', async () => {
+    comDado();
+    render(<CustosScreen />);
+    await waitFor(() => expect(screen.getByText('$2,84')).toBeTruthy());
+    expect(screen.queryByText('Onde foi o custo')).toBeNull();
+  });
+
   it('não usa emoji — os ícones são SVG', async () => {
     comDado();
     const { container } = render(<CustosScreen />);

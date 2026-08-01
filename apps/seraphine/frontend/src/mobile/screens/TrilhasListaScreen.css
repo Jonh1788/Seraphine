@@ -121,6 +121,20 @@ html[data-shell='phone'] .ms-trilhaslista-card {
 }
 /* Terminada é história: o cartão recua para o fundo, como no frame. */
 html[data-shell='phone'] .ms-trilhaslista-card--concluida { opacity: .65; }
+/* Cartão que abre o mapa daquela trilha. O alvo NÃO é o texto do nome: o
+   `::after` do botão cobre o cartão inteiro (46px de ícone + 15px de padding
+   em cima e embaixo = 76px de alto), bem acima dos 44pt da HIG. */
+html[data-shell='phone'] .ms-trilhaslista-card--abre { position: relative; }
+html[data-shell='phone'] .ms-trilhaslista-abrir {
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; text-align: left; cursor: pointer;
+}
+html[data-shell='phone'] .ms-trilhaslista-abrir::after {
+  content: ''; position: absolute; inset: 0; border-radius: 18px;
+}
+html[data-shell='phone'] .ms-trilhaslista-seta {
+  flex: none; color: var(--text-faint, #5f5e6b);
+}
 html[data-shell='phone'] .ms-trilhaslista-icone {
   width: 46px; height: 46px; flex: none;
   border-radius: 14px;

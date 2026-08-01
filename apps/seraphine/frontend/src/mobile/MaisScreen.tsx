@@ -3,9 +3,16 @@ import { Orb } from './Orb';
 import { getStats, type Stats } from '../courses/api';
 import {
   FinanceIcon, FlameIcon, ZapIcon, TasksIcon, InboxIcon, CalendarIcon,
-  BrainIcon, InsightsIcon, NotesIcon, HeartIcon,
+  BrainIcon, InsightsIcon, NotesIcon, HeartIcon, GaugeIcon, SettingsIcon,
 } from '../icons/Icons';
 
+// Esta grade é a ÚNICA porta de Configurações e de Custos & Energia: nenhuma
+// das duas é aba, nenhuma das duas é empurrada por outra tela. Tirar um destes
+// dois módulos daqui não esconde a tela — deixa a tela inalcançável, e com ela
+// o Seletor de modelo, que só se abre de dentro das Configurações.
+//
+// Os dois entram por último, depois dos oito módulos de conteúdo: são ajuste e
+// medição do app, não mais um lugar onde há coisa sua guardada.
 const MODULES: { key: string; title: string; icon: JSX.Element }[] = [
   { key: 'financas', title: 'Finanças', icon: <FinanceIcon size={20} /> },
   { key: 'habitos', title: 'Hábitos', icon: <HeartIcon size={20} /> },
@@ -15,6 +22,8 @@ const MODULES: { key: string; title: string; icon: JSX.Element }[] = [
   { key: 'memoria', title: 'Memória', icon: <BrainIcon size={20} /> },
   { key: 'insights', title: 'Insights', icon: <InsightsIcon size={20} /> },
   { key: 'notas', title: 'Notas', icon: <TasksIcon size={20} /> },
+  { key: 'custos', title: 'Custos', icon: <GaugeIcon size={20} /> },
+  { key: 'configuracoes', title: 'Configurações', icon: <SettingsIcon size={20} /> },
 ];
 
 export function MaisScreen({ onOpen }: { onOpen: (p: { key: string; title: string }) => void }) {

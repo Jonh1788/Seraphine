@@ -190,6 +190,46 @@ describe('TrilhasListaScreen — dado, vazio e erro', () => {
   });
 });
 
+describe('TrilhasListaScreen — o cartão abre a trilha', () => {
+  // Os cartões nasceram informativos porque o mapa não lia `id`: empurrá-lo
+  // abriria sempre a trilha em foco. Com o mapa obedecendo o `id`, o que este
+  // teste prende é que ele viaja — sem o id, tocar em "Estatística aplicada"
+  // abre "Rust do zero" e a lista fica pior do que inerte.
+  it('o cartão abre o mapa DAQUELA trilha, com o id dela', async () => {
+    felizes();
+    const onOpen = vi.fn();
+    render(<TrilhasListaScreen onOpen={onOpen} />);
+    await assentar();
+
+    fireEvent.click(within(cartao('c3')).getByText('Estatística aplicada'));
+    expect(onOpen).toHaveBeenCalledWith({ key: 'trilhas', title: 'Estatística aplicada', id: 'c3' });
+
+    fireEvent.click(within(cartao('c1')).getByText('Rust do zero'));
+    expect(onOpen).toHaveBeenLastCalledWith({ key: 'trilhas', title: 'Rust do zero', id: 'c1' });
+  });
+
+  // Sem título próprio o cartão mostra o tópico — e é esse o nome que precisa
+  // chegar no empurrão, senão a tela abre com um `title` vazio.
+  it('trilha sem título viaja com o tópico, que é o que o cartão mostra', async () => {
+    felizes([GERANDO]);
+    const onOpen = vi.fn();
+    render(<TrilhasListaScreen onOpen={onOpen} />);
+    await assentar();
+
+    fireEvent.click(within(cartao('c2')).getByText('redes neurais'));
+    expect(onOpen).toHaveBeenCalledWith({ key: 'trilhas', title: 'redes neurais', id: 'c2' });
+  });
+
+  it('sem onOpen o cartão volta a ser texto, em vez de virar botão morto', async () => {
+    felizes();
+    render(<TrilhasListaScreen />);
+    await assentar();
+
+    expect(within(cartao('c1')).queryByRole('button')).toBeNull();
+    expect(within(cartao('c1')).getByText('Rust do zero')).toBeTruthy();
+  });
+});
+
 describe('TrilhasListaScreen — a barra de progresso', () => {
   it('a barra do "gerando…" é indeterminada: nada de 35% inventado', async () => {
     felizes();
@@ -372,5 +412,14 @@ describe('TrilhasListaScreen — CSS', () => {
   it('os controles tocáveis têm 44pt', () => {
     expect(blocoDe('.ms-trilhaslista-botao')).toMatch(/min-height:\s*44px/);
     expect(blocoDe('.ms-trilhaslista-campo')).toMatch(/min-height:\s*44px/);
+  });
+
+  // O alvo do cartão não é o texto do nome (~15px de alto): é o cartão inteiro,
+  // via um pseudo que o cobre. Sem o `position: relative` no cartão, esse
+  // `inset: 0` se ancoraria em outro elemento e o alvo viraria a linha de texto.
+  it('o alvo do cartão é o cartão inteiro, e não o texto do nome', () => {
+    expect(blocoDe('.ms-trilhaslista-card--abre')).toMatch(/position:\s*relative/);
+    expect(blocoDe('.ms-trilhaslista-abrir::after')).toMatch(/position:\s*absolute/);
+    expect(blocoDe('.ms-trilhaslista-abrir::after')).toMatch(/inset:\s*0/);
   });
 });
