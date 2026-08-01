@@ -174,6 +174,19 @@ html[data-shell='phone'] .ms-chat-bolha__pensando {
 html[data-shell='phone'] .ms-chat-bolha__mudo {
   font-size: 13px; line-height: 21.7px; color: var(--text-dim, #9594a0);
 }
+/* O QUE FOI DECIDIDO SOBRE UM PEDIDO DE PERMISSÃO, no fio da conversa.
+   Também não é `--danger`: recusar não é falhar. Mas também não é o cinza mais
+   apagado da tela — uma recusa (ou uma permissão que expirou) é a explicação de
+   por que a ação NÃO aconteceu, e é a linha que a pessoa vai procurar depois.
+   A barra à esquerda a separa da fala dela sem gritar. */
+html[data-shell='phone'] .ms-chat-bolha__decisao {
+  margin-top: 8px;
+  padding-left: 9px;
+  border-left: 2px solid var(--border-strong, rgba(255, 255, 255, .16));
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim, #9594a0);
+}
 
 /* ── markdown da bolha ──
    A resposta é markdown (o desktop sempre a renderizou assim). O que vem daqui
@@ -257,6 +270,107 @@ html[data-shell='phone'] .ms-chat-cartao .rich-card__details { gap: 6px 12px; }
 /* Nenhum cartão do backend tem elemento clicável — não há alvo de 44pt a
    cumprir aqui. Se um dia tiver, ele nasce ignorando o toque: `a` e `button`
    não estão na lista branca do saneador e são removidos antes de chegar à tela. */
+
+/* ── pedido de permissão ──
+   O único bloco desta tela em que um toque tem consequência fora dela: manda um
+   e-mail, apaga um evento, faz um Pix. O desenho segue disso.
+
+   1. O QUE vem antes da pergunta — o cabeçalho nomeia a ferramenta e a lista
+      mostra os argumentos. Nada é cortado por ser comprido: o corpo do e-mail
+      inteiro cabe aqui, rolando, porque o pedaço escondido é justamente o que a
+      pessoa precisaria ter lido.
+   2. AS DUAS SAÍDAS TÊM O MESMO TAMANHO. O "não" não é link nem X de canto:
+      é botão, ao lado, com a mesma área de toque. Desenhar só o "sim" bonito é
+      escolher pela pessoa.
+   3. 44pt DE ALTURA nos dois, que é o mínimo da Apple para alvo de toque — e
+      aqui vale duas vezes, porque errar o alvo entre "permitir" e "não
+      permitir" é executar o contrário do que se quis. */
+html[data-shell='phone'] .ms-chat-aprov {
+  border: 1px solid var(--accent-soft, rgba(154, 147, 255, .14));
+  background: var(--surface, #17171e);
+  border-radius: 14px;
+  padding: 12px;
+}
+html[data-shell='phone'] .ms-chat-aprov__titulo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-chat-aprov__selo {
+  flex: none;
+  display: flex;
+  color: var(--accent, #9a93ff);
+}
+/* Rola em vez de cortar (ver 1). O teto é generoso de propósito: a lista só
+   passa dele com conteúdo de arquivo ou corpo de e-mail, que é exatamente
+   quando ler importa mais. */
+html[data-shell='phone'] .ms-chat-aprov__detalhes {
+  margin: 10px 0 0;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+html[data-shell='phone'] .ms-chat-aprov__linha + .ms-chat-aprov__linha { margin-top: 8px; }
+html[data-shell='phone'] .ms-chat-aprov__chave {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint, #5f5e6b);
+}
+/* Empilhado, e não em duas colunas: em 390px a coluna do valor ficaria com
+   ~200px e um comando ou um caminho quebraria em cinco linhas de três palavras.
+   `pre-wrap` porque a quebra de linha do corpo do e-mail é parte do que vai ser
+   enviado; `anywhere` porque um caminho sem espaço não pode furar a bolha.
+   `margin: 0` derruba o recuo que o navegador dá a `dd` sozinho. */
+html[data-shell='phone'] .ms-chat-aprov__valor {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text, #ececef);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+html[data-shell='phone'] .ms-chat-aprov .ms-chat-vazio { margin-top: 10px; }
+html[data-shell='phone'] .ms-chat-aprov__botoes {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+html[data-shell='phone'] .ms-chat-aprov__nao,
+html[data-shell='phone'] .ms-chat-aprov__sim {
+  flex: 1;
+  min-width: 0;
+  /* 44pt: o mínimo da Apple. Não é `height` — o rótulo pode quebrar em duas
+     linhas num aparelho com fonte grande, e aí o botão cresce em vez de cortar
+     a palavra. */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  /* Sem o atraso de 300ms do duplo-toque no WKWebView: aqui a pessoa já
+     decidiu, e meio segundo de nada faz ela apertar de novo. */
+  touch-action: manipulation;
+}
+html[data-shell='phone'] .ms-chat-aprov__nao {
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  background: transparent;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-chat-aprov__sim {
+  border: 1px solid transparent;
+  background: var(--accent, #9a93ff);
+  color: var(--accent-contrast, #14141a);
+}
 
 /* ── cartão de tarefa inline ── */
 html[data-shell='phone'] .ms-chat-card {

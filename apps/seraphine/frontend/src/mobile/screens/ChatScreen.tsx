@@ -5,7 +5,9 @@ import { useAppRefs } from '../../stores/RefsContext';
 import { useChatStore } from '../../stores/chatStore';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import { Orb } from '../Orb';
-import { ArrowLeftIcon, MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../../icons/Icons';
+import {
+  ArrowLeftIcon, CheckIcon, LockIcon, MicIcon, SendIcon, SparkleIcon, VolumeIcon, XIcon,
+} from '../../icons/Icons';
 import { ChatVazioMiolo } from './ChatVazioScreen';
 import { updateTaskStatus } from '../../tasks/api';
 import { fetchConversationTurns } from '../../chat/api';
@@ -61,6 +63,16 @@ interface Bolha {
   /** Bolha aberta por um `tool_result` que chegou antes de ela falar: o
    *  próximo turno de texto a adota, para o cartão e a frase ficarem juntos. */
   orfa?: boolean;
+  /** O que foi decidido sobre um pedido de permissão deste turno — recusa,
+   *  estouro de tempo, pedido vencido. Fica no fio da conversa porque é a
+   *  única prova, depois, de que a ação NÃO aconteceu e por quê. */
+  decisoes?: string[];
+}
+
+/** Um argumento do `tool_request`, pronto para a tela. */
+interface Detalhe {
+  chave: string;
+  valor: string;
 }
 
 /**
@@ -68,11 +80,15 @@ interface Bolha {
  *
  * `pensando` é o que a tela pode afirmar quando o fio não diz mais nada;
  * `aprovacao` é o único caso em que o fio NOMEIA a ferramenta — ver
- * `rotuloDeFerramenta` e o comentário de `tool_request` no handler.
+ * `rotuloDeFerramenta` e o comentário de `tool_request` no handler — e é o
+ * único em que a tela PERGUNTA em vez de narrar; `executando` é o intervalo
+ * entre o toque em Permitir e o `tool_result`, que existe para o toque deixar
+ * marca (sem ele, aprovar apagava o cartão e não punha nada no lugar).
  */
 type Trabalho =
   | { fase: 'pensando' }
-  | { fase: 'aprovacao'; ferramenta: string };
+  | { fase: 'aprovacao'; id: string; ferramenta: string; detalhes: Detalhe[] }
+  | { fase: 'executando'; ferramenta: string };
 
 export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   const { wsRef } = useAppRefs();
@@ -107,6 +123,24 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   const escutando = useRealtimeStore((s) => s.wakeWordEnabled);
   const conversaRef = useRef<string | undefined>(localStorage.getItem(CONV_KEY) || undefined);
   const fimRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * O pedido de permissão que ainda não foi respondido — UM por vez, porque o
+   * engine para em `queue.get()` antes de olhar a próxima chamada
+   * (`engine.py:1211`). Em ref, e não em estado, por dois motivos: o handler do
+   * socket precisa comparar o `request_id` que chega com o que está de pé sem
+   * fazer efeito colateral dentro de um `setState`, e o guarda de toque duplo
+   * tem de valer no MESMO quadro, antes de qualquer redesenho.
+   */
+  const pendenteRef = useRef<{ id: string; rotulo: string } | null>(null);
+  /**
+   * Ids que a PESSOA recusou. O `tool_result` que vem depois traz
+   * `ok:false, error:"rejected by user"` (`engine.py:1256`) — exatamente o
+   * mesmo quadro do estouro de tempo, que também vira `approved=False`
+   * (`engine.py:1225`). O fio não distingue os dois; quem distingue é esta
+   * memória, e é ela que impede uma decisão da pessoa de aparecer como
+   * "Uma ação falhou: rejected by user".
+   */
+  const negadosRef = useRef<Set<string>>(new Set());
 
   // O AppBootstrap cria o socket de forma assíncrona: enquanto ele não existe a
   // conversa fica em esqueleto. Se nunca chegar, viramos erro desenhado — um
@@ -164,7 +198,9 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       // `turn_end` para esperar. Sem isto a tela ficaria "pensando…" para
       // sempre ao lado de um cabeçalho dizendo "sem conexão" — duas afirmações
       // contraditórias, e a mais visível seria a falsa.
-      if (s === 'disconnected') setTrabalho(null);
+      // O pedido de permissão morre junto: um "Permitir" sobre socket caído
+      // não chega a lugar nenhum, e o turno do outro lado já foi cancelado.
+      if (s === 'disconnected') { pendenteRef.current = null; setTrabalho(null); }
     });
   }, [ws]);
 
@@ -176,6 +212,24 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       // poucos que a tela desenha importam, e cada leitura já vem checada.
       const msg = raw as unknown as Record<string, unknown>;
 
+      // A APROVAÇÃO QUE CHEGOU TARDE — E ESTE ERRO NÃO É FATAL.
+      // Corrida real: os 300s estouram no instante do toque. O socket responde
+      // `{type:'error', code:'unknown_request_id'}` (`ws/routes.py:1060`) e seu
+      // laço SEGUE — o engine já desistiu daquela ferramenta e continuou o
+      // turno. Caindo no ramo de erro genérico abaixo, a tela apagaria o
+      // "pensando…" e escreveria "Não consegui responder: r1" para um turno
+      // que ainda vai responder: o id cru como frase de erro, e o erro errado.
+      if (msg.type === 'error' && msg.code === 'unknown_request_id') {
+        // O pedido já não está de pé aqui: o servidor só manda este erro em
+        // resposta a um `tool_approval`, e mandar um zera o `pendenteRef`.
+        setTrabalho((t) => (t && t.fase !== 'pensando' ? { fase: 'pensando' } : t));
+        setBolhas((prev) => registrarDecisao(
+          prev,
+          'Essa aprovação já não valia — o pedido expirou ou já tinha sido respondido.',
+        ));
+        return;
+      }
+
       // O TURNO SÓ FECHA NO FIM. `turn_end` é único e sai depois de TUDO
       // (`conversation/engine.py:1430`): entre a primeira ferramenta e a
       // resposta ainda cabem rodadas inteiras de modelo e mais ferramentas.
@@ -183,18 +237,30 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       // `tool_result` — e nos 30s medidos no aparelho (clima + aviso na casa) a
       // tela voltava a parecer ociosa depois dos primeiros 5.
       if (msg.type === 'turn_end' || msg.type === 'turn_cancelled' || msg.type === 'error') {
+        // O pedido de permissão vai junto: sem turno, os dois botões não têm
+        // mais para onde mandar a resposta — e botão morto na tela é pior do
+        // que botão nenhum, porque só se descobre que morreu apertando.
+        pendenteRef.current = null;
         setTrabalho(null);
       }
 
       // O ÚNICO QUADRO DO FIO QUE NOMEIA A FERRAMENTA. E ele não é "está
       // rodando": o engine só o emite para ferramenta com
       // `requires_confirmation` e fica parado esperando o sim
-      // (`engine.py:1216`, `APPROVAL_TIMEOUT_SECONDS = 300`). O telefone não
-      // tem painel de aprovação — quem tem é o desktop (`tools/ApprovalPanel`)
-      // —, então dizer "criando o evento…" seria descrever um trabalho que não
-      // começou. A tela diz o que é: parado, esperando aprovação.
+      // (`engine.py:1216`, `APPROVAL_TIMEOUT_SECONDS = 300`). Dizer "criando o
+      // evento…" seria descrever um trabalho que não começou — e não vai
+      // começar sem resposta. A tela diz o que é: parado, esperando decisão —
+      // e agora oferece as duas.
+      //
+      // SEM CONDIÇÃO DE TER SIDO ESTA TELA A MANDAR O TURNO, ao contrário do
+      // `tool_result` (ver o comentário lá embaixo): um pedido de permissão de
+      // turno de fundo que ninguém responde morre nos 300s e a ação não
+      // acontece. Aqui, ignorar é decidir "não" pela pessoa.
       if (msg.type === 'tool_request') {
-        setTrabalho({ fase: 'aprovacao', ferramenta: rotuloDeFerramenta(String(msg.tool ?? '')) });
+        const id = String(msg.request_id ?? '');
+        const rotulo = rotuloDeFerramenta(String(msg.tool ?? ''));
+        pendenteRef.current = { id, rotulo };
+        setTrabalho({ fase: 'aprovacao', id, ferramenta: rotulo, detalhes: detalhesDe(msg.args) });
         return;
       }
 
@@ -249,11 +315,50 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       }
 
       if (msg.type === 'tool_result') {
-        // A ferramenta acabou; o TURNO não. Volta ao estado genérico em vez de
-        // desligar a espera (e em vez de abrir uma espera nova onde não havia:
-        // um `tool_result` de um turno que a tela não abriu — proativo, por
-        // exemplo — não deve desenhar espera nenhuma).
-        setTrabalho((t) => (t ? { fase: 'pensando' } : t));
+        const rid = String(msg.request_id ?? '');
+
+        // QUEM AVISA QUE A APROVAÇÃO ACABOU É O SERVIDOR, e é aqui.
+        // Não há cronômetro deste lado de propósito: um relógio de cliente
+        // discordaria do relógio que manda (o `wait_for` do engine), e a
+        // divergência apareceria como botão vivo depois do fim ou botão morto
+        // antes dele. Um pedido que ainda está de pé quando o `tool_result`
+        // dele chega é um pedido que NÃO foi respondido daqui — aos 300s o
+        // engine desiste sozinho e segue como recusa (`engine.py:1225`).
+        //
+        // E O `request_id` TEM DE BATER. O engine dispara em paralelo tudo que
+        // não pede confirmação (`engine.py:1145-1157`) ANTES de parar no que
+        // pede: o `tool_result` do clima chega com o pedido de permissão de pé,
+        // com outro id. Confundir os dois derrubaria os botões de uma permissão
+        // viva — e ela só morreria mesmo aos 300s, sem ninguém poder responder.
+        const pendente = pendenteRef.current;
+        if (!pendente || pendente.id !== rid) {
+          // A ferramenta acabou; o TURNO não. Volta ao estado genérico em vez
+          // de desligar a espera (e em vez de abrir uma espera nova onde não
+          // havia: um `tool_result` de um turno que a tela não abriu —
+          // proativo, por exemplo — não deve desenhar espera nenhuma). O
+          // pedido de permissão é o único estado que NÃO cede lugar: ele não é
+          // narração do que está acontecendo, é uma pergunta em aberto.
+          setTrabalho((t) => (t && t.fase !== 'aprovacao' ? { fase: 'pensando' } : t));
+        } else {
+          setTrabalho((t) => (t ? { fase: 'pensando' } : t));
+          pendenteRef.current = null;
+          if (!msg.ok) {
+            setBolhas((prev) => registrarDecisao(
+              prev,
+              `Esta permissão expirou sem resposta: ${pendente.rotulo} não foi feito.`,
+            ));
+            return;
+          }
+          // `ok` com o pedido ainda de pé: alguém respondeu que sim por outro
+          // caminho. Some com os botões (a decisão já foi tomada) e segue para
+          // o tratamento normal — o resultado é bom e pode trazer cartão.
+        }
+
+        // A RECUSA DELA NÃO É FALHA. O engine devolve `error:"rejected by
+        // user"` (`engine.py:1256`), em inglês e com cara de defeito; a marca
+        // de recusa já foi escrita na conversa no instante do toque.
+        if (negadosRef.current.delete(rid)) return;
+
         if (!msg.ok) {
           // Ferramenta que falha calada é ação que o usuário acha que aconteceu.
           const motivo = String(msg.error ?? '').trim() || 'a ferramenta não respondeu';
@@ -327,6 +432,41 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
     if (enviarTexto(rascunho)) setRascunho('');
   };
 
+  /**
+   * A DECISÃO, indo pelo fio.
+   *
+   * `{type:'tool_approval', request_id, approved}` é o formato exato que o laço
+   * interno do socket lê (`ws/routes.py:1055-1058`): ele faz
+   * `str(payload.get("request_id",""))` e `bool(payload.get("approved", False))`
+   * e chama `engine.submit_approval`, que empurra o booleano na fila em que o
+   * turno está parado. Campo com outro nome vira id vazio + `approved=False`:
+   * um "sim" chegaria como "não", calado.
+   *
+   * NEGAR É PRIMEIRA CLASSE, e não só um botão: a recusa é registrada na
+   * conversa aqui, no toque, e não quando o `tool_result` volta — porque o
+   * quadro que volta é indistinguível do estouro de tempo.
+   */
+  const responder = (aprovado: boolean): void => {
+    const pendente = pendenteRef.current;
+    if (!pendente || !ws) return;
+    // Zera ANTES de mandar. Dois toques no mesmo quadro chegam os dois antes de
+    // o React redesenhar (o botão ainda está de pé no DOM), e a segunda decisão
+    // cairia num `request_id` que o engine já tirou da fila — o servidor
+    // responderia `unknown_request_id` a um toque que a pessoa deu de propósito.
+    pendenteRef.current = null;
+    ws.send({ type: 'tool_approval', request_id: pendente.id, approved: aprovado });
+    if (aprovado) {
+      // O toque PRECISA deixar marca: o cartão some na hora e a ferramenta pode
+      // levar dezenas de segundos. Sem esta linha, aprovar era visualmente
+      // idêntico a não ter apertado nada.
+      setTrabalho({ fase: 'executando', ferramenta: pendente.rotulo });
+      return;
+    }
+    negadosRef.current.add(pendente.id);
+    setTrabalho({ fase: 'pensando' });
+    setBolhas((prev) => registrarDecisao(prev, `Você não permitiu: ${pendente.rotulo}.`));
+  };
+
   // A conversa espera pelas duas pontas: o socket que ainda vai nascer e o
   // transcrito que ainda vai voltar.
   const carregando = (!ws && !desistiu) || restaurando;
@@ -343,8 +483,13 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   // primeira. A exceção é a aprovação, que não é "ela está escrevendo" — é o
   // turno PARADO à espera de um sim, e isso precisa ser dito mesmo com texto na
   // tela (ela costuma dizer "deixa comigo!" e só então pedir a ferramenta).
+  // O mesmo vale para o intervalo logo DEPOIS do sim: esconder o "você
+  // permitiu" atrás do cursor faria o toque sumir sem deixar marca, e a pessoa
+  // apertaria de novo um botão que já não está lá.
   const escrevendo = bolhas.some((b) => b.streaming);
-  const mostraTrabalho = !escrevendo || trabalho?.fase === 'aprovacao';
+  const mostraTrabalho = !escrevendo
+    || trabalho?.fase === 'aprovacao'
+    || trabalho?.fase === 'executando';
 
   return (
     <div className={`ms-chat${onBack ? ' ms-chat--empurrada' : ''}`}>
@@ -433,6 +578,10 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
             && !(b.cartoes ?? []).length
             && !b.orcamento
             && !b.erroFerramenta
+            // Uma recusa É o que houve neste turno. "Não veio resposta desta
+            // vez" ao lado de "você não permitiu" seriam duas frases
+            // desmentindo uma à outra, e a errada é a de cima.
+            && !(b.decisoes ?? []).length
             && !b.streaming;
           return (
             <div key={b.id} className="ms-chat-linha ms-chat-linha--sera">
@@ -458,6 +607,9 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
                       : 'não veio resposta desta vez — pergunte de novo.'}
                   </p>
                 )}
+                {(b.decisoes ?? []).map((d, i) => (
+                  <p key={i} className="ms-chat-bolha__decisao">{d}</p>
+                ))}
                 {(b.cartoes ?? []).map((html, i) => <CartaoRico key={i} html={html} />)}
                 {(b.tarefas ?? []).map((t) => <CardDeTarefa key={t.id} tarefa={t} />)}
                 {b.orcamento && <BarraDeOrcamento orcamento={b.orcamento} />}
@@ -475,11 +627,15 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
           <div className="ms-chat-linha ms-chat-linha--sera">
             <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
             <div className="ms-chat-bolha ms-chat-bolha--sera">
-              <p className="ms-chat-bolha__pensando" role="status">
-                {trabalho.fase === 'aprovacao'
-                  ? `esperando sua aprovação para ${trabalho.ferramenta}…`
-                  : 'pensando…'}
-              </p>
+              {trabalho.fase === 'aprovacao'
+                ? <PedidoDePermissao pedido={trabalho} onResponder={responder} />
+                : (
+                  <p className="ms-chat-bolha__pensando" role="status">
+                    {trabalho.fase === 'executando'
+                      ? `você permitiu — ${trabalho.ferramenta}…`
+                      : 'pensando…'}
+                  </p>
+                )}
             </div>
           </div>
         )}
@@ -539,6 +695,65 @@ function Skel({ linhas = 2 }: { linhas?: number }) {
   return (
     <div className="ms-chat-skel" aria-hidden="true">
       {Array.from({ length: linhas }, (_, i) => <span key={i} />)}
+    </div>
+  );
+}
+
+/* ── o pedido de permissão ────────────────────────────────────────────────
+   O engine para o turno inteiro em `queue.get()` e espera até 300s
+   (`engine.py:1222`); enquanto o telefone só AVISAVA que havia um pedido, esse
+   era o tempo que a ação levava para não acontecer.
+
+   O DESENHO SEGUE A CONSEQUÊNCIA. Aprovar não é confirmar um diálogo: é mandar
+   um e-mail, apagar um evento, fazer um Pix. Por isso o cartão diz O QUE vai
+   ser executado — argumento a argumento — ANTES de oferecer a escolha.
+   "Permitir?" sem dizer o quê é pior do que não perguntar: ensina a pessoa a
+   apertar sim, e a primeira vez que isso custa caro é justamente a vez em que
+   ela devia ter lido.
+
+   E as duas saídas têm o mesmo peso. O "não" não é link nem X de canto: é botão
+   do mesmo tamanho, ao lado. Quem só desenha o "sim" bonito está escolhendo
+   pela pessoa. */
+function PedidoDePermissao(
+  { pedido, onResponder }: {
+    pedido: { ferramenta: string; detalhes: Detalhe[] };
+    onResponder: (aprovado: boolean) => void;
+  },
+) {
+  return (
+    <div className="ms-chat-aprov">
+      {/* A MESMA FRASE DE ANTES, e de propósito: é o único lugar em que a
+          ferramenta é dita em português, e ela continua verdadeira — o turno
+          está parado esperando. `role="status"` porque o pedido nasce sozinho
+          no meio da conversa, sem toque nenhum da pessoa. */}
+      <p className="ms-chat-aprov__titulo" role="status">
+        <span className="ms-chat-aprov__selo" aria-hidden="true"><LockIcon size={13} /></span>
+        Esperando sua aprovação para {pedido.ferramenta}
+      </p>
+      {pedido.detalhes.length
+        ? (
+          <dl className="ms-chat-aprov__detalhes">
+            {pedido.detalhes.map((d, i) => (
+              <div key={i} className="ms-chat-aprov__linha">
+                <dt className="ms-chat-aprov__chave">{d.chave}</dt>
+                <dd className="ms-chat-aprov__valor">{d.valor}</dd>
+              </div>
+            ))}
+          </dl>
+        )
+        // Pedido sem argumento nenhum não vira caixa vazia: a ausência de
+        // detalhe é ela própria um motivo para desconfiar, e é dita.
+        : <Vazio>Esta ação não veio com detalhe nenhum — pergunte antes de permitir.</Vazio>}
+      <div className="ms-chat-aprov__botoes">
+        <button type="button" className="ms-chat-aprov__nao" onClick={() => onResponder(false)}>
+          <XIcon size={15} />
+          Não permitir
+        </button>
+        <button type="button" className="ms-chat-aprov__sim" onClick={() => onResponder(true)}>
+          <CheckIcon size={15} />
+          Permitir
+        </button>
+      </div>
     </div>
   );
 }
@@ -810,6 +1025,109 @@ const ROTULO_FERRAMENTA: Record<string, string> = {
 
 function rotuloDeFerramenta(nome: string): string {
   return ROTULO_FERRAMENTA[nome] ?? (nome || 'uma ferramenta');
+}
+
+/** Registra no fio da conversa o que foi decidido sobre um pedido. Usa o mesmo
+ *  `anexar` dos cartões: a decisão pertence ao turno, e some junto com ele se a
+ *  conversa for embora. */
+function registrarDecisao(bolhas: Bolha[], texto: string): Bolha[] {
+  return anexar(bolhas, (b) => ({ ...b, decisoes: [...(b.decisoes ?? []), texto] }));
+}
+
+/**
+ * Nome de argumento → rótulo em português.
+ *
+ * As chaves são as REAIS das 16 ferramentas com `requires_confirmation`, lidas
+ * dos `json_schema` do backend (`tools/google.py`, `whatsapp.py`, `wise.py`,
+ * `filesystem.py`, `dev.py`, `browser_automation.py`), e não inventadas: um
+ * dicionário de chutes nunca acertaria e o rótulo cairia sempre no nome cru.
+ *
+ * Chave desconhecida cai no próprio nome do fio, pela mesma razão de
+ * `rotuloDeFerramenta`: feio e verdadeiro é melhor do que sumir. Um argumento
+ * escondido é exatamente o que faria a pessoa aprovar sem saber.
+ */
+const ROTULO_ARGUMENTO: Record<string, string> = {
+  // agenda
+  summary: 'título',
+  start: 'início',
+  end: 'fim',
+  description: 'descrição',
+  location: 'local',
+  attendees: 'convidados',
+  event_id: 'evento',
+  event_ids: 'eventos',
+  calendar_id: 'agenda',
+  // e-mail
+  to: 'para',
+  cc: 'cópia',
+  bcc: 'cópia oculta',
+  subject: 'assunto',
+  body: 'texto',
+  attachments: 'anexos',
+  in_reply_to_message_id: 'respondendo a',
+  // whatsapp
+  chat_id: 'conversa',
+  message: 'mensagem',
+  text: 'texto',
+  quote_msg_id: 'respondendo a',
+  // pix
+  recipient_name: 'quem recebe',
+  pix_key: 'chave Pix',
+  pix_key_type: 'tipo da chave',
+  amount: 'valor',
+  reference: 'referência',
+  source_currency: 'moeda',
+  // arquivos e computador
+  path: 'arquivo',
+  content: 'conteúdo',
+  old: 'trecho antigo',
+  new: 'trecho novo',
+  command: 'comando',
+  cwd: 'pasta',
+  script: 'script',
+  name: 'nome',
+  input: 'entrada',
+  target: 'onde',
+  // navegador
+  selector: 'elemento',
+};
+
+/**
+ * Os `args` do `tool_request` (`engine.py:471`) viram linhas legíveis.
+ *
+ * NADA É FILTRADO por ser feio ou comprido: o argumento escondido é o que a
+ * pessoa não leu antes de aprovar. Só saem os vazios de verdade (`null`,
+ * `undefined`, string em branco), que não dizem nada sobre a consequência —
+ * `0` e `false` FICAM, porque dizem.
+ */
+function detalhesDe(args: unknown): Detalhe[] {
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return [];
+  const detalhes: Detalhe[] = [];
+  for (const [chave, bruto] of Object.entries(args as Record<string, unknown>)) {
+    const valor = valorLegivel(bruto);
+    if (!valor) continue;
+    detalhes.push({ chave: ROTULO_ARGUMENTO[chave] ?? chave, valor });
+  }
+  return detalhes;
+}
+
+/** Valor de argumento → texto. Uma lista de e-mails ou de ids é o caso comum
+ *  (`to`, `attendees`, `event_ids`) e não pode virar `[object Object]`. */
+function valorLegivel(bruto: unknown): string {
+  if (typeof bruto === 'string') return bruto.trim();
+  if (typeof bruto === 'number') return Number.isFinite(bruto) ? String(bruto) : '';
+  // Booleano em tela portuguesa é "sim"/"não": `all_day: false` lido como
+  // "false" no meio de uma frase em português não é informação, é ruído.
+  if (typeof bruto === 'boolean') return bruto ? 'sim' : 'não';
+  if (Array.isArray(bruto)) return bruto.map(valorLegivel).filter(Boolean).join(', ');
+  if (bruto === null || bruto === undefined) return '';
+  try {
+    return JSON.stringify(bruto) ?? '';
+  } catch {
+    // Referência cíclica num arg é patologia do modelo, não da tela: perde-se a
+    // linha, não o pedido.
+    return '';
+  }
 }
 
 /** `metadata.task` chega como uma tarefa só ou como `{ tasks: [...] }`. */

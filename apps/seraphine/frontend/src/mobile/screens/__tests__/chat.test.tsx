@@ -797,6 +797,297 @@ describe('ChatScreen', () => {
     });
   });
 
+  /* RESPONDER A APROVAÇÃO — a tela deixou de só AVISAR.
+     A Task 18 pôs a frase "esperando sua aprovação para X"; sem botão, o engine
+     ficava parado em `queue.get()` até `APPROVAL_TIMEOUT_SECONDS = 300`
+     (`engine.py:1222`) e o turno morria calado. O fio de volta já existia:
+     `{type:'tool_approval', request_id, approved}` cai no ramo do laço interno
+     do socket (`ws/routes.py:1055`) e vira `engine.submit_approval`.
+
+     APROVAR É AÇÃO COM CONSEQUÊNCIA: o pedido diz O QUE vai ser feito — o
+     `tool_request` carrega `args` (`engine.py:471`) — antes de perguntar.
+     Perguntar "permitir?" sem dizer o quê ensina a pessoa a apertar sim. */
+  describe('responder à aprovação', () => {
+    const ARGS_AGENDA = {
+      summary: 'Dentista',
+      start: '2026-08-06T15:00',
+      attendees: ['ana@exemplo.com'],
+      all_day: false,
+    };
+
+    const pedido = (
+      args: Record<string, unknown> = ARGS_AGENDA,
+      tool = 'calendar_create_event',
+      id = 'r1',
+    ) => ({ type: 'tool_request', request_id: id, tool, args, requires_confirmation: true });
+
+    /** O caminho real: pergunta enviada, pedido de permissão de volta. */
+    function pedirPermissao(args?: Record<string, unknown>, tool?: string, id?: string) {
+      const feito = montar();
+      escrever(feito.container, 'marca dentista quinta 15h');
+      feito.ws.emite(pedido(args, tool, id));
+      return feito;
+    }
+
+    const permitir = () => screen.getByRole('button', { name: /^permitir$/i });
+    const negar = () => screen.getByRole('button', { name: /^não permitir$/i });
+    /** Nenhum botão de decisão de pé — nem morto, nem vivo. */
+    const semBotoes = () => {
+      expect(screen.queryByRole('button', { name: /^permitir$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^não permitir$/i })).toBeNull();
+    };
+    /** O `tool_result` que o engine emite quando a aprovação NÃO saiu:
+     *  a mesma string para recusa e para estouro de tempo (`engine.py:1256`). */
+    const recusada = (id = 'r1') =>
+      ({ type: 'tool_result', request_id: id, ok: false, output: null, error: 'rejected by user', metadata: {} });
+
+    it('o pedido nomeia a ação E mostra o que vai ser executado', () => {
+      pedirPermissao();
+      // A frase da Task 18 continua sendo o cabeçalho — é o único lugar onde a
+      // ferramenta é nomeada em português.
+      expect(screen.getByText(/esperando sua aprovação para criar um evento na agenda/i)).toBeTruthy();
+      // …e agora vem o QUE, argumento a argumento, com rótulo em português.
+      expect(screen.getByText('título')).toBeTruthy();
+      expect(screen.getByText('Dentista')).toBeTruthy();
+      expect(screen.getByText('início')).toBeTruthy();
+      expect(screen.getByText('2026-08-06T15:00')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('argumento que não é texto vira texto legível', () => {
+      pedirPermissao();
+      // Lista de e-mails não pode virar `[object Object]` nem sumir.
+      expect(screen.getByText('ana@exemplo.com')).toBeTruthy();
+      // …e um booleano não vira "false" no meio de uma tela em português.
+      expect(screen.getByText('não')).toBeTruthy();
+    });
+
+    it('permitir manda tool_approval com approved verdadeiro', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: true,
+      });
+    });
+
+    it('negar manda tool_approval com approved falso', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: false,
+      });
+    });
+
+    it('o request_id respondido é o do pedido, não um qualquer', () => {
+      const { ws } = pedirPermissao(undefined, undefined, 'req-42');
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'req-42', approved: true,
+      });
+    });
+
+    it('permitido: o botão some e a tela diz que a ação está rodando', () => {
+      pedirPermissao();
+      fireEvent.click(permitir());
+      semBotoes();
+      // O toque tem de deixar marca: sem isto o cartão sumiria e a tela ficaria
+      // 10s idêntica a antes do toque.
+      expect(screen.getByText(/você permitiu — criar um evento na agenda/i)).toBeTruthy();
+    });
+
+    it('negado: registra a recusa, tira os botões e NÃO vira "uma ação falhou"', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      semBotoes();
+      expect(screen.getByText(/você não permitiu: criar um evento na agenda/i)).toBeTruthy();
+      // O engine devolve `ok:false, error:"rejected by user"` para a recusa
+      // (`engine.py:1256`). Nada falhou — a pessoa decidiu —, e mostrar
+      // "Uma ação falhou: rejected by user" seria chamar a decisão dela de
+      // defeito, em inglês.
+      ws.emite(recusada());
+      expect(screen.queryByText(/uma ação falhou/i)).toBeNull();
+      expect(screen.queryByText(/rejected by user/i)).toBeNull();
+      semBotoes();
+    });
+
+    it('permitido COM ELA ESCREVENDO: o toque continua deixando marca', () => {
+      // MUTAÇÃO M9, e o caso é o NORMAL: ela diz "deixa comigo!" e só então
+      // pede a ferramenta, e a bolha fica `streaming` porque o `turn_end` desse
+      // caminho não vem — o engine está parado esperando o sim. Se o "você
+      // permitiu" se esconder atrás do cursor, apertar Permitir fica idêntico a
+      // não ter apertado: o cartão some e nada aparece no lugar, por dezenas de
+      // segundos. A pessoa aperta de novo um botão que já não existe.
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite(token('Deixa comigo!'));
+      ws.emite(pedido());
+      fireEvent.click(permitir());
+      expect(screen.getByText(/você permitiu — criar um evento na agenda/i)).toBeTruthy();
+    });
+
+    it('ferramenta paralela que termina no meio NÃO derruba o pedido', () => {
+      // MUTAÇÃO M11, e não é hipótese: o engine dispara em paralelo tudo que
+      // NÃO pede confirmação (`engine.py:1145-1157`, `_parallel_tasks`) antes
+      // de parar no pedido que pede. O `tool_result` do clima chega, portanto,
+      // com o pedido de permissão de pé — e com outro `request_id`. Confundir
+      // os dois apagaria os botões de uma permissão viva e ainda escreveria que
+      // ela expirou; a ação morreria nos 300s, dita como se já tivesse morrido.
+      const { ws } = pedirPermissao();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }, 'outro-id'));
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+      expect(screen.queryByText(/expirou sem resposta/i)).toBeNull();
+    });
+
+    it('duas recusas no mesmo turno ficam as duas na conversa', () => {
+      // MUTAÇÃO M28. O engine pede uma permissão de cada vez, mas um turno pode
+      // pedir várias (`engine.py:1211`, dentro do laço de tool_calls). Trocar a
+      // lista em vez de somar apagaria a primeira recusa sem ruído — e a pessoa
+      // leria só a segunda, concluindo que a primeira ação aconteceu.
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      ws.emite(recusada());
+      ws.emite(pedido({ to: 'ana@exemplo.com' }, 'gmail_send_message', 'r2'));
+      fireEvent.click(negar());
+      expect(screen.getByText(/você não permitiu: criar um evento na agenda/i)).toBeTruthy();
+      expect(screen.getByText(/você não permitiu: enviar um e-mail/i)).toBeTruthy();
+    });
+
+    it('negado: o turno segue e termina no turn_end, sem esperar os 300s', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      // O engine devolve a recusa ao modelo e continua o laço: vem resposta e
+      // vem `turn_end`. O telefone não pode ficar pendurado nesse caminho.
+      ws.emite(recusada());
+      ws.emite(token('Tudo bem, não marquei nada.'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Tudo bem, não marquei nada.')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+      semBotoes();
+    });
+
+    it('a bolha que só tem a recusa não é lida como turno perdido', () => {
+      // A recusa entra numa bolha que pode não ter texto nenhum. Sem contá-la,
+      // a regra do turno mudo escreveria "não veio resposta desta vez" ao lado
+      // de "você não permitiu" — duas frases contradizendo uma à outra.
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/você não permitiu/i)).toBeTruthy();
+      expect(screen.queryByText(/não veio resposta desta vez/i)).toBeNull();
+    });
+
+    it('expirou: quem avisa é o SERVIDOR, e a tela recolhe os botões', () => {
+      // Não há cronômetro no cliente: aos 300s o engine desiste sozinho
+      // (`engine.py:1225`) e emite o `tool_result` do pedido. Esse quadro é o
+      // aviso — e é a única hora em que a tela pode afirmar que expirou sem
+      // arriscar discordar do servidor.
+      const { ws } = pedirPermissao();
+      ws.emite(recusada());
+      semBotoes();
+      expect(screen.getByText(/esta permissão expirou sem resposta/i)).toBeTruthy();
+      expect(screen.queryByText(/uma ação falhou/i)).toBeNull();
+    });
+
+    it('a ferramenta que respondeu OK também recolhe o pedido', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.emite(ferramentaOk(null));
+      semBotoes();
+      // …e sem inventar recusa: ela não expirou, ela rodou.
+      expect(screen.queryByText(/expirou sem resposta/i)).toBeNull();
+    });
+
+    it('dois toques mandam UMA decisão só', () => {
+      // No mesmo quadro o React ainda não redesenhou e o botão continua de pé.
+      const { ws } = pedirPermissao();
+      const b = permitir();
+      act(() => { b.click(); b.click(); });
+      expect(ws.enviadas.filter((m) => m.type === 'tool_approval')).toHaveLength(1);
+    });
+
+    it('turno cancelado tira os botões — eles não valem mais nada', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.emite({ type: 'turn_cancelled', conversation_id: 'c1', turn_id: 't1' });
+      semBotoes();
+    });
+
+    it('conexão caída tira os botões — o backend já matou o turno', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.conexao('disconnected');
+      semBotoes();
+    });
+
+    it('aprovação que o servidor não reconhece mais é dita, e não mata o turno', () => {
+      // Corrida real: os 300s estouram no instante do toque. O socket responde
+      // `{type:'error', code:'unknown_request_id'}` (`ws/routes.py:1060`) e o
+      // turno SEGUE vivo do outro lado — tratá-lo como erro fatal apagaria o
+      // "pensando…" de um turno que ainda vai responder.
+      const { ws } = pedirPermissao();
+      fireEvent.click(permitir());
+      ws.emite({ type: 'error', code: 'unknown_request_id', message: 'r1' });
+      expect(screen.getByText(/essa aprovação já não valia/i)).toBeTruthy();
+      expect(screen.queryByText(/não consegui responder/i)).toBeNull();
+      expect(screen.getByText('pensando…')).toBeTruthy();
+    });
+
+    it('ferramenta sem argumento nenhum ainda pede permissão, e diz que não veio detalhe', () => {
+      pedirPermissao({});
+      expect(screen.getByText(/não veio com detalhe nenhum/i)).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('ferramenta desconhecida do telefone também ganha os dois botões', () => {
+      // O rótulo cai no nome do fio; a decisão não pode cair junto — uma
+      // ferramenta nova seria justamente a que mais precisa de um "não".
+      pedirPermissao({ command: 'rm -rf /tmp/x' }, 'ferramenta_nova');
+      expect(screen.getByText(/esperando sua aprovação para ferramenta_nova/i)).toBeTruthy();
+      expect(screen.getByText('rm -rf /tmp/x')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('argumento com nome que o telefone não traduz aparece com o nome do fio', () => {
+      pedirPermissao({ campo_novo: 'valor' });
+      expect(screen.getByText('campo_novo')).toBeTruthy();
+      expect(screen.getByText('valor')).toBeTruthy();
+    });
+
+    it('pedido de turno que a tela não abriu também pode ser respondido', () => {
+      // Ao contrário do `tool_result` (que não inventa espera, M20), o
+      // `tool_request` PRECISA de resposta venha de onde vier: se ninguém
+      // responde, o turno de fundo morre nos 300s e a ação não acontece.
+      const { ws } = montar();
+      ws.emite(pedido());
+      expect(permitir()).toBeTruthy();
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: true,
+      });
+    });
+
+    it('o pedido continua de pé enquanto ela escreve', () => {
+      // Mesma razão da M16 da Task 18, agora com botão: escondido atrás do
+      // cursor, o pedido nunca seria respondido.
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite(token('Deixa comigo!'));
+      ws.emite(pedido());
+      expect(screen.getByText('Deixa comigo!')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+    });
+
+    it('em repouso não há botão de decisão nenhum na tela', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia!'));
+      semBotoes();
+    });
+  });
+
   /* A BOLHA VAZIA É UM TURNO PERDIDO.
      Na conversa real apareceram duas falas do usuário seguidas, sem resposta no
      meio. Uma bolha da Seraphine que fecha sem NADA dentro é indistinguível de
