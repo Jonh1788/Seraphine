@@ -27,8 +27,10 @@ interface TelemetryViewProps {
 type Period = 7 | 30;
 
 /* Quem é flat vem de `GET /telemetry/flat-backends` — NÃO existe cópia local.
- * O backend precifica e grava; esta view só exibe. Quando as duas listas
- * divergiam, a mesma chamada era gravada com um custo e mostrada com outro.
+ * O backend precifica e grava; esta view só exibe. As duas listas já
+ * divergiram; nenhum emissor produzia os backends em disputa, então nada foi
+ * gravado errado — mas com um sink ligado a mesma chamada seria gravada com um
+ * custo e mostrada com outro.
  *
  * Enquanto a lista não chegou, `split` é null e a view não classifica: chutar
  * "flat" zera um custo real, chutar "medido" inventa um. Ambos os chutes dão

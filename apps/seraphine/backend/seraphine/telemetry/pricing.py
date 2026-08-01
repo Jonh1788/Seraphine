@@ -15,10 +15,19 @@ _DEFAULT_PRICE = (3.0, 15.0)  # conservative fallback for unknown metered models
 
 # Backends com custo marginal $0. PÚBLICO de propósito: a rota
 # `GET /telemetry/flat-backends` publica esta lista e o front a consome. Antes,
-# o front declarava uma cópia literal que havia divergido daqui — `ollama` e
-# `local` eram GRAVADOS pelo default de (3.0, 15.0)/M e EXIBIDOS como flat, ou
-# seja $18 gravados contra $0 na tela para 1M/1M. Uma cópia a mais volta a
-# divergir; qualquer consumidor novo importa daqui ou chama a rota.
+# o front classificava por uma cópia literal que havia divergido daqui: tratava
+# `ollama`/`local` como flat enquanto esta lista os deixava cair no default
+# metered de (3.0, 15.0)/M.
+#
+# A divergência era LATENTE, não ativa: nenhum emissor de telemetria produzia
+# esses backends (só `AnthropicClient` → cliproxy/anthropic e o OpenRouter →
+# openrouter tinham sink), então NENHUMA linha de `llm_usage` foi mal
+# precificada por isto. O dano era potencial — medido chamando `cost_for` à
+# mão, dava $18 contra $0 na tela em 1M/1M. Ligar um sink no OllamaClient
+# bastaria para tornar isso real e silencioso.
+#
+# Uma cópia a mais volta a divergir; qualquer consumidor novo importa daqui ou
+# chama a rota.
 #
 # Por que cada um é $0:
 #   cliproxy   — assinatura flat (Claude Code CLI via proxy local)

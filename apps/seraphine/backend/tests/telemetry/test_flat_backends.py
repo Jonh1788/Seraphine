@@ -2,18 +2,21 @@
 
 O front mantinha uma cópia literal desta lista e ela havia divergido: o front
 tratava `ollama`/`local` como flat, o backend os precificava pelo default
-conservador de (3.0, 15.0) USD/M. A mesma chamada era GRAVADA com um custo e
-EXIBIDA com outro — o total e a barra discordavam sem nada quebrar.
+conservador de (3.0, 15.0) USD/M.
 
-Estes testes prendem os dois lados do contrato:
+A divergência era LATENTE, não ativa — nenhum emissor de telemetria produzia
+esses backends, então nenhuma linha de `llm_usage` foi mal precificada. O risco
+era o dia em que um sink fosse ligado: a mesma chamada seria GRAVADA com um
+custo e EXIBIDA com outro ($18 contra $0 em 1M/1M), e o total discordaria da
+barra sem nada quebrar. Estes testes existem para que esse dia não chegue.
+
+Prendem os dois lados do contrato:
   1. todo backend declarado flat custa 0.0, com qualquer volume;
   2. `ollama`/`local` estão entre eles (era aí que os lados divergiam);
   3. os medidos continuam medidos (senão a lógica poderia estar desligada);
   4. a rota devolve exatamente a constante, não uma cópia.
 """
 from __future__ import annotations
-
-import asyncio
 
 import pytest
 from fastapi import FastAPI

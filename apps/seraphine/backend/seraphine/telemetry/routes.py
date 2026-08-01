@@ -11,9 +11,17 @@ router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
 @router.get("/flat-backends")
 async def flat_backends() -> dict[str, list[str]]:
-    """Fonte única de quem custa $0 marginal. O front exibia uma cópia
-    divergente desta lista (tratava `ollama`/`local` como flat enquanto o
-    backend os cobrava), então a lista viaja em vez de ser reescrita.
+    """Fonte única de quem custa $0 marginal — consuma daqui, não copie.
+
+    O front classificava por uma cópia literal desta lista que havia divergido
+    (tratava `ollama`/`local` como flat enquanto `pricing.py` os precificava
+    como metered). A divergência nunca chegou a gravar dado errado: nenhum
+    emissor de telemetria produzia esses backends. Era latente — e é por isso
+    que a lista passou a viajar em vez de ser reescrita no cliente.
+
+    NÃO existe linha mal precificada em `llm_usage` por causa disso, e não há
+    backfill a fazer. `cost_for()` só roda no momento da escrita; o que já foi
+    gravado mantém o custo com que foi gravado.
 
     Estática e sem dependência do `telemetry_service`: o front a busca no
     mount, antes/independente do summary, e não pode classificar sem ela.

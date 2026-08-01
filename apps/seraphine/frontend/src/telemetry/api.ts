@@ -50,9 +50,12 @@ export async function fetchTelemetrySummary(days = 7): Promise<TelemetrySummary>
 /*                                                                     */
 /*  Quem custa $0 marginal é decidido pelo backend (pricing.py), que   */
 /*  é quem PRECIFICA e GRAVA. Esta view só EXIBE. Uma cópia local da   */
-/*  lista já divergiu uma vez — `ollama`/`local` eram gravados a       */
-/*  (3,15)/M e exibidos como flat, $18 contra $0 em 1M/1M. Buscar a    */
-/*  lista custa uma chamada e elimina a classe do bug.                 */
+/*  lista já divergiu uma vez: o front tratava `ollama`/`local` como   */
+/*  flat enquanto o backend os precificava como metered. Nenhum        */
+/*  emissor produzia esses backends ainda, então nada foi gravado      */
+/*  errado — a divergência era latente, valendo $18 contra $0 em       */
+/*  1M/1M no dia em que um sink fosse ligado. Buscar a lista custa     */
+/*  uma chamada e elimina a classe do bug.                             */
 /* ------------------------------------------------------------------ */
 
 export async function listFlatBackends(): Promise<string[]> {
