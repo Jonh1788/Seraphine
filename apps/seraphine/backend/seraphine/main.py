@@ -116,6 +116,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 feature="chat",
                 input_tokens=rec.get("input_tokens", 0),
                 output_tokens=rec.get("output_tokens", 0),
+                # Presente só quando o provedor reporta o valor cobrado
+                # (OpenRouter). None → o service estima pela tabela.
+                cost_usd=rec.get("cost_usd"),
             ))
         except Exception:
             pass

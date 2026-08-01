@@ -16,11 +16,27 @@ class TelemetryService:
         self.store = store
 
     async def record(self, *, backend: str, model: str, feature: str = "chat",
-                     input_tokens: int = 0, output_tokens: int = 0) -> None:
-        """Persist one LLM call's usage + computed cost. Never raises into the
-        caller (telemetry must not break a chat turn)."""
+                     input_tokens: int = 0, output_tokens: int = 0,
+                     cost_usd: float | None = None) -> None:
+        """Persist one LLM call's usage + cost. Never raises into the caller
+        (telemetry must not break a chat turn).
+
+        ``cost_usd`` é o custo REPORTADO PELO PROVEDOR, quando ele reporta. O
+        OpenRouter devolve o valor cobrado no frame final de usage, e esse
+        número vence a tabela de `pricing.py` — que é estimativa estática com
+        quatro ids e um default conservador de (3, 15) por milhão, ordens de
+        grandeza errado para modelos baratos. Sem isso, um Gemini Flash seria
+        cobrado como se fosse Sonnet.
+
+        Quando o provedor não reporta (cliproxy, ou uma resposta sem o campo),
+        cai na tabela como antes.
+        """
         try:
-            cost = cost_for(backend, model, int(input_tokens or 0), int(output_tokens or 0))
+            cost = (
+                float(cost_usd)
+                if cost_usd is not None
+                else cost_for(backend, model, int(input_tokens or 0), int(output_tokens or 0))
+            )
             row = (str(uuid.uuid4()), datetime.now(timezone.utc).isoformat(),
                    backend or "?", model or "?", feature or "chat",
                    int(input_tokens or 0), int(output_tokens or 0), float(cost))
@@ -62,11 +78,11 @@ class TelemetryService:
             return {
                 "days": int(days),
                 "total": {"input_tokens": tot[0], "output_tokens": tot[1],
-                          "cost_usd": round(tot[2], 4), "calls": tot[3]},
+                          "cost_usd": round(tot[2], 6), "calls": tot[3]},
                 "by_model": [{"model": r[0], "input_tokens": r[1], "output_tokens": r[2],
-                              "cost_usd": round(r[3], 4), "calls": r[4]} for r in by_model],
-                "by_feature": [{"feature": r[0], "cost_usd": round(r[1], 4), "calls": r[2]} for r in by_feature],
-                "by_backend": [{"backend": r[0], "cost_usd": round(r[1], 4), "calls": r[2]} for r in by_backend],
+                              "cost_usd": round(r[3], 6), "calls": r[4]} for r in by_model],
+                "by_feature": [{"feature": r[0], "cost_usd": round(r[1], 6), "calls": r[2]} for r in by_feature],
+                "by_backend": [{"backend": r[0], "cost_usd": round(r[1], 6), "calls": r[2]} for r in by_backend],
             }
         return await asyncio.to_thread(_work)
 

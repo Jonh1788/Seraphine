@@ -199,14 +199,20 @@ class OpenRouterChatClient:
         if self._telemetry is None:
             return
         try:
-            self._telemetry(
-                {
-                    "backend": "openrouter",
-                    "model": model,
-                    "input_tokens": int(usage.get("prompt_tokens") or 0),
-                    "output_tokens": int(usage.get("completion_tokens") or 0),
-                }
-            )
+            rec: dict[str, Any] = {
+                "backend": "openrouter",
+                "model": model,
+                "input_tokens": int(usage.get("prompt_tokens") or 0),
+                "output_tokens": int(usage.get("completion_tokens") or 0),
+            }
+            # O OpenRouter devolve o custo REAL cobrado (pedimos `usage.include`
+            # acima). Vale mais que a tabela estimada de pricing.py: cobre
+            # qualquer modelo sem manutenção e já reflete desconto de cache.
+            # `cost` ausente ou não-numérico → deixa o consumidor estimar.
+            cost = usage.get("cost")
+            if isinstance(cost, (int, float)):
+                rec["cost_usd"] = float(cost)
+            self._telemetry(rec)
         except Exception:
             pass
 
