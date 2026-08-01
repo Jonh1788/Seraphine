@@ -684,6 +684,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     # Cost-aware routing: feed the engine the metered-spend signal source.
     engine._telemetry_service = telemetry_service
+    # ...e o sink de escrita, para o cliente OpenRouter que o engine monta por
+    # conta própria em `_resolve_chat_llm` (o do cliproxy já recebe o sink pela
+    # factory). É o MESMO sink, então o gasto cai em feature="chat" igual.
+    engine._telemetry_sink = _telemetry_sink
 
     # Learning loop (OpenJarvis #1): wire the LearningService. It needs a
     # one-shot LLM call (mirror memory/profile.py's accumulation pattern) and

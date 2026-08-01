@@ -198,6 +198,67 @@ async def test_resolve_chat_llm(tmp_path):
     llm, model = await engine._resolve_chat_llm()
     assert llm is sentinel and model is None
 
+    # 6. Prefixo duplicado gravado por cliente antigo → colapsa.
+    #    Sem isso o model id sai como "openrouter:openai/gpt-4o-mini" e a
+    #    OpenRouter devolve 400 "is not a valid model ID".
+    await store.set_kv("chat_model", "openrouter:openrouter:openai/gpt-4o-mini")
+    llm, model = await engine._resolve_chat_llm()
+    assert isinstance(llm, OpenRouterChatClient)
+    assert model == "openai/gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+async def test_resolve_chat_llm_repassa_o_sink_de_telemetria(tmp_path):
+    """O gasto do OpenRouter tem que aparecer em custo/energia.
+
+    O cliente do cliproxy recebe o sink pela factory (`llm/factory.py`), mas o
+    do OpenRouter é construído pelo próprio engine. Enquanto o engine o criava
+    sem `telemetry=`, `_emit_usage` saía cedo e TODO turno roteado por
+    OpenRouter ficava invisível no painel — foi o que aconteceu com o Gemini.
+    """
+    from seraphine.conversation.engine import ConversationEngine
+    from seraphine.deepsearch import schema as deepsearch_schema
+    from seraphine.deepsearch.providers import OpenRouterChatClient
+    from seraphine.memory.store import MemoryStore
+
+    store = MemoryStore(tmp_path / "sink.sqlite")
+    store.register_migrator("seraphine_deepsearch", deepsearch_schema.migrate)
+    await store.ensure_schema()
+
+    engine = ConversationEngine(_SentinelLLM(), store)
+
+    recebidos: list[dict] = []
+    engine._telemetry_sink = recebidos.append
+
+    def _set_key() -> None:
+        with store._connect() as conn:
+            conn.execute(
+                "UPDATE deepsearch_config SET openrouter_key = ? WHERE id = 1",
+                ("sk-or-x",),
+            )
+
+    import asyncio
+
+    await asyncio.to_thread(_set_key)
+    await store.set_kv("chat_model", "openrouter:google/gemini-2.5-flash")
+
+    llm, model = await engine._resolve_chat_llm()
+    assert isinstance(llm, OpenRouterChatClient)
+
+    # O cliente tem que ter recebido ESTE sink, não None.
+    assert llm._telemetry is not None, "cliente OpenRouter criado sem telemetria"
+
+    # E o sink recebido tem que ser o do engine: emitir chega na nossa lista.
+    llm._emit_usage(model, {"prompt_tokens": 11, "completion_tokens": 22})
+    assert recebidos == [
+        {
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-flash",
+            "input_tokens": 11,
+            "output_tokens": 22,
+        }
+    ]
+
 
 def test_token_tool_call_shape_is_engine_compatible():
     """A standalone guard: the documented terminal tool_calls shape parses."""

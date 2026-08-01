@@ -538,6 +538,12 @@ class ConversationEngine:
         # by main.py after lifespan construction; both tolerate None.
         self._metered_spend_today: float = 0.0
         self._telemetry_service: Any = None
+        # Sink de ESCRITA de telemetria (o `_telemetry_service` acima só LÊ o
+        # gasto). O cliente do cliproxy recebe o sink pela factory; o do
+        # OpenRouter é construído aqui em `_resolve_chat_llm`, então precisa
+        # dele por este caminho — sem isso, todo turno roteado por OpenRouter
+        # some do custo/energia. Wired por main.py; tolera None.
+        self._telemetry_sink: Any = None
         # Learning loop (OpenJarvis #1): wired by main.py after lifespan
         # construction. The active policy + computed knobs are refreshed once
         # per turn; both tolerate a missing service (defaults / no-op).
@@ -1508,7 +1514,7 @@ class ConversationEngine:
                 return (self.llm, None)
             from seraphine.deepsearch.providers import OpenRouterChatClient
 
-            return (OpenRouterChatClient(key), model_id)
+            return (OpenRouterChatClient(key, telemetry=self._telemetry_sink), model_id)
         except Exception as e:  # noqa: BLE001 — chat must never break on this
             logger.warning("chat-model resolution failed, using cliproxy: %s", e)
             return (self.llm, None)
