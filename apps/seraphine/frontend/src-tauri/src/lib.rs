@@ -30,6 +30,7 @@ mod mic;
 mod telemetry;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod voice_io;
+mod wakeword;
 mod whisper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -58,6 +59,11 @@ fn run_mobile() {
             whisper::whisper_prepare,
             whisper::whisper_transcribe_pcm,
             health::health_schedule_background,
+            // Wake word — native detection, keeps running with the screen
+            // off (requires the `audio` background mode, see Info.ios.plist).
+            wakeword::wakeword_start,
+            wakeword::wakeword_stop,
+            wakeword::wakeword_status,
         ])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -137,6 +143,11 @@ fn run_desktop() {
             voice_io::vpio_play_chunk,
             voice_io::vpio_flush_output,
             voice_io::vpio_ring_len,
+            // Wake word — native detection, fed by whichever mic path is
+            // already capturing (cpal or VPIO).
+            wakeword::wakeword_start,
+            wakeword::wakeword_stop,
+            wakeword::wakeword_status,
             clipboard::read_clipboard,
             health::health_request_authorization,
             health::health_get_today_summary,

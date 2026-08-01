@@ -5,25 +5,38 @@
 //! 16 kHz mono Int16 PCM, and emits chunks to the frontend via
 //! Tauri events so the same WebSocket pipeline can consume them.
 
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const CHUNK_SAMPLES: usize = 1600; // 100 ms at 16 kHz
+
+/// Who currently needs the microphone. The stream is torn down only when
+/// the last holder lets go — otherwise arming the wake word while realtime
+/// is running (or vice versa) would have one of them yank the device out
+/// from under the other, and two cpal streams on the same input device
+/// fight over the CoreAudio HAL lock.
+pub const HOLDER_REALTIME: &str = "realtime";
+pub const HOLDER_WAKEWORD: &str = "wakeword";
 
 /// Shared state — holds the active capture stream. `None` when stopped.
 /// Stream is not `Sync`, so we wrap in a Mutex for interior mutability.
 pub struct MicState {
     stream: Mutex<Option<Stream>>,
+    holders: Mutex<HashSet<&'static str>>,
+    info: Mutex<Option<MicInfo>>,
 }
 
 impl MicState {
     pub fn new() -> Self {
         Self {
             stream: Mutex::new(None),
+            holders: Mutex::new(HashSet::new()),
+            info: Mutex::new(None),
         }
     }
 }
@@ -38,6 +51,17 @@ pub fn start_mic_capture(
     app: AppHandle,
     state: State<'_, MicState>,
 ) -> Result<MicInfo, String> {
+    let info = build_and_install(&app, &state)?;
+    state
+        .holders
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(HOLDER_REALTIME);
+    Ok(info)
+}
+
+/// Start (or restart) the capture stream, replacing any existing one.
+fn build_and_install(app: &AppHandle, state: &MicState) -> Result<MicInfo, String> {
     // Stop any existing stream first.
     {
         let mut guard = state.stream.lock().map_err(|e| e.to_string())?;
@@ -126,22 +150,68 @@ pub fn start_mic_capture(
         *guard = Some(stream);
     }
 
-    Ok(MicInfo {
+    let info = MicInfo {
         device: device_name,
         input_sample_rate: input_rate,
         target_sample_rate: TARGET_SAMPLE_RATE,
         channels: input_channels as u32,
-    })
+    };
+    *state.info.lock().map_err(|e| e.to_string())? = Some(info.clone());
+    Ok(info)
 }
 
 #[tauri::command]
 pub fn stop_mic_capture(state: State<'_, MicState>) -> Result<(), String> {
-    let mut guard = state.stream.lock().map_err(|e| e.to_string())?;
-    *guard = None; // drops the stream -> stops capture
+    release_from(&state, HOLDER_REALTIME)
+}
+
+/// Keep a capture stream alive on behalf of `holder`, reusing the running
+/// one if there is one. Used by the wake word so arming it does not open a
+/// second microphone.
+pub fn acquire(app: &AppHandle, holder: &'static str) -> Result<MicInfo, String> {
+    let state = app.state::<MicState>();
+    let already = state.stream.lock().map_err(|e| e.to_string())?.is_some();
+    let info = if already {
+        state
+            .info
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "mic: stream running but info missing".to_string())?
+    } else {
+        build_and_install(app, &state)?
+    };
+    state
+        .holders
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(holder);
+    Ok(info)
+}
+
+/// Drop `holder`'s claim. The stream stops only once nobody holds it.
+pub fn release(app: &AppHandle, holder: &'static str) {
+    let state = app.state::<MicState>();
+    if let Err(e) = release_from(&state, holder) {
+        log::warn!("mic: release({holder}) failed: {e}");
+    }
+}
+
+fn release_from(state: &MicState, holder: &'static str) -> Result<(), String> {
+    let remaining = {
+        let mut holders = state.holders.lock().map_err(|e| e.to_string())?;
+        holders.remove(holder);
+        holders.len()
+    };
+    if remaining == 0 {
+        let mut guard = state.stream.lock().map_err(|e| e.to_string())?;
+        *guard = None; // drops the stream -> stops capture
+        *state.info.lock().map_err(|e| e.to_string())? = None;
+    }
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct MicInfo {
     pub device: String,
     pub input_sample_rate: u32,
@@ -153,6 +223,9 @@ pub struct MicInfo {
 fn flush_chunks(buffer: &mut Vec<i16>, app: &AppHandle) {
     while buffer.len() >= CHUNK_SAMPLES {
         let chunk: Vec<i16> = buffer.drain(..CHUNK_SAMPLES).collect();
+        // Wake word taps the same samples the webview gets. It is a no-op
+        // (one atomic load) unless the user turned the wake word on.
+        crate::wakeword::feed(&chunk);
         let _ = app.emit("mic-pcm-chunk", chunk);
     }
 }

@@ -1,0 +1,9 @@
+{
+  "fp_per_hour": 0.45446821288124917,
+  "recall": 0.96875,
+  "n_pos": 32,
+  "neg_hours": 11.001869565972221,
+  "model": "ei_seraphine_v9.onnx",
+  "threshold": 0.92,
+  "passed": true
+}

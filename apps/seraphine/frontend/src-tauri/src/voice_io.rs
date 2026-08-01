@@ -511,6 +511,9 @@ unsafe extern "C" fn input_callback(
             .drain(..MIC_EMIT_SAMPLES)
             .map(|s| (s.clamp(-1.0, 1.0) * 32_767.0) as i16)
             .collect();
+        // Wake word taps the AEC-cleaned mic too, so it can never hear
+        // Seraphine's own TTS. Non-blocking; a no-op when disarmed.
+        crate::wakeword::feed(&chunk);
         let _ = ctx.app.emit("mic-pcm-chunk", chunk);
     }
     0
