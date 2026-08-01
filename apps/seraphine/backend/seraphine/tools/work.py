@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.cards import text as _esc
 from seraphine.tools.svg_icons import CLIPBOARD
 from seraphine.work.service import WorkProjectService
 
@@ -22,13 +23,13 @@ def _project_card(project: dict[str, Any], subtitle: str = "Projeto de trabalho"
         '<div class="rich-card__header">'
         f'<div class="rich-card__icon rich-card__icon--work">{CLIPBOARD}</div>'
         '<div>'
-        f'<div class="rich-card__title">{name}</div>'
-        f'<div class="rich-card__subtitle">{subtitle}</div>'
+        f'<div class="rich-card__title">{_esc(name)}</div>'
+        f'<div class="rich-card__subtitle">{_esc(subtitle)}</div>'
         '</div></div>'
         '<div class="rich-card__details">'
-        f'<div class="rich-card__detail"><span>Area</span><strong>{area}</strong></div>'
-        f'<div class="rich-card__detail"><span>Prioridade</span><strong>{priority}</strong></div>'
-        f'<div class="rich-card__detail"><span>Prazo</span><strong>{due}</strong></div>'
+        f'<div class="rich-card__detail"><span>Area</span><strong>{_esc(area)}</strong></div>'
+        f'<div class="rich-card__detail"><span>Prioridade</span><strong>{_esc(priority)}</strong></div>'
+        f'<div class="rich-card__detail"><span>Prazo</span><strong>{_esc(due)}</strong></div>'
         '</div></div><!--/card-->'
     )
 

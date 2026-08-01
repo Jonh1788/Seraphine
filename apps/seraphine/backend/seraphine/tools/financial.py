@@ -15,6 +15,7 @@ from typing import Any
 
 from mod_finance.parser import ALL_CATEGORIES
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.cards import text as _esc
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def build_dashboard_html(
         f'    <div class="rich-card__icon rich-card__icon--finance">{WALLET}</div>'
         '    <div>'
         f'      <div class="rich-card__title">Painel Financeiro</div>'
-        f'      <div class="rich-card__subtitle">{month_label} {year}</div>'
+        f'      <div class="rich-card__subtitle">{month_label} {_esc(year)}</div>'
         '    </div>'
         '  </div>'
         # Stats row
@@ -120,7 +121,7 @@ def build_dashboard_html(
             icon = CATEGORY_ICONS.get(cat_name, PIN)
             html += (
                 f'<div class="rich-card__bar-row">'
-                f'  <span class="rich-card__bar-label">{icon} {cat_name}</span>'
+                f'  <span class="rich-card__bar-label">{icon} {_esc(cat_name)}</span>'
                 f'  <div class="rich-card__bar-track">'
                 f'    <div class="rich-card__bar-fill {bar_cls}" style="width:{pct}%"></div>'
                 f'  </div>'
@@ -153,8 +154,8 @@ def build_dashboard_html(
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon {icon_cls}">{icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{e_desc}</div>'
-                f'    <div class="rich-card__item-meta">{date_label} · {e_cat}</div>'
+                f'    <div class="rich-card__item-title">{_esc(e_desc)}</div>'
+                f'    <div class="rich-card__item-meta">{_esc(date_label)} · {_esc(e_cat)}</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value {val_cls}">{sign}{_format_brl(e_amount)}</div>'
                 f'</div>'
@@ -368,9 +369,9 @@ class AddFinancialEntryTool(Tool):
             '  <div class="rich-card__item">'
             f'    <div class="rich-card__item-icon {icon_cls}">{icon}</div>'
             f'    <div class="rich-card__item-body">'
-            f'      <div class="rich-card__item-title">{description}</div>'
+            f'      <div class="rich-card__item-title">{_esc(description)}</div>'
             f'      <div class="rich-card__item-meta">'
-            f'        {type_pt} · {cat} · {date_label}{recurring_note}'
+            f'        {type_pt} · {_esc(cat)} · {_esc(date_label)}{_esc(recurring_note)}'
             f'      </div>'
             f'    </div>'
             f'    <div class="rich-card__item-value {val_cls}">{sign}{_format_brl(amount)}</div>'

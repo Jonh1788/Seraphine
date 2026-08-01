@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import html as _html
 import logging
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.cards import text as _esc
 from seraphine.tools.svg_icons import (
     ALERT_TRIANGLE,
     CHECK_CIRCLE,
@@ -152,7 +152,7 @@ def _build_task_card(
     items_html = ""
     current_group = object()
     for t in tasks:
-        t_title = _html.escape(str(t.get("title") or ""))
+        t_title = _esc(t.get("title") or "")
         t_status = str(t.get("status") or "pending")
         t_id = str(t.get("task_id") or "")
         t_due_date = t.get("due_date")
@@ -163,7 +163,7 @@ def _build_task_card(
         if group and group != current_group:
             current_group = group
             items_html += (
-                f'<div class="task-chat-card__date-group">{group}</div>'
+                f'<div class="task-chat-card__date-group">{_esc(group)}</div>'
             )
 
         # Status icon
@@ -177,16 +177,16 @@ def _build_task_card(
         if t_due_time:
             time_html = (
                 f'<span class="task-chat-card__time">'
-                f'{CLOCK} {_html.escape(str(t_due_time))}'
+                f'{CLOCK} {_esc(t_due_time)}'
                 f'</span>'
             )
 
         items_html += (
             f'<div class="task-chat-card__item">'
             f'  <span class="task-chat-card__toggle"'
-            f'    data-task-id="{_html.escape(t_id)}"'
+            f'    data-task-id="{_esc(t_id)}"'
             f'    data-action="toggle-status"'
-            f'    data-current-status="{_html.escape(t_status)}"'
+            f'    data-current-status="{_esc(t_status)}"'
             f'    data-next-status="{next_status}">'
             f'    {status_icon}'
             f'  </span>'

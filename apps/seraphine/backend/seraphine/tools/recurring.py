@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from seraphine.recurring.service import RecurringService
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.cards import text as _esc
 from seraphine.tools.svg_icons import CALENDAR_DAYS, REPEAT
 
 logger = logging.getLogger(__name__)
@@ -60,21 +61,21 @@ def _build_card_html(
         '  <div class="rich-card__header">'
         f'    <div class="rich-card__icon">{REPEAT}</div>'
         '    <div>'
-        f'      <div class="rich-card__title">{title}</div>'
-        f'      <div class="rich-card__subtitle">{schedule}</div>'
+        f'      <div class="rich-card__title">{_esc(title)}</div>'
+        f'      <div class="rich-card__subtitle">{_esc(schedule)}</div>'
         '    </div>'
         '  </div>'
         '  <div class="rich-card__stats">'
         '    <div class="rich-card__stat">'
         '      <div class="rich-card__stat-label">Frequency</div>'
-        f'      <div class="rich-card__stat-value">{freq_label}</div>'
+        f'      <div class="rich-card__stat-value">{_esc(freq_label)}</div>'
         '    </div>'
     )
     if time:
         html += (
             '    <div class="rich-card__stat">'
             '      <div class="rich-card__stat-label">Time</div>'
-            f'      <div class="rich-card__stat-value">{time}</div>'
+            f'      <div class="rich-card__stat-value">{_esc(time)}</div>'
             '    </div>'
         )
     if frequency == "weekly" and weekday is not None:
@@ -88,7 +89,7 @@ def _build_card_html(
         html += (
             '    <div class="rich-card__stat">'
             '      <div class="rich-card__stat-label">Day of month</div>'
-            f'      <div class="rich-card__stat-value">{day_of_month}</div>'
+            f'      <div class="rich-card__stat-value">{_esc(day_of_month)}</div>'
             '    </div>'
         )
     html += '  </div>'
@@ -96,7 +97,7 @@ def _build_card_html(
     if description:
         html += (
             f'<hr class="rich-card__divider">'
-            f'<div class="rich-card__section">{description}</div>'
+            f'<div class="rich-card__section">{_esc(description)}</div>'
         )
 
     if materialized_today:

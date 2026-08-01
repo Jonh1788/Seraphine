@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import html as _html
 import logging
 from typing import Any
 
 from seraphine.habits.service import HabitService
 from seraphine.tools.base import Tool, ToolResult
+from seraphine.tools.cards import css_color as _css_color
+from seraphine.tools.cards import text as _esc
 from seraphine.tools.svg_icons import (
     CHECK_CIRCLE,
     FLAME,
@@ -50,8 +51,8 @@ def _build_toggle_card(
     best_streak: int,
     completed: bool,
 ) -> str:
-    title = _html.escape(str(habit.get("title") or ""))
-    color = str(habit.get("color") or "#22d3ee")
+    title = _esc(habit.get("title") or "")
+    color = _css_color(habit.get("color") or "")
     icon_key = str(habit.get("icon") or "check")
     icon_svg = HABIT_ICONS.get(icon_key, HABIT_ICONS["check"])
 
@@ -93,8 +94,8 @@ def _build_toggle_card(
 
 
 def _build_create_card(habit: dict[str, Any]) -> str:
-    title = _html.escape(str(habit.get("title") or ""))
-    color = str(habit.get("color") or "#22d3ee")
+    title = _esc(habit.get("title") or "")
+    color = _css_color(habit.get("color") or "")
     icon_key = str(habit.get("icon") or "check")
     icon_svg = HABIT_ICONS.get(icon_key, HABIT_ICONS["check"])
     frequency = str(habit.get("frequency") or "daily")
@@ -119,7 +120,7 @@ def _build_create_card(habit: dict[str, Any]) -> str:
         f'    <div class="rich-card__icon" style="color:{color}">{icon_svg}</div>'
         '    <div>'
         f'      <div class="rich-card__title">{title}</div>'
-        f'      <div class="rich-card__subtitle">{REPEAT} {subtitle}</div>'
+        f'      <div class="rich-card__subtitle">{REPEAT} {_esc(subtitle)}</div>'
         '    </div>'
         '  </div>'
         '</div><!--/card-->'
