@@ -82,6 +82,10 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   // dentro do Tauri com o `whisper_transcribe_pcm` do Mac. No iPhone, portanto,
   // quase nunca. Conectada e ouvindo são dois estados, e a tela agora diz o que
   // sabe de cada um em vez de trocar um pelo outro.
+  // A frase entre aspas também mudou: o handoff dizia "oi Sera", mas o
+  // classificador embarcado (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`,
+  // limiar 0.92) foi treinado em "Ei Seraphine". Ali a string é contrato com o
+  // modelo, não texto livre — quem seguir a frase antiga fala e nada acontece.
   const escutando = useRealtimeStore((s) => s.wakeWordEnabled);
   const conversaRef = useRef<string | undefined>(localStorage.getItem(CONV_KEY) || undefined);
   const fimRef = useRef<HTMLDivElement | null>(null);
@@ -285,7 +289,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
               ? (
                 <p className="ms-chat__presenca">
                   <span className="ms-chat__ponto" aria-hidden="true" />
-                  {escutando ? <>ouvindo &ldquo;oi Sera&rdquo;</> : 'conectada'}
+                  {escutando ? <>ouvindo &ldquo;Ei Seraphine&rdquo;</> : 'conectada'}
                 </p>
               )
               : <Erro>sem conexão</Erro>}

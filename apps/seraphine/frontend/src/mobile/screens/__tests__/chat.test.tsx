@@ -327,6 +327,20 @@ describe('ChatScreen', () => {
       expect(screen.getByText(/ouvindo/)).toBeTruthy();
       expect(screen.queryByText('conectada')).toBeNull();
     });
+
+    /* A frase entre aspas não é texto de UI: é contrato com o classificador
+       embarcado (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`, limiar 0.92),
+       treinado em "Ei Seraphine". Anunciar outra frase ensina o usuário a dizer
+       o que não dispara nada — falha silenciosa, sem erro na tela. Por isso as
+       duas metades: a frase certa aparece E a errada não sobrevive. */
+    it('anuncia a frase em que o modelo foi treinado, não outra', () => {
+      useRealtimeStore.setState({ wakeWordEnabled: true });
+      const { ws } = montar();
+      ws.conexao('connected');
+      const linha = screen.getByText(/ouvindo/i).textContent ?? '';
+      expect(linha).toMatch(/ei seraphine/i);
+      expect(linha).not.toMatch(/oi sera\b/i);
+    });
   });
 });
 
