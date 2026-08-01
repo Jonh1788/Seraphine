@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppRefs } from '../../stores/RefsContext';
@@ -54,12 +54,25 @@ interface Bolha {
   streaming?: boolean;
   tarefas?: CardTarefa[];
   orcamento?: Orcamento;
+  /** HTML de cartão que o backend mandou pronto (`metadata.html_card`). */
+  cartoes?: string[];
   /** Motivo da ferramenta que falhou neste turno. */
   erroFerramenta?: string;
   /** Bolha aberta por um `tool_result` que chegou antes de ela falar: o
    *  próximo turno de texto a adota, para o cartão e a frase ficarem juntos. */
   orfa?: boolean;
 }
+
+/**
+ * O QUE ESTÁ ACONTECENDO AGORA, do envio até o `turn_end`.
+ *
+ * `pensando` é o que a tela pode afirmar quando o fio não diz mais nada;
+ * `aprovacao` é o único caso em que o fio NOMEIA a ferramenta — ver
+ * `rotuloDeFerramenta` e o comentário de `tool_request` no handler.
+ */
+type Trabalho =
+  | { fase: 'pensando' }
+  | { fase: 'aprovacao'; ferramenta: string };
 
 export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   const { wsRef } = useAppRefs();
@@ -73,8 +86,8 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   );
   const [bolhas, setBolhas] = useState<Bolha[]>([]);
   const [falha, setFalha] = useState<string | null>(null);
-  /** Mandou e ainda não voltou NADA daquele turno. Ver `enviarTexto`. */
-  const [aguardando, setAguardando] = useState(false);
+  /** Turno aberto: mandou e o servidor ainda não fechou. Ver `enviarTexto`. */
+  const [trabalho, setTrabalho] = useState<Trabalho | null>(null);
   const [rascunho, setRascunho] = useState('');
   // Restauro do transcrito: só há o que esperar se já existe conversa gravada.
   const [restaurando, setRestaurando] = useState(() => !!localStorage.getItem(CONV_KEY));
@@ -144,7 +157,15 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
 
   useEffect(() => {
     if (!ws) return;
-    return ws.onStatus((s) => setStatus(s));
+    return ws.onStatus((s) => {
+      setStatus(s);
+      // O backend CANCELA o turno quando o socket cai (`ws/routes.py`, ramo
+      // `websocket.disconnect` → `turn_cancel_event.set()`), então não há mais
+      // `turn_end` para esperar. Sem isto a tela ficaria "pensando…" para
+      // sempre ao lado de um cabeçalho dizendo "sem conexão" — duas afirmações
+      // contraditórias, e a mais visível seria a falsa.
+      if (s === 'disconnected') setTrabalho(null);
+    });
   }, [ws]);
 
   useEffect(() => {
@@ -155,12 +176,26 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       // poucos que a tela desenha importam, e cada leitura já vem checada.
       const msg = raw as unknown as Record<string, unknown>;
 
-      // Chegou QUALQUER coisa do servidor sobre este turno: a espera acabou.
-      // (`assistant_opener` também conta — é fala dela.)
-      if (msg.type === 'token' || msg.type === 'tool_result'
-        || msg.type === 'turn_end' || msg.type === 'error'
-        || msg.type === 'assistant_opener') {
-        setAguardando(false);
+      // O TURNO SÓ FECHA NO FIM. `turn_end` é único e sai depois de TUDO
+      // (`conversation/engine.py:1430`): entre a primeira ferramenta e a
+      // resposta ainda cabem rodadas inteiras de modelo e mais ferramentas.
+      // A versão anterior desligava a espera no primeiro sinal — inclusive num
+      // `tool_result` — e nos 30s medidos no aparelho (clima + aviso na casa) a
+      // tela voltava a parecer ociosa depois dos primeiros 5.
+      if (msg.type === 'turn_end' || msg.type === 'turn_cancelled' || msg.type === 'error') {
+        setTrabalho(null);
+      }
+
+      // O ÚNICO QUADRO DO FIO QUE NOMEIA A FERRAMENTA. E ele não é "está
+      // rodando": o engine só o emite para ferramenta com
+      // `requires_confirmation` e fica parado esperando o sim
+      // (`engine.py:1216`, `APPROVAL_TIMEOUT_SECONDS = 300`). O telefone não
+      // tem painel de aprovação — quem tem é o desktop (`tools/ApprovalPanel`)
+      // —, então dizer "criando o evento…" seria descrever um trabalho que não
+      // começou. A tela diz o que é: parado, esperando aprovação.
+      if (msg.type === 'tool_request') {
+        setTrabalho({ fase: 'aprovacao', ferramenta: rotuloDeFerramenta(String(msg.tool ?? '')) });
+        return;
       }
 
       if (msg.type === 'token') {
@@ -214,6 +249,11 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       }
 
       if (msg.type === 'tool_result') {
+        // A ferramenta acabou; o TURNO não. Volta ao estado genérico em vez de
+        // desligar a espera (e em vez de abrir uma espera nova onde não havia:
+        // um `tool_result` de um turno que a tela não abriu — proativo, por
+        // exemplo — não deve desenhar espera nenhuma).
+        setTrabalho((t) => (t ? { fase: 'pensando' } : t));
         if (!msg.ok) {
           // Ferramenta que falha calada é ação que o usuário acha que aconteceu.
           const motivo = String(msg.error ?? '').trim() || 'a ferramenta não respondeu';
@@ -224,11 +264,20 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
         if (!meta) return;
         const tarefas = tarefasDe(meta.task);
         const orcamento = orcamentoDe(meta.dashboard_data);
-        if (!tarefas.length && !orcamento) return;
+        // O CARTÃO PRONTO SÓ ENTRA QUANDO NÃO HÁ DADO ESTRUTURADO. `task` e
+        // `dashboard_data` já viram cartão DESTA tela, e o backend manda os dois
+        // no mesmo `tool_result` (`tools/financial.py:236`): desenhar o HTML
+        // junto seria a mesma informação duas vezes, uma delas sem o botão de
+        // concluir. Mesma regra do desktop (`chat/ChatView.tsx:779`).
+        const cartao = !tarefas.length && !orcamento
+          ? cartaoDe(meta.html_card)
+          : null;
+        if (!tarefas.length && !orcamento && !cartao) return;
         setBolhas((prev) => anexar(prev, (b) => ({
           ...b,
           tarefas: tarefas.length ? [...(b.tarefas ?? []), ...tarefas] : b.tarefas,
           orcamento: orcamento ?? b.orcamento,
+          cartoes: cartao ? [...(b.cartoes ?? []), cartao] : b.cartoes,
         })));
       }
     });
@@ -255,7 +304,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
     if (!texto || !ws) return false;
     setBolhas((prev) => [...prev, { id: `voce-${prev.length}-${Date.now()}`, autor: 'voce', texto }]);
     setFalha(null);
-    // ENTRE O ENVIO E O PRIMEIRO TOKEN A TELA FICAVA IDÊNTICA A OCIOSA.
+    // ENTRE O ENVIO E O FIM DO TURNO A TELA FICAVA IDÊNTICA A OCIOSA.
     // Um turno que roda ferramentas leva DEZENAS de segundos (medido no
     // aparelho: ~30s para clima + aviso na casa), e nesse intervalo não há
     // bolha dela, nem cursor, nem nada. Quem está do outro lado conclui que a
@@ -263,7 +312,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
     // ficou com quatro falas do usuário seguidas, que pareciam turnos mortos e
     // não eram: a resposta veio, junta, no fim. Nenhum estado de bolha cobre
     // isto, porque a bolha dela só nasce com o primeiro token.
-    setAguardando(true);
+    setTrabalho({ fase: 'pensando' });
     ws.send({
       type: 'user_message',
       conversation_id: conversaRef.current,
@@ -288,6 +337,14 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   // nasceu e `desistiu` cobre o que nunca nasceu. Por isso tocar numa sugestão
   // nunca cai no `return false` mudo do `enviarTexto`.
   const vazio = !carregando && !bolhas.length && !falha && !desistiu && !falhaHistorico;
+
+  // ENQUANTO ELA ESCREVE, O CURSOR JÁ DIZ QUE ELA ESTÁ FALANDO: um "pensando…"
+  // logo abaixo do texto que aparece seria uma segunda voz repetindo a
+  // primeira. A exceção é a aprovação, que não é "ela está escrevendo" — é o
+  // turno PARADO à espera de um sim, e isso precisa ser dito mesmo com texto na
+  // tela (ela costuma dizer "deixa comigo!" e só então pedir a ferramenta).
+  const escrevendo = bolhas.some((b) => b.streaming);
+  const mostraTrabalho = !escrevendo || trabalho?.fase === 'aprovacao';
 
   return (
     <div className={`ms-chat${onBack ? ' ms-chat--empurrada' : ''}`}>
@@ -373,6 +430,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
           // streaming, vazio é espera; fechado, vazio é falha, e ela é dita.
           const mudo = !texto
             && !(b.tarefas ?? []).length
+            && !(b.cartoes ?? []).length
             && !b.orcamento
             && !b.erroFerramenta
             && !b.streaming;
@@ -400,6 +458,7 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
                       : 'não veio resposta desta vez — pergunte de novo.'}
                   </p>
                 )}
+                {(b.cartoes ?? []).map((html, i) => <CartaoRico key={i} html={html} />)}
                 {(b.tarefas ?? []).map((t) => <CardDeTarefa key={t.id} tarefa={t} />)}
                 {b.orcamento && <BarraDeOrcamento orcamento={b.orcamento} />}
                 {b.erroFerramenta && <Erro>Uma ação falhou: {b.erroFerramenta}.</Erro>}
@@ -408,15 +467,19 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
           );
         })}
 
-        {/* A ESPERA, desenhada. Não é bolha de verdade — não tem id nem texto e
-            some no primeiro sinal do turno —, mas ocupa o lugar dela para a
+        {/* O TURNO EM ANDAMENTO, desenhado. Não é bolha de verdade — não tem id
+            nem texto e some no `turn_end` —, mas ocupa o lugar dela para a
             conversa nunca parecer parada. Sem isto, mandar e esperar 30s é
             visualmente idêntico a não ter mandado nada. */}
-        {aguardando && (
+        {trabalho && mostraTrabalho && (
           <div className="ms-chat-linha ms-chat-linha--sera">
             <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
             <div className="ms-chat-bolha ms-chat-bolha--sera">
-              <p className="ms-chat-bolha__pensando" role="status">pensando…</p>
+              <p className="ms-chat-bolha__pensando" role="status">
+                {trabalho.fase === 'aprovacao'
+                  ? `esperando sua aprovação para ${trabalho.ferramenta}…`
+                  : 'pensando…'}
+              </p>
             </div>
           </div>
         )}
@@ -511,6 +574,102 @@ function CardDeTarefa({ tarefa }: { tarefa: CardTarefa }) {
   );
 }
 
+/* ── cartão que o backend manda pronto ────────────────────────────────────
+   O cartão de clima do desktop NÃO é componente React: é HTML cru montado em
+   `seraphine/tools/weather.py` (`build_weather_html`) e entregue em
+   `metadata.html_card`, com as classes `rich-card*`. O mecanismo é geral —
+   clima, finanças, saúde, água, hábitos, tarefas, trabalho e recorrentes usam o
+   mesmo campo —, e o telefone descartava tudo.
+
+   RENDERIZAR ISSO NÃO CONTRADIZ O `rehype-raw` RECUSADO NA BOLHA. A distinção é
+   a ORIGEM, e não o formato: o markdown da bolha vem do MODELO, entrada que o
+   conteúdo lido (e-mail, página, mensagem de terceiro) pode induzir; o
+   `html_card` é montado pelo NOSSO backend, a partir da resposta de uma API.
+   São confianças diferentes, e por isso os dois caminhos são separados: a bolha
+   segue sem `rehype-raw`, este bloco não passa por markdown nenhum.
+
+   O CANAL TEM CONTRATO, E O CONTRATO JÁ ESTÁ FURADO HOJE. `build_weather_html`
+   interpola `city` por f-string, sem escape (`weather.py:316`), e `city` vem dos
+   ARGS DO MODELO; `format_weather_card` é pior — interpola `city`,
+   `current_description` e cada `forecast[].date`/`description`, todos escritos
+   pelo modelo a partir do que ele leu na web. Um cartão "nosso" pode portanto
+   carregar HTML do modelo lá dentro, e sem uma peneira a porta que a bolha
+   fechou reabriria pelos fundos, vestida de cartão. Daí a lista branca abaixo. */
+
+/** Tags que um cartão pode conter. Fora da lista, o elemento sai INTEIRO —
+ *  com a subárvore, que é o que se quer para `<script>`. */
+const CARTAO_TAGS = new Set([
+  'DIV', 'SPAN', 'P', 'B', 'STRONG', 'EM', 'SMALL', 'UL', 'OL', 'LI', 'HR', 'BR',
+  // Os ícones do backend são SVG inline (`tools/svg_icons.py`): a casa não usa
+  // emoji, então uma lista que só pensasse em `div` apagaria todos eles.
+  'SVG', 'G', 'PATH', 'POLYLINE', 'POLYGON', 'CIRCLE', 'LINE', 'RECT', 'ELLIPSE',
+]);
+
+/** Atributos de geometria/traço que os ícones precisam. Comparados em
+ *  minúsculas porque o parser de HTML normaliza `viewBox` e amigos. */
+const CARTAO_ATTRS_SVG = new Set([
+  'xmlns', 'width', 'height', 'viewbox', 'fill', 'stroke', 'stroke-width',
+  'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'd', 'points',
+  'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'transform',
+]);
+
+/**
+ * Peneira o HTML do cartão contra a lista branca.
+ *
+ * `class` é o único atributo geral que sobrevive: é o que liga o cartão à folha
+ * (`rich-card*`). `style` NÃO sobrevive — é vetor de injeção por si só
+ * (`position:fixed;inset:0` vira sobreposição de tela cheia sobre a conversa), e
+ * o único `style` que o backend emite é um `flex:1` que a folha do celular
+ * devolve por seletor. Sem `href`/`src` não há navegação nem requisição; sem
+ * `on*` não há execução.
+ */
+function sanearCartao(bruto: string): string {
+  if (typeof DOMParser === 'undefined') return '';
+  // `text/html` num documento inerte: o parser não executa nada e não busca
+  // nada, mesmo antes da peneira.
+  const doc = new DOMParser().parseFromString(`<div id="raiz">${bruto}</div>`, 'text/html');
+  const raiz = doc.getElementById('raiz');
+  if (!raiz) return '';
+  podar(raiz, false);
+  return raiz.innerHTML.trim();
+}
+
+function podar(no: Element, dentroDeSvg: boolean): void {
+  for (const filho of Array.from(no.childNodes)) {
+    // 3 = texto (passa), 1 = elemento (é examinado). Comentário e o resto saem:
+    // um `<!--card-->` solto no meio não desenha nada e o `limpar()` do texto
+    // já assume que eles não chegam à tela.
+    if (filho.nodeType === 3) continue;
+    if (filho.nodeType !== 1) { no.removeChild(filho); continue; }
+    const el = filho as Element;
+    const tag = el.tagName.toUpperCase();
+    if (!CARTAO_TAGS.has(tag)) { no.removeChild(el); continue; }
+    const svg = dentroDeSvg || tag === 'SVG';
+    for (const attr of Array.from(el.attributes)) {
+      const nome = attr.name.toLowerCase();
+      if (nome === 'class') continue;
+      if (svg && CARTAO_ATTRS_SVG.has(nome)) continue;
+      el.removeAttribute(attr.name);
+    }
+    podar(el, svg);
+  }
+}
+
+function CartaoRico({ html }: { html: string }) {
+  const limpo = useMemo(() => sanearCartao(html), [html]);
+  // Cartão que a peneira esvaziou não some calado: sumir é o modo de falha que
+  // esta onda inteira existe para não repetir. Ele diz que chegou e não deu.
+  if (!limpo) return <Vazio>Não consegui desenhar o cartão que veio com esta resposta.</Vazio>;
+  return (
+    <div
+      className="ms-chat-cartao"
+      // eslint-disable-next-line react/no-danger -- ver o bloco acima: origem
+      // é o nosso backend e o conteúdo passou pela lista branca de `sanearCartao`.
+      dangerouslySetInnerHTML={{ __html: limpo }}
+    />
+  );
+}
+
 function BarraDeOrcamento({ orcamento }: { orcamento: Orcamento }) {
   const { usado, total, livre } = orcamento;
   const pct = total > 0 ? Math.max(0, Math.min(100, Math.round((usado / total) * 100))) : 0;
@@ -564,11 +723,13 @@ function anexar(bolhas: Bolha[], mut: (b: Bolha) => Bolha): Bolha[] {
  *  do usuário, o resto (hoje `assistant`) é fala dela. */
 function deTurno(t: ConversationTurn): Bolha {
   const tarefas = tarefasGravadas(t.content);
+  const cartoes = cartoesGravados(t.content);
   return {
     id: t.id,
     autor: t.role === 'user' ? 'voce' : 'sera',
     texto: t.content,
     ...(tarefas.length ? { tarefas } : {}),
+    ...(cartoes.length ? { cartoes } : {}),
   };
 }
 
@@ -588,6 +749,67 @@ function tarefasGravadas(conteudo: string): CardTarefa[] {
     }
   }
   return achadas;
+}
+
+/** O engine grava o `html_card` no próprio texto do turno
+ *  (`conversation/engine.py:1300`), entre `<!--card-->` e `<!--/card-->`,
+ *  justamente para o transcrito não perder o cartão. Sem esta leitura o
+ *  `limpar()` apagaria o bloco e a conversa restaurada voltaria só com o texto —
+ *  o mesmo buraco que `tarefasGravadas` já tapava do lado das tarefas. */
+const CARD_RE = /<!--card-->([\s\S]*?)<!--\/card-->/g;
+
+function cartoesGravados(conteudo: string): string[] {
+  const achados: string[] = [];
+  for (const m of conteudo.matchAll(CARD_RE)) {
+    const html = m[1].trim();
+    if (html) achados.push(html);
+  }
+  return achados;
+}
+
+/** Um `metadata.html_card` só vale se for string com conteúdo. */
+function cartaoDe(meta: unknown): string | null {
+  if (typeof meta !== 'string') return null;
+  const html = meta.trim();
+  return html ? html : null;
+}
+
+/**
+ * Nome de ferramenta → frase em português.
+ *
+ * SÓ AS QUE PEDEM CONFIRMAÇÃO ESTÃO AQUI, e não por preguiça: `tool_request` é
+ * o único quadro do fio que traz o nome, e o engine só o emite quando
+ * `requires_confirmation` é verdadeiro. As ferramentas que fazem o turno demorar
+ * — `weather_forecast`, `home_announce`, `web_search` — têm `False`, e o
+ * `tool_result` delas não carrega campo `tool` nenhum
+ * (`engine.py:476`, `ToolResultEvent`). Nomear "consultando o tempo…" hoje seria
+ * inventar estado que o fio não entrega; registrado no relatório.
+ *
+ * Nome desconhecido cai no próprio nome do fio, e não numa frase genérica:
+ * "esperando sua aprovação para ferramenta_nova" é feio e verdadeiro, e diz à
+ * pessoa exatamente o que perguntar.
+ */
+const ROTULO_FERRAMENTA: Record<string, string> = {
+  calendar_create_event: 'criar um evento na agenda',
+  calendar_update_event: 'mudar um evento da agenda',
+  calendar_delete_event: 'apagar um evento da agenda',
+  calendar_bulk_delete_events: 'apagar vários eventos da agenda',
+  gmail_send_message: 'enviar um e-mail',
+  whatsapp_send_message: 'mandar uma mensagem no WhatsApp',
+  whatsapp_send_voice: 'mandar um áudio no WhatsApp',
+  wise_send_pix: 'fazer um Pix',
+  delete_note: 'apagar uma nota',
+  write_file: 'escrever um arquivo',
+  edit_file: 'editar um arquivo',
+  run_shell: 'rodar um comando no computador',
+  osascript: 'controlar o Mac',
+  shortcuts_run: 'rodar um atalho do Mac',
+  browser_submit: 'enviar um formulário no navegador',
+  browser_confirm_payment: 'confirmar um pagamento no navegador',
+};
+
+function rotuloDeFerramenta(nome: string): string {
+  return ROTULO_FERRAMENTA[nome] ?? (nome || 'uma ferramenta');
 }
 
 /** `metadata.task` chega como uma tarefa só ou como `{ tasks: [...] }`. */

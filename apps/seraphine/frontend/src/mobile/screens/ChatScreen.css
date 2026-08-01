@@ -219,6 +219,45 @@ html[data-shell='phone'] .ms-chat-bolha--vindo .ms-chat-bolha__texto > :last-chi
   animation: statusBlink 1s ease-in-out infinite;
 }
 
+/* ── cartão que o backend manda pronto ──
+   O HTML vem inteiro do backend (`metadata.html_card`) com as classes
+   `rich-card*`, que vivem em `src/styles.css` — a folha do desktop, carregada
+   GLOBALMENTE pelo `main.tsx:6` e portanto já valendo aqui dentro.
+
+   REUSO, e não cópia, e a razão não é economia: aqueles nomes de classe são
+   CONTRATO DO BACKEND. `weather.py` escreve `rich-card__item-title` literalmente
+   numa f-string, e o mesmo campo serve clima, finanças, saúde, água, hábitos,
+   tarefas, trabalho e recorrentes. Reescrevê-los numa folha do celular seria ter
+   a MESMA definição em dois arquivos, para sete famílias de cartão, com o
+   backend livre para mudar o HTML de qualquer uma delas — a divergência que esta
+   onda passou o tempo consertando, multiplicada.
+
+   O que é do CELULAR fica aqui, escopado em `.ms-chat-cartao`, e só o que muda
+   de verdade: largura, toque, e o `style` que o saneador tira. */
+html[data-shell='phone'] .ms-chat-cartao { margin-top: 10px; }
+/* A folha do desktop trava o cartão em 480px e lhe dá margem vertical própria.
+   Aqui quem manda na largura é a bolha (390px menos avatar e recuos) e quem
+   manda no respiro é o `margin-top` acima. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card { max-width: none; margin: 0; }
+/* O cabeçalho do cartão cresce pelo `style="flex:1"` do div do meio, e `style`
+   NÃO passa pelo saneador (`position:fixed;inset:0` viraria uma sobreposição de
+   tela cheia sobre a conversa). O div do meio é o único SEM classe no cabeçalho
+   — o ícone e o valor grande têm as suas —, e é isso que o seletor usa. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__header > div:not([class]) {
+  flex: 1;
+  min-width: 0;
+}
+/* Não há ponteiro no telefone: o `:hover` do desktop GRUDA depois do toque no
+   WKWebView e deixa um item aceso sem motivo. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__item:hover { background: none; }
+/* Em 390px o recuo lateral do item do desktop come a largura da linha de
+   previsão; o cartão já tem o padding dele. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__item { padding: 7px 0; }
+html[data-shell='phone'] .ms-chat-cartao .rich-card__details { gap: 6px 12px; }
+/* Nenhum cartão do backend tem elemento clicável — não há alvo de 44pt a
+   cumprir aqui. Se um dia tiver, ele nasce ignorando o toque: `a` e `button`
+   não estão na lista branca do saneador e são removidos antes de chegar à tela. */
+
 /* ── cartão de tarefa inline ── */
 html[data-shell='phone'] .ms-chat-card {
   margin-top: 10px;
