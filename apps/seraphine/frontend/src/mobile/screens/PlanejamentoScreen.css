@@ -1,0 +1,287 @@
+/* Tela PLANEJAMENTO do handoff v3 (frame "Planejamento").
+
+   Medidas e cores verbatim do frame: cabeçalho 12/20 com "Seu dia" em 22/700 e
+   a data em 12px dim; coluna de hora de 38px em 11px tabular; bloco com
+   border-left de 3px na cor da categoria, raio 11 e padding 11/13; título 14/600
+   e meta 11px dim; bloco de foco em accent-soft com borda TRACEJADA accent;
+   rótulo "A ENCAIXAR" em 11/700 com tracking .06em em faint; fichas de 13px
+   sobre surface com borda border-strong e raio 12; cartão de sugestão em
+   accent-soft com borda rgba(154,147,255,.22) e raio 13; CTA full-width em
+   accent com raio 14 e texto 15/700.
+
+   As cores das categorias são as mesmas do desktop (`planning/PlanningView.tsx`,
+   BLOCK_COLORS) — o frame desenha #42a5f5 (reunião), #ab47bc (exercício),
+   #26a69a (pausa) e faint (livre), que é exatamente aquela tabela.
+
+   DUAS COISAS DO FRAME NÃO VIRARAM CSS, de propósito:
+
+   · O HANDLE DE 6 PONTOS das fichas. Ele promete um gesto de arrastar; esta
+     tela não arrasta (ver o cabeçalho do .tsx: não há rota que agende uma
+     tarefa, e arrastar em iOS disputa com a rolagem). Um punho de arrasto sobre
+     um controle que só aceita toque é uma promessa falsa. No lugar dele, o
+     relógio — que é o que a ficha faz: escolher um horário.
+
+   · AS ALTURAS DESENHADAS DOS CONTROLES. O frame dá 29px ao "Refazer" e ~33px
+     às fichas; a HIG pede 44. Aqui os controles crescem até 44 (o padding
+     desenhado fica, o mínimo vence). O ‹ é a exceção: o alvo dele vem da regra
+     compartilhada do shell, presa ao rótulo "Voltar", que cresce por fora sem
+     mover o glifo.
+
+   Todas as classes e todos os keyframes levam o prefixo ms-plan-: nome de
+   keyframe é global e já houve colisão nesta base. */
+
+html[data-shell='phone'] .ms-plan {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* ── cabeçalho ── */
+html[data-shell='phone'] .ms-plan-topo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 20px 10px;
+}
+/* A caixa desenhada tem 34px; os 44 de alvo vêm da regra compartilhada do
+   shell, presa ao rótulo "Voltar". */
+html[data-shell='phone'] .ms-plan-voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0);
+  font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-plan-titulos { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-plan-titulo {
+  margin: 0;
+  font-size: 22px; font-weight: 700; letter-spacing: -.02em;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-plan-data {
+  margin: 0;
+  font-size: 12px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-plan-refazer {
+  flex: none; min-height: 44px;
+  border: none; border-radius: 10px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  color: var(--accent, #9a93ff);
+  font: inherit; font-size: 12px; font-weight: 700;
+  padding: 8px 13px; cursor: pointer;
+}
+html[data-shell='phone'] .ms-plan-refazer:disabled { opacity: .45; cursor: default; }
+
+/* ── corpo ── */
+html[data-shell='phone'] .ms-plan-corpo {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 6px 20px 10px;
+}
+
+/* ── linha do tempo ── */
+html[data-shell='phone'] .ms-plan-linhas {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 9px;
+}
+html[data-shell='phone'] .ms-plan-linha {
+  display: flex; gap: 11px;
+}
+html[data-shell='phone'] .ms-plan-hora {
+  width: 38px; flex: none;
+  padding-top: 11px;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-plan-linha--focus .ms-plan-hora {
+  color: var(--accent, #9a93ff); font-weight: 700;
+}
+html[data-shell='phone'] .ms-plan-bloco {
+  flex: 1; min-width: 0;
+  border-left: 3px solid var(--text-faint, #5f5e6b);
+  border-radius: 11px;
+  padding: 11px 13px;
+  background: rgba(255, 255, 255, .04);
+}
+html[data-shell='phone'] .ms-plan-bloco--meeting {
+  border-left-color: #42a5f5;
+  background: rgba(66, 165, 245, .1);
+}
+html[data-shell='phone'] .ms-plan-bloco--exercise {
+  border-left-color: #ab47bc;
+  background: rgba(171, 71, 188, .1);
+}
+html[data-shell='phone'] .ms-plan-bloco--break {
+  border-left-color: #26a69a;
+  background: rgba(38, 166, 154, .1);
+}
+html[data-shell='phone'] .ms-plan-bloco--admin {
+  border-left-color: #78909c;
+  background: rgba(120, 144, 156, .1);
+}
+/* O foco não tem borda esquerda colorida: é tracejado accent em volta, como no
+   frame — é o que o distingue de um compromisso já marcado. */
+html[data-shell='phone'] .ms-plan-bloco--focus {
+  border: 1px dashed var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+}
+html[data-shell='phone'] .ms-plan-bloco--free .ms-plan-bloco__titulo {
+  color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-plan-eyebrow {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-plan-ia {
+  display: inline-flex; color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-plan-bloco__titulo {
+  font-size: 14px; font-weight: 600; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-plan-bloco--focus .ms-plan-bloco__titulo { margin-top: 5px; }
+html[data-shell='phone'] .ms-plan-bloco__meta {
+  margin-top: 2px;
+  font-size: 11px; line-height: 1.4; color: var(--text-dim, #9594a0);
+}
+
+/* ── a encaixar ── */
+html[data-shell='phone'] .ms-plan-encaixar {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 4px;
+}
+html[data-shell='phone'] .ms-plan-rotulo {
+  margin: 0; padding: 0 2px;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-plan-fichas {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+html[data-shell='phone'] .ms-plan-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 44px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  border-radius: 12px;
+  padding: 9px 13px;
+  font: inherit; font-size: 13px; color: var(--text, #ececef);
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-plan-chip__icone { color: var(--text-faint, #5f5e6b); display: inline-flex; }
+html[data-shell='phone'] .ms-plan-chip--escolhida {
+  border-color: var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+}
+/* Encaixada não é "apagada": ela ganhou hora, e a hora é o que ela mostra. */
+html[data-shell='phone'] .ms-plan-chip--encaixada { cursor: default; opacity: .8; }
+html[data-shell='phone'] .ms-plan-chip__hora {
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-plan-seletor {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+}
+html[data-shell='phone'] .ms-plan-seletor__rotulo {
+  font-size: 12px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-plan-slot {
+  min-height: 44px;
+  border: 1px solid var(--accent, #9a93ff);
+  border-radius: 12px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  color: var(--accent, #9a93ff);
+  font: inherit; font-size: 13px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 9px 13px; cursor: pointer;
+}
+html[data-shell='phone'] .ms-plan-slot--cancelar {
+  border-color: var(--border-strong, rgba(255, 255, 255, .12));
+  background: none;
+  color: var(--text-dim, #9594a0);
+  font-weight: 600;
+}
+
+/* ── cartão de sugestão ── */
+html[data-shell='phone'] .ms-plan-sug {
+  display: flex; gap: 9px; align-items: flex-start;
+  margin-top: 2px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  border: 1px solid rgba(154, 147, 255, .22);
+  border-radius: 13px;
+  padding: 12px 14px;
+}
+html[data-shell='phone'] .ms-plan-sug__marca { flex: none; margin-top: 1px; color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-plan-sug__corpo { min-width: 0; }
+html[data-shell='phone'] .ms-plan-sug__head {
+  display: block;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-plan-sug__texto {
+  margin: 3px 0 0;
+  font-size: 12px; line-height: 1.5; color: var(--text, #ececef);
+}
+
+/* ── rodapé: aceitar ── */
+html[data-shell='phone'] .ms-plan-rodape {
+  flex: none;
+  padding: 6px 20px 30px;
+}
+html[data-shell='phone'] .ms-plan-cta {
+  display: block; width: 100%; min-height: 44px;
+  border: none; border-radius: 14px;
+  background: var(--accent, #9a93ff);
+  color: var(--accent-contrast, #14141a);
+  font: inherit; font-size: 15px; font-weight: 700;
+  padding: 14px; cursor: pointer;
+}
+html[data-shell='phone'] .ms-plan-cta:disabled { cursor: default; }
+html[data-shell='phone'] .ms-plan-cta--aceito {
+  background: rgba(74, 222, 128, .14);
+  color: var(--user, #4ade80);
+}
+html[data-shell='phone'] .ms-plan-cta:not(:disabled):active { transform: translateY(1px); }
+
+/* ── recados, vazio, erro e espera ── */
+html[data-shell='phone'] .ms-plan-recado {
+  margin: 0;
+  font-size: 12px; line-height: 1.45; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-plan-recado--erro { color: var(--danger, #ef6b6b); font-weight: 600; }
+html[data-shell='phone'] .ms-plan-recado--ok { color: var(--user, #4ade80); font-weight: 600; }
+html[data-shell='phone'] .ms-plan-vazio {
+  margin: 0;
+  font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-plan-erro {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0;
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-plan-erro::before {
+  content: '!'; flex: none;
+  width: 15px; height: 15px; margin-top: 1px;
+  border-radius: 50%; border: 1.2px solid currentColor;
+  font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-plan-skel {
+  display: flex; flex-direction: column; gap: 9px;
+}
+html[data-shell='phone'] .ms-plan-skel span {
+  height: 58px; border-radius: 11px;
+  margin-left: 49px;
+  background: rgba(255, 255, 255, .06);
+  animation: ms-plan-pisca 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-plan-skel span:nth-child(2) { animation-delay: .2s; }
+html[data-shell='phone'] .ms-plan-skel span:nth-child(3) { animation-delay: .4s; }
+html[data-shell='phone'] .ms-plan-skel span:nth-child(4) { animation-delay: .6s; }
+
+@keyframes ms-plan-pisca {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-plan-skel span { animation: none; }
+}
