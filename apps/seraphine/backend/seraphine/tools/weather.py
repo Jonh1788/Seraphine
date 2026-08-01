@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import ssl
 from datetime import date, datetime, timedelta
+from html import escape as _html_escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -269,6 +270,28 @@ def _max_rain_chance(hourly: list[dict[str, Any]]) -> int:
     return max(chances) if chances else 0
 
 
+# ---------------------------------------------------------------------------
+# Escaping
+#
+# The card's markup is ours; its content is not. `city` arrives in the model's
+# own tool arguments and every textual field below it arrives from wttr.in --
+# and the model fills those arguments with whatever it just read, which
+# routinely includes web pages and e-mail. Third-party text, all of it.
+#
+# The card is handed to the frontend as `metadata.html_card` and injected into
+# the chat as raw HTML (the desktop renders it through rehype-raw with no
+# sanitizer), so an unescaped interpolation here is a live XSS sink on every
+# client at once. Escaped here rather than in each frontend because this is the
+# one point where that text becomes HTML: every renderer downstream inherits
+# the fix instead of having to rediscover the hole.
+# ---------------------------------------------------------------------------
+
+
+def _esc(value: Any) -> str:
+    """Render an untrusted value as card *text* rather than card markup."""
+    return _html_escape(str(value), quote=True)
+
+
 def build_weather_html(
     city: str,
     data: dict[str, Any],
@@ -313,22 +336,24 @@ def build_weather_html(
         '  <div class="rich-card__header">'
         '    <div class="rich-card__icon rich-card__icon--weather">' + icon + '</div>'
         '    <div style="flex:1">'
-        f'      <div class="rich-card__title">{city}</div>'
-        f'      <div class="rich-card__subtitle">{desc_pt} · Sensação {feels_like}°C</div>'
+        # `temp_c` and `feels_like` went through int() above, so they cannot
+        # carry markup; everything else here is third-party text.
+        f'      <div class="rich-card__title">{_esc(city)}</div>'
+        f'      <div class="rich-card__subtitle">{_esc(desc_pt)} · Sensação {feels_like}°C</div>'
         '    </div>'
         f'    <div class="rich-card__big-value {temp_cls}">{temp_c}°</div>'
         '  </div>'
         # Details row
         '  <div class="rich-card__details">'
-        f'    <span class="rich-card__detail">{WIND} {wind} km/h</span>'
-        f'    <span class="rich-card__detail">{DROPLETS} {humidity}%</span>'
-        f'    <span class="rich-card__detail">{UMBRELLA} {precip}mm</span>'
-        f'    <span class="rich-card__detail">{THERMOMETER} UV {uv}</span>'
+        f'    <span class="rich-card__detail">{WIND} {_esc(wind)} km/h</span>'
+        f'    <span class="rich-card__detail">{DROPLETS} {_esc(humidity)}%</span>'
+        f'    <span class="rich-card__detail">{UMBRELLA} {_esc(precip)}mm</span>'
+        f'    <span class="rich-card__detail">{THERMOMETER} UV {_esc(uv)}</span>'
     )
     if sunrise and sunset:
         html += (
-            f'    <span class="rich-card__detail">{SUNRISE} {sunrise}</span>'
-            f'    <span class="rich-card__detail">{SUNSET} {sunset}</span>'
+            f'    <span class="rich-card__detail">{SUNRISE} {_esc(sunrise)}</span>'
+            f'    <span class="rich-card__detail">{SUNSET} {_esc(sunset)}</span>'
         )
     html += '  </div>'
 
@@ -353,7 +378,7 @@ def build_weather_html(
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{fc_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{date_label}</div>'
+                f'    <div class="rich-card__item-title">{_esc(date_label)}</div>'
                 f'    <div class="rich-card__item-meta">{CLOUD_RAIN} {rain_pct}%</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value">'
@@ -371,7 +396,7 @@ def build_weather_html(
         rel = _relative_label(parsed, today) if parsed is not None else ""
         heading = rel.capitalize() if rel else _date_label(hourly_date)
         html += '<hr class="rich-card__divider">'
-        html += f'<div class="rich-card__section">{heading} por hora</div>'
+        html += f'<div class="rich-card__section">{_esc(heading)} por hora</div>'
         for h in forecasts[0]["hourly"]:
             htime = h.get("time", "0").zfill(4)
             htime_fmt = f"{htime[:len(htime)-2]}:{htime[-2:]}"
@@ -384,8 +409,8 @@ def build_weather_html(
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{h_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{htime_fmt}</div>'
-                f'    <div class="rich-card__item-meta">{UMBRELLA} {h_rain}%</div>'
+                f'    <div class="rich-card__item-title">{_esc(htime_fmt)}</div>'
+                f'    <div class="rich-card__item-meta">{UMBRELLA} {_esc(h_rain)}%</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value {h_cls}">{h_temp}°C</div>'
                 f'</div>'
@@ -644,11 +669,24 @@ class FormatWeatherCardTool(Tool):
         icon = _get_icon(current_desc) if current_desc else THERMOMETER
         desc_pt = _get_pt(current_desc) if current_desc else ""
 
-        # Header with big temp
+        # Header with big temp.
+        #
+        # Every value in this tool comes from the model's arguments, so none
+        # of it is trusted -- including the ones the schema declares as
+        # integers, which nothing enforces. `_temp_class` compares against an
+        # int, so guard it the way the forecast rows below already do rather
+        # than let a non-numeric temp raise before it can be escaped.
         temp_html = ""
         if current_temp is not None:
-            temp_cls = _temp_class(current_temp)
-            temp_html = f'<div class="rich-card__big-value {temp_cls}">{current_temp}°</div>'
+            temp_cls = (
+                _temp_class(current_temp)
+                if isinstance(current_temp, (int, float))
+                else "clr-dim"
+            )
+            temp_html = (
+                f'<div class="rich-card__big-value {temp_cls}">'
+                f'{_esc(current_temp)}°</div>'
+            )
 
         subtitle_parts = []
         if desc_pt:
@@ -658,9 +696,13 @@ class FormatWeatherCardTool(Tool):
         details_html = ""
         detail_items = []
         if wind:
-            detail_items.append(f'<span class="rich-card__detail">{WIND} {wind} km/h</span>')
+            detail_items.append(
+                f'<span class="rich-card__detail">{WIND} {_esc(wind)} km/h</span>'
+            )
         if humidity:
-            detail_items.append(f'<span class="rich-card__detail">{DROPLETS} {humidity}%</span>')
+            detail_items.append(
+                f'<span class="rich-card__detail">{DROPLETS} {_esc(humidity)}%</span>'
+            )
         if detail_items:
             details_html = '<div class="rich-card__details">' + "".join(detail_items) + '</div>'
 
@@ -671,7 +713,8 @@ class FormatWeatherCardTool(Tool):
             mn = day.get("min_temp", "?")
             mx = day.get("max_temp", "?")
             rain = day.get("rain_chance")
-            rain_meta = f"{UMBRELLA} {rain}%" if rain is not None else ""
+            # UMBRELLA is our own SVG and must stay markup; `rain` must not.
+            rain_meta = f"{UMBRELLA} {_esc(rain)}%" if rain is not None else ""
             min_cls = _temp_class(mn) if isinstance(mn, int) else "clr-dim"
             max_cls = _temp_class(mx) if isinstance(mx, int) else "clr-dim"
 
@@ -679,13 +722,13 @@ class FormatWeatherCardTool(Tool):
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{d_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{day.get("date", "?")}</div>'
+                f'    <div class="rich-card__item-title">{_esc(day.get("date", "?"))}</div>'
                 f'    <div class="rich-card__item-meta">{rain_meta}</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value">'
-                f'    <span class="{min_cls}">{mn}°</span>'
+                f'    <span class="{min_cls}">{_esc(mn)}°</span>'
                 f'    <span class="clr-faint"> / </span>'
-                f'    <span class="{max_cls}">{mx}°</span>'
+                f'    <span class="{max_cls}">{_esc(mx)}°</span>'
                 f'  </div>'
                 f'</div>'
             )
@@ -695,8 +738,8 @@ class FormatWeatherCardTool(Tool):
             '  <div class="rich-card__header">'
             f'    <div class="rich-card__icon rich-card__icon--weather">{icon}</div>'
             f'    <div style="flex:1">'
-            f'      <div class="rich-card__title">{city}</div>'
-            f'      <div class="rich-card__subtitle">{" · ".join(subtitle_parts)}</div>'
+            f'      <div class="rich-card__title">{_esc(city)}</div>'
+            f'      <div class="rich-card__subtitle">{_esc(" · ".join(subtitle_parts))}</div>'
             f'    </div>'
             f'    {temp_html}'
             f'  </div>'

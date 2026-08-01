@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from html.parser import HTMLParser
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -11,9 +13,21 @@ import httpx
 import pytest
 
 from seraphine.tools import weather as weather_mod
-from seraphine.tools.svg_icons import CLOUD, CLOUD_RAIN, SUN
+from seraphine.tools.svg_icons import (
+    CLOUD,
+    CLOUD_RAIN,
+    DROPLETS,
+    SUN,
+    SUNRISE,
+    SUNSET,
+    THERMOMETER,
+    UMBRELLA,
+    WIND,
+)
 from seraphine.tools.weather import (
+    FormatWeatherCardTool,
     WeatherForecastTool,
+    _esc,
     _first_desc,
     _get_icon,
     _get_pt,
@@ -531,6 +545,439 @@ class TestRelativeLabel:
     def test_no_label_outside_the_window(self):
         assert _relative_label(date(2026, 4, 15), FAKE_TODAY) == ""
         assert _relative_label(date(2026, 4, 11), FAKE_TODAY) == ""
+
+
+# ---------------------------------------------------------------------------
+# Escaping -- the card's structure is ours, its content is not.
+#
+# `city` comes from the model's own arguments, and every other textual field
+# comes from wttr.in. The model fills those arguments with what it just read,
+# which routinely includes web pages and e-mail -- third-party text. The card
+# is handed to the frontend as `metadata.html_card` and injected into the chat
+# as raw HTML (the desktop renders it through rehype-raw with no sanitizer),
+# so anything interpolated unescaped is a live XSS sink.
+# ---------------------------------------------------------------------------
+
+XSS_SCRIPT = '<script>alert("xss")</script>'
+XSS_EVENT = '<img src=x onerror="alert(1)">'
+
+# Every tag the card builder writes itself: the card's own layout plus the
+# inline SVG icons from svg_icons.py. Anything else in the parsed output came
+# from the data, which means it was never escaped.
+OWN_TAGS = frozenset(
+    {"div", "span", "hr", "svg", "path", "polyline", "circle", "line", "rect"}
+)
+
+
+class _Markup(HTMLParser):
+    """Read the card the way a browser would, not the way a regex would."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tags: list[str] = []
+        self.attrs: list[tuple[str, str | None]] = []
+        self._text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append(tag)
+        self.attrs.extend(attrs)
+
+    def handle_data(self, data: str) -> None:
+        self._text.append(data)
+
+    @property
+    def text(self) -> str:
+        """Visible text, with entities resolved back to their characters."""
+        return "".join(self._text)
+
+
+def parse_card(card_html: str) -> _Markup:
+    parser = _Markup()
+    parser.feed(card_html)
+    parser.close()
+    return parser
+
+
+def assert_structure_is_ours(card_html: str) -> _Markup:
+    """No tag and no event handler in the card that we did not write."""
+    parsed = parse_card(card_html)
+    foreign = sorted(set(parsed.tags) - OWN_TAGS)
+    assert not foreign, f"data was rendered as markup: {foreign}"
+    handlers = sorted({n for n, _ in parsed.attrs if n.lower().startswith("on")})
+    assert not handlers, f"data was rendered as event handlers: {handlers}"
+    return parsed
+
+
+def wttr_with(
+    *,
+    current: dict[str, Any] | None = None,
+    day0: dict[str, Any] | None = None,
+    hour0: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """SAMPLE_WTTR with individual fields replaced."""
+    data = copy.deepcopy(SAMPLE_WTTR)
+    if current:
+        data["current_condition"][0].update(current)
+    if day0:
+        data["weather"][0].update(day0)
+    if hour0:
+        data["weather"][0]["hourly"][0].update(hour0)
+    return data
+
+
+class TestEscHelper:
+    def test_angle_brackets_and_ampersands(self):
+        assert _esc("<b>&</b>") == "&lt;b&gt;&amp;&lt;/b&gt;"
+
+    def test_quotes_are_escaped_too(self):
+        """No untrusted value sits in an attribute today, but the escaper has
+        to be attribute-safe anyway: the next person to write
+        `title="{...}"` must not silently reopen the hole."""
+        assert _esc('a"b') == "a&quot;b"
+        assert _esc("a'b") == "a&#x27;b"
+
+    def test_non_strings_are_accepted(self):
+        assert _esc(25) == "25"
+
+
+class TestWeatherCardEscaping:
+    """`build_weather_html` -- the wttr.in card."""
+
+    def test_city_with_script_tag_is_escaped(self):
+        card = build_weather_html(XSS_SCRIPT, SAMPLE_WTTR)
+
+        assert "<script>" not in card
+        assert "&lt;script&gt;" in card
+        parsed = assert_structure_is_ours(card)
+        # ...and it is still legible: the payload survives as *text*.
+        assert XSS_SCRIPT in parsed.text
+
+    def test_city_with_event_handler_attribute_is_escaped(self):
+        card = build_weather_html(XSS_EVENT, SAMPLE_WTTR)
+
+        assert "<img" not in card
+        assert "&lt;img" in card
+        # `onerror=` is still in the string -- as text. What matters is that
+        # it never became an attribute.
+        parsed = assert_structure_is_ours(card)
+        assert XSS_EVENT in parsed.text
+
+    def test_card_markup_is_not_escaped(self):
+        """The other half of the bargain: escaping the data must not escape
+        the card. A test that only checked for '<' would pass on rubble."""
+        card = build_weather_html(XSS_SCRIPT, SAMPLE_WTTR, days=1)
+
+        assert card.startswith(
+            '<!--card--><div class="rich-card rich-card--weather">'
+        )
+        assert card.endswith("</div><!--/card-->")
+        assert '<div class="rich-card__header">' in card
+        assert '<div class="rich-card__title">' in card
+        assert '<hr class="rich-card__divider">' in card
+        assert '<span class="rich-card__detail">' in card
+        assert '<div class="rich-card__item">' in card
+        # Our own tags and quotes are untouched...
+        assert "&lt;div" not in card
+        assert "&quot;rich-card" not in card
+        # ...and every inline SVG passes through verbatim, each pinned in the
+        # slot it belongs to. Asserting only `ICON in card` would be satisfied
+        # by the same icon somewhere else on the card.
+        assert f'<div class="rich-card__icon rich-card__icon--weather">{CLOUD}</div>' in card
+        assert f'<span class="rich-card__detail">{WIND} 15 km/h</span>' in card
+        assert f'<span class="rich-card__detail">{DROPLETS} 75%</span>' in card
+        assert f'<span class="rich-card__detail">{UMBRELLA} 0.0mm</span>' in card
+        assert f'<span class="rich-card__detail">{THERMOMETER} UV 8</span>' in card
+        assert f'<span class="rich-card__detail">{SUNRISE} 05:43</span>' in card
+        assert f'<span class="rich-card__detail">{SUNSET} 17:32</span>' in card
+        assert f'<div class="rich-card__item-meta">{CLOUD_RAIN} 40%</div>' in card
+        assert f'<div class="rich-card__item-meta">{UMBRELLA} 10%</div>' in card
+        # The forecast row and the first hourly row both show SUN in an
+        # identical wrapper, so each is pinned together with the title that
+        # only it has -- otherwise one row's icon covers for the other's.
+        assert (
+            f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{SUN}</div>'
+            f'  <div class="rich-card__item-body">'
+            f'    <div class="rich-card__item-title">Dom 12/04</div>'
+        ) in card
+        assert (
+            f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{SUN}</div>'
+            f'  <div class="rich-card__item-body">'
+            f'    <div class="rich-card__item-title">06:00</div>'
+        ) in card
+        assert (
+            f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{CLOUD}</div>'
+            f'  <div class="rich-card__item-body">'
+            f'    <div class="rich-card__item-title">12:00</div>'
+        ) in card
+        # The layout still parses into the elements it is supposed to have.
+        parsed = parse_card(card)
+        assert "hr" in parsed.tags
+        assert parsed.tags.count("div") >= 5
+
+    def test_readable_text_survives_escaping(self):
+        """Ampersands and angle brackets in a real name must read back
+        correctly, not arrive double-escaped or mangled."""
+        card = build_weather_html("Foo & <b>Bar</b>", SAMPLE_WTTR)
+
+        parsed = assert_structure_is_ours(card)
+        assert "Foo & <b>Bar</b>" in parsed.text
+        assert "&amp;amp;" not in card
+
+    @pytest.mark.parametrize(
+        "field", ["humidity", "windspeedKmph", "uvIndex", "precipMM"]
+    )
+    def test_current_condition_fields_are_escaped(self, field: str):
+        card = build_weather_html("Itabuna", wttr_with(current={field: XSS_SCRIPT}))
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+
+    @pytest.mark.parametrize(
+        ("scope", "field"),
+        [
+            ("current", "temp_C"),
+            ("current", "FeelsLikeC"),
+            ("day0", "maxtempC"),
+            ("day0", "mintempC"),
+            ("hour0", "tempC"),
+        ],
+    )
+    def test_numeric_fields_cannot_carry_markup(self, scope: str, field: str):
+        """These reach the card bare, because `int()` strips them of any way
+        to carry markup first. That coercion is the whole protection, so pin
+        the property and not the mechanism: the card must either refuse the
+        value or escape it -- never render it as markup. Delete an `int()`
+        and this test is what notices."""
+        data = wttr_with(**{scope: {field: XSS_SCRIPT}})  # type: ignore[arg-type]
+        try:
+            card = build_weather_html("Itabuna", data, days=1)
+        except (ValueError, TypeError):
+            return  # refused outright, which is also safe
+        assert "<script>" not in card
+        assert_structure_is_ours(card)
+
+    def test_api_weather_description_is_escaped(self):
+        """An unknown description falls through `_get_pt` verbatim."""
+        card = build_weather_html(
+            "Itabuna", wttr_with(current={"weatherDesc": [{"value": XSS_SCRIPT}]})
+        )
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+
+    def test_sunrise_and_sunset_are_escaped(self):
+        """`_format_time_24h` returns unparseable input unchanged."""
+        data = copy.deepcopy(SAMPLE_WTTR)
+        data["weather"][0]["astronomy"] = [
+            {"sunrise": XSS_SCRIPT, "sunset": XSS_EVENT}
+        ]
+        card = build_weather_html("Itabuna", data)
+
+        assert "<script>" not in card
+        assert "<img" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+        assert XSS_EVENT in parsed.text
+
+    def test_forecast_day_label_and_hourly_heading_are_escaped(self):
+        """`_date_label` passes an unparseable date straight through, and it
+        reaches both the day row and the hourly heading."""
+        card = build_weather_html("Itabuna", wttr_with(day0={"date": XSS_SCRIPT}), days=1)
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert parsed.text.count(XSS_SCRIPT) >= 2, "day row and heading"
+
+    def test_hourly_time_label_is_escaped(self):
+        """The time is reformatted before it is interpolated, so only its
+        safety is asserted here -- not an exact round-trip."""
+        card = build_weather_html("Itabuna", wttr_with(hour0={"time": XSS_EVENT}), days=1)
+
+        assert "<img" not in card
+        assert "&lt;img" in card
+        assert_structure_is_ours(card)
+
+    def test_hourly_rain_chance_is_escaped(self):
+        card = build_weather_html(
+            "Itabuna", wttr_with(hour0={"chanceofrain": XSS_SCRIPT}), days=1
+        )
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+
+    def test_every_text_field_poisoned_at_once(self):
+        """Catch-all: nothing textual anywhere in the payload may escape into
+        markup, however the builder is later refactored."""
+        data = wttr_with(
+            current={
+                "humidity": XSS_SCRIPT,
+                "windspeedKmph": XSS_EVENT,
+                "uvIndex": XSS_SCRIPT,
+                "precipMM": XSS_EVENT,
+                "weatherDesc": [{"value": XSS_SCRIPT}],
+            },
+            day0={"date": XSS_EVENT},
+            hour0={"chanceofrain": XSS_SCRIPT, "time": XSS_EVENT},
+        )
+        data["weather"][0]["astronomy"] = [
+            {"sunrise": XSS_SCRIPT, "sunset": XSS_EVENT}
+        ]
+        card = build_weather_html(XSS_SCRIPT, data, days=1)
+
+        assert_structure_is_ours(card)
+
+    @pytest.mark.asyncio
+    async def test_escaping_reaches_the_tool_result(
+        self, tool: WeatherForecastTool, frozen_today
+    ):
+        """The escaping must hold on the value the frontend actually gets."""
+        with mock_wttr(SAMPLE_WTTR):
+            result = await tool.execute({"city": XSS_SCRIPT})
+
+        assert result.ok
+        card = result.metadata["html_card"]
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+        # The plain-text summary is read by the model, not rendered as HTML,
+        # so it keeps the city verbatim.
+        assert XSS_SCRIPT in (result.output or "")
+
+
+class TestFormatWeatherCardEscaping:
+    """`format_weather_card` -- every field here is filled by the model."""
+
+    BASE_FORECAST = [{"date": "Sáb 19/04", "min_temp": 20, "max_temp": 30}]
+
+    @pytest.fixture
+    def fmt_tool(self) -> FormatWeatherCardTool:
+        return FormatWeatherCardTool()
+
+    async def _card(self, fmt_tool: FormatWeatherCardTool, **args: Any) -> str:
+        payload: dict[str, Any] = {
+            "city": "Itabuna",
+            "forecast": self.BASE_FORECAST,
+            **args,
+        }
+        result = await fmt_tool.execute(payload)
+        assert result.ok, result.error
+        return result.metadata["html_card"]
+
+    @pytest.mark.asyncio
+    async def test_city_is_escaped(self, fmt_tool: FormatWeatherCardTool):
+        card = await self._card(fmt_tool, city=XSS_SCRIPT)
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+
+    @pytest.mark.asyncio
+    async def test_description_is_escaped(self, fmt_tool: FormatWeatherCardTool):
+        card = await self._card(fmt_tool, current_description=XSS_EVENT)
+
+        assert "<img" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_EVENT in parsed.text
+
+    @pytest.mark.asyncio
+    async def test_humidity_and_wind_are_escaped(
+        self, fmt_tool: FormatWeatherCardTool
+    ):
+        card = await self._card(fmt_tool, wind_kmh=XSS_SCRIPT, humidity=XSS_EVENT)
+
+        assert "<script>" not in card
+        assert "<img" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+        assert XSS_EVENT in parsed.text
+
+    @pytest.mark.asyncio
+    async def test_current_temp_is_escaped(self, fmt_tool: FormatWeatherCardTool):
+        card = await self._card(fmt_tool, current_temp=XSS_SCRIPT)
+
+        assert "<script>" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+
+    @pytest.mark.asyncio
+    async def test_fractional_temp_still_gets_a_colour(
+        self, fmt_tool: FormatWeatherCardTool
+    ):
+        """Guarding `_temp_class` against non-numeric temps must not demote
+        the numeric ones that already worked."""
+        card = await self._card(fmt_tool, current_temp=25.5)
+
+        assert "clr-warm" in card
+        assert "clr-dim" not in card
+
+    @pytest.mark.asyncio
+    async def test_forecast_day_fields_are_escaped(
+        self, fmt_tool: FormatWeatherCardTool
+    ):
+        card = await self._card(
+            fmt_tool,
+            forecast=[
+                {
+                    "date": XSS_SCRIPT,
+                    "min_temp": XSS_EVENT,
+                    "max_temp": XSS_SCRIPT,
+                    "rain_chance": XSS_EVENT,
+                }
+            ],
+        )
+
+        assert "<script>" not in card
+        assert "<img" not in card
+        parsed = assert_structure_is_ours(card)
+        assert XSS_SCRIPT in parsed.text
+        assert XSS_EVENT in parsed.text
+
+    @pytest.mark.asyncio
+    async def test_card_markup_is_not_escaped(self, fmt_tool: FormatWeatherCardTool):
+        card = await self._card(
+            fmt_tool,
+            city=XSS_SCRIPT,
+            current_temp=25,
+            current_description="Heavy rain",
+            humidity=70,
+            wind_kmh=12,
+            forecast=[
+                {
+                    "date": "Sáb 19/04",
+                    "min_temp": 20,
+                    "max_temp": 30,
+                    "description": "Sunny",
+                    "rain_chance": 40,
+                }
+            ],
+        )
+
+        assert card.startswith(
+            '<!--card--><div class="rich-card rich-card--weather">'
+        )
+        assert card.endswith("</div><!--/card-->")
+        assert '<div class="rich-card__header">' in card
+        assert '<div class="rich-card__details">' in card
+        assert '<hr class="rich-card__divider">' in card
+        assert '<div class="rich-card__item">' in card
+        assert "&lt;div" not in card
+        assert "&quot;rich-card" not in card
+        # Each SVG pinned in its own slot: the header icon and the forecast
+        # row icon differ here precisely so one cannot stand in for the other.
+        assert f'<div class="rich-card__icon rich-card__icon--weather">{CLOUD_RAIN}</div>' in card
+        assert f'<span class="rich-card__detail">{WIND} 12 km/h</span>' in card
+        assert f'<span class="rich-card__detail">{DROPLETS} 70%</span>' in card
+        assert f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{SUN}</div>' in card
+        assert f'<div class="rich-card__item-meta">{UMBRELLA} 40%</div>' in card
+        # The legitimate values still render, unmangled.
+        parsed = parse_card(card)
+        assert "Chuva forte" in parsed.text
+        assert "25°" in parsed.text
+        assert "70%" in parsed.text
+        assert "12 km/h" in parsed.text
 
 
 class TestTodaySp:
