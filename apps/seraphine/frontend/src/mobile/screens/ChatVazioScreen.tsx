@@ -54,7 +54,11 @@ export function ChatVazioMiolo({ onSugestao }: { onSugestao?: (texto: string) =>
           Sobre o que a gente<br aria-hidden="true" />{' '}conversa primeiro?
         </h1>
         <p className="ms-chatvazio__apoio">
-          Toque numa sugestão ou só diga &ldquo;oi Sera&rdquo;.
+          {/* A frase é contrato com o classificador embarcado
+              (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`, limiar 0.92),
+              treinado em "Ei Seraphine". O handoff dizia "oi Sera", que não
+              aciona nada — e aqui a frase é instrução, não enfeite. */}
+          Toque numa sugestão ou só diga &ldquo;Ei Seraphine&rdquo;.
         </p>
       </div>
       <div className="ms-chatvazio__sugestoes">

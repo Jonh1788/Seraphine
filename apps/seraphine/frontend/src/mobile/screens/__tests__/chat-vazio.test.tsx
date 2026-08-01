@@ -75,6 +75,20 @@ describe('ChatVazioMiolo', () => {
     expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(TEXTOS.length);
   });
 
+  /* A frase entre aspas da linha de apoio não é texto de UI: é contrato com o
+     classificador embarcado (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`,
+     limiar 0.92), treinado em "Ei Seraphine". E aqui ela é INSTRUÇÃO — "só diga
+     X" — no estado vazio do chat, ou seja, onde alguém abre o app pela primeira
+     vez e testa. Ensinar a frase errada é falha muda: a pessoa fala e nada
+     acontece, sem erro nenhum na tela. Daí as duas metades: a frase certa
+     aparece E a errada não sobrevive. */
+  it('instrui a frase em que o modelo foi treinado, não outra', () => {
+    render(<ChatVazioMiolo />);
+    const apoio = screen.getByText(/Toque numa sugestão/).textContent ?? '';
+    expect(apoio).toMatch(/ei seraphine/i);
+    expect(apoio).not.toMatch(/oi sera\b/i);
+  });
+
   it('exporta as sugestões como dado, na ordem do handoff', () => {
     expect(SUGESTOES.map((s) => s.texto)).toEqual(TEXTOS);
   });
