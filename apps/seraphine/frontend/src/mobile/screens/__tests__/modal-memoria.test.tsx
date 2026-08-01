@@ -4,6 +4,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { ModalMemoria, CONFIANCAS } from '../ModalMemoria';
+import { createFact } from '../../../memory/api';
+
+// A camada de memória é dublê no arquivo inteiro: nenhum teste de tela pode
+// encostar em `fetch`. Os testes injetam `criar`; o único que deixa o padrão
+// agir é o que prova que o padrão é a camada.
+vi.mock('../../../memory/api', () => ({ createFact: vi.fn().mockResolvedValue({ id: 'f-1' }) }));
 
 // O QUE ESTE ARQUIVO PRENDE
 //
@@ -223,13 +229,32 @@ describe('ModalMemoria — criar', () => {
     }
   });
 
-  it('manda o texto sem os espaços das pontas', async () => {
+  it('manda o texto como o usuário escreveu — aparar é da camada', async () => {
+    // A costura entre a tela e `createFact`: quem apara e quem RECUSA um texto
+    // em branco é a camada, porque é lá que se sabe que o backend aceitaria
+    // `" "` (`min_length=1`). Duplicar o `trim()` aqui criaria a segunda cópia
+    // de uma regra — foi exatamente isso que a mutação M1 expôs neste arquivo.
     const { criar } = abrir();
     escrever('  odeio call antes das 9  ');
     fireEvent.click(salvar());
     await assentar();
 
-    expect(criar).toHaveBeenCalledWith(expect.objectContaining({ text: 'odeio call antes das 9' }));
+    expect(criar).toHaveBeenCalledWith(expect.objectContaining({ text: '  odeio call antes das 9  ' }));
+  });
+
+  it('sem a prop `criar`, quem grava é a camada de memória (não um escritor morto)', async () => {
+    // O padrão tem de ser um POST de verdade. Enquanto era `throw`, este modal
+    // não podia ser montado em lugar nenhum.
+    render(<ModalMemoria aberto onFechar={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Lembrança'), { target: { value: 'durmo tarde' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await assentar();
+
+    expect(createFact).toHaveBeenCalledWith({
+      text: 'durmo tarde',
+      source: 'explicit',
+      confidence: 1,
+    });
   });
 
   it('enquanto o POST está em voo mostra salvando… e não manda de novo', async () => {

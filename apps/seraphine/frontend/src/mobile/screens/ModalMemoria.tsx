@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { MobileSheet } from '../MobileSheet';
+import { createFact, type NewFact } from '../../memory/api';
 import { AlertTriangleIcon, SparkleIcon } from '../../icons/Icons';
 import './ModalMemoria.css';
 
@@ -33,34 +34,27 @@ import './ModalMemoria.css';
 //    tela de Memória recusou quando o "+" não tinha POST. No lugar deles fica
 //    uma linha dizendo quem escolhe — afirmação verificada, não consolo.
 //
-// ── POR QUE `criar` É OBRIGATÓRIO, E NÃO TEM PADRÃO ──────────────────────────
-// `src/memory/api.ts` exporta HOJE `listFacts` e `fetchProfile` — leitura, só.
-// Não há `createFact`, embora o backend tenha o POST. Esta task não pode editar
-// `memory/api.ts` (arquivo de outro dono) e telas não fazem `fetch`. O irmão de
-// tarefa pôde ter um padrão porque `updateTaskStatus` existe e salva de
-// verdade; aqui um padrão só poderia lançar erro em toda chamada — um escritor
-// morto, que é pior que escritor nenhum, pela mesma razão que derrubou o "+".
-// Então o escritor é INJETADO e obrigatório: enquanto `memory/api.ts` não
-// crescer `createFact`, o compilador não deixa ninguém montar este modal
-// achando que ele grava. O relatório da task pede essa função.
-
-/** O corpo de `POST /memory/facts`, campo a campo, sem nada a mais. */
-export interface NovaLembranca {
-  /** `FactCreate.text` — o backend exige `min_length=1`; quem exige que não
-   *  seja só espaço é esta tela. */
-  text: string;
-  /** `FactCreate.source`. `explicit` é o que a tela de desktop já manda para a
-   *  mesma ação (o usuário digitou o fato), e é o padrão do backend. */
-  source: string;
-  /** `FactCreate.confidence`, 0..1. */
-  confidence: number;
-}
+// ── QUEM ESCREVE, E O QUE ESTA TELA NÃO PRECISA SABER ────────────────────────
+// `createFact` (`src/memory/api.ts`) nasceu com esta task porque a camada de
+// memória só lia — o POST existia no backend e o único consumidor era o painel
+// de desktop, com `fetch` cru dentro do componente. Mesmo movimento que a Task 5
+// fez com notificações.
+//
+// O que a camada guarda, e por isso NÃO está aqui: que `source` é validado na
+// LEITURA e não na escrita (um `source` solto grava 201 e depois derruba o
+// `GET /memory/facts` inteiro), que `confidence` fora de 0..1 vira um 422 mudo,
+// e que o backend aceita `" "` como fato. Esta tela manda o que o usuário
+// escreveu; aparar e recusar é trabalho de quem conhece o contrato.
+//
+// `criar` continua injetável — mas com um padrão que grava de verdade. A injeção
+// existe para o teste não precisar de rede, não para tapar buraco de camada.
 
 export interface ModalMemoriaProps {
   aberto: boolean;
   onFechar: () => void;
-  /** Persiste a lembrança nova. Obrigatório de propósito — ver o bloco acima. */
-  criar: (nova: NovaLembranca) => Promise<void>;
+  /** Persiste a lembrança nova. O padrão é a camada de memória; injetável para
+   *  o teste. */
+  criar?: (nova: NewFact) => Promise<unknown>;
   /** O POST voltou 201: quem abriu costuma querer relistar. */
   onCriada?: () => void;
 }
@@ -92,7 +86,7 @@ function tinta(hex: string, alfa: number): string {
 
 type Estado = 'ocioso' | 'salvando' | 'erro' | 'descartar';
 
-export function ModalMemoria({ aberto, onFechar, criar, onCriada }: ModalMemoriaProps): JSX.Element {
+export function ModalMemoria({ aberto, onFechar, criar = createFact, onCriada }: ModalMemoriaProps): JSX.Element {
   const [texto, setTexto] = useState('');
   const [confianca, setConfianca] = useState(CONFIANCAS[0].valor);
   const [estado, setEstado] = useState<Estado>('ocioso');
@@ -102,9 +96,12 @@ export function ModalMemoria({ aberto, onFechar, criar, onCriada }: ModalMemoria
 
   /** UMA regra, lida pelo `disabled` do botão E pela guarda do envio. Duplicar
    *  a condição nos dois lugares é como as duas pontas divergem calado — foi
-   *  isso que a lista de backends flat custou nesta mesma onda. Espaço em
-   *  branco não passa: o backend só exige `min_length=1`, então " " viraria uma
-   *  lembrança que não diz nada. */
+   *  isso que a lista de backends flat custou nesta mesma onda.
+   *
+   *  Isto é AFFORDANCE, não validação: diz se o botão está vivo. Quem RECUSA um
+   *  texto em branco é `createFact`, porque é lá que se sabe que o backend
+   *  aceitaria `" "`. Os dois concordam sobre o vazio sem que este arquivo
+   *  precise saber o porquê. */
   const podeSalvar = limpo !== '' && estado !== 'salvando';
 
   const enviar = async (): Promise<void> => {
@@ -115,7 +112,11 @@ export function ModalMemoria({ aberto, onFechar, criar, onCriada }: ModalMemoria
     if (!podeSalvar) return;
     setEstado('salvando');
     try {
-      await criar({ text: limpo, source: 'explicit', confidence: degrau.numero });
+      // `source: 'explicit'` é afirmação de PROCEDÊNCIA, não default repetido:
+      // este fato veio do usuário digitando, e não de uma reflexão da
+      // Seraphine. Se um dia o padrão da camada mudar, o significado desta tela
+      // não pode mudar junto, calado. O texto vai como está — quem apara é lá.
+      await criar({ text: texto, source: 'explicit', confidence: degrau.numero });
       onCriada?.();
       onFechar();
     } catch {
