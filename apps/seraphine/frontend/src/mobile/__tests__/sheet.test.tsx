@@ -70,7 +70,7 @@ function declarado(el: Element, prop: string, pseudo = false): string {
 }
 
 function px(el: Element, prop: string, pseudo = false): number {
-  const n = /^(\d+(?:\.\d+)?)px$/.exec(declarado(el, prop, pseudo));
+  const n = /^(-?\d+(?:\.\d+)?)px$/.exec(declarado(el, prop, pseudo));
   return n ? Number(n[1]) : 0;
 }
 
@@ -89,7 +89,7 @@ afterAll(() => {
 describe('MobileSheet', () => {
   it('fechado não deixa conteúdo no DOM', () => {
     render(
-      <MobileSheet aberto={false} onFechar={vi.fn()}>
+      <MobileSheet aberto={false} rotulo="Nova tarefa" onFechar={vi.fn()}>
         <input placeholder="oi" />
       </MobileSheet>,
     );
@@ -103,7 +103,7 @@ describe('MobileSheet', () => {
   it('toque no backdrop fecha; toque no conteúdo não', () => {
     const onFechar = vi.fn();
     const { container } = render(
-      <MobileSheet aberto onFechar={onFechar}>
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={onFechar}>
         <button>dentro</button>
       </MobileSheet>,
     );
@@ -116,7 +116,7 @@ describe('MobileSheet', () => {
   it('o rodapé fica fora da área rolável', () => {
     // o indicador de autosave não pode sumir com o scroll do conteúdo
     const { container } = render(
-      <MobileSheet aberto onFechar={vi.fn()} rodape={<span>salvo</span>}>
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()} rodape={<span>salvo</span>}>
         x
       </MobileSheet>,
     );
@@ -152,44 +152,133 @@ describe('MobileSheet', () => {
     expect(painel.style.getPropertyValue('--ms-sheet-teclado')).toBe('0px');
   });
 
-  it('a medida do teclado desloca o painel de verdade', () => {
-    // A variável só serve se o CSS a consumir; senão é enfeite que passa no
-    // teste acima e enterra o rodapé no aparelho.
-    expect(bloco(FONE + '.ms-sheet__painel')).toMatch(/bottom:[^;]*var\(--ms-sheet-teclado/);
+  it('a medida do teclado move o painel, encurta o painel e come o respiro de baixo', () => {
+    // A variável só serve se o CSS a consumir, e são TRÊS consumos: sem o
+    // `bottom` o painel fica atrás do teclado; sem o `max-height` ele sobe com
+    // a mesma altura e o topo sai da tela; sem o `padding` sobra uma faixa
+    // morta de 34px (o respiro do home indicator) onde o teclado já está.
+    const painel = bloco(FONE + '.ms-sheet__painel');
+    expect(painel).toMatch(/bottom:[^;]*var\(--ms-sheet-teclado/);
+    expect(painel).toMatch(/max-height:[^;]*var\(--ms-sheet-teclado/);
+    expect(painel).toMatch(/padding:[^;]*var\(--ms-sheet-teclado/);
   });
 
   it('é um diálogo modal, nasce com o foco e fecha no Escape', () => {
     const onFechar = vi.fn();
     const { container } = render(
-      <MobileSheet aberto onFechar={onFechar} titulo={<h2>Nova tarefa</h2>}>
+      <MobileSheet aberto rotulo="Novo evento" onFechar={onFechar} titulo={<h2>Novo evento</h2>}>
         x
       </MobileSheet>,
     );
     const painel = container.querySelector('.ms-sheet__painel')!;
     expect(painel.getAttribute('role')).toBe('dialog');
     expect(painel.getAttribute('aria-modal')).toBe('true');
-    // nome acessível: quem lê tela precisa saber QUAL modal abriu
-    expect(document.getElementById(painel.getAttribute('aria-labelledby')!)?.textContent).toBe('Nova tarefa');
     expect(document.activeElement).toBe(painel);
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onFechar).toHaveBeenCalledTimes(1);
   });
 
+  it('o nome do diálogo é o rótulo, não o cabeçalho inteiro', () => {
+    // O cabeçalho dos modais leva Cancelar e Salvar ao lado do título. Se ele
+    // fosse o nome acessível (um `aria-labelledby` apontando para o contêiner),
+    // o modal se anunciaria como "Cancelar Novo evento Salvar" — e o consumidor
+    // não teria como consertar de dentro do escopo dele. Precedente da casa:
+    // `google/ModalShell.tsx` expõe `label` e usa `aria-label`.
+    const { container } = render(
+      <MobileSheet
+        aberto
+        rotulo="Novo evento"
+        onFechar={vi.fn()}
+        titulo={
+          <>
+            <button>Cancelar</button>
+            <span>Novo evento</span>
+            <button>Salvar</button>
+          </>
+        }
+      >
+        x
+      </MobileSheet>,
+    );
+    const painel = container.querySelector('.ms-sheet__painel')!;
+    // `getByRole` com nome é o que o leitor de tela enxerga — e é o que quebra
+    // se o nome voltar a sair do cabeçalho inteiro.
+    expect(screen.getByRole('dialog', { name: 'Novo evento' })).toBe(painel);
+  });
+
+  it('trava a rolagem do fundo enquanto está aberto e devolve ao fechar', () => {
+    // `overscroll-behavior: contain` só corta o encadeamento a partir do corpo
+    // rolável; arrastar no backdrop ainda rolaria a tela atrás no WKWebView.
+    document.body.style.overflow = 'scroll';
+    const { rerender } = render(
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()}>
+        x
+      </MobileSheet>,
+    );
+    expect(document.body.style.overflow).toBe('hidden');
+    rerender(
+      <MobileSheet aberto={false} rotulo="Nova tarefa" onFechar={vi.fn()}>
+        x
+      </MobileSheet>,
+    );
+    expect(document.body.style.overflow).toBe('scroll');
+    document.body.style.overflow = '';
+  });
+
+  it('o Tab circula dentro do painel', () => {
+    const { container } = render(
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()} rodape={<button>Salvar</button>}>
+        <input placeholder="Título" />
+      </MobileSheet>,
+    );
+    const primeiro = container.querySelector('.ms-sheet__grabber') as HTMLElement;
+    const ultimo = screen.getByText('Salvar');
+
+    ultimo.focus();
+    fireEvent.keyDown(ultimo, { key: 'Tab' });
+    expect(document.activeElement).toBe(primeiro);
+
+    fireEvent.keyDown(primeiro, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(ultimo);
+  });
+
   it('o controle de fechar da moldura tem alvo de 44pt', () => {
     const { container } = render(
-      <MobileSheet aberto onFechar={vi.fn()}>
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()}>
         x
       </MobileSheet>,
     );
     const fechar = container.querySelector('.ms-sheet__grabber')!;
     expect(fechar.getAttribute('aria-label')).toBe('Fechar');
     // Mesmo mecanismo do ‹ das telas empurradas (obsidian.css): o pseudo cresce
-    // por fora, centrado, sem mover nem engordar a barrinha desenhada.
+    // por fora, sem mover nem engordar a barrinha desenhada.
     expect(declarado(fechar, 'position', true)).toBe('absolute');
     expect(`${px(fechar, 'width', true)}x${px(fechar, 'height', true)}`).toBe('44x44');
     // e a barrinha do handoff continua 38×4
     expect(`${px(fechar, 'width')}x${px(fechar, 'height')}`).toBe('38x4');
+  });
+
+  it('o alvo do grabber não desce sobre o que vier abaixo dele', () => {
+    // Centrado (`translate(-50%,-50%)`) o alvo desceria ~18px além da barrinha,
+    // por cima do cabeçalho do modal — e como o grabber é `position: relative`
+    // e o cabeçalho não é posicionado, o pseudo ganharia o toque. Um controle
+    // centrado no topo do cabeçalho perderia a borda de cima para o "Fechar",
+    // ou seja: o toque errado descartaria o formulário sem confirmar. O alvo é
+    // enviesado para CIMA, onde só há o padding do painel e o backdrop — que
+    // fecha do mesmo jeito. Isto aqui é o que segura a decisão, porque as
+    // Tasks 8-10 não vão ler o comentário do CSS.
+    const { container } = render(
+      <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()}>
+        x
+      </MobileSheet>,
+    );
+    const fechar = container.querySelector('.ms-sheet__grabber')!;
+    const desloc = /translate\(\s*-?[\d.]+%\s*,\s*(-?[\d.]+)px\s*\)/.exec(declarado(fechar, 'transform', true));
+    expect(desloc).not.toBeNull();
+    const topo = px(fechar, 'top', true) + Number(desloc![1]);
+    expect(topo).toBeLessThanOrEqual(0); // começa na barrinha ou acima dela
+    expect(topo + px(fechar, 'height', true)).toBeLessThanOrEqual(px(fechar, 'height'));
   });
 
   it('mantém as medidas do handoff (backdrop, raio, home indicator)', () => {
@@ -198,7 +287,10 @@ describe('MobileSheet', () => {
     expect(backdrop).toMatch(/backdrop-filter:\s*blur\(3px\)/);
     const painel = bloco(FONE + '.ms-sheet__painel');
     expect(painel).toMatch(/border-radius:\s*28px 28px 0 0/);
-    expect(painel).toMatch(/34px/); // padding inferior do home indicator
+    // ancorado no atalho inteiro: só `/34px/` casaria com o `min(34px, …)` do
+    // mesmo bloco, e trocar a base por `calc(0px - min(34px, …))` mataria o
+    // respiro do home indicator com o teste verde.
+    expect(painel).toMatch(/padding:\s*10px 20px calc\(34px/);
   });
 });
 
@@ -207,7 +299,7 @@ function comTeclado() {
   const vv = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0 });
   Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
   const r = render(
-    <MobileSheet aberto onFechar={vi.fn()} rodape={<span>salvo</span>}>
+    <MobileSheet aberto rotulo="Nova tarefa" onFechar={vi.fn()} rodape={<span>salvo</span>}>
       x
     </MobileSheet>,
   );

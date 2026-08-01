@@ -44,10 +44,17 @@ html[data-shell='phone'] .ms-sheet__painel {
 }
 
 /* Alvo de 44pt pelo MESMO mecanismo do ‹ das telas empurradas (obsidian.css):
-   um pseudo que cresce por fora, centrado, sem mover nem engordar a barrinha
-   de 38×4 que o handoff desenha. Ele avança ~18px para baixo, num corredor de
-   44px no meio do painel — onde os cabeçalhos dos três modais só têm texto
-   (Cancelar e Salvar ficam nas pontas), então não rouba toque de ninguém. */
+   um pseudo que cresce por fora, sem mover nem engordar a barrinha de 38×4 que
+   o handoff desenha.
+   A diferença é o VIÉS: lá o pseudo é centrado, aqui ele cresce só para CIMA
+   (`top: 0` + `translateY(-40px)` fecham os 44px exatamente no pé da barrinha).
+   Centrado, ele desceria ~18px além dela, e como o grabber é `position:
+   relative` e o cabeçalho do modal não é posicionado, o pseudo ganharia o
+   toque: um controle centrado no topo do cabeçalho perderia a borda de cima
+   para o "Fechar" — e o toque errado descarta o formulário sem confirmar.
+   Para cima só há os 10px de padding do painel e o backdrop, que fecha do
+   mesmo jeito. Quem segura isto é o teste, não este comentário: as Tasks 8-10
+   não vão lê-lo. */
 html[data-shell='phone'] .ms-sheet__grabber {
   position: relative; flex-grow: 0; flex-shrink: 0;
   width: 38px; height: 4px; margin: 0 auto 14px; padding: 0;
@@ -55,8 +62,8 @@ html[data-shell='phone'] .ms-sheet__grabber {
   cursor: pointer;
 }
 html[data-shell='phone'] .ms-sheet__grabber::after {
-  content: ''; position: absolute; top: 50%; left: 50%;
-  width: 44px; height: 44px; transform: translate(-50%, -50%);
+  content: ''; position: absolute; top: 0; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -40px);
 }
 
 html[data-shell='phone'] .ms-sheet__cabecalho { flex-grow: 0; flex-shrink: 0; }
