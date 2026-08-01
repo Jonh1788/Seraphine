@@ -1,0 +1,225 @@
+/* src/mobile/screens/ModalEvento.css — modal de evento (handoff: frame
+   "Modal · novo evento"). Medidas tiradas de lá verbatim: barra de ações com
+   `margin-bottom: 16` e título 15/700, campo de título 17/600 com
+   `padding: 0 2px 14px` e borda de baixo, lista com `gap: 2` e `margin-top: 6`,
+   linhas `padding: 13px 2px` com gap 12, quadradinho de ícone 30×30 de raio 9,
+   divisória de 1px com `margin-left: 42px`, pílula de início 13/600 em
+   accent-soft com `padding: 5px 11px` e raio 9, legenda CALENDÁRIO 11/700 com
+   `letter-spacing: .06em` e `margin: 14px 0 9px`, chips 12/600 com
+   `padding: 8px 13px` e raio 11, ponto de 7px, toggle 44×26 de raio 14 com
+   botão de 22.
+
+   A MOLDURA NÃO ESTÁ AQUI: backdrop, cantos de 28, grabber, respiro de home
+   indicator e a faixa do rodapé são do `MobileSheet` (`ms-sheet-*`). O painel
+   dele já traz o padding lateral de 20 — nada neste arquivo põe margem própria,
+   senão o conteúdo entraria duas vezes.
+
+   O QUE O HANDOFF DESENHA E ESTE CSS NÃO COPIA, de propósito, tudo por causa do
+   alvo de 44pt da HIG:
+   - o vão ENTRE os chips de calendário vira 14 na vertical (continua 8 na
+     horizontal). Os chips têm 30 de altura; com 8 nas duas direções, dois alvos
+     de 44 empilhados se cobririam em 6px e um toque na borda de baixo de
+     "Agenda" mudaria o calendário para o chip da linha seguinte. 30 + 14 = 44,
+     encostam sem se invadirem — e na horizontal nem se coloca a questão, porque
+     todo chip é mais largo que 44.
+   - o campo de Local ganha `min-height: 44` com `margin: -9px 0`: a caixa de
+     toque fecha os 44 sem mover uma linha do desenho (a footprint no fluxo
+     continua a do texto, e a linha segue com os 56 do ícone de 30 mais os 13+13
+     de padding).
+
+   Prefixo `ms-mevento-` em TUDO. (Não há `@keyframes` aqui: o modal não anima
+   nada por conta própria — quem anima a entrada é o `MobileSheet`.) */
+
+/* ── barra de ações (Cancelar · Novo evento · Salvar) ──────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-cabecalho {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 16px;
+}
+
+html[data-shell='phone'] .ms-mevento-titulo-barra {
+  flex: 1; min-width: 0; text-align: center;
+  font-size: 15px; font-weight: 700; color: var(--text, #ececef);
+}
+
+html[data-shell='phone'] .ms-mevento-acao {
+  position: relative; flex: none;
+  padding: 0; border: none; background: transparent;
+  font-family: inherit; font-size: 14px; color: var(--dim, #9594a0);
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-mevento-acao--forte { font-weight: 700; color: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-mevento-acao--perigo { font-weight: 700; color: var(--danger, #ef6b6b); }
+html[data-shell='phone'] .ms-mevento-acao[disabled] { opacity: .6; }
+/* Cresce a partir da própria borda esquerda: o de Cancelar avança para dentro
+   do vão do título (que tem 10 de folga e nenhum controle), e o de Salvar, que
+   já nasce com ~45 de largura, não passa dos 20px de padding do painel. */
+html[data-shell='phone'] .ms-mevento-acao::after {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 100%; min-width: 44px; height: 44px; transform: translateY(-50%);
+}
+
+/* ── título do evento ──────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-titulo {
+  display: block; width: 100%; box-sizing: border-box;
+  padding: 0 2px 14px;
+  border: none; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08));
+  outline: none; background: none;
+  font-family: inherit; font-size: 17px; font-weight: 600; line-height: 30px;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mevento-titulo::placeholder { color: var(--faint, #5f5e6b); }
+
+/* ── linhas de campo ───────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-linhas {
+  display: flex; flex-direction: column; gap: 2px; margin-top: 6px;
+}
+
+html[data-shell='phone'] .ms-mevento-linha {
+  position: relative;
+  display: flex; align-items: center; gap: 12px; padding: 13px 2px;
+}
+
+html[data-shell='phone'] .ms-mevento-icone {
+  width: 30px; height: 30px; flex: none; border-radius: 9px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, .06); color: var(--dim, #9594a0);
+}
+html[data-shell='phone'] .ms-mevento-icone--dia,
+html[data-shell='phone'] .ms-mevento-icone--inicio { background: rgba(66, 165, 245, .13); color: #42a5f5; }
+html[data-shell='phone'] .ms-mevento-icone--local { background: rgba(38, 166, 154, .13); color: #26a69a; }
+html[data-shell='phone'] .ms-mevento-icone--repetir { background: rgba(154, 147, 255, .13); color: var(--accent, #9a93ff); }
+
+html[data-shell='phone'] .ms-mevento-rotulo { flex: 1; font-size: 14px; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-mevento-rotulo--fixo { flex: none; }
+
+html[data-shell='phone'] .ms-mevento-valor { font-size: 13px; color: var(--dim, #9594a0); }
+
+html[data-shell='phone'] .ms-mevento-divisoria {
+  height: 1px; background: var(--border, rgba(255, 255, 255, .08)); margin-left: 42px;
+}
+
+/* ── início e fim ──────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-pill {
+  display: inline-flex; align-items: center; flex: none;
+  font-size: 13px; color: var(--dim, #9594a0);
+}
+/* O início é o destacado do handoff; o fim fica em dim, sem fundo. */
+html[data-shell='phone'] .ms-mevento-pill--inicio {
+  font-weight: 600; color: var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  padding: 5px 11px; border-radius: 9px;
+}
+
+html[data-shell='phone'] .ms-mevento-campo {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px;
+}
+
+/* O controle nativo por cima do valor desenhado: no iPhone abre o seletor do
+   sistema e o dedo tem 44pt de alvo sem engordar a linha de 56. Invisível, não
+   removido — continua no DOM, focável e nomeado para quem lê tela. */
+html[data-shell='phone'] .ms-mevento-sobreposto {
+  position: absolute; left: 0; right: 0; top: 50%;
+  width: 100%; height: 44px; transform: translateY(-50%);
+  margin: 0; padding: 0; border: none;
+  opacity: 0; -webkit-appearance: none; appearance: none;
+  font-family: inherit; font-size: 16px; /* < 16px faz o iOS dar zoom ao focar */
+  cursor: pointer;
+}
+
+/* ── dia inteiro ───────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-toggle {
+  position: relative; flex: none;
+  width: 44px; height: 26px; padding: 0;
+  border: none; border-radius: 14px; background: rgba(255, 255, 255, .12);
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-mevento-toggle--ligado { background: var(--accent, #9a93ff); }
+/* 26 de altura desenhada, 44 de alvo — cresce só na vertical, que é onde falta
+   (a largura já é 44). */
+html[data-shell='phone'] .ms-mevento-toggle::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
+
+html[data-shell='phone'] .ms-mevento-botao {
+  position: absolute; top: 2px; left: 2px;
+  width: 22px; height: 22px; border-radius: 50%; background: #cfcfda;
+  transition: transform .16s ease;
+}
+html[data-shell='phone'] .ms-mevento-toggle--ligado .ms-mevento-botao {
+  transform: translateX(18px); background: #fff;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-mevento-botao { transition: none; }
+}
+
+/* ── local ─────────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-local {
+  flex: 1; min-width: 0; min-height: 44px; margin: -9px 0;
+  padding: 0; border: none; outline: none; background: none;
+  font-family: inherit; font-size: 16px; text-align: right;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mevento-local::placeholder { color: var(--faint, #5f5e6b); }
+
+/* ── calendário ────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mevento-secao {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  color: var(--faint, #5f5e6b); margin: 14px 0 9px;
+}
+
+html[data-shell='phone'] .ms-mevento-chips {
+  display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 14px;
+}
+
+html[data-shell='phone'] .ms-mevento-chip {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 30px; padding: 8px 13px; box-sizing: border-box;
+  /* borda transparente no não escolhido: sem ela o chip PULA 2px ao ser
+     escolhido, e a fileira inteira se remonta debaixo do dedo. */
+  border: 1px solid transparent; border-radius: 11px;
+  background: rgba(255, 255, 255, .05); color: var(--dim, #9594a0);
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-mevento-chip::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
+/* A cor do escolhido é a do próprio calendário e vem inline (é dado, não
+   folha de estilo); aqui fica só o peso. */
+html[data-shell='phone'] .ms-mevento-chip--escolhido { font-weight: 700; }
+
+html[data-shell='phone'] .ms-mevento-ponto { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+
+/* ── rodapé (fora da rolagem, por construção do MobileSheet) ───────────────── */
+
+html[data-shell='phone'] .ms-mevento-rodape {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  margin-top: 12px;
+}
+
+html[data-shell='phone'] .ms-mevento-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--dim, #9594a0);
+}
+/* O aviso é o único texto do rodapé que precisa ser visto de longe: é ele que
+   impede a pessoa de achar que o evento entrou na agenda. */
+html[data-shell='phone'] .ms-mevento-status--erro { color: var(--danger, #ef6b6b); font-weight: 600; }
+
+html[data-shell='phone'] .ms-mevento-retentar {
+  min-height: 44px; padding: 0 10px;
+  border: none; background: none; color: inherit;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  text-decoration: underline; cursor: pointer;
+}
