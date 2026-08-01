@@ -1,0 +1,82 @@
+/* src/mobile/MobileSheet.css — moldura de sheet dos modais (handoff: frames
+   "Modal · nova tarefa", "Modal · novo evento", "Modal · nova memória").
+   Medidas tiradas de lá verbatim: backdrop rgba(0,0,0,.55) com blur(3px),
+   painel de raio 28 no topo com borda superior --border-strong, padding
+   10px 20px 34px, sombra 0 -14px 40px rgba(0,0,0,.5) e grabber 38×4 de raio 3
+   em rgba(255,255,255,.18) com 14px de respiro abaixo.
+
+   DUAS COISAS QUE O HANDOFF DESENHA E ESTE CSS NÃO COPIA, de propósito:
+   - o raio de baixo (`28px 28px 43px 43px`): os 43 são o canto INTERNO da
+     moldura de telefone do mockup, não do sheet. No aparelho o painel encosta
+     na borda da tela, então embaixo é 0.
+   - o `z-index: 5` do mockup, que só precisava vencer os irmãos daquele frame.
+     Aqui o sheet cobre a tab bar do shell inteiro, então sobe para 60.
+
+   Prefixo `ms-sheet-` em TUDO, inclusive nos `@keyframes` — nome de keyframe é
+   global e há outros agentes escrevendo animação nesta onda. */
+
+html[data-shell='phone'] .ms-sheet { position: fixed; inset: 0; z-index: 60; }
+
+html[data-shell='phone'] .ms-sheet__backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: ms-sheet-surgir .18s ease-out;
+}
+
+/* `bottom` e `max-height` leem `--ms-sheet-teclado` (px, escrito inline pelo
+   componente): com o teclado aberto o painel sobe e encurta na mesma medida,
+   em vez de ficar atrás dele. O padding de baixo é o respiro do home
+   indicator (34) — que some quando o teclado o cobre, daí o `min()`, sem o
+   qual sobraria uma faixa morta de 34px entre o rodapé e o teclado. */
+html[data-shell='phone'] .ms-sheet__painel {
+  position: absolute; left: 0; right: 0; bottom: var(--ms-sheet-teclado, 0px);
+  display: flex; flex-direction: column;
+  max-height: calc(100dvh - 56px - var(--ms-sheet-teclado, 0px));
+  background: var(--surface, #17171e);
+  border-top: 1px solid var(--border-strong, rgba(255, 255, 255, .14));
+  border-radius: 28px 28px 0 0;
+  padding: 10px 20px calc(34px - min(34px, var(--ms-sheet-teclado, 0px)));
+  color: var(--text, #ececef);
+  box-shadow: 0 -14px 40px rgba(0, 0, 0, .5);
+  outline: none;
+  animation: ms-sheet-subir .22s cubic-bezier(.32, .72, 0, 1);
+}
+
+/* Alvo de 44pt pelo MESMO mecanismo do ‹ das telas empurradas (obsidian.css):
+   um pseudo que cresce por fora, centrado, sem mover nem engordar a barrinha
+   de 38×4 que o handoff desenha. Ele avança ~18px para baixo, num corredor de
+   44px no meio do painel — onde os cabeçalhos dos três modais só têm texto
+   (Cancelar e Salvar ficam nas pontas), então não rouba toque de ninguém. */
+html[data-shell='phone'] .ms-sheet__grabber {
+  position: relative; flex-grow: 0; flex-shrink: 0;
+  width: 38px; height: 4px; margin: 0 auto 14px; padding: 0;
+  border: none; border-radius: 3px; background: rgba(255, 255, 255, .18);
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-sheet__grabber::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+
+html[data-shell='phone'] .ms-sheet__cabecalho { flex-grow: 0; flex-shrink: 0; }
+
+/* O único que rola. `min-height: 0` porque, sem ele, um filho comprido estoura
+   o flex em vez de rolar; `overscroll-behavior` para o embalo não vazar para a
+   tela atrás quando o corpo chega ao fim. */
+html[data-shell='phone'] .ms-sheet__corpo {
+  flex-grow: 1; flex-shrink: 1; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+}
+
+/* Fora da rolagem e sem encolher: é aqui que o modal de tarefa mostra
+   salvando…/salvo/erro ao salvar, e o erro tem de continuar visível com o
+   corpo rolado até o fim. */
+html[data-shell='phone'] .ms-sheet__rodape { flex-grow: 0; flex-shrink: 0; }
+
+@keyframes ms-sheet-surgir { from { opacity: 0; } }
+@keyframes ms-sheet-subir { from { transform: translateY(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-sheet__backdrop, html[data-shell='phone'] .ms-sheet__painel { animation: none; }
+}
