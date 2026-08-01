@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import ssl
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from html import escape as _html_escape
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import truststore
@@ -113,6 +115,83 @@ WEEKDAYS_PT = [
     "Dom",
 ]
 
+# ---------------------------------------------------------------------------
+# Day targeting
+#
+# "Tomorrow" is relative to the user, who lives in America/Sao_Paulo -- not to
+# UTC, which is three hours ahead and would roll the date over at 21:00 local.
+# ---------------------------------------------------------------------------
+_SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+_WHEN_TODAY = frozenset({"today", "hoje", "now", "agora"})
+_WHEN_TOMORROW = frozenset({"tomorrow", "amanh\u00e3", "amanha"})
+
+
+def _today_sp() -> date:
+    """Today's calendar date in the user's timezone."""
+    return datetime.now(_SP_TZ).date()
+
+
+def _resolve_target_date(when: str, today: date) -> date | None:
+    """Resolve a ``when`` argument to a calendar date.
+
+    Accepts ``today``/``tomorrow`` (and their PT-BR synonyms) or an exact
+    ``YYYY-MM-DD``. Returns ``None`` when the value cannot be understood --
+    the caller must surface that rather than quietly defaulting to today,
+    which is the exact failure this parameter exists to prevent.
+    """
+    raw = when.strip()
+    key = raw.lower()
+    if key in _WHEN_TODAY:
+        return today
+    if key in _WHEN_TOMORROW:
+        return today + timedelta(days=1)
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _relative_label(target: date, today: date) -> str:
+    """PT-BR relative name for a date, or "" when it has none."""
+    delta = (target - today).days
+    if delta == 0:
+        return "hoje"
+    if delta == 1:
+        return "amanh\u00e3"
+    if delta == 2:
+        return "depois de amanh\u00e3"
+    return ""
+
+
+def _parse_iso_date(date_str: str) -> date | None:
+    try:
+        return date.fromisoformat(date_str.strip())
+    except (AttributeError, ValueError):
+        return None
+
+
+def _date_label(date_str: str) -> str:
+    """``'2026-04-13'`` -> ``'Seg 13/04'``; unparseable input passes through."""
+    parsed = _parse_iso_date(date_str)
+    if parsed is None:
+        return date_str
+    return f"{WEEKDAYS_PT[parsed.weekday()]} {parsed.strftime('%d/%m')}"
+
+
+def _day_phrase(date_str: str, today: date) -> str:
+    """Name a day every way at once: ``'amanh\u00e3 Seg 13/04 (2026-04-13)'``.
+
+    The model has to be able to tell, from the tool result alone, whether it
+    got the day it asked for.
+    """
+    label = _date_label(date_str)
+    parsed = _parse_iso_date(date_str)
+    rel = _relative_label(parsed, today) if parsed is not None else ""
+    if parsed is None:
+        return label
+    return f"{rel} {label} ({date_str})" if rel else f"{label} ({date_str})"
+
 
 def _get_icon(desc: str) -> str:
     """Return an emoji for the weather description."""
@@ -166,6 +245,20 @@ def _format_time_24h(time_str: str) -> str:
         return time_str
 
 
+def _first_desc(fc: dict[str, Any]) -> str:
+    """Representative weather description for a forecast day.
+
+    Prefers the first hourly slot; falls back to the midday slot when that
+    one carries no description.
+    """
+    hourly = fc.get("hourly") or []
+    desc = (hourly[0] if hourly else {}).get("weatherDesc", [{}])[0].get("value", "")
+    if not desc and hourly:
+        mid = len(hourly) // 2
+        desc = hourly[mid].get("weatherDesc", [{}])[0].get("value", "")
+    return desc
+
+
 def _max_rain_chance(hourly: list[dict[str, Any]]) -> int:
     """Return the maximum chance of rain across hourly entries."""
     chances: list[int] = []
@@ -177,15 +270,44 @@ def _max_rain_chance(hourly: list[dict[str, Any]]) -> int:
     return max(chances) if chances else 0
 
 
+# ---------------------------------------------------------------------------
+# Escaping
+#
+# The card's markup is ours; its content is not. `city` arrives in the model's
+# own tool arguments and every textual field below it arrives from wttr.in --
+# and the model fills those arguments with whatever it just read, which
+# routinely includes web pages and e-mail. Third-party text, all of it.
+#
+# The card is handed to the frontend as `metadata.html_card` and injected into
+# the chat as raw HTML (the desktop renders it through rehype-raw with no
+# sanitizer), so an unescaped interpolation here is a live XSS sink on every
+# client at once. Escaped here rather than in each frontend because this is the
+# one point where that text becomes HTML: every renderer downstream inherits
+# the fix instead of having to rediscover the hole.
+# ---------------------------------------------------------------------------
+
+
+def _esc(value: Any) -> str:
+    """Render an untrusted value as card *text* rather than card markup."""
+    return _html_escape(str(value), quote=True)
+
+
 def build_weather_html(
     city: str,
     data: dict[str, Any],
     days: int = 3,
+    offset: int = 0,
 ) -> str:
-    """Build a rich HTML weather card using CSS classes from styles.css."""
+    """Build a rich HTML weather card using CSS classes from styles.css.
+
+    ``offset`` is the index of the first forecast day to render and ``days``
+    how many to render from there, so a single future day can be shown on
+    its own.
+    """
 
     current = data["current_condition"][0]
-    forecasts = data.get("weather", [])[:days]
+    forecasts = data.get("weather", [])[offset : offset + days]
+    today = _today_sp()
 
     temp_c = int(current["temp_C"])
     feels_like = int(current["FeelsLikeC"])
@@ -214,48 +336,39 @@ def build_weather_html(
         '  <div class="rich-card__header">'
         '    <div class="rich-card__icon rich-card__icon--weather">' + icon + '</div>'
         '    <div style="flex:1">'
-        f'      <div class="rich-card__title">{city}</div>'
-        f'      <div class="rich-card__subtitle">{desc_pt} · Sensação {feels_like}°C</div>'
+        # `temp_c` and `feels_like` went through int() above, so they cannot
+        # carry markup; everything else here is third-party text.
+        f'      <div class="rich-card__title">{_esc(city)}</div>'
+        f'      <div class="rich-card__subtitle">{_esc(desc_pt)} · Sensação {feels_like}°C</div>'
         '    </div>'
         f'    <div class="rich-card__big-value {temp_cls}">{temp_c}°</div>'
         '  </div>'
         # Details row
         '  <div class="rich-card__details">'
-        f'    <span class="rich-card__detail">{WIND} {wind} km/h</span>'
-        f'    <span class="rich-card__detail">{DROPLETS} {humidity}%</span>'
-        f'    <span class="rich-card__detail">{UMBRELLA} {precip}mm</span>'
-        f'    <span class="rich-card__detail">{THERMOMETER} UV {uv}</span>'
+        f'    <span class="rich-card__detail">{WIND} {_esc(wind)} km/h</span>'
+        f'    <span class="rich-card__detail">{DROPLETS} {_esc(humidity)}%</span>'
+        f'    <span class="rich-card__detail">{UMBRELLA} {_esc(precip)}mm</span>'
+        f'    <span class="rich-card__detail">{THERMOMETER} UV {_esc(uv)}</span>'
     )
     if sunrise and sunset:
         html += (
-            f'    <span class="rich-card__detail">{SUNRISE} {sunrise}</span>'
-            f'    <span class="rich-card__detail">{SUNSET} {sunset}</span>'
+            f'    <span class="rich-card__detail">{SUNRISE} {_esc(sunrise)}</span>'
+            f'    <span class="rich-card__detail">{SUNSET} {_esc(sunset)}</span>'
         )
     html += '  </div>'
 
     # Forecast days
     if forecasts:
+        section = "Previsão" if len(forecasts) == 1 else "Próximos dias"
         html += '<hr class="rich-card__divider">'
-        html += '<div class="rich-card__section">Próximos dias</div>'
+        html += f'<div class="rich-card__section">{section}</div>'
         for fc in forecasts:
             date_str = fc["date"]
-            try:
-                dt = datetime.strptime(date_str, "%Y-%m-%d")
-                weekday = WEEKDAYS_PT[dt.weekday()]
-                date_label = f"{weekday} {dt.strftime('%d/%m')}"
-            except ValueError:
-                date_label = date_str
+            date_label = _date_label(date_str)
 
             fc_max = int(fc["maxtempC"])
             fc_min = int(fc["mintempC"])
-            fc_desc = fc.get("hourly", [{}])[0].get("weatherDesc", [{}])[0].get(
-                "value", ""
-            )
-            if not fc_desc and fc.get("hourly"):
-                mid = len(fc["hourly"]) // 2
-                fc_desc = (
-                    fc["hourly"][mid].get("weatherDesc", [{}])[0].get("value", "")
-                )
+            fc_desc = _first_desc(fc)
             fc_icon = _get_icon(fc_desc)
             rain_pct = _max_rain_chance(fc.get("hourly", []))
             min_cls = _temp_class(fc_min)
@@ -265,7 +378,7 @@ def build_weather_html(
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{fc_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{date_label}</div>'
+                f'    <div class="rich-card__item-title">{_esc(date_label)}</div>'
                 f'    <div class="rich-card__item-meta">{CLOUD_RAIN} {rain_pct}%</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value">'
@@ -276,10 +389,14 @@ def build_weather_html(
                 f'</div>'
             )
 
-    # Hourly section (only when days == 1)
-    if days == 1 and forecasts and forecasts[0].get("hourly"):
+    # Hourly section (only when a single day is in view)
+    if len(forecasts) == 1 and forecasts[0].get("hourly"):
+        hourly_date = str(forecasts[0].get("date", ""))
+        parsed = _parse_iso_date(hourly_date)
+        rel = _relative_label(parsed, today) if parsed is not None else ""
+        heading = rel.capitalize() if rel else _date_label(hourly_date)
         html += '<hr class="rich-card__divider">'
-        html += '<div class="rich-card__section">Hoje por hora</div>'
+        html += f'<div class="rich-card__section">{_esc(heading)} por hora</div>'
         for h in forecasts[0]["hourly"]:
             htime = h.get("time", "0").zfill(4)
             htime_fmt = f"{htime[:len(htime)-2]}:{htime[-2:]}"
@@ -292,8 +409,8 @@ def build_weather_html(
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{h_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{htime_fmt}</div>'
-                f'    <div class="rich-card__item-meta">{UMBRELLA} {h_rain}%</div>'
+                f'    <div class="rich-card__item-title">{_esc(htime_fmt)}</div>'
+                f'    <div class="rich-card__item-meta">{UMBRELLA} {_esc(h_rain)}%</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value {h_cls}">{h_temp}°C</div>'
                 f'</div>'
@@ -303,20 +420,64 @@ def build_weather_html(
     return html
 
 
+def _build_summary(
+    city: str,
+    current: dict[str, Any],
+    forecasts: list[dict[str, Any]],
+    today: date,
+) -> str:
+    """Text handed back to the model.
+
+    It always names the days it covers, in relative *and* absolute form, so a
+    wrong day is visible instead of silent.
+    """
+    temp = current.get("temp_C", "?")
+    desc_now = _get_pt((current.get("weatherDesc") or [{}])[0].get("value", ""))
+    now_part = f"Agora em {city}: {temp}°C, {desc_now}."
+
+    if not forecasts:
+        return f"Sem dados de previsão para {city}. {now_part}"
+
+    if len(forecasts) == 1:
+        fc = forecasts[0]
+        phrase = _day_phrase(str(fc.get("date", "")), today)
+        fc_desc = _get_pt(_first_desc(fc))
+        rain = _max_rain_chance(fc.get("hourly", []))
+        return (
+            f"Previsão de {city} — cobre {phrase}: "
+            f"mín {fc.get('mintempC', '?')}°C, máx {fc.get('maxtempC', '?')}°C, "
+            f"{fc_desc}, {rain}% de chance de chuva. {now_part}"
+        )
+
+    phrases = "; ".join(
+        _day_phrase(str(fc.get("date", "")), today) for fc in forecasts
+    )
+    return (
+        f"Previsão de {city} — cobre {len(forecasts)} dias: {phrases}. {now_part}"
+    )
+
+
 class WeatherForecastTool(Tool):
     name = "weather_forecast"
     description = (
-        "Get a beautiful weather forecast for a city (today + up to 3 days). "
+        "Get a beautiful weather forecast for a city. "
         "A rich visual card is AUTOMATICALLY displayed to the user — you do "
         "NOT need to repeat the weather data. Just add a BRIEF 1-sentence "
         "comment like 'Tá quente!' or 'Leva guarda-chuva!'. "
         "NEVER list temperatures, humidity, wind, or forecast data in your "
         "reply — the card already shows everything visually. "
-        "IMPORTANT: this tool only covers up to 3 days ahead. For forecasts "
-        "further than 3 days (next week, next month), use web_search to find "
-        "the forecast — do NOT invent data. "
+        "ASKING ABOUT ONE DAY: pass `when` — 'today', 'tomorrow', or an exact "
+        "'YYYY-MM-DD'. For 'amanhã' pass when='tomorrow'. Omit `when` for the "
+        "default outlook (today plus the next 2 days). There is no day-count "
+        "parameter — do not try to express a day with a number. "
+        "The result always states which dates it covers; read it back, and if "
+        "it is not the day the user asked about, call again with the right "
+        "`when`. "
+        "IMPORTANT: this tool only reaches about 3 days out (today, tomorrow, "
+        "the day after). For anything further (next week, next month), use "
+        "web_search to find the forecast — do NOT invent data. "
         "Triggers: 'como está o tempo?', 'vai chover?', 'previsão do "
-        "tempo em Itabuna', 'clima em São Paulo'."
+        "tempo em Itabuna', 'clima em São Paulo', 'como vai estar amanhã?'."
     )
     json_schema: dict[str, Any] = {
         "type": "object",
@@ -325,11 +486,14 @@ class WeatherForecastTool(Tool):
                 "type": "string",
                 "description": "City name (e.g. 'Itabuna', 'São Paulo', 'London')",
             },
-            "days": {
-                "type": "integer",
+            "when": {
+                "type": "string",
                 "description": (
-                    "Number of forecast days (1-3, default 3). "
-                    "Use 1 for hourly detail of today."
+                    "Which single day to report: 'today', 'tomorrow', or an "
+                    "exact date 'YYYY-MM-DD' (the user's timezone, "
+                    "America/Sao_Paulo). Omit for the default outlook of "
+                    "today plus the next 2 days. Days beyond that are not "
+                    "available here — use web_search instead."
                 ),
             },
         },
@@ -346,6 +510,26 @@ class WeatherForecastTool(Tool):
         if not city:
             return ToolResult(ok=False, error="city is required")
 
+        today = _today_sp()
+
+        # `when` names one specific day. Resolve it before spending a request:
+        # a value we cannot parse is an error, never a silent fallback to today.
+        when_raw = args.get("when")
+        when = str(when_raw).strip() if when_raw is not None else ""
+        target: date | None = None
+        if when:
+            target = _resolve_target_date(when, today)
+            if target is None:
+                return ToolResult(
+                    ok=False,
+                    error=(
+                        f"Could not understand when={when!r}. Use 'today', "
+                        "'tomorrow', or an exact date as 'YYYY-MM-DD'."
+                    ),
+                )
+
+        # `days` is no longer advertised, but an old-habit call should still
+        # select a sensible range instead of being ignored.
         try:
             days = int(args.get("days") or 3)
         except (TypeError, ValueError):
@@ -383,8 +567,35 @@ class WeatherForecastTool(Tool):
                 error="Weather data is missing current conditions",
             )
 
+        # Pick the days to report. Match the target against wttr.in's own
+        # date strings rather than assuming its day 0 is our today -- that
+        # assumption breaks for cities in other timezones.
+        available: list[dict[str, Any]] = data.get("weather") or []
+        offset = 0
+        count = days
+        if target is not None:
+            iso = target.isoformat()
+            index = next(
+                (i for i, fc in enumerate(available) if fc.get("date") == iso),
+                None,
+            )
+            if index is None:
+                window = ", ".join(
+                    str(fc.get("date", "?")) for fc in available
+                ) or "none"
+                return ToolResult(
+                    ok=False,
+                    error=(
+                        f"{iso} is outside this tool's forecast window for "
+                        f"{city} (available: {window}). Use web_search to find "
+                        "the forecast for that date — do NOT invent data."
+                    ),
+                )
+            offset = index
+            count = 1
+
         try:
-            html = build_weather_html(city, data, days=days)
+            html = build_weather_html(city, data, days=count, offset=offset)
         except (KeyError, IndexError, TypeError) as e:
             return ToolResult(
                 ok=False,
@@ -394,11 +605,12 @@ class WeatherForecastTool(Tool):
         # Short text summary for Claude to speak/TTS; the rich HTML goes
         # in metadata.html_card so the frontend injects it directly into
         # the chat without depending on Claude echoing the HTML verbatim.
+        # The summary names the covered dates so a mismatch with what the
+        # user asked for is recoverable instead of invisible.
         current = data.get("current_condition", [{}])[0]
-        temp = current.get("temp_C", "?")
-        desc_raw = (current.get("weatherDesc") or [{}])[0].get("value", "")
-        desc_pt = _get_pt(desc_raw)
-        summary = f"Clima em {city}: {temp}°C, {desc_pt}."
+        summary = _build_summary(
+            city, current, available[offset : offset + count], today
+        )
         return ToolResult(
             ok=True,
             output=summary,
@@ -457,11 +669,24 @@ class FormatWeatherCardTool(Tool):
         icon = _get_icon(current_desc) if current_desc else THERMOMETER
         desc_pt = _get_pt(current_desc) if current_desc else ""
 
-        # Header with big temp
+        # Header with big temp.
+        #
+        # Every value in this tool comes from the model's arguments, so none
+        # of it is trusted -- including the ones the schema declares as
+        # integers, which nothing enforces. `_temp_class` compares against an
+        # int, so guard it the way the forecast rows below already do rather
+        # than let a non-numeric temp raise before it can be escaped.
         temp_html = ""
         if current_temp is not None:
-            temp_cls = _temp_class(current_temp)
-            temp_html = f'<div class="rich-card__big-value {temp_cls}">{current_temp}°</div>'
+            temp_cls = (
+                _temp_class(current_temp)
+                if isinstance(current_temp, (int, float))
+                else "clr-dim"
+            )
+            temp_html = (
+                f'<div class="rich-card__big-value {temp_cls}">'
+                f'{_esc(current_temp)}°</div>'
+            )
 
         subtitle_parts = []
         if desc_pt:
@@ -471,9 +696,13 @@ class FormatWeatherCardTool(Tool):
         details_html = ""
         detail_items = []
         if wind:
-            detail_items.append(f'<span class="rich-card__detail">{WIND} {wind} km/h</span>')
+            detail_items.append(
+                f'<span class="rich-card__detail">{WIND} {_esc(wind)} km/h</span>'
+            )
         if humidity:
-            detail_items.append(f'<span class="rich-card__detail">{DROPLETS} {humidity}%</span>')
+            detail_items.append(
+                f'<span class="rich-card__detail">{DROPLETS} {_esc(humidity)}%</span>'
+            )
         if detail_items:
             details_html = '<div class="rich-card__details">' + "".join(detail_items) + '</div>'
 
@@ -484,7 +713,8 @@ class FormatWeatherCardTool(Tool):
             mn = day.get("min_temp", "?")
             mx = day.get("max_temp", "?")
             rain = day.get("rain_chance")
-            rain_meta = f"{UMBRELLA} {rain}%" if rain is not None else ""
+            # UMBRELLA is our own SVG and must stay markup; `rain` must not.
+            rain_meta = f"{UMBRELLA} {_esc(rain)}%" if rain is not None else ""
             min_cls = _temp_class(mn) if isinstance(mn, int) else "clr-dim"
             max_cls = _temp_class(mx) if isinstance(mx, int) else "clr-dim"
 
@@ -492,13 +722,13 @@ class FormatWeatherCardTool(Tool):
                 f'<div class="rich-card__item">'
                 f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{d_icon}</div>'
                 f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{day.get("date", "?")}</div>'
+                f'    <div class="rich-card__item-title">{_esc(day.get("date", "?"))}</div>'
                 f'    <div class="rich-card__item-meta">{rain_meta}</div>'
                 f'  </div>'
                 f'  <div class="rich-card__item-value">'
-                f'    <span class="{min_cls}">{mn}°</span>'
+                f'    <span class="{min_cls}">{_esc(mn)}°</span>'
                 f'    <span class="clr-faint"> / </span>'
-                f'    <span class="{max_cls}">{mx}°</span>'
+                f'    <span class="{max_cls}">{_esc(mx)}°</span>'
                 f'  </div>'
                 f'</div>'
             )
@@ -508,8 +738,8 @@ class FormatWeatherCardTool(Tool):
             '  <div class="rich-card__header">'
             f'    <div class="rich-card__icon rich-card__icon--weather">{icon}</div>'
             f'    <div style="flex:1">'
-            f'      <div class="rich-card__title">{city}</div>'
-            f'      <div class="rich-card__subtitle">{" · ".join(subtitle_parts)}</div>'
+            f'      <div class="rich-card__title">{_esc(city)}</div>'
+            f'      <div class="rich-card__subtitle">{_esc(" · ".join(subtitle_parts))}</div>'
             f'    </div>'
             f'    {temp_html}'
             f'  </div>'

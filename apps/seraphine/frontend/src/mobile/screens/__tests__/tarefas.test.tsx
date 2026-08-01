@@ -1,12 +1,17 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../../tasks/api', () => ({
   listTasks: vi.fn(),
   updateTaskStatus: vi.fn(),
   createTask: vi.fn(),
+  // As duas novas: a tela passou a montar o `ModalTarefa`, que salva por
+  // `updateTask` e exclui por `deleteTask`. Faltando no mock, o modal quebra no
+  // render (o default de prop é lido na montagem, não no envio).
+  updateTask: vi.fn(),
+  deleteTask: vi.fn(),
 }));
-import { listTasks, updateTaskStatus, createTask } from '../../../tasks/api';
+import { listTasks, updateTaskStatus, createTask, updateTask, deleteTask } from '../../../tasks/api';
 import type { Task } from '../../../tasks/types';
 import { TarefasScreen } from '../TarefasScreen';
 
@@ -36,6 +41,8 @@ describe('TarefasScreen', () => {
     vi.mocked(listTasks).mockReset();
     vi.mocked(updateTaskStatus).mockReset();
     vi.mocked(createTask).mockReset();
+    vi.mocked(updateTask).mockReset().mockResolvedValue(undefined);
+    vi.mocked(deleteTask).mockReset().mockResolvedValue(undefined);
   });
 
   it('lista as tarefas abertas com categoria, prazo e o item em foco', async () => {
@@ -173,11 +180,120 @@ describe('TarefasScreen', () => {
     await waitFor(() => expect(vi.mocked(listTasks).mock.calls.length).toBeGreaterThan(1));
   });
 
+  /* O EDITOR — o buraco que a integração fechou.
+     `ModalTarefa` estava pronto, testado e sem NINGUÉM que o montasse: não é
+     chave de registry (é sobreposição, não destino), então navegação nenhuma o
+     alcançava. A porta é a própria linha da lista. */
+  describe('editor de tarefa', () => {
+    const abrirPrimeira = async () => {
+      vi.mocked(listTasks).mockResolvedValue([
+        tarefa({ id: 1, title: 'Pagar aluguel', category: 'moradia', due_date: dia(0) }),
+        tarefa({ id: 2, title: 'Revisar PR' }),
+      ]);
+      render(<TarefasScreen />);
+      await waitFor(() => expect(screen.getByText('Pagar aluguel')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Editar Pagar aluguel' }));
+      return await screen.findByRole('dialog');
+    };
+
+    it('tocar na linha abre o sheet DAQUELA tarefa', async () => {
+      const dialogo = await abrirPrimeira();
+      expect(dialogo.getAttribute('aria-label')).toBe('Editar tarefa');
+      // O título vem da linha tocada — não da primeira da lista por acaso.
+      expect((screen.getByLabelText('Título da tarefa') as HTMLInputElement).value)
+        .toBe('Pagar aluguel');
+      expect((screen.getByLabelText('Categoria') as HTMLSelectElement).value).toBe('moradia');
+    });
+
+    it('sem tocar em linha nenhuma, não há sheet montado', async () => {
+      vi.mocked(listTasks).mockResolvedValue([tarefa({ id: 1, title: 'Pagar aluguel' })]);
+      render(<TarefasScreen />);
+      await waitFor(() => expect(screen.getByText('Pagar aluguel')).toBeTruthy());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('excluir chama a camada e refaz a lista', async () => {
+      await abrirPrimeira();
+      expect(listTasks).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Excluir tarefa' }));
+      fireEvent.click(screen.getByText('Sim'));
+
+      await waitFor(() => expect(deleteTask).toHaveBeenCalledWith(1));
+      // A linha só some de verdade quando a lista volta do servidor.
+      await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+    });
+
+    it('fechar sem ter salvado NÃO refaz a lista', async () => {
+      await abrirPrimeira();
+      fireEvent.click(screen.getByRole('button', { name: 'Fechar tarefa' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      // Um GET por abertura de modal seria tráfego por nada — e apagaria as
+      // marcações otimistas que a lista guarda.
+      expect(listTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it('salva pela camada e refaz a lista UMA vez, no fechamento', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await abrirPrimeira();
+
+        fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'approved' } });
+        fireEvent.change(screen.getByLabelText('Prioridade'), { target: { value: 'high' } });
+        // o debounce de 800ms do modal, dentro de `act` para o React aplicar o
+        // re-render do rodapé no mesmo lote
+        await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+        // A TAREFA vai para a camada, não só o id: é dela que sai a categoria
+        // que protege um patch de tags (ver o comentário em `tasks/api.ts`).
+        await waitFor(() => expect(updateTask).toHaveBeenCalledTimes(1));
+        expect(vi.mocked(updateTask).mock.calls[0][0]).toMatchObject({ id: 1, category: 'moradia' });
+        expect(vi.mocked(updateTask).mock.calls[0][1]).toEqual({ status: 'approved', priority: 'high' });
+
+        // Salvou, e a lista NÃO se refez ainda: relistar a cada PATCH seria um
+        // GET por tecla digitada.
+        expect(listTasks).toHaveBeenCalledTimes(1);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Fechar tarefa' }));
+        await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a categoria que viaja com o patch é a DA TELA, não a da linha que abriu', async () => {
+      // O `tarefa` que chegou por prop é um retrato da lista. Quem já trocou a
+      // categoria aqui dentro tem na tela um valor mais novo — e é ele que
+      // precisa acompanhar um patch de tags, senão a proteção da camada
+      // restauraria justamente a categoria que o usuário acabou de abandonar.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await abrirPrimeira();
+
+        fireEvent.change(screen.getByLabelText('Categoria'), { target: { value: 'saude' } });
+        await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+        await waitFor(() => expect(updateTask).toHaveBeenCalledTimes(1));
+
+        fireEvent.change(screen.getByLabelText('Adicionar tag'), { target: { value: 'exame' } });
+        fireEvent.keyDown(screen.getByLabelText('Adicionar tag'), { key: 'Enter' });
+        await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+        await waitFor(() => expect(updateTask).toHaveBeenCalledTimes(2));
+        expect(vi.mocked(updateTask).mock.calls[1][1]).toEqual({ tags: ['exame'] });
+        expect(vi.mocked(updateTask).mock.calls[1][0]).toMatchObject({ id: 1, category: 'saude' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   /* A MESMA tela é a aba `tarefas` e a tela empurrada `tarefas-view` (registry.ts
-     aponta as duas chaves para cá). Ela é empurrada de três lugares — o eyebrow
-     "Tarefas" do Hoje, o "Resolver" de qualquer sugestão de tipo `task` e o "+"
-     do Calendário — e o contêiner empurrado (`PhoneShell`, ramo `pushed`) NÃO
-     desenha tab bar. Sem um controle de saída próprio o usuário fica preso.
+     aponta as duas chaves para cá). Ela é empurrada do eyebrow "Tarefas" do Hoje
+     e do "Resolver" de qualquer sugestão de tipo `task` — e o contêiner empurrado
+     (`PhoneShell`, ramo `pushed`) NÃO desenha tab bar. Sem um controle de saída
+     próprio o usuário fica preso.
+     (O "+" do Calendário era a terceira origem; virou o "+" de NOVO EVENTO na
+     integração, agora que existe rota para criar evento.)
 
      Quem distingue os dois contextos é o `onBack`: o shell só o passa no ramo da
      pilha. Era ele também na aba (`PhoneShell.tsx:59` voltava para o Hoje, saída

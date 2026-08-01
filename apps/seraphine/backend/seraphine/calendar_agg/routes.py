@@ -393,6 +393,13 @@ async def aggregate(
             dt_str = raw_dt[:10]
             if dt_str in day_map:
                 day_map[dt_str]["events"].append({
+                    # O id do Google vai junto porque é o que torna a linha
+                    # ACIONÁVEL: a lista do dia do celular sai daqui, e sem
+                    # ele apagar viraria adivinhação por título e horário —
+                    # dois "Dentista" às 14h são dois eventos diferentes.
+                    # Sempre presente, ainda que vazio, para o consumidor não
+                    # ter que distinguir ausência de vazio.
+                    "id": str(ev.get("id") or ""),
                     "title": ev.get("summary", "(sem titulo)"),
                     "start": raw_dt,
                     "end": raw_end,

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { fetchAggregate, fetchTasksByRange } from '../../calendar/api';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { apagarEvento, fetchAggregate, fetchTasksByRange } from '../../calendar/api';
 import type { AggregateDay, Task } from '../../calendar/types';
-import { ArrowLeftIcon, PlusIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, PlusIcon, TrashIcon } from '../../icons/Icons';
+import { ModalEvento } from './ModalEvento';
 import type { ScreenProps } from './registry';
 import './CalendarioScreen.css';
 
@@ -51,17 +52,40 @@ interface Item {
   cat: CatId;
   titulo: string;
   sub: string;
+  /** Só nas linhas de EVENTO: o id no Google, que é o que torna a linha
+   *  apagável. Vazio quando o agregado não o trouxe — e aí a tela diz isso em
+   *  vez de oferecer um botão que apagaria o quê. */
+  eventoId?: string;
 }
 
 /** O que aconteceu (ou está marcado) num dia, na ordem das categorias.
  *  As bolinhas da grade saem DESTA mesma função, então bolinha e lista nunca
- *  discordam: um dia com bolinha sempre tem linha. */
-function itensDoDia(dia: AggregateDay | undefined, tarefas: Map<number, Task>): Item[] {
+ *  discordam: um dia com bolinha sempre tem linha — e um evento apagado some
+ *  das duas de uma vez. */
+function itensDoDia(
+  dia: AggregateDay | undefined,
+  tarefas: Map<number, Task>,
+  apagados: ReadonlySet<string>,
+): Item[] {
   if (!dia) return [];
   const itens: Item[] = [];
 
   dia.events.forEach((e, i) => {
-    itens.push({ chave: `ev-${i}`, cat: 'eventos', titulo: e.title, sub: faixa(e.start, e.end) });
+    const id = e.id ?? '';
+    // Apagado com confirmação do servidor. Fica de fora mesmo que um
+    // recarregamento traga o evento de volta (o Google leva um instante para
+    // parar de listá-lo): ele NÃO está mais na agenda.
+    if (id && apagados.has(id)) return;
+    // A data entra na chave porque o índice sozinho colide entre dias — e a
+    // chave carrega estado de linha (confirmação, erro), que não pode vazar
+    // de um dia para outro.
+    itens.push({
+      chave: `ev-${dia.date}-${id || i}`,
+      cat: 'eventos',
+      titulo: e.title,
+      sub: faixa(e.start, e.end),
+      eventoId: id,
+    });
   });
 
   dia.tasks.forEach((t) => {
@@ -96,7 +120,7 @@ function itensDoDia(dia: AggregateDay | undefined, tarefas: Map<number, Task>): 
   return itens;
 }
 
-export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
+export function CalendarioScreen({ onBack }: ScreenProps) {
   // O mês exibido é o corrente; `hoje` é fixado no primeiro render para o
   // destaque não escorregar se a tela ficar aberta pela virada do dia.
   const hoje = useMemo(() => new Date(), []);
@@ -112,6 +136,61 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [sel, setSel] = useState(isoHoje);
+  const [criando, setCriando] = useState(false);
+  const [recarga, setRecarga] = useState(0);
+
+  /* ── APAGAR EVENTO ────────────────────────────────────────────────────
+     A INTERAÇÃO É BOTÃO NA LINHA, não deslizar nem toque longo:
+      - a ação é DESTRUTIVA e não tem desfazer por aqui; gesto é justamente a
+        forma mais fácil de disparar sem querer numa lista que rola;
+      - esta onda já decidiu isto uma vez — a tela de Planejamento trocou o
+        arrastar por toque pelo mesmo motivo;
+      - gesto é invisível: um botão anuncia que a linha pode ser apagada, e um
+        alvo de 44pt é alcançável com o polegar sem mira.
+     A confirmação NOMEIA o evento e o horário: "tem certeza?" não diz o que
+     vai sumir.
+
+     E NADA SOME ANTES DA CONFIRMAÇÃO DO SERVIDOR. Sem remoção otimista: uma
+     linha que desaparece na hora do toque é uma promessa que a falha teria que
+     desdizer, e o pior resultado possível desta tela é a pessoa achar que
+     apagou com o compromisso ainda no Google. */
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [apagando, setApagando] = useState<string | null>(null);
+  const [erroApagar, setErroApagar] = useState<{ chave: string; mensagem: string } | null>(null);
+  const [apagados, setApagados] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const vivo = useRef(true);
+
+  useEffect(() => {
+    vivo.current = true;
+    return () => { vivo.current = false; };
+  }, []);
+
+  /** UMA guarda de reentrância, e é a que também se vê: o "Sim" fica
+   *  `disabled` enquanto `apagando` for esta linha. Havia uma segunda, em ref,
+   *  e a mutação provou que nenhuma das duas era observável — cada uma cobria
+   *  a outra. Duas versões da mesma regra é o que diverge com o tempo; ficou a
+   *  que o usuário enxerga. */
+  const apagarLinha = async (it: Item): Promise<void> => {
+    if (!it.eventoId) return;
+    setApagando(it.chave);
+    setErroApagar(null);
+    try {
+      await apagarEvento(it.eventoId);
+      if (!vivo.current) return;
+      // Agora sim. `jaNaoExistia` não muda o que a tela faz — o evento não está
+      // na agenda de um jeito ou de outro —, mas a camada o distingue para
+      // ninguém confundir "não estava lá" com "eu apaguei".
+      setApagados((atual) => new Set(atual).add(it.eventoId as string));
+      setConfirmando(null);
+    } catch (e: unknown) {
+      if (!vivo.current) return;
+      // A linha FICA. E o motivo aparece com `role="alert"`.
+      setConfirmando(null);
+      setErroApagar({ chave: it.chave, mensagem: e instanceof Error ? e.message : String(e) });
+    } finally {
+      if (vivo.current) setApagando(null);
+    }
+  };
 
   useEffect(() => {
     let vivo = true;
@@ -128,15 +207,15 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
         setCarregando(false);
       });
     return () => { vivo = false; };
-  }, [inicio, fim]);
+  }, [inicio, fim, recarga]);
 
   // dia (YYYY-MM-DD) → linhas daquele dia. Uma passada só serve grade e lista.
   const porDia = useMemo(() => {
     const mapaTarefas = new Map(tarefas.map((t) => [t.id, t]));
     const m = new Map<string, Item[]>();
-    (dias ?? []).forEach((d) => m.set(d.date, itensDoDia(d, mapaTarefas)));
+    (dias ?? []).forEach((d) => m.set(d.date, itensDoDia(d, mapaTarefas, apagados)));
     return m;
-  }, [dias, tarefas]);
+  }, [dias, tarefas, apagados]);
 
   // Semanas do mês: cada uma com 7 posições, `null` no que é de outro mês.
   const semanas = useMemo(() => {
@@ -171,11 +250,18 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
                 {eventosHoje ? `${plural(eventosHoje, 'evento', 'eventos')} hoje` : 'nada marcado hoje'}
               </p>}
         </div>
+        {/* O "+" desta tela cria EVENTO, não tarefa. Ele apontava para a lista
+            de tarefas porque a criação de evento não tinha rota: existia só
+            como ferramenta do modelo. Com `POST /google/calendar/events` de pé
+            (e `criarEvento` na camada), o controle passou a fazer o que a tela
+            em que ele está sugere. A porta para `tarefas-view` não se perdeu:
+            o Hoje continua abrindo a lista de tarefas por dois caminhos. */}
         <button
           type="button"
           className="ms-calendario-novo"
-          aria-label="Nova tarefa"
-          onClick={() => onOpen?.({ key: 'tarefas-view', title: 'Tarefas' })}
+          aria-label="Novo evento"
+          aria-haspopup="dialog"
+          onClick={() => setCriando(true)}
         >
           <PlusIcon size={18} />
         </button>
@@ -246,12 +332,93 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
           : erro ? <Erro>Não consegui carregar os itens deste dia.</Erro>
           : itensSel.length ? itensSel.map((it) => (
             <article key={it.chave} className={`ms-calendario-item ms-calendario-item--${it.cat}`}>
-              <p className="ms-calendario-item__titulo">{it.titulo}</p>
-              <p className="ms-calendario-item__sub">{it.sub}</p>
+              <div className="ms-calendario-item__linha">
+                <div className="ms-calendario-item__texto">
+                  <p className="ms-calendario-item__titulo">{it.titulo}</p>
+                  <p className="ms-calendario-item__sub">{it.sub}</p>
+                </div>
+                {/* Só EVENTO tem este controle: a tarefa se apaga na tela de
+                    tarefas, e o DELETE do calendário nem a alcançaria. */}
+                {it.cat === 'eventos' && confirmando !== it.chave ? (
+                  it.eventoId ? (
+                    <button
+                      type="button"
+                      className="ms-calendario-item__apagar"
+                      aria-label={`Apagar evento ${it.titulo}`}
+                      onClick={() => { setErroApagar(null); setConfirmando(it.chave); }}
+                    >
+                      <TrashIcon size={16} />
+                    </button>
+                  ) : (
+                    /* Sem id não dá para apagar com segurança — e sumir com o
+                       botão calado deixaria a pessoa procurando o que não
+                       existe. Ele fica, desabilitado, dizendo o porquê. */
+                    <button
+                      type="button"
+                      className="ms-calendario-item__apagar"
+                      disabled
+                      aria-label={`Não dá para apagar ${it.titulo}: a agenda não trouxe o identificador deste evento`}
+                      title="sem identificador — recarregue a agenda"
+                    >
+                      <TrashIcon size={16} />
+                    </button>
+                  )
+                ) : null}
+              </div>
+
+              {confirmando === it.chave ? (
+                <div className="ms-calendario-confirma">
+                  <p className="ms-calendario-confirma__texto" id={`ms-cal-confirma-${it.chave}`}>
+                    Apagar “{it.titulo}” — {it.sub}?
+                  </p>
+                  <div className="ms-calendario-confirma__acoes">
+                    <button
+                      type="button"
+                      className="ms-calendario-confirma__botao ms-calendario-confirma__botao--perigo"
+                      aria-describedby={`ms-cal-confirma-${it.chave}`}
+                      disabled={apagando === it.chave}
+                      onClick={() => void apagarLinha(it)}
+                    >
+                      Sim
+                    </button>
+                    <button
+                      type="button"
+                      className="ms-calendario-confirma__botao"
+                      aria-describedby={`ms-cal-confirma-${it.chave}`}
+                      onClick={() => setConfirmando(null)}
+                    >
+                      Não
+                    </button>
+                    {apagando === it.chave ? (
+                      <span className="ms-calendario-confirma__estado" role="status">apagando…</span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {erroApagar?.chave === it.chave ? (
+                <p className="ms-calendario-item__erro" role="alert">
+                  Não consegui apagar “{it.titulo}”: {erroApagar.mensagem}
+                </p>
+              ) : null}
             </article>
           ))
           : <Vazio>Nada marcado neste dia — nenhum evento, tarefa ou registro.</Vazio>}
       </section>
+
+      {/* `dia={sel}` e não "hoje": o modal nasce no dia que a grade está
+          mostrando, senão marcar algo para dia 20 exigiria escolher a data
+          duas vezes. Criado, o mês inteiro se refaz — o evento novo pode cair
+          em qualquer célula, não só na selecionada. */}
+      <ModalEvento
+        aberto={criando}
+        dia={sel}
+        onFechar={() => setCriando(false)}
+        onCriado={() => {
+          setCriando(false);
+          setRecarga((r) => r + 1);
+        }}
+      />
     </div>
   );
 }

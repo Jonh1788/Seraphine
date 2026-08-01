@@ -465,6 +465,9 @@ class ErrorEvent(BaseModel):
 
 
 class ToolRequestEvent(BaseModel):
+    """Approval gate: the tool is NOT running, it's waiting for a yes.
+    Only emitted for `requires_confirmation` tools."""
+
     type: Literal["tool_request"] = "tool_request"
     request_id: str
     tool: str
@@ -472,9 +475,31 @@ class ToolRequestEvent(BaseModel):
     requires_confirmation: bool
 
 
+class ToolStartEvent(BaseModel):
+    """The tool is running RIGHT NOW — emitted for every tool that actually
+    executes, approval-gated or not, before the engine awaits its result.
+
+    Without this the stream never named the slow tools: `tool_request` only
+    covers the approval-gated ones, and `weather_forecast` / `web_search` /
+    `home_announce` — the ones that keep a turn busy for ~30s — don't ask for
+    approval. The screen had nothing to say and looked frozen.
+
+    `tool` is the identifier (`weather_forecast`), never a sentence: the
+    human-language label belongs to the client, which knows the user's
+    language and the surrounding context."""
+
+    type: Literal["tool_start"] = "tool_start"
+    request_id: str
+    tool: str
+    args: dict[str, Any]
+
+
 class ToolResultEvent(BaseModel):
     type: Literal["tool_result"] = "tool_result"
     request_id: str
+    # Same identifier as the matching tool_start, so a client can label a
+    # result without keeping its own request_id → name map.
+    tool: str
     ok: bool
     output: str | None = None
     error: str | None = None
@@ -494,6 +519,7 @@ StreamEvent = Union[
     TurnCancelledEvent,
     ErrorEvent,
     ToolRequestEvent,
+    ToolStartEvent,
     ToolResultEvent,
     MoodEvent,
 ]
@@ -1189,6 +1215,7 @@ class ConversationEngine:
                         )
                         yield ToolResultEvent(
                             request_id=request_id,
+                            tool=tool_name,
                             ok=False,
                             output=None,
                             error=result.error,
@@ -1232,6 +1259,18 @@ class ConversationEngine:
                         approved_int = None
 
                     if approved:
+                        # Name the tool BEFORE awaiting it. Non-approval tools
+                        # were already dispatched above, so this frame lands
+                        # while the tool runs — which is exactly when the
+                        # screen needs to say "consultando o tempo…" instead
+                        # of showing an idle-looking ellipsis. Emitted one at a
+                        # time, in call order, so the client's label always
+                        # points at the call the turn is currently blocked on.
+                        yield ToolStartEvent(
+                            request_id=request_id,
+                            tool=tool_name,
+                            args=tool_args,
+                        )
                         if _idx in _parallel_tasks:
                             # Already running concurrently — just await
                             # the pre-dispatched task. tool_args were
@@ -1284,6 +1323,7 @@ class ConversationEngine:
                         logger.debug("add_event for tool_used failed: %s", exc)
                     yield ToolResultEvent(
                         request_id=request_id,
+                        tool=tool_name,
                         ok=result.ok,
                         output=result.output,
                         error=result.error,

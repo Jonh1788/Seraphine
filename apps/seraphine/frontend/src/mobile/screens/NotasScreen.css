@@ -46,7 +46,7 @@ html[data-shell='phone'] .ms-notas-busca-icone {
 }
 html[data-shell='phone'] .ms-notas-busca-campo {
   flex: 1; min-width: 0; background: none; border: none; outline: none; padding: 0;
-  font: inherit; font-size: 13px; color: var(--text, #ececef);
+  font: inherit; color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-notas-busca-campo::placeholder { color: var(--text-faint, #5f5e6b); }
 html[data-shell='phone'] .ms-notas-busca-campo::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
@@ -87,8 +87,8 @@ html[data-shell='phone'] .ms-notas-campo {
   border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 11px;
   padding: 9px 11px; font: inherit; color: var(--text, #ececef); outline: none;
 }
-html[data-shell='phone'] .ms-notas-campo-titulo { font-size: 13px; font-weight: 700; }
-html[data-shell='phone'] .ms-notas-campo { font-size: 12.5px; line-height: 1.45; resize: none; }
+html[data-shell='phone'] .ms-notas-campo-titulo { font-weight: 700; }
+html[data-shell='phone'] .ms-notas-campo { line-height: 1.45; resize: none; }
 html[data-shell='phone'] .ms-notas-campo-titulo::placeholder,
 html[data-shell='phone'] .ms-notas-campo::placeholder { color: var(--text-faint, #5f5e6b); font-weight: 400; }
 html[data-shell='phone'] .ms-notas-campo-titulo:disabled,

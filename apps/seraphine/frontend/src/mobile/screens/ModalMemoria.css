@@ -1,0 +1,153 @@
+/* src/mobile/screens/ModalMemoria.css — modal de lembrança (handoff: frame
+   "Modal · nova memória"). Medidas tiradas de lá verbatim: cabeçalho
+   `justify-content: space-between` com 16 de respiro embaixo, Cancelar 14px
+   --dim, título 15/700, Salvar 14/700 accent; dica em accent-soft com borda
+   rgba(154,147,255,.22), raio 13, padding 12px 14px, gap 11, texto 12/1.5;
+   campo de raio 14, padding 14, `line-height: 1.6` e `min-height: 96px`;
+   eyebrow 11/700 com 0.06em de tracking e margem 16/9; linha de confiança com
+   `border-top` e `padding: 15px 2px 2px`, quadradinho 30×30 de raio 9, rótulo
+   14, subtítulo 11 e valor 13/600.
+
+   A MOLDURA NÃO ESTÁ AQUI: backdrop, cantos de 28, grabber, respiro de home
+   indicator e a faixa do rodapé são do `MobileSheet` (`ms-sheet-*`). O painel
+   dele já traz o padding lateral de 20 — nada neste arquivo põe margem própria,
+   senão o conteúdo entraria duas vezes.
+
+   TRÊS COISAS QUE O HANDOFF DESENHA E ESTE CSS NÃO COPIA, de propósito:
+   - os CINCO CHIPS de categoria não têm CSS aqui porque não têm DOM: o
+     `POST /memory/facts` não aceita categoria (ver o cabeçalho do .tsx). No
+     lugar deles, `.ms-mmemoria-nota`.
+   - o campo livre sobe de 15px para 16px de fonte. Abaixo de 16 o iOS DÁ ZOOM
+     ao focar, e esta tela existe para digitar: o zoom empurraria o painel e o
+     rodapé para fora antes da primeira palavra. 1px de divergência contra a
+     tela inteira saltando.
+   - Cancelar e Salvar ganham alvo de 44pt por um pseudo que cresce por fora
+     (mesma técnica do ‹ das telas empurradas e dos ícones do modal de tarefa),
+     sem mover o desenho. Cada um cresce para o lado de dentro do painel, onde
+     só há vazio; centrados, os 44 do Salvar entrariam no título.
+
+   Prefixo `ms-mmemoria-` em TUDO. (Não há `@keyframes` aqui: o modal não anima
+   nada por conta própria — quem anima a entrada é o `MobileSheet`.) */
+
+/* ── cabeçalho ─────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-cabecalho {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 16px;
+}
+
+html[data-shell='phone'] .ms-mmemoria-titulo { font-size: 15px; font-weight: 700; }
+
+html[data-shell='phone'] .ms-mmemoria-acao {
+  position: relative; flex: none;
+  padding: 0; border: none; background: none;
+  font-family: inherit; font-size: 14px; line-height: 20px;
+  color: var(--dim, #9594a0); cursor: pointer;
+}
+html[data-shell='phone'] .ms-mmemoria-acao--salvar { font-weight: 700; color: var(--accent, #9a93ff); }
+/* Desabilitado continua no DOM e continua legível: o botão apagado É a
+   explicação de por que nada acontece com o campo vazio. */
+html[data-shell='phone'] .ms-mmemoria-acao[disabled] { opacity: .45; cursor: default; }
+
+html[data-shell='phone'] .ms-mmemoria-acao::after {
+  content: ''; position: absolute; top: 50%; left: 0; right: 0;
+  min-width: 44px; height: 44px; transform: translateY(-50%);
+}
+
+/* ── dica da Seraphine ─────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-dica {
+  display: flex; align-items: flex-start; gap: 11px;
+  margin: 0 0 16px; padding: 12px 14px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  border: 1px solid rgba(154, 147, 255, .22); border-radius: 13px;
+  font-size: 12px; line-height: 1.5;
+}
+
+html[data-shell='phone'] .ms-mmemoria-dica-icone {
+  flex: none; margin-top: 1px; display: inline-flex;
+  color: var(--accent, #9a93ff);
+}
+
+/* ── campo livre ───────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-campo {
+  display: block; width: 100%; min-height: 96px; padding: 14px;
+  box-sizing: border-box; resize: vertical;
+  background: var(--app, #0f0f14);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 14px;
+  font-family: inherit; line-height: 1.6;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mmemoria-campo::placeholder { color: var(--faint, #5f5e6b); }
+
+/* ── categoria (texto, não controle) ───────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-eyebrow {
+  margin: 16px 0 9px;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  color: var(--faint, #5f5e6b);
+}
+
+html[data-shell='phone'] .ms-mmemoria-nota {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--dim, #9594a0);
+}
+
+/* ── linha de confiança ────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-linha {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 6px; padding: 15px 2px 2px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, .08));
+}
+
+html[data-shell='phone'] .ms-mmemoria-icone {
+  width: 30px; height: 30px; flex: none; border-radius: 9px;
+  display: grid; place-items: center;
+}
+
+html[data-shell='phone'] .ms-mmemoria-linha-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+html[data-shell='phone'] .ms-mmemoria-rotulo { font-size: 14px; }
+html[data-shell='phone'] .ms-mmemoria-sub { margin-top: 1px; font-size: 11px; color: var(--faint, #5f5e6b); }
+
+html[data-shell='phone'] .ms-mmemoria-valor {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600;
+}
+
+html[data-shell='phone'] .ms-mmemoria-ponto { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+
+/* O controle nativo por cima da linha inteira: no iPhone abre o seletor do
+   sistema e o dedo tem 44pt de alvo sem engordar o desenho de 47. Invisível,
+   não removido — continua no DOM, focável e nomeado para quem lê tela. */
+html[data-shell='phone'] .ms-mmemoria-sobreposto {
+  position: absolute; left: 0; right: 0; top: 50%;
+  width: 100%; height: 44px; transform: translateY(-50%);
+  margin: 0; padding: 0; border: none;
+  opacity: 0; -webkit-appearance: none; appearance: none;
+  font-family: inherit; /* < 16px faz o iOS dar zoom ao focar */
+  cursor: pointer;
+}
+
+/* ── rodapé (fora da rolagem, por construção do MobileSheet) ───────────────── */
+
+html[data-shell='phone'] .ms-mmemoria-rodape { display: flex; align-items: center; margin-top: 12px; }
+
+html[data-shell='phone'] .ms-mmemoria-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 18px;
+  font-size: 12px; color: var(--dim, #9594a0);
+}
+/* O erro é o texto que impede o usuário de sair achando que a Seraphine
+   guardou: cor de perigo e peso. O aviso de descarte é âmbar — atrapalha de
+   propósito, mas não é falha de nada. */
+html[data-shell='phone'] .ms-mmemoria-status--erro { color: var(--danger, #ef6b6b); font-weight: 600; }
+html[data-shell='phone'] .ms-mmemoria-status--aviso { color: var(--warning, #ffa726); font-weight: 600; }
+
+html[data-shell='phone'] .ms-mmemoria-retentar {
+  min-height: 44px; padding: 0 10px;
+  border: none; background: none; color: inherit;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  text-decoration: underline; cursor: pointer;
+}

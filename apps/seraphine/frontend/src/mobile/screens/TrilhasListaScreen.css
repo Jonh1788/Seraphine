@@ -1,0 +1,271 @@
+/* Tela TRILHAS · LISTA do handoff v3 (frame "Trilhas · lista").
+
+   Medidas e cores verbatim do frame: cabeçalho 12/20 com título de 22px,
+   fichinhas de 12/700 em #ffd54f e #ff8a4c sobre 10% da própria cor, cartão de
+   criar em gradiente de 135 graus sobre accent com raio 18, campo de raio 12
+   sobre 25% de preto, cartões de curso de raio 18 sobre surface com ícone de
+   46 e raio 14, selo de 10/700 com raio 7, barra de 7px com raio 5 sobre 6% de
+   branco, cartão concluído a 65% de opacidade.
+
+   Duas coisas do frame NÃO viraram CSS, e é de propósito:
+     · a largura de 35% da barra do "gerando…" — número que a api não sustenta
+       (ver o cabeçalho do .tsx). No lugar dela, uma faixa que corre.
+     · os emojis do quadradinho de cada curso — o design system não usa emoji;
+       o ícone é o TrilhasIcon, e o que muda por estado é a tinta do fundo.
+
+   Todas as classes e todos os keyframes levam o prefixo ms-trilhaslista-:
+   nome de keyframe é global e já houve colisão nesta base. */
+
+html[data-shell='phone'] .ms-trilhaslista {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+/* ESTA TELA É A ABA TRILHAS, e cada bloco dela paga o próprio recuo de 20px
+   (o do frame). A aba nasce em `.mshell__content`, que já paga `12px+safe 16px
+   16px` para as telas que não pagam nada — e as duas somadas dariam 36px de
+   margem lateral, quase o dobro do desenho, com o cartão de criar estreitando.
+   Então a aba anula o recuo do contêiner e mantém só a safe area do topo (o
+   `-12px` come os 12px do padding, não o `env()` que vem somado a ele).
+   É o espelho da regra do mapa, que compensa o contêiner CONTRÁRIO. */
+html[data-shell='phone'] .mshell__content .ms-trilhaslista {
+  margin: -12px -16px -16px;
+}
+
+/* ── cabeçalho: título + XP + sequência ── */
+html[data-shell='phone'] .ms-trilhaslista-topo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 20px 10px;
+}
+/* A caixa desenhada tem 34px; os 44 de alvo vêm da regra compartilhada do
+   shell, presa ao rótulo "Voltar". */
+html[data-shell='phone'] .ms-trilhaslista-voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0);
+  font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-trilhaslista-titulo {
+  flex: 1; min-width: 0;
+  font-size: 22px; font-weight: 700; letter-spacing: -.02em;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-trilhaslista-pills {
+  flex: none; display: flex; align-items: center; gap: 7px;
+}
+html[data-shell='phone'] .ms-trilhaslista-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700;
+  padding: 5px 10px; border-radius: 16px;
+}
+html[data-shell='phone'] .ms-trilhaslista-pill--xp {
+  color: #ffd54f;
+  background: rgba(255, 213, 79, .1);
+}
+html[data-shell='phone'] .ms-trilhaslista-pill--streak {
+  color: #ff8a4c;
+  background: rgba(255, 138, 76, .1);
+}
+/* A queda do XP não é o alerta da tela (esse é da lista): é um recado curto,
+   em tinta de perigo para ninguém ler como "zero". */
+html[data-shell='phone'] .ms-trilhaslista-aviso {
+  font-size: 11px; font-weight: 700; color: var(--danger, #ef6b6b);
+}
+
+/* ── cartão de criar trilha ── */
+html[data-shell='phone'] .ms-trilhaslista-criar {
+  flex: none;
+  margin: 0 20px;
+  background: linear-gradient(135deg, rgba(154, 147, 255, .16), rgba(154, 147, 255, .05));
+  border: 1px solid rgba(154, 147, 255, .25);
+  border-radius: 18px;
+  padding: 15px 16px;
+}
+html[data-shell='phone'] .ms-trilhaslista-criar__rotulo {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-trilhaslista-campo {
+  display: block; width: 100%; min-height: 44px;
+  background: rgba(0, 0, 0, .25);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 12px;
+  padding: 11px 13px;
+  font: inherit;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-trilhaslista-campo::placeholder { color: var(--text-faint, #5f5e6b); }
+html[data-shell='phone'] .ms-trilhaslista-campo:focus {
+  outline: none;
+  border-color: rgba(154, 147, 255, .5);
+}
+html[data-shell='phone'] .ms-trilhaslista-botao {
+  display: block; width: 100%; min-height: 44px; margin-top: 10px;
+  border: none; border-radius: 12px;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #14141a);
+  font: inherit; font-size: 14px; font-weight: 700;
+  padding: 12px; cursor: pointer;
+}
+html[data-shell='phone'] .ms-trilhaslista-botao:disabled { opacity: .45; cursor: default; }
+html[data-shell='phone'] .ms-trilhaslista-botao:not(:disabled):active { transform: translateY(1px); }
+
+/* ── lista de trilhas ── */
+html[data-shell='phone'] .ms-trilhaslista-lista {
+  flex: 1;
+  padding: 12px 20px 20px;
+}
+html[data-shell='phone'] .ms-trilhaslista-cards {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 12px;
+}
+html[data-shell='phone'] .ms-trilhaslista-card {
+  display: flex; align-items: center; gap: 13px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 18px;
+  padding: 15px 16px;
+}
+/* Terminada é história: o cartão recua para o fundo, como no frame. */
+html[data-shell='phone'] .ms-trilhaslista-card--concluida { opacity: .65; }
+/* Cartão que abre o mapa daquela trilha. O alvo NÃO é o texto do nome: o
+   `::after` do botão cobre o cartão inteiro (46px de ícone + 15px de padding
+   em cima e embaixo = 76px de alto), bem acima dos 44pt da HIG. */
+html[data-shell='phone'] .ms-trilhaslista-card--abre { position: relative; }
+html[data-shell='phone'] .ms-trilhaslista-abrir {
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; text-align: left; cursor: pointer;
+}
+html[data-shell='phone'] .ms-trilhaslista-abrir::after {
+  content: ''; position: absolute; inset: 0; border-radius: 18px;
+}
+html[data-shell='phone'] .ms-trilhaslista-seta {
+  flex: none; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-trilhaslista-icone {
+  width: 46px; height: 46px; flex: none;
+  border-radius: 14px;
+  display: grid; place-items: center;
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+  color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-trilhaslista-card--gerando .ms-trilhaslista-icone {
+  background: rgba(255, 167, 38, .13); color: var(--warning, #ffa726);
+}
+html[data-shell='phone'] .ms-trilhaslista-card--concluida .ms-trilhaslista-icone {
+  background: rgba(74, 222, 128, .14); color: var(--user, #4ade80);
+}
+html[data-shell='phone'] .ms-trilhaslista-card--falhou .ms-trilhaslista-icone {
+  background: rgba(239, 107, 107, .12); color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-trilhaslista-corpo { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-trilhaslista-cabeca {
+  display: flex; align-items: center; gap: 8px;
+}
+html[data-shell='phone'] .ms-trilhaslista-nome {
+  min-width: 0;
+  font-size: 15px; font-weight: 700; color: var(--text, #ececef);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-trilhaslista-badge {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 7px;
+  color: var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, .14));
+}
+html[data-shell='phone'] .ms-trilhaslista-badge--gerando {
+  gap: 5px;
+  color: var(--warning, #ffa726);
+  background: rgba(255, 167, 38, .13);
+}
+html[data-shell='phone'] .ms-trilhaslista-badge--concluida {
+  color: var(--user, #4ade80);
+  background: rgba(74, 222, 128, .12);
+}
+html[data-shell='phone'] .ms-trilhaslista-badge--falhou {
+  color: var(--danger, #ef6b6b);
+  background: rgba(239, 107, 107, .12);
+}
+html[data-shell='phone'] .ms-trilhaslista-ponto {
+  width: 5px; height: 5px; flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ms-trilhaslista-pisca 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-trilhaslista-meta {
+  font-size: 12px; color: var(--text-dim, #9594a0); margin-top: 2px;
+}
+
+/* ── barra ──
+   Com fração: gradiente accent, e verde quando fecha em 100.
+   Sem fração (gerando): faixa que corre, porque não há percentual para
+   afirmar — a api devolve 0/0 enquanto o curso está sendo montado. */
+html[data-shell='phone'] .ms-trilhaslista-barra {
+  height: 7px; border-radius: 5px; margin-top: 8px;
+  background: rgba(255, 255, 255, .06);
+  overflow: hidden;
+}
+html[data-shell='phone'] .ms-trilhaslista-barra__feita {
+  display: block; height: 100%; border-radius: 5px;
+  background: linear-gradient(90deg, var(--accent-dim, #6c63d6), var(--accent, #9a93ff));
+  transition: width 200ms cubic-bezier(.16, 1, .3, 1);
+}
+html[data-shell='phone'] .ms-trilhaslista-card--concluida .ms-trilhaslista-barra__feita {
+  background: var(--user, #4ade80);
+}
+html[data-shell='phone'] .ms-trilhaslista-barra__correndo {
+  display: block; width: 38%; height: 100%; border-radius: 5px;
+  background: var(--warning, #ffa726); opacity: .7;
+  animation: ms-trilhaslista-corre 1.5s ease-in-out infinite;
+}
+
+/* ── vazio, erro e espera ── */
+html[data-shell='phone'] .ms-trilhaslista-vazio {
+  font-size: 12.5px; line-height: 1.45; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-trilhaslista-erro {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 12.5px; line-height: 1.45; color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-trilhaslista-erro::before {
+  content: '!'; flex: none;
+  width: 15px; height: 15px; margin-top: 1px;
+  border-radius: 50%; border: 1.2px solid currentColor;
+  font-size: 10px; font-weight: 700; line-height: 13px; text-align: center;
+}
+html[data-shell='phone'] .ms-trilhaslista-erro--criar { margin-top: 10px; }
+html[data-shell='phone'] .ms-trilhaslista-skel {
+  display: flex; flex-direction: column; gap: 12px;
+}
+html[data-shell='phone'] .ms-trilhaslista-skel span {
+  height: 78px; border-radius: 18px;
+  background: rgba(255, 255, 255, .06);
+  animation: ms-trilhaslista-pisca 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-trilhaslista-skel span:nth-child(2) { animation-delay: .2s; }
+html[data-shell='phone'] .ms-trilhaslista-skel span:nth-child(3) { animation-delay: .4s; }
+/* fichinha de espera do XP e da sequência: barra curta, sem texto nenhum */
+html[data-shell='phone'] .ms-trilhaslista-skel--chip { width: 46px; }
+html[data-shell='phone'] .ms-trilhaslista-skel--chip span { height: 22px; border-radius: 16px; }
+
+@keyframes ms-trilhaslista-pisca {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+@keyframes ms-trilhaslista-corre {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(263%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-trilhaslista-ponto,
+  html[data-shell='phone'] .ms-trilhaslista-skel span { animation: none; }
+  html[data-shell='phone'] .ms-trilhaslista-barra__correndo {
+    width: 100%; opacity: .35; animation: none;
+  }
+}

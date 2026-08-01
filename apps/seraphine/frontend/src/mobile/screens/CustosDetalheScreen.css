@@ -1,0 +1,250 @@
+/* src/mobile/screens/CustosDetalheScreen.css — CUSTOS & ENERGIA · DETALHE.
+   Medidas do handoff v3 (frame "Custos & Energia · detalhe"): cartões
+   `--surface` de raio 18 com 15/16 de padding; colunas de 74px de altura com
+   raio 5 no topo; barras horizontais de 6px; medidores de raio 14 sobre
+   `--app`; card de sugestão em `--accent-soft` de raio 16.
+
+   Tudo prefixado `ms-custosdet-`, inclusive os @keyframes: nome de keyframe é
+   global, e a tela irmã (`ms-custos-`) tem um pulso com o mesmo papel. */
+
+html[data-shell='phone'] .ms-custosdet {
+  display: flex;
+  flex-direction: column;
+  color: var(--text, #ececef);
+}
+
+/* ── cabeçalho ── */
+html[data-shell='phone'] .ms-custosdet-head {
+  display: flex; align-items: center; gap: 10px; padding: 11px 20px 8px;
+}
+html[data-shell='phone'] .ms-custosdet-voltar {
+  flex: none; width: 22px; height: 22px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0); cursor: pointer;
+}
+html[data-shell='phone'] .ms-custosdet-head__texto { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-custosdet-titulo {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custosdet-sub { font-size: 11px; color: var(--text-dim, #9594a0); }
+
+html[data-shell='phone'] .ms-custosdet-corpo {
+  display: flex; flex-direction: column; gap: 12px; padding: 6px 20px 34px;
+}
+
+/* ── cartões ── */
+html[data-shell='phone'] .ms-custosdet-func,
+html[data-shell='phone'] .ms-custosdet-modelos,
+html[data-shell='phone'] .ms-custosdet-energia {
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 18px; padding: 15px 16px;
+}
+html[data-shell='phone'] .ms-custosdet-cabeca {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+html[data-shell='phone'] .ms-custosdet-energia .ms-custosdet-cabeca { align-items: center; }
+html[data-shell='phone'] .ms-custosdet-cabeca__titulo {
+  font-size: 13px; font-weight: 700; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custosdet-cabeca__total {
+  font-size: 11px; color: var(--text-dim, #9594a0); flex: none;
+}
+
+/* ── por funcionalidade: colunas verticais ──
+   O valor fica ACIMA da barra e o nome ABAIXO, como no handoff: a leitura de
+   cima para baixo é "quanto → quanto disso → de quê". */
+html[data-shell='phone'] .ms-custosdet-colunas {
+  display: flex; gap: 10px; align-items: flex-end; margin-top: 12px;
+}
+html[data-shell='phone'] .ms-custosdet-col {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  align-items: center; gap: 7px;
+}
+html[data-shell='phone'] .ms-custosdet-col__custo {
+  font-size: 11px; font-weight: 700; color: var(--text, #ececef);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-custosdet-col__trilho {
+  width: 100%; height: 74px; display: flex; align-items: flex-end;
+}
+html[data-shell='phone'] .ms-custosdet-col__barra {
+  width: 100%; border-radius: 5px 5px 3px 3px;
+  background: var(--accent, #9a93ff);
+  /* Uma coluna de altura 0 desapareceria e a funcionalidade sumiria da tela
+     junto. O toco de 4px diz "existe e custou nada" sem afirmar magnitude —
+     a altura declarada continua sendo a real (0%). */
+  min-height: 4px;
+}
+html[data-shell='phone'] .ms-custosdet-col__nome {
+  font-size: 10px; color: var(--text-faint, #5f5e6b);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* o maior gasto do período */
+html[data-shell='phone'] .ms-custosdet-col--ambar .ms-custosdet-col__custo { color: #ffa726; }
+html[data-shell='phone'] .ms-custosdet-col--ambar .ms-custosdet-col__barra { background: #ffa726; }
+/* sem custo marginal — confirmado pela lista do backend */
+html[data-shell='phone'] .ms-custosdet-col--zero .ms-custosdet-col__custo { color: var(--user, #4ade80); }
+html[data-shell='phone'] .ms-custosdet-col--zero .ms-custosdet-col__barra {
+  background: rgba(74, 222, 128, .5);
+}
+html[data-shell='phone'] .ms-custosdet-resto {
+  font-size: 10px; margin-top: 10px; color: var(--text-faint, #5f5e6b);
+}
+
+/* ── por modelo: barras horizontais ── */
+html[data-shell='phone'] .ms-custosdet-linha { margin-top: 11px; }
+html[data-shell='phone'] .ms-custosdet-linha__topo {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 5px;
+}
+html[data-shell='phone'] .ms-custosdet-linha__id {
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0;
+}
+html[data-shell='phone'] .ms-custosdet-linha__ponto {
+  width: 8px; height: 8px; flex: none; border-radius: 50%;
+}
+html[data-shell='phone'] .ms-custosdet-linha__nome {
+  font-size: 13px; color: var(--text, #ececef);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-custosdet-linha__meta {
+  flex: none; display: inline-flex; align-items: baseline; gap: 8px;
+}
+html[data-shell='phone'] .ms-custosdet-linha__custo {
+  font-size: 13px; font-weight: 700; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custosdet-linha__custo--flat { color: var(--user, #4ade80); }
+html[data-shell='phone'] .ms-custosdet-linha__chamadas {
+  font-size: 11px; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-custosdet-linha__trilho {
+  display: block; height: 6px; border-radius: 4px; overflow: hidden;
+  background: rgba(255, 255, 255, .05);
+}
+html[data-shell='phone'] .ms-custosdet-linha__fill {
+  display: block; height: 100%; border-radius: 4px;
+  background: var(--accent, #9a93ff);
+  min-width: 3px;
+}
+html[data-shell='phone'] .ms-custosdet-linha__fill--flat { background: rgba(74, 222, 128, .5); }
+html[data-shell='phone'] .ms-custosdet-nota {
+  font-size: 10px; line-height: 1.4; margin-top: 12px; color: var(--text-faint, #5f5e6b);
+}
+
+/* ── energia ── */
+html[data-shell='phone'] .ms-custosdet-vivo {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-size: 11px; color: var(--user, #4ade80);
+}
+html[data-shell='phone'] .ms-custosdet-vivo__ponto {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--user, #4ade80);
+  animation: ms-custosdet-vivo 1.6s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-custosdet-medidores {
+  display: flex; gap: 10px; margin-top: 12px;
+}
+html[data-shell='phone'] .ms-custosdet-medidor {
+  flex: 1; min-width: 0; text-align: center;
+  background: var(--app, #0e0e13);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 14px; padding: 11px 8px;
+}
+html[data-shell='phone'] .ms-custosdet-medidor__rotulo {
+  display: block; font-size: 10px; color: var(--text-faint, #5f5e6b);
+}
+html[data-shell='phone'] .ms-custosdet-medidor__valor {
+  display: block; font-size: 19px; font-weight: 700; margin-top: 3px;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custosdet-medidor__valor small {
+  font-size: 11px; font-weight: 600; color: var(--text-dim, #9594a0);
+}
+
+/* ── sugestão ── */
+html[data-shell='phone'] .ms-custosdet-sugestao {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--accent-soft, rgba(154, 147, 255, .13));
+  border: 1px solid rgba(154, 147, 255, .22);
+  border-radius: 16px; padding: 14px 15px;
+}
+html[data-shell='phone'] .ms-custosdet-sugestao__icone {
+  flex: none; margin-top: 1px; color: var(--accent, #9a93ff);
+  display: inline-flex;
+}
+html[data-shell='phone'] .ms-custosdet-sugestao__corpo { flex: 1; min-width: 0; }
+html[data-shell='phone'] .ms-custosdet-sugestao__texto {
+  font-size: 13px; line-height: 1.5; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-custosdet-sugestao__acoes {
+  display: flex; gap: 8px; margin-top: 11px;
+}
+
+/* ── botões ──
+   44pt de alvo (HIG) sem inflar a caixa desenhada: o pseudo cresce por fora,
+   centrado, como a regra do shell faz com o ‹ de voltar. */
+html[data-shell='phone'] .ms-custosdet-botao,
+html[data-shell='phone'] .ms-custosdet-retry {
+  position: relative; font: inherit; cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 10px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .16));
+  background: transparent; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-custosdet-botao--primario {
+  font-weight: 700; border-color: transparent;
+  background: var(--accent, #9a93ff); color: var(--accent-contrast, #16121f);
+}
+html[data-shell='phone'] .ms-custosdet-botao::after,
+html[data-shell='phone'] .ms-custosdet-retry::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 100%; height: 44px; min-width: 44px;
+  transform: translate(-50%, -50%);
+}
+
+/* ── estados ── */
+html[data-shell='phone'] .ms-custosdet-vazio,
+html[data-shell='phone'] .ms-custosdet-indisp {
+  font-size: 12px; line-height: 1.4; margin-top: 8px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-custosdet-status {
+  font-size: 11px; line-height: 1.45; margin-top: 8px; color: var(--text-dim, #9594a0);
+}
+html[data-shell='phone'] .ms-custosdet-status code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px;
+}
+html[data-shell='phone'] .ms-custosdet-erro {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12px; line-height: 1.4; padding: 11px 13px; border-radius: 14px;
+  color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, .1);
+  border: 1px solid rgba(239, 68, 68, .22);
+}
+html[data-shell='phone'] .ms-custosdet-erro p { min-width: 0; }
+html[data-shell='phone'] .ms-custosdet-retry {
+  flex: none; color: var(--text, #ececef);
+  border-color: rgba(239, 68, 68, .35);
+}
+
+/* Espera sem texto. Nenhum bloco pode piscar um número antes do dado — numa
+   tela de dinheiro, o número piscado é lido como valor; e no bloco de energia,
+   uma frase de indisponibilidade antes da primeira amostra seria uma
+   afirmação sobre o que ainda não se sabe. */
+html[data-shell='phone'] .ms-custosdet-skel {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
+}
+html[data-shell='phone'] .ms-custosdet-skel span {
+  display: block; height: 12px; border-radius: 6px;
+  background: rgba(255, 255, 255, .07);
+  animation: ms-custosdet-pulso 1.4s ease-in-out infinite;
+}
+html[data-shell='phone'] .ms-custosdet-skel span:first-child { height: 42px; width: 100%; }
+html[data-shell='phone'] .ms-custosdet-skel span:nth-child(2) { width: 70%; }
+html[data-shell='phone'] .ms-custosdet-skel span:nth-child(3) { width: 45%; }
+
+@keyframes ms-custosdet-pulso { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes ms-custosdet-vivo { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-custosdet-skel span,
+  html[data-shell='phone'] .ms-custosdet-vivo__ponto { animation: none; }
+}

@@ -8,9 +8,16 @@ import type { ScreenProps } from '../screens/registry';
 // (o shell acha a tela pela chave, passa onBack, e quem carrega não derruba a
 // tab bar) — não sobre o conteúdo das telas, que a Onda 2 reescreve.
 //
-// `trilhas` NUNCA resolve de propósito: é a tela usada para observar o estado
-// suspenso. As demais resolvem, e o React guarda o módulo resolvido no próprio
-// objeto do lazy — por isso cada chave é usada por um teste só.
+// `trilhas-lista` NUNCA resolve de propósito: é a tela usada para observar o
+// estado suspenso. As demais resolvem, e o React guarda o módulo resolvido no
+// próprio objeto do lazy — por isso cada chave é usada por um teste só.
+//
+// A chave é `trilhas-lista`, e não `trilhas`, porque a ABA Trilhas monta a
+// LISTA desde a Task 19: o mapa (`trilhas`) virou destino empurrado por ela. A
+// aba montava o interior de uma trilha e escolhia sozinha qual — "eu entro na
+// trilhas, aí tá na eva". Só a chave mudou; o que este teste afirma (a tab bar
+// sobrevive ao carregamento da tela da aba) é o mesmo. Quem prende o
+// comportamento novo, com as telas de VERDADE, é `trilhas-aba.test.tsx`.
 vi.mock('../screens/registry', () => ({
   SCREEN_KEYS: [],
   SCREENS: {
@@ -24,7 +31,7 @@ vi.mock('../screens/registry', () => ({
     chat: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => <div>tela:chat{onBack ? ':com-onBack' : ''}</div>,
     })),
-    trilhas: lazy(() => new Promise<{ default: () => JSX.Element }>(() => {})),
+    'trilhas-lista': lazy(() => new Promise<{ default: () => JSX.Element }>(() => {})),
     financas: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => (
         <button type="button" onClick={onBack}>fechar-financas</button>
@@ -48,18 +55,25 @@ vi.mock('../screens/registry', () => ({
     // `inbox`, que o Mais abre) mostra `undefined` — é o caso das quinze telas
     // que não mandam nem leem o campo.
     inbox: lazy(async () => ({
-      default: ({ onOpen, id }: ScreenProps) => (
+      default: ({ onOpen, onBack, id }: ScreenProps) => (
         <div>
           <span>inbox-id:{String(id)}</span>
           <button type="button"
             onClick={() => onOpen?.({ key: 'whatsapp', title: 'Ana', id: '5511999999999@c.us' })}>
             abrir-thread
           </button>
+          <button type="button" onClick={onBack}>fechar-inbox</button>
         </div>
       ),
     })),
     whatsapp: lazy(async () => ({
-      default: ({ id }: ScreenProps) => <div>thread:{id ?? 'sem-id'}</div>,
+      default: ({ id, onBack }: ScreenProps) => (
+        <div>
+          <span>thread:{id ?? 'sem-id'}</span>
+          {/* o ‹ é da tela, como no app: é ele que desfaz o degrau */}
+          <button type="button" onClick={onBack}>fechar-thread</button>
+        </div>
+      ),
     })),
     'onboarding-boas-vindas': lazy(async () => ({
       default: ({ onDone }: ScreenProps) => (
@@ -117,7 +131,8 @@ describe('PhoneShell monta pelo registry', () => {
   it('mantém a tab bar visível enquanto a tela da aba ainda carrega', () => {
     jaOnboardou();
     const { container, getByText } = render(<PhoneShell />);
-    fireEvent.click(getByText('Trilhas')); // suspende e nunca resolve
+    // a aba Trilhas monta `trilhas-lista`, que aqui suspende e nunca resolve
+    fireEvent.click(getByText('Trilhas'));
     expect(container.querySelector('.mshell__content')?.innerHTML).toBe('');
     // se o Suspense envolvesse o shell inteiro, o React esconderia a tab bar
     expect(visivel(container.querySelector('.mtabbar'))).toBe(true);
@@ -180,6 +195,36 @@ describe('PhoneShell monta pelo registry', () => {
     // ela empurra outra COM id, e o id atravessa o estado do shell até a tela
     fireEvent.click(getByText('abrir-thread'));
     expect(await findByText('thread:5511999999999@c.us')).toBeTruthy();
+    await settle();
+  });
+
+  // O buraco que este teste tranca: `pushed` era UM SLOT, então o `onBack` de
+  // qualquer tela empurrada voltava para a ABA. Toda cadeia de dois níveis
+  // perdia o meio do caminho em silêncio — Configurações → Seletor de modelo
+  // caía no Mais, Custos → detalhe idem, Trilhas → lista → mapa idem.
+  it('voltar de um segundo nível cai no PRIMEIRO, e não na aba', async () => {
+    jaOnboardou();
+    const { container, getByText, findByText, queryByText } = render(<PhoneShell />);
+    fireEvent.click(getByText('Mais'));
+    await settle();
+
+    fireEvent.click(getByText('Inbox')); // degrau 1
+    expect(await findByText('inbox-id:undefined')).toBeTruthy();
+    fireEvent.click(getByText('abrir-thread')); // degrau 2
+    expect(await findByText('thread:5511999999999@c.us')).toBeTruthy();
+    expect(queryByText('inbox-id:undefined')).toBeNull(); // só o topo é montado
+
+    fireEvent.click(getByText('fechar-thread'));
+
+    // A ASSERÇÃO: o degrau 1 volta. Com um slot só, aqui aparecia a tab bar e o
+    // Inbox tinha sumido — e nenhum teste dizia nada.
+    expect(await findByText('inbox-id:undefined')).toBeTruthy();
+    expect(container.querySelector('.mtabbar')).toBeNull();
+
+    // e só o segundo voltar esvazia a pilha e devolve a tab bar
+    fireEvent.click(getByText('fechar-inbox'));
+    expect(queryByText('inbox-id:undefined')).toBeNull();
+    expect(container.querySelector('.mtabbar')).toBeTruthy();
     await settle();
   });
 

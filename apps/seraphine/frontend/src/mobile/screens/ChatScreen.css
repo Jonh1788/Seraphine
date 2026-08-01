@@ -120,8 +120,18 @@ html[data-shell='phone'] .ms-chat__dia-rotulo {
 
 html[data-shell='phone'] .ms-chat-linha--voce { display: flex; justify-content: flex-end; }
 html[data-shell='phone'] .ms-chat-linha--sera { display: flex; gap: 9px; align-items: flex-start; }
+/* ALINHAMENTO ÓPTICO DO AVATAR — o que se percebia como torto.
+   `align-items: flex-start` casa o TOPO DAS CAIXAS, não o das letras: o
+   quadrado de 26px ficava com o centro acima do centro da primeira linha.
+   `center` não serve: centraliza no bloco INTEIRO, e numa resposta de oito
+   linhas o avatar desceria para o meio do parágrafo.
+   A conta, dos valores reais desta tela: a primeira linha mede 14px × 1.55 =
+   21.7px, então o centro dela está a 10.85px do topo; o do avatar está a 13px.
+   A diferença — 2.15px — sobe o avatar, e só ele. Se a fonte ou a entrelinha
+   da bolha mudarem, esta linha muda junto (é por isso que ela cita as duas). */
 html[data-shell='phone'] .ms-chat-avatar {
   flex: none;
+  margin-top: -2.15px;
   width: 26px;
   height: 26px;
   border-radius: 8px;
@@ -150,8 +160,68 @@ html[data-shell='phone'] .ms-chat-bolha__texto {
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
-/* Enquanto a resposta chega, um cursor pulsa no fim do texto. */
-html[data-shell='phone'] .ms-chat-bolha--vindo .ms-chat-bolha__texto::after {
+/* O modelo abriu um bloco de raciocínio e ainda não disse nada em voz alta.
+   Sem esta linha a bolha ficaria vazia — indistinguível de travada. */
+/* `line-height` IGUAL à do parágrafo (21.7px = 14 × 1.55), não a do próprio
+   tamanho: a compensação do avatar é calculada sobre a primeira linha, e uma
+   linha mais baixa aqui faria o avatar parecer torto justamente na espera —
+   que é quando ele fica sozinho na tela. Mesma razão em `__mudo`. */
+html[data-shell='phone'] .ms-chat-bolha__pensando {
+  font-size: 13px; line-height: 21.7px; font-style: italic; color: var(--text-faint, #5f5e6b);
+}
+/* Turno fechado sem uma palavra. Não é `--danger`: nada falhou do lado de cá, e
+   pintar de vermelho um turno que só não rendeu texto seria alarme falso. */
+html[data-shell='phone'] .ms-chat-bolha__mudo {
+  font-size: 13px; line-height: 21.7px; color: var(--text-dim, #9594a0);
+}
+/* O QUE FOI DECIDIDO SOBRE UM PEDIDO DE PERMISSÃO, no fio da conversa.
+   Também não é `--danger`: recusar não é falhar. Mas também não é o cinza mais
+   apagado da tela — uma recusa (ou uma permissão que expirou) é a explicação de
+   por que a ação NÃO aconteceu, e é a linha que a pessoa vai procurar depois.
+   A barra à esquerda a separa da fala dela sem gritar. */
+html[data-shell='phone'] .ms-chat-bolha__decisao {
+  margin-top: 8px;
+  padding-left: 9px;
+  border-left: 2px solid var(--border-strong, rgba(255, 255, 255, .16));
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim, #9594a0);
+}
+
+/* ── markdown da bolha ──
+   A resposta é markdown (o desktop sempre a renderizou assim). O que vem daqui
+   é sempre bloco, então o contêiner virou `div`: `<p>` dentro de `<p>` é HTML
+   inválido e o React remonta a árvore por conta. */
+html[data-shell='phone'] .ms-chat-md__p { margin: 0; }
+/* Só ENTRE parágrafos: margem no primeiro afastaria o texto do avatar e
+   estragaria justamente o alinhamento acertado acima. */
+html[data-shell='phone'] .ms-chat-md__p + .ms-chat-md__p { margin-top: 8px; }
+html[data-shell='phone'] .ms-chat-bolha__texto ul,
+html[data-shell='phone'] .ms-chat-bolha__texto ol { margin: 6px 0; padding-left: 20px; }
+html[data-shell='phone'] .ms-chat-bolha__texto li { margin: 2px 0; }
+html[data-shell='phone'] .ms-chat-bolha__texto strong { font-weight: 700; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-chat-bolha__texto code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em;
+  background: rgba(255, 255, 255, .07); border-radius: 5px; padding: 1px 5px;
+}
+/* O bloco de código rola SOZINHO: sem isto uma linha longa alargaria a bolha e
+   levaria a conversa inteira para fora dos 390px. */
+html[data-shell='phone'] .ms-chat-bolha__texto pre {
+  margin: 8px 0; padding: 10px 12px; border-radius: 10px;
+  background: rgba(255, 255, 255, .05); overflow-x: auto;
+}
+html[data-shell='phone'] .ms-chat-bolha__texto pre code { background: none; padding: 0; }
+html[data-shell='phone'] .ms-chat-md__link { color: var(--accent, #9a93ff); text-decoration: underline; }
+html[data-shell='phone'] .ms-chat-bolha__texto table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; }
+html[data-shell='phone'] .ms-chat-bolha__texto th,
+html[data-shell='phone'] .ms-chat-bolha__texto td {
+  border: 1px solid var(--border, rgba(255, 255, 255, .08)); padding: 5px 9px; text-align: left;
+}
+
+/* Enquanto a resposta chega, um cursor pulsa no fim do texto — agora no fim do
+   ÚLTIMO PARÁGRAFO, e não do contêiner: com markdown dentro, um `::after` no
+   bloco cairia numa linha só dele, embaixo do texto. */
+html[data-shell='phone'] .ms-chat-bolha--vindo .ms-chat-bolha__texto > :last-child::after {
   content: '';
   display: inline-block;
   width: 2px;
@@ -160,6 +230,146 @@ html[data-shell='phone'] .ms-chat-bolha--vindo .ms-chat-bolha__texto::after {
   vertical-align: -2px;
   background: var(--accent, #9a93ff);
   animation: statusBlink 1s ease-in-out infinite;
+}
+
+/* ── cartão que o backend manda pronto ──
+   O HTML vem inteiro do backend (`metadata.html_card`) com as classes
+   `rich-card*`, que vivem em `src/styles.css` — a folha do desktop, carregada
+   GLOBALMENTE pelo `main.tsx:6` e portanto já valendo aqui dentro.
+
+   REUSO, e não cópia, e a razão não é economia: aqueles nomes de classe são
+   CONTRATO DO BACKEND. `weather.py` escreve `rich-card__item-title` literalmente
+   numa f-string, e o mesmo campo serve clima, finanças, saúde, água, hábitos,
+   tarefas, trabalho e recorrentes. Reescrevê-los numa folha do celular seria ter
+   a MESMA definição em dois arquivos, para sete famílias de cartão, com o
+   backend livre para mudar o HTML de qualquer uma delas — a divergência que esta
+   onda passou o tempo consertando, multiplicada.
+
+   O que é do CELULAR fica aqui, escopado em `.ms-chat-cartao`, e só o que muda
+   de verdade: largura, toque, e o `style` que o saneador tira. */
+html[data-shell='phone'] .ms-chat-cartao { margin-top: 10px; }
+/* A folha do desktop trava o cartão em 480px e lhe dá margem vertical própria.
+   Aqui quem manda na largura é a bolha (390px menos avatar e recuos) e quem
+   manda no respiro é o `margin-top` acima. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card { max-width: none; margin: 0; }
+/* O cabeçalho do cartão cresce pelo `style="flex:1"` do div do meio, e `style`
+   NÃO passa pelo saneador (`position:fixed;inset:0` viraria uma sobreposição de
+   tela cheia sobre a conversa). O div do meio é o único SEM classe no cabeçalho
+   — o ícone e o valor grande têm as suas —, e é isso que o seletor usa. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__header > div:not([class]) {
+  flex: 1;
+  min-width: 0;
+}
+/* Não há ponteiro no telefone: o `:hover` do desktop GRUDA depois do toque no
+   WKWebView e deixa um item aceso sem motivo. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__item:hover { background: none; }
+/* Em 390px o recuo lateral do item do desktop come a largura da linha de
+   previsão; o cartão já tem o padding dele. */
+html[data-shell='phone'] .ms-chat-cartao .rich-card__item { padding: 7px 0; }
+html[data-shell='phone'] .ms-chat-cartao .rich-card__details { gap: 6px 12px; }
+/* Nenhum cartão do backend tem elemento clicável — não há alvo de 44pt a
+   cumprir aqui. Se um dia tiver, ele nasce ignorando o toque: `a` e `button`
+   não estão na lista branca do saneador e são removidos antes de chegar à tela. */
+
+/* ── pedido de permissão ──
+   O único bloco desta tela em que um toque tem consequência fora dela: manda um
+   e-mail, apaga um evento, faz um Pix. O desenho segue disso.
+
+   1. O QUE vem antes da pergunta — o cabeçalho nomeia a ferramenta e a lista
+      mostra os argumentos. Nada é cortado por ser comprido: o corpo do e-mail
+      inteiro cabe aqui, rolando, porque o pedaço escondido é justamente o que a
+      pessoa precisaria ter lido.
+   2. AS DUAS SAÍDAS TÊM O MESMO TAMANHO. O "não" não é link nem X de canto:
+      é botão, ao lado, com a mesma área de toque. Desenhar só o "sim" bonito é
+      escolher pela pessoa.
+   3. 44pt DE ALTURA nos dois, que é o mínimo da Apple para alvo de toque — e
+      aqui vale duas vezes, porque errar o alvo entre "permitir" e "não
+      permitir" é executar o contrário do que se quis. */
+html[data-shell='phone'] .ms-chat-aprov {
+  border: 1px solid var(--accent-soft, rgba(154, 147, 255, .14));
+  background: var(--surface, #17171e);
+  border-radius: 14px;
+  padding: 12px;
+}
+html[data-shell='phone'] .ms-chat-aprov__titulo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-chat-aprov__selo {
+  flex: none;
+  display: flex;
+  color: var(--accent, #9a93ff);
+}
+/* Rola em vez de cortar (ver 1). O teto é generoso de propósito: a lista só
+   passa dele com conteúdo de arquivo ou corpo de e-mail, que é exatamente
+   quando ler importa mais. */
+html[data-shell='phone'] .ms-chat-aprov__detalhes {
+  margin: 10px 0 0;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+html[data-shell='phone'] .ms-chat-aprov__linha + .ms-chat-aprov__linha { margin-top: 8px; }
+html[data-shell='phone'] .ms-chat-aprov__chave {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint, #5f5e6b);
+}
+/* Empilhado, e não em duas colunas: em 390px a coluna do valor ficaria com
+   ~200px e um comando ou um caminho quebraria em cinco linhas de três palavras.
+   `pre-wrap` porque a quebra de linha do corpo do e-mail é parte do que vai ser
+   enviado; `anywhere` porque um caminho sem espaço não pode furar a bolha.
+   `margin: 0` derruba o recuo que o navegador dá a `dd` sozinho. */
+html[data-shell='phone'] .ms-chat-aprov__valor {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text, #ececef);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+html[data-shell='phone'] .ms-chat-aprov .ms-chat-vazio { margin-top: 10px; }
+html[data-shell='phone'] .ms-chat-aprov__botoes {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+html[data-shell='phone'] .ms-chat-aprov__nao,
+html[data-shell='phone'] .ms-chat-aprov__sim {
+  flex: 1;
+  min-width: 0;
+  /* 44pt: o mínimo da Apple. Não é `height` — o rótulo pode quebrar em duas
+     linhas num aparelho com fonte grande, e aí o botão cresce em vez de cortar
+     a palavra. */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  /* Sem o atraso de 300ms do duplo-toque no WKWebView: aqui a pessoa já
+     decidiu, e meio segundo de nada faz ela apertar de novo. */
+  touch-action: manipulation;
+}
+html[data-shell='phone'] .ms-chat-aprov__nao {
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  background: transparent;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-chat-aprov__sim {
+  border: 1px solid transparent;
+  background: var(--accent, #9a93ff);
+  color: var(--accent-contrast, #14141a);
 }
 
 /* ── cartão de tarefa inline ── */
@@ -245,7 +455,6 @@ html[data-shell='phone'] .ms-chat__campo {
   border: none;
   outline: none;
   font: inherit;
-  font-size: 14px;
   color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-chat__campo::placeholder { color: var(--text-faint, #5f5e6b); }

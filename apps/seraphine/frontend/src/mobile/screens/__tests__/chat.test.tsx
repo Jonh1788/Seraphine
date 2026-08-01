@@ -48,6 +48,37 @@ function escrever(container: HTMLElement, texto: string) {
 const token = (texto: string, turn = 't1') =>
   ({ type: 'token', conversation_id: 'c1', turn_id: turn, text: texto });
 
+/** Um `tool_result` de sucesso com a metadata pedida. */
+const ferramentaOk = (metadata: unknown, req = 'r1') =>
+  ({ type: 'tool_result', request_id: req, ok: true, output: 'ok', error: null, metadata });
+
+/**
+ * O cartão de clima como o backend o monta — `<!--card-->` + classes `rich-card*`
+ * (`seraphine/tools/weather.py:310`, `build_weather_html`). Vem PRONTO em
+ * `metadata.html_card`; não há componente React nenhum do outro lado.
+ * O `style="flex:1"` do div do meio está aqui de propósito: é o único atributo
+ * de estilo que o backend emite, e o saneador tem de derrubá-lo.
+ */
+const CARTAO_CLIMA = '<!--card--><div class="rich-card rich-card--weather">'
+  + '<div class="rich-card__header">'
+  + '<div class="rich-card__icon rich-card__icon--weather">'
+  + '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"'
+  + ' fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg>'
+  + '</div>'
+  + '<div style="flex:1">'
+  + '<div class="rich-card__title">Ilhéus</div>'
+  + '<div class="rich-card__subtitle">Parcialmente nublado · Sensação 30°C</div>'
+  + '</div>'
+  + '<div class="rich-card__big-value clr-warm">28°</div>'
+  + '</div>'
+  + '<hr class="rich-card__divider">'
+  + '<div class="rich-card__section">Previsão</div>'
+  + '<div class="rich-card__item">'
+  + '<div class="rich-card__item-body"><div class="rich-card__item-title">Seg 13/04</div></div>'
+  + '<div class="rich-card__item-value"><span class="clr-cool">21°</span></div>'
+  + '</div>'
+  + '</div><!--/card-->';
+
 /** O título do estado vazio do handoff (tela 19), que a Task 28 embutiu aqui. */
 const TITULO_VAZIO = 'Sobre o que a gente conversa primeiro?';
 
@@ -327,6 +358,780 @@ describe('ChatScreen', () => {
       expect(screen.getByText(/ouvindo/)).toBeTruthy();
       expect(screen.queryByText('conectada')).toBeNull();
     });
+
+    /* A frase entre aspas não é texto de UI: é contrato com o classificador
+       embarcado (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`, limiar 0.92),
+       treinado em "Ei Seraphine". Anunciar outra frase ensina o usuário a dizer
+       o que não dispara nada — falha silenciosa, sem erro na tela. Por isso as
+       duas metades: a frase certa aparece E a errada não sobrevive. */
+    it('anuncia a frase em que o modelo foi treinado, não outra', () => {
+      useRealtimeStore.setState({ wakeWordEnabled: true });
+      const { ws } = montar();
+      ws.conexao('connected');
+      const linha = screen.getByText(/ouvindo/i).textContent ?? '';
+      expect(linha).toMatch(/ei seraphine/i);
+      expect(linha).not.toMatch(/oi sera\b/i);
+    });
+  });
+
+  /* O RACIOCÍNIO NÃO É RESPOSTA.
+     O desktop separa `<think>…</think>` (e o `<|channel>thought` da Gemma) desde
+     sempre, num parser privado do `ChatView.tsx`. O telefone não tinha como
+     alcançá-lo e renderizava o fluxo cru: a bolha começava com "O usuário quer
+     saber a previsão…", tags e tudo, antes da frase de verdade. O parser mudou-se
+     para `chat/thinking.ts` e as duas telas leem a MESMA definição — copiá-lo
+     para o mobile daria dois parsers da mesma string, que é como a lista de
+     backends flat já pôs um número errado na tela desta casa. */
+  describe('o raciocínio do modelo não vaza na bolha', () => {
+    it('esconde o bloco <think> e mostra só a resposta', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>O usuário quer saber a previsão do tempo.</think>Hoje faz 24°.'));
+      expect(screen.getByText('Hoje faz 24°.')).toBeTruthy();
+      expect(screen.queryByText(/previsão do tempo/)).toBeNull();
+      // e nem as tags cruas
+      expect(document.body.textContent).not.toMatch(/<\/?think>/);
+    });
+
+    it('o formato de canal da Gemma some do mesmo jeito', () => {
+      const { ws } = montar();
+      ws.emite(token('<|channel>thought\nDeixa eu ver a agenda.<channel|>Você tem 2 eventos.'));
+      expect(screen.getByText('Você tem 2 eventos.')).toBeTruthy();
+      expect(screen.queryByText(/Deixa eu ver a agenda/)).toBeNull();
+      expect(document.body.textContent).not.toMatch(/channel/);
+    });
+
+    it('enquanto só houve raciocínio, a bolha DIZ que está pensando', () => {
+      // Sem isto a bolha fica muda: o bloco abriu, nada saiu em voz alta, e uma
+      // bolha vazia é indistinguível de uma que travou.
+      const { ws } = montar();
+      ws.emite(token('<think>Preciso checar o clima'));
+      const aviso = screen.getByText('pensando…');
+      expect(aviso.getAttribute('role')).toBe('status');
+      expect(screen.queryByText(/Preciso checar o clima/)).toBeNull();
+    });
+
+    it('chegando a resposta, o aviso de "pensando" sai de cena', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>Preciso checar o clima'));
+      expect(screen.getByText('pensando…')).toBeTruthy();
+      ws.emite(token('</think>Está 24° e sem chuva.'));
+      expect(screen.getByText('Está 24° e sem chuva.')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('texto sem raciocínio nenhum passa intacto', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia! Como você está?'));
+      expect(screen.getByText('Bom dia! Como você está?')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+  });
+
+  /* A RESPOSTA É MARKDOWN, e ia como texto puro.
+     Na conversa real chegou `**hoje e dos próximos dias**` com os asteriscos à
+     mostra: a ênfase que o modelo pediu virava ruído. O desktop renderiza
+     markdown desde sempre; o telefone não importava nada. */
+  describe('markdown da bolha', () => {
+    it('negrito vira negrito, e os asteriscos somem', () => {
+      const { ws, container } = montar();
+      ws.emite(token('a previsão é de **hoje e dos próximos dias**'));
+      const forte = container.querySelector('.ms-chat-bolha__texto strong');
+      expect(forte?.textContent).toBe('hoje e dos próximos dias');
+      expect(container.textContent).not.toContain('**');
+    });
+
+    it('lista vira lista', () => {
+      const { ws, container } = montar();
+      ws.emite(token('leve:\n- guarda-chuva\n- casaco'));
+      const itens = container.querySelectorAll('.ms-chat-bolha__texto li');
+      expect([...itens].map((i) => i.textContent)).toEqual(['guarda-chuva', 'casaco']);
+    });
+
+    it('HTML cru do MODELO sai como TEXTO, não como marcação', () => {
+      // A decisão central: sem `rehype-raw`. O conteúdo vem do modelo, e uma
+      // `<div>` que ele escrevesse não pode virar árvore de verdade dentro da
+      // bolha. Mesma escolha da tela de Lição de teoria, e aqui pesa mais.
+      const { ws, container } = montar();
+      ws.emite(token('cuidado: <div class="rich-card">nao sou cartao</div>'));
+      expect(container.querySelector('.ms-chat-bolha__texto .rich-card')).toBeNull();
+      expect(container.querySelector('.ms-chat-bolha__texto div div')).toBeNull();
+      expect(container.textContent).toContain('nao sou cartao');
+    });
+
+    it('o texto sem marcação nenhuma continua chegando inteiro', () => {
+      const { ws, container } = montar();
+      ws.emite(token('Ilhéus tá com 24°C e chuva nas proximidades.'));
+      expect(container.querySelector('.ms-chat-bolha__texto')?.textContent)
+        .toBe('Ilhéus tá com 24°C e chuva nas proximidades.');
+    });
+
+    it('a bolha do USUÁRIO não passa por markdown', () => {
+      // O que ele digitou vai para a tela como foi digitado — asterisco de
+      // ênfase que ele escreveu é asterisco que ele quis ver.
+      const { container } = montar();
+      escrever(container, 'manda **isso** literal');
+      const minha = container.querySelector('.ms-chat-bolha--voce');
+      expect(minha?.textContent).toBe('manda **isso** literal');
+      expect(minha?.querySelector('strong')).toBeNull();
+    });
+  });
+
+  /* O CARTÃO QUE O BACKEND MANDA PRONTO.
+     O cartão de clima do desktop não é componente React: é HTML cru montado em
+     `weather.py` e entregue em `metadata.html_card`, com as classes `rich-card*`.
+     O celular descartava o campo e mostrava só o texto.
+
+     RENDERIZAR ISSO NÃO CONTRADIZ o `rehype-raw` recusado na bolha: a distinção
+     é a ORIGEM. O markdown da bolha vem do MODELO — entrada que o conteúdo lido
+     (e-mail, página, mensagem de terceiro) pode induzir. O `html_card` é montado
+     pelo NOSSO backend. São confianças diferentes.
+     Mas o canal tem contrato, e o contrato já está furado hoje: `city` entra no
+     HTML por f-string sem escape (`weather.py:316`) e `city` vem dos ARGS DO
+     MODELO. Por isso o cartão passa por um saneador de lista branca antes de
+     virar árvore — senão a porta que a bolha fechou reabriria pelos fundos. */
+  describe('cartão pronto do backend', () => {
+    it('o cartão de clima aparece, em vez de só o texto', () => {
+      const { ws, container } = montar();
+      ws.emite(token('Leva guarda-chuva!'));
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+
+      expect(container.querySelector('.ms-chat-cartao .rich-card--weather')).toBeTruthy();
+      expect(screen.getByText('Ilhéus')).toBeTruthy();
+      expect(screen.getByText('28°')).toBeTruthy();
+      expect(screen.getByText('Seg 13/04')).toBeTruthy();
+      // e o cartão fica na MESMA fala do comentário dela.
+      expect(container.querySelectorAll('.ms-chat-linha--sera')).toHaveLength(1);
+    });
+
+    it('o cartão nasce mesmo quando a ferramenta corre antes de ela falar', () => {
+      // Caso comum: o engine corta o stream no pedaço que traz `tool_calls`.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      expect(container.querySelector('.rich-card--weather')).toBeTruthy();
+    });
+
+    it('a bolha continua recusando o HTML do MODELO, cartão ou não', () => {
+      // As duas afirmações no mesmo teste de propósito: é o par que prova que a
+      // permissão é do CANAL e não do formato.
+      const { ws, container } = montar();
+      ws.emite(token('cuidado: <div class="rich-card rich-card--weather">falso</div>'));
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+
+      expect(container.querySelector('.ms-chat-bolha__texto .rich-card')).toBeNull();
+      expect(container.textContent).toContain('falso');
+      expect(container.querySelector('.ms-chat-cartao .rich-card--weather')).toBeTruthy();
+    });
+
+    it('o saneador derruba script, manipulador de evento e style do cartão', () => {
+      // `city` é interpolado sem escape e vem dos args do modelo: este é o
+      // caminho por onde HTML do modelo chegaria vestido de cartão nosso.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({
+        html_card: '<div class="rich-card rich-card--weather">'
+          + '<div class="rich-card__title">'
+          + '<img src="x" onerror="window.__furou = 1">Ilhéus</div>'
+          + '<script>window.__furou = 2</script>'
+          + '<div style="position:fixed;inset:0">tapa a tela</div>'
+          + '<a href="javascript:alert(1)">link</a>'
+          + '</div>',
+      }));
+
+      const cartao = container.querySelector('.ms-chat-cartao') as HTMLElement;
+      expect(cartao).toBeTruthy();
+      expect(cartao.querySelector('img')).toBeNull();
+      expect(cartao.querySelector('script')).toBeNull();
+      expect(cartao.querySelector('a')).toBeNull();
+      expect(cartao.innerHTML).not.toContain('onerror');
+      expect(cartao.innerHTML).not.toContain('javascript:');
+      expect(cartao.querySelector('[style]')).toBeNull();
+      // e o que é legítimo sobrevive.
+      expect(cartao.querySelector('.rich-card__title')?.textContent).toContain('Ilhéus');
+    });
+
+    it('o saneador não deixa comentário passar para a segunda análise', () => {
+      // MUTAÇÃO M11. Comentário não DESENHA nada, então nenhuma asserção sobre
+      // o que se vê o pega — e a primeira leva de testes olhava só para isso.
+      // Só que o cartão faz uma volta parse → `innerHTML` → parse (o React
+      // reanalisa o que o saneador serializou), e é exatamente aí que mora o
+      // mXSS: um comentário mal fechado reabre a árvore na segunda análise, com
+      // o saneador já fora do caminho. A afirmação tem de ser sobre o FIO —
+      // o HTML serializado —, e não sobre o texto renderizado.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({
+        html_card: '<div class="rich-card"><!--<div>--><div class="rich-card__title">Ilhéus</div></div>',
+      }));
+      const cartao = container.querySelector('.ms-chat-cartao') as HTMLElement;
+      expect(cartao.innerHTML).not.toContain('<!--');
+      expect(cartao.querySelector('.rich-card__title')?.textContent).toBe('Ilhéus');
+    });
+
+    it('dois cartões no mesmo turno aparecem os dois', () => {
+      // MUTAÇÃO M22. `anexar` põe os dois na MESMA bolha; trocar a lista em vez
+      // de somar apagaria o primeiro sem ruído. Um turno de "e em Itabuna?"
+      // roda a ferramenta duas vezes, e o cartão de Ilhéus sumiria.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }, 'r1'));
+      ws.emite(ferramentaOk({
+        html_card: '<div class="rich-card rich-card--weather">'
+          + '<div class="rich-card__title">Itabuna</div></div>',
+      }, 'r2'));
+      expect(container.querySelectorAll('.ms-chat-cartao')).toHaveLength(2);
+      expect(screen.getByText('Ilhéus')).toBeTruthy();
+      expect(screen.getByText('Itabuna')).toBeTruthy();
+    });
+
+    it('o ícone SVG do cartão sobrevive ao saneador', () => {
+      // Os ícones do backend são SVG inline (`svg_icons.py`) — a casa não usa
+      // emoji. Uma lista branca que só pensasse em `div` os apagaria.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      const svg = container.querySelector('.ms-chat-cartao svg');
+      expect(svg).toBeTruthy();
+      expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24');
+      expect(container.querySelector('.ms-chat-cartao svg circle')).toBeTruthy();
+    });
+
+    it('o cartão sobrevive ao restauro da conversa', async () => {
+      // O engine grava o `html_card` no próprio texto do turno
+      // (`engine.py:1300`) para o transcrito não perder o cartão. Sem lê-lo, o
+      // `limpar()` apagava o bloco e a conversa restaurada ficava só com o texto.
+      localStorage.setItem(CONV_KEY, 'conv-1');
+      vi.mocked(fetchConversationTurns).mockResolvedValue([
+        {
+          id: 't0', conversation_id: 'conv-1', role: 'assistant',
+          content: `Leva guarda-chuva!\n${CARTAO_CLIMA}`,
+          created_at: '2026-07-30T10:00:00',
+        },
+      ]);
+      const { container } = montar();
+      await screen.findByText('Leva guarda-chuva!');
+
+      expect(container.querySelector('.ms-chat-cartao .rich-card--weather')).toBeTruthy();
+      expect(screen.getByText('Ilhéus')).toBeTruthy();
+      // e a marcação não vaza como texto.
+      expect(container.textContent).not.toContain('rich-card__title');
+      expect(container.textContent).not.toContain('<!--card-->');
+    });
+
+    it('cartão pronto NÃO entra quando já há cartão estruturado', async () => {
+      // `financial.py:236` manda `html_card` E `dashboard_data` no mesmo
+      // `tool_result`. Desenhar os dois seria a mesma informação duas vezes —
+      // é a regra que o desktop já aplica (`ChatView.tsx:779`).
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({
+        dashboard_data: { income: 3500, expenses: 2340, balance: 1160 },
+        html_card: '<div class="rich-card rich-card--finance">'
+          + '<div class="rich-card__title">Resumo do mês</div></div>',
+      }));
+      expect(screen.getByText('67% usado')).toBeTruthy();
+      expect(container.querySelector('.ms-chat-cartao')).toBeNull();
+      expect(screen.queryByText('Resumo do mês')).toBeNull();
+    });
+
+    it('bolha só com cartão não é lida como turno perdido', () => {
+      const { ws } = montar();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Ilhéus')).toBeTruthy();
+      expect(screen.queryByText(/não veio resposta desta vez/)).toBeNull();
+    });
+
+    it('cartão que o saneador esvazia DIZ que não deu, em vez de sumir', () => {
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: '<script>alert(1)</script>' }));
+      expect(container.querySelector('.ms-chat-cartao')).toBeNull();
+      expect(screen.getByText(/não consegui desenhar o cartão/i)).toBeTruthy();
+    });
+  });
+
+  /* A ESPERA — E ELA DURA O TURNO INTEIRO, NÃO ATÉ O PRIMEIRO SINAL.
+     Medido no aparelho: um turno que roda ferramentas leva ~30s, e nesse tempo
+     a tela era IDÊNTICA a ociosa. Quem está do outro lado conclui que a pergunta
+     se perdeu e manda de novo; foi assim que a conversa real ficou com quatro
+     falas do usuário seguidas, que pareciam turnos mortos e não eram.
+
+     A primeira correção parava no PRIMEIRO sinal do turno — inclusive num
+     `tool_result`. Só que o `turn_end` do engine é ÚNICO e vem no fim de tudo
+     (`engine.py:1430`): entre a primeira ferramenta e a resposta ainda cabem
+     rodadas inteiras de modelo e mais ferramentas. Nos 30s medidos (clima +
+     aviso na casa), a tela voltava a ficar muda depois dos primeiros 5. */
+  describe('espera pela resposta', () => {
+    it('mandou: a conversa diz que está pensando', () => {
+      const { container } = montar();
+      escrever(container, 'oi');
+      expect(screen.getByText('pensando…').getAttribute('role')).toBe('status');
+    });
+
+    it('a espera SEGUE depois da primeira ferramenta, porque o turno segue', () => {
+      const { ws, container } = montar();
+      escrever(container, 'como vai estar o tempo amanhã?');
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      // o cartão já é progresso visível…
+      expect(container.querySelector('.rich-card--weather')).toBeTruthy();
+      // …e a tela continua dizendo que não acabou.
+      expect(screen.getByText('pensando…')).toBeTruthy();
+    });
+
+    it('a espera só acaba no fim do turno', () => {
+      const { ws, container } = montar();
+      escrever(container, 'como vai estar o tempo amanhã?');
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      ws.emite(token('Vai chover à tarde.'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Vai chover à tarde.')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('some de vista enquanto a resposta está sendo escrita', () => {
+      // O cursor da bolha já diz que ela está falando; um "pensando…" embaixo
+      // do texto que aparece seria uma segunda voz dizendo a mesma coisa.
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.emite(token('Oi! Tudo'));
+      expect(screen.queryByText('pensando…')).toBeNull();
+      expect(screen.getByText('Oi! Tudo')).toBeTruthy();
+    });
+
+    it('aprovação pendente é DITA, com o nome da ferramenta', () => {
+      // `tool_request` é o único quadro do fio que traz o nome da ferramenta —
+      // e ele só é emitido para as que exigem confirmação (`engine.py:1216`).
+      // No telefone não há painel de aprovação: sem esta frase o turno ficaria
+      // travado 300s (`APPROVAL_TIMEOUT_SECONDS`) dizendo "pensando…".
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite({
+        type: 'tool_request', request_id: 'r1',
+        tool: 'calendar_create_event', args: {}, requires_confirmation: true,
+      });
+      expect(screen.getByText(/esperando sua aprovação para criar um evento na agenda/i)).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('ferramenta que o telefone não conhece é dita pelo nome do fio', () => {
+      const { container, ws } = montar();
+      escrever(container, 'roda isso');
+      ws.emite({
+        type: 'tool_request', request_id: 'r1',
+        tool: 'ferramenta_nova', args: {}, requires_confirmation: true,
+      });
+      expect(screen.getByText(/esperando sua aprovação para ferramenta_nova/i)).toBeTruthy();
+    });
+
+    it('a aprovação é dita MESMO com ela já falando', () => {
+      // MUTAÇÃO M16. O caso é o normal, não o raro: ela diz "deixa comigo!" e
+      // só então pede a ferramenta. A bolha fica `streaming` até o `turn_end`,
+      // que nesse caminho não vem — o engine está parado esperando o sim, por
+      // até 300s. Escondido atrás do cursor, o pedido de aprovação nunca
+      // apareceria e o telefone travaria calado.
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite(token('Deixa comigo!'));
+      ws.emite({
+        type: 'tool_request', request_id: 'r1',
+        tool: 'calendar_create_event', args: {}, requires_confirmation: true,
+      });
+      expect(screen.getByText('Deixa comigo!')).toBeTruthy();
+      expect(screen.getByText(/esperando sua aprovação para criar um evento na agenda/i)).toBeTruthy();
+    });
+
+    it('ferramenta sozinha não inventa uma espera que a tela não abriu', () => {
+      // MUTAÇÃO M20. A espera é sempre de um turno QUE ESTA TELA MANDOU: é a
+      // única que ela sabe terminar. Um `tool_result` que chega sem isso —
+      // turno começado por outra tela no mesmo socket — abriria um "pensando…"
+      // sem `turn_end` à vista, e ele ficaria lá para sempre.
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }));
+      expect(container.querySelector('.rich-card--weather')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('a aprovação some quando a ferramenta responde', () => {
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite({
+        type: 'tool_request', request_id: 'r1',
+        tool: 'calendar_create_event', args: {}, requires_confirmation: true,
+      });
+      ws.emite(ferramentaOk(null));
+      expect(screen.queryByText(/esperando sua aprovação/i)).toBeNull();
+      expect(screen.getByText('pensando…')).toBeTruthy();
+    });
+
+    it('some no erro — senão a tela pensaria para sempre', () => {
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.emite({ type: 'error', message: 'o modelo caiu' });
+      expect(screen.queryByText('pensando…')).toBeNull();
+      expect(screen.getByText(/o modelo caiu/)).toBeTruthy();
+    });
+
+    it('some quando o turno é cancelado', () => {
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.emite({ type: 'turn_cancelled', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('some quando a conexão cai — o turno morreu com ela', () => {
+      // O backend cancela o turno no `websocket.disconnect` (`routes.py:1035`).
+      // Sem isto a tela pensaria para sempre ao lado de "sem conexão".
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.conexao('disconnected');
+      expect(screen.queryByText('pensando…')).toBeNull();
+      expect(screen.getByText('sem conexão')).toBeTruthy();
+    });
+
+    it('sem socket, nada é mandado e nada fica pensando', () => {
+      // `enviarTexto` devolve false sem `ws`: prometer espera por uma mensagem
+      // que não saiu seria a mentira ao contrário.
+      const { container } = render(<ChatScreen />);
+      escrever(container, 'oi');
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('em repouso, ninguém está pensando', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia!'));
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+  });
+
+  /* RESPONDER A APROVAÇÃO — a tela deixou de só AVISAR.
+     A Task 18 pôs a frase "esperando sua aprovação para X"; sem botão, o engine
+     ficava parado em `queue.get()` até `APPROVAL_TIMEOUT_SECONDS = 300`
+     (`engine.py:1222`) e o turno morria calado. O fio de volta já existia:
+     `{type:'tool_approval', request_id, approved}` cai no ramo do laço interno
+     do socket (`ws/routes.py:1055`) e vira `engine.submit_approval`.
+
+     APROVAR É AÇÃO COM CONSEQUÊNCIA: o pedido diz O QUE vai ser feito — o
+     `tool_request` carrega `args` (`engine.py:471`) — antes de perguntar.
+     Perguntar "permitir?" sem dizer o quê ensina a pessoa a apertar sim. */
+  describe('responder à aprovação', () => {
+    const ARGS_AGENDA = {
+      summary: 'Dentista',
+      start: '2026-08-06T15:00',
+      attendees: ['ana@exemplo.com'],
+      all_day: false,
+    };
+
+    const pedido = (
+      args: Record<string, unknown> = ARGS_AGENDA,
+      tool = 'calendar_create_event',
+      id = 'r1',
+    ) => ({ type: 'tool_request', request_id: id, tool, args, requires_confirmation: true });
+
+    /** O caminho real: pergunta enviada, pedido de permissão de volta. */
+    function pedirPermissao(args?: Record<string, unknown>, tool?: string, id?: string) {
+      const feito = montar();
+      escrever(feito.container, 'marca dentista quinta 15h');
+      feito.ws.emite(pedido(args, tool, id));
+      return feito;
+    }
+
+    const permitir = () => screen.getByRole('button', { name: /^permitir$/i });
+    const negar = () => screen.getByRole('button', { name: /^não permitir$/i });
+    /** Nenhum botão de decisão de pé — nem morto, nem vivo. */
+    const semBotoes = () => {
+      expect(screen.queryByRole('button', { name: /^permitir$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^não permitir$/i })).toBeNull();
+    };
+    /** O `tool_result` que o engine emite quando a aprovação NÃO saiu:
+     *  a mesma string para recusa e para estouro de tempo (`engine.py:1256`). */
+    const recusada = (id = 'r1') =>
+      ({ type: 'tool_result', request_id: id, ok: false, output: null, error: 'rejected by user', metadata: {} });
+
+    it('o pedido nomeia a ação E mostra o que vai ser executado', () => {
+      pedirPermissao();
+      // A frase da Task 18 continua sendo o cabeçalho — é o único lugar onde a
+      // ferramenta é nomeada em português.
+      expect(screen.getByText(/esperando sua aprovação para criar um evento na agenda/i)).toBeTruthy();
+      // …e agora vem o QUE, argumento a argumento, com rótulo em português.
+      expect(screen.getByText('título')).toBeTruthy();
+      expect(screen.getByText('Dentista')).toBeTruthy();
+      expect(screen.getByText('início')).toBeTruthy();
+      expect(screen.getByText('2026-08-06T15:00')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('argumento que não é texto vira texto legível', () => {
+      pedirPermissao();
+      // Lista de e-mails não pode virar `[object Object]` nem sumir.
+      expect(screen.getByText('ana@exemplo.com')).toBeTruthy();
+      // …e um booleano não vira "false" no meio de uma tela em português.
+      expect(screen.getByText('não')).toBeTruthy();
+    });
+
+    it('permitir manda tool_approval com approved verdadeiro', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: true,
+      });
+    });
+
+    it('negar manda tool_approval com approved falso', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: false,
+      });
+    });
+
+    it('o request_id respondido é o do pedido, não um qualquer', () => {
+      const { ws } = pedirPermissao(undefined, undefined, 'req-42');
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'req-42', approved: true,
+      });
+    });
+
+    it('permitido: o botão some e a tela diz que a ação está rodando', () => {
+      pedirPermissao();
+      fireEvent.click(permitir());
+      semBotoes();
+      // O toque tem de deixar marca: sem isto o cartão sumiria e a tela ficaria
+      // 10s idêntica a antes do toque.
+      expect(screen.getByText(/você permitiu — criar um evento na agenda/i)).toBeTruthy();
+    });
+
+    it('negado: registra a recusa, tira os botões e NÃO vira "uma ação falhou"', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      semBotoes();
+      expect(screen.getByText(/você não permitiu: criar um evento na agenda/i)).toBeTruthy();
+      // O engine devolve `ok:false, error:"rejected by user"` para a recusa
+      // (`engine.py:1256`). Nada falhou — a pessoa decidiu —, e mostrar
+      // "Uma ação falhou: rejected by user" seria chamar a decisão dela de
+      // defeito, em inglês.
+      ws.emite(recusada());
+      expect(screen.queryByText(/uma ação falhou/i)).toBeNull();
+      expect(screen.queryByText(/rejected by user/i)).toBeNull();
+      semBotoes();
+    });
+
+    it('permitido COM ELA ESCREVENDO: o toque continua deixando marca', () => {
+      // MUTAÇÃO M9, e o caso é o NORMAL: ela diz "deixa comigo!" e só então
+      // pede a ferramenta, e a bolha fica `streaming` porque o `turn_end` desse
+      // caminho não vem — o engine está parado esperando o sim. Se o "você
+      // permitiu" se esconder atrás do cursor, apertar Permitir fica idêntico a
+      // não ter apertado: o cartão some e nada aparece no lugar, por dezenas de
+      // segundos. A pessoa aperta de novo um botão que já não existe.
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite(token('Deixa comigo!'));
+      ws.emite(pedido());
+      fireEvent.click(permitir());
+      expect(screen.getByText(/você permitiu — criar um evento na agenda/i)).toBeTruthy();
+    });
+
+    it('ferramenta paralela que termina no meio NÃO derruba o pedido', () => {
+      // MUTAÇÃO M11, e não é hipótese: o engine dispara em paralelo tudo que
+      // NÃO pede confirmação (`engine.py:1145-1157`, `_parallel_tasks`) antes
+      // de parar no pedido que pede. O `tool_result` do clima chega, portanto,
+      // com o pedido de permissão de pé — e com outro `request_id`. Confundir
+      // os dois apagaria os botões de uma permissão viva e ainda escreveria que
+      // ela expirou; a ação morreria nos 300s, dita como se já tivesse morrido.
+      const { ws } = pedirPermissao();
+      ws.emite(ferramentaOk({ html_card: CARTAO_CLIMA }, 'outro-id'));
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+      expect(screen.queryByText(/expirou sem resposta/i)).toBeNull();
+    });
+
+    it('duas recusas no mesmo turno ficam as duas na conversa', () => {
+      // MUTAÇÃO M28. O engine pede uma permissão de cada vez, mas um turno pode
+      // pedir várias (`engine.py:1211`, dentro do laço de tool_calls). Trocar a
+      // lista em vez de somar apagaria a primeira recusa sem ruído — e a pessoa
+      // leria só a segunda, concluindo que a primeira ação aconteceu.
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      ws.emite(recusada());
+      ws.emite(pedido({ to: 'ana@exemplo.com' }, 'gmail_send_message', 'r2'));
+      fireEvent.click(negar());
+      expect(screen.getByText(/você não permitiu: criar um evento na agenda/i)).toBeTruthy();
+      expect(screen.getByText(/você não permitiu: enviar um e-mail/i)).toBeTruthy();
+    });
+
+    it('negado: o turno segue e termina no turn_end, sem esperar os 300s', () => {
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      // O engine devolve a recusa ao modelo e continua o laço: vem resposta e
+      // vem `turn_end`. O telefone não pode ficar pendurado nesse caminho.
+      ws.emite(recusada());
+      ws.emite(token('Tudo bem, não marquei nada.'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Tudo bem, não marquei nada.')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+      semBotoes();
+    });
+
+    it('a bolha que só tem a recusa não é lida como turno perdido', () => {
+      // A recusa entra numa bolha que pode não ter texto nenhum. Sem contá-la,
+      // a regra do turno mudo escreveria "não veio resposta desta vez" ao lado
+      // de "você não permitiu" — duas frases contradizendo uma à outra.
+      const { ws } = pedirPermissao();
+      fireEvent.click(negar());
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/você não permitiu/i)).toBeTruthy();
+      expect(screen.queryByText(/não veio resposta desta vez/i)).toBeNull();
+    });
+
+    it('expirou: quem avisa é o SERVIDOR, e a tela recolhe os botões', () => {
+      // Não há cronômetro no cliente: aos 300s o engine desiste sozinho
+      // (`engine.py:1225`) e emite o `tool_result` do pedido. Esse quadro é o
+      // aviso — e é a única hora em que a tela pode afirmar que expirou sem
+      // arriscar discordar do servidor.
+      const { ws } = pedirPermissao();
+      ws.emite(recusada());
+      semBotoes();
+      expect(screen.getByText(/esta permissão expirou sem resposta/i)).toBeTruthy();
+      expect(screen.queryByText(/uma ação falhou/i)).toBeNull();
+    });
+
+    it('a ferramenta que respondeu OK também recolhe o pedido', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.emite(ferramentaOk(null));
+      semBotoes();
+      // …e sem inventar recusa: ela não expirou, ela rodou.
+      expect(screen.queryByText(/expirou sem resposta/i)).toBeNull();
+    });
+
+    it('dois toques mandam UMA decisão só', () => {
+      // No mesmo quadro o React ainda não redesenhou e o botão continua de pé.
+      const { ws } = pedirPermissao();
+      const b = permitir();
+      act(() => { b.click(); b.click(); });
+      expect(ws.enviadas.filter((m) => m.type === 'tool_approval')).toHaveLength(1);
+    });
+
+    it('turno cancelado tira os botões — eles não valem mais nada', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.emite({ type: 'turn_cancelled', conversation_id: 'c1', turn_id: 't1' });
+      semBotoes();
+    });
+
+    it('conexão caída tira os botões — o backend já matou o turno', () => {
+      const { ws } = pedirPermissao();
+      expect(permitir()).toBeTruthy();
+      ws.conexao('disconnected');
+      semBotoes();
+    });
+
+    it('aprovação que o servidor não reconhece mais é dita, e não mata o turno', () => {
+      // Corrida real: os 300s estouram no instante do toque. O socket responde
+      // `{type:'error', code:'unknown_request_id'}` (`ws/routes.py:1060`) e o
+      // turno SEGUE vivo do outro lado — tratá-lo como erro fatal apagaria o
+      // "pensando…" de um turno que ainda vai responder.
+      const { ws } = pedirPermissao();
+      fireEvent.click(permitir());
+      ws.emite({ type: 'error', code: 'unknown_request_id', message: 'r1' });
+      expect(screen.getByText(/essa aprovação já não valia/i)).toBeTruthy();
+      expect(screen.queryByText(/não consegui responder/i)).toBeNull();
+      expect(screen.getByText('pensando…')).toBeTruthy();
+    });
+
+    it('ferramenta sem argumento nenhum ainda pede permissão, e diz que não veio detalhe', () => {
+      pedirPermissao({});
+      expect(screen.getByText(/não veio com detalhe nenhum/i)).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('ferramenta desconhecida do telefone também ganha os dois botões', () => {
+      // O rótulo cai no nome do fio; a decisão não pode cair junto — uma
+      // ferramenta nova seria justamente a que mais precisa de um "não".
+      pedirPermissao({ command: 'rm -rf /tmp/x' }, 'ferramenta_nova');
+      expect(screen.getByText(/esperando sua aprovação para ferramenta_nova/i)).toBeTruthy();
+      expect(screen.getByText('rm -rf /tmp/x')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+      expect(negar()).toBeTruthy();
+    });
+
+    it('argumento com nome que o telefone não traduz aparece com o nome do fio', () => {
+      pedirPermissao({ campo_novo: 'valor' });
+      expect(screen.getByText('campo_novo')).toBeTruthy();
+      expect(screen.getByText('valor')).toBeTruthy();
+    });
+
+    it('pedido de turno que a tela não abriu também pode ser respondido', () => {
+      // Ao contrário do `tool_result` (que não inventa espera, M20), o
+      // `tool_request` PRECISA de resposta venha de onde vier: se ninguém
+      // responde, o turno de fundo morre nos 300s e a ação não acontece.
+      const { ws } = montar();
+      ws.emite(pedido());
+      expect(permitir()).toBeTruthy();
+      fireEvent.click(permitir());
+      expect(ws.enviadas.at(-1)).toEqual({
+        type: 'tool_approval', request_id: 'r1', approved: true,
+      });
+    });
+
+    it('o pedido continua de pé enquanto ela escreve', () => {
+      // Mesma razão da M16 da Task 18, agora com botão: escondido atrás do
+      // cursor, o pedido nunca seria respondido.
+      const { ws, container } = montar();
+      escrever(container, 'marca dentista quinta 15h');
+      ws.emite(token('Deixa comigo!'));
+      ws.emite(pedido());
+      expect(screen.getByText('Deixa comigo!')).toBeTruthy();
+      expect(permitir()).toBeTruthy();
+    });
+
+    it('em repouso não há botão de decisão nenhum na tela', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia!'));
+      semBotoes();
+    });
+  });
+
+  /* A BOLHA VAZIA É UM TURNO PERDIDO.
+     Na conversa real apareceram duas falas do usuário seguidas, sem resposta no
+     meio. Uma bolha da Seraphine que fecha sem NADA dentro é indistinguível de
+     "ela ignorou a pergunta" — e a tela é a única que sabe a diferença. */
+  describe('turno que fecha sem uma palavra', () => {
+    it('só raciocínio e fim de turno: a bolha diz o que houve, em vez de ficar vazia', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>ia responder o clima</think>'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/pensei, mas não cheguei a responder/)).toBeTruthy();
+      expect(screen.queryByText(/ia responder o clima/)).toBeNull();
+      // e UMA frase só: "pensando…" ao lado de "não cheguei a responder" seriam
+      // duas afirmações contraditórias na mesma bolha.
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('resposta que só tinha marcação também não vira bolha muda', () => {
+      // `limpar` come `[anim:…]` e comentários de cartão. Sobrando nada, o
+      // resultado era uma bolha em branco.
+      const { ws } = montar();
+      ws.emite(token('[anim:acenar]'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/não veio resposta desta vez/)).toBeTruthy();
+    });
+
+    it('enquanto o turno está aberto, vazio é ESPERA e não falha', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>pensando ainda'));
+      expect(screen.getByText('pensando…')).toBeTruthy();
+      expect(screen.queryByText(/não cheguei a responder/)).toBeNull();
+    });
+
+    it('bolha com cartão e sem texto não é muda', () => {
+      // O cartão de tarefa É a resposta nesse turno; dizer "não veio resposta"
+      // ao lado dele seria contradizer o que está na tela.
+      const { ws } = montar();
+      ws.emite({
+        type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+        metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending' } },
+      });
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Pagar aluguel')).toBeTruthy();
+      expect(screen.queryByText(/não veio resposta desta vez/)).toBeNull();
+    });
   });
 });
 
@@ -496,16 +1301,23 @@ describe('ChatScreen — restaura o transcrito', () => {
     expect(screen.queryByText(/task-data/)).toBeNull();
   });
 
-  it('não despeja o HTML do cartão salvo dentro da bolha', async () => {
+  it('não despeja o HTML do cartão salvo dentro da bolha: desenha o cartão', async () => {
+    // A afirmação original era "nada disso aparece" — escrita quando o telefone
+    // ainda descartava cartão. O que ela protegia continua valendo e é o que
+    // sobrou aqui: a MARCAÇÃO não pode virar texto na bolha. O conteúdo, sim,
+    // aparece — como cartão, que é onde ele deveria estar desde o começo.
     localStorage.setItem(CONV_KEY, 'conv-1');
     vi.mocked(fetchConversationTurns).mockResolvedValue([
       turno('t2', 'assistant',
         'Seu painel:\n<!--card--><div class="rich-card"><b>Receitas</b></div><!--/card-->'),
     ]);
-    montar();
+    const { container } = montar();
 
     expect(await screen.findByText('Seu painel:')).toBeTruthy();
-    expect(screen.queryByText(/rich-card|Receitas/)).toBeNull();
+    expect(container.querySelector('.ms-chat-bolha__texto')?.textContent).toBe('Seu painel:');
+    expect(container.textContent).not.toContain('rich-card');
+    expect(container.textContent).not.toContain('<!--card-->');
+    expect(container.querySelector('.ms-chat-cartao .rich-card b')?.textContent).toBe('Receitas');
   });
 
   it('mostra erro próprio quando o histórico não carrega, e deixa conversar', async () => {

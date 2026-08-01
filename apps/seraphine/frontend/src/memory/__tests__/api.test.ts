@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchProfile, listFacts } from '../api';
+import { createFact, fetchProfile, listFacts } from '../api';
 
 /**
  * Build a realistic Response double. Real fetch responses always carry
@@ -90,6 +90,97 @@ describe('listFacts', () => {
     mockFetch(jsonResponse({ detail: 'boom' }, { status: 500 }));
 
     await expect(listFacts()).rejects.toThrow('HTTP 500');
+  });
+});
+
+describe('createFact', () => {
+  function body(spy: ReturnType<typeof vi.fn>, i = 0): Record<string, unknown> {
+    return JSON.parse(String((spy.mock.calls[i][1] as RequestInit).body));
+  }
+
+  it('POSTs /memory/facts as JSON and returns the created fact', async () => {
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    const fact = await createFact({ text: 'Mora em São Paulo' });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(calledUrl(spy)).toContain('/memory/facts');
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+    expect(fact).toEqual(FACT);
+  });
+
+  it('fills in the backend defaults so callers cannot drift from them', async () => {
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    await createFact({ text: 'Mora em São Paulo' });
+
+    expect(body(spy)).toEqual({ text: 'Mora em São Paulo', source: 'explicit', confidence: 1 });
+  });
+
+  it('keeps confidence 0 — it is a real value, not "unset"', async () => {
+    // `0 || 1.0` is 1.0. The same falsy-zero bug already cost this project a
+    // budget ceiling and a provider-reported cost; a fact the user marked as
+    // worthless must not be stored as certain.
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    await createFact({ text: 'talvez ele goste de jazz', confidence: 0 });
+
+    expect(body(spy).confidence).toBe(0);
+  });
+
+  it('trims the text and refuses a blank one WITHOUT hitting the network', async () => {
+    // The backend only asks for `min_length=1`, so " " would be stored as a
+    // fact that says nothing — and every screen would then render a blank row.
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    await createFact({ text: '  Mora em São Paulo  ' });
+    expect(body(spy).text).toBe('Mora em São Paulo');
+
+    await expect(createFact({ text: '   ' })).rejects.toThrow(/vazi/i);
+    await expect(createFact({ text: '' })).rejects.toThrow(/vazi/i);
+    expect(spy).toHaveBeenCalledTimes(1); // só o primeiro
+  });
+
+  it('refuses a source outside the backend Literal WITHOUT hitting the network', async () => {
+    // THE TRAP. `FactCreate.source` is a plain `str`, and `store.add_fact`
+    // inserts it with `# type: ignore[arg-type]` — so POSTing source="mobile"
+    // returns 201. But `Fact.source` IS a Literal, and `list_facts` rebuilds
+    // every row through it: one bad write makes `GET /memory/facts` raise for
+    // the WHOLE list. The poisoned row then cannot even be deleted from a
+    // screen, because no screen can list it. Verified against the model.
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    await expect(createFact({ text: 'x', source: 'mobile' })).rejects.toThrow(/source/i);
+    expect(spy).not.toHaveBeenCalled();
+
+    // e os quatro válidos passam
+    for (const source of ['explicit', 'reflection', 'user_taught', 'observation']) {
+      await createFact({ text: 'x', source });
+    }
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it('refuses a confidence outside 0..1 WITHOUT hitting the network', async () => {
+    // `Field(ge=0.0, le=1.0)` would answer 422, and the caller would only see
+    // the bare "HTTP 422" this module throws — no clue about which field.
+    const spy = mockFetch(jsonResponse(FACT, { status: 201 }));
+
+    await expect(createFact({ text: 'x', confidence: 1.5 })).rejects.toThrow(/confian|confidence/i);
+    await expect(createFact({ text: 'x', confidence: -0.1 })).rejects.toThrow(/confian|confidence/i);
+    expect(spy).not.toHaveBeenCalled();
+
+    // as bordas são válidas
+    await createFact({ text: 'x', confidence: 0 });
+    await createFact({ text: 'x', confidence: 1 });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects with the HTTP status when the backend fails', async () => {
+    mockFetch(jsonResponse({ detail: 'boom' }, { status: 500 }));
+
+    await expect(createFact({ text: 'Mora em São Paulo' })).rejects.toThrow('HTTP 500');
   });
 });
 

@@ -49,6 +49,14 @@ export interface AggJournal {
 }
 
 export interface AggEvent {
+  /** O id do evento no Google (`calendar_agg/routes.py` o copia do item cru).
+   *
+   *  É o que torna a linha ACIONÁVEL: sem ele, apagar viraria adivinhação por
+   *  título e horário, e dois "Dentista" às 14h são dois eventos diferentes.
+   *  Opcional porque um agregado antigo (ou um evento que o Google devolveu
+   *  sem id) não o traz — e a tela precisa dizer isso em vez de oferecer um
+   *  botão que apagaria o quê. */
+  id?: string;
   title: string;
   start: string;
   end: string;

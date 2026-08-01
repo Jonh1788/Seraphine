@@ -1,0 +1,159 @@
+/* Tela CONFIGURAÇÕES do handoff v3 (frames "Configurações" A e B, que no app
+   são uma tela rolável só).
+
+   Medidas verbatim do handoff: cabeçalho 12/20 com título de 22px, rótulo de
+   grupo 11/700 com tracking de 6 centésimos de em em text-faint, cartões de
+   raio 18 sobre surface, linhas de 13px por 15px com ícone de 30px e raio 9,
+   divisória de 1px com recuo de 57px, interruptor de 44 por 26 com bola de 22.
+
+   Todas as classes e o keyframe levam o prefixo ms-config- para não colidirem
+   com o CSS de nenhuma outra tela — nome de keyframe é global. */
+
+html[data-shell='phone'] .ms-config { display: flex; flex-direction: column; min-height: 100%; }
+
+/* ── cabeçalho ── */
+html[data-shell='phone'] .ms-config-head {
+  flex: none; display: flex; align-items: center; gap: 11px; padding: 12px 20px 10px;
+}
+/* A caixa de 34px é o desenho; os 44 de alvo vêm da regra compartilhada do
+   shell, presa ao rótulo "Voltar" (a margem negativa alinha o traço à margem
+   de 20px sem empurrar o título). */
+html[data-shell='phone'] .ms-config-voltar {
+  flex: none; width: 34px; height: 34px; margin-left: -8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-dim, #9594a0); font: inherit; cursor: pointer;
+}
+html[data-shell='phone'] .ms-config-titulo {
+  font-size: 22px; font-weight: 700; letter-spacing: -.02em; color: var(--text, #ececef);
+}
+
+/* ── corpo ── */
+html[data-shell='phone'] .ms-config-corpo {
+  flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 4px 20px 20px;
+}
+
+/* Aviso único das quedas de leitura. Tinta de perigo para nunca ser lido como
+   vazio, e largura cheia porque ele fala pela tela inteira. */
+html[data-shell='phone'] .ms-config-aviso {
+  font-size: 12px; line-height: 1.5; color: var(--danger, #ef6b6b);
+  background: rgba(239, 107, 107, .1); border: 1px solid rgba(239, 107, 107, .28);
+  border-radius: 13px; padding: 10px 13px;
+}
+
+/* ── grupos ── */
+html[data-shell='phone'] .ms-config-grupo { display: flex; flex-direction: column; }
+html[data-shell='phone'] .ms-config-grupo-rotulo {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  color: var(--text-faint, #5f5e6b); padding: 0 4px 8px;
+}
+html[data-shell='phone'] .ms-config-card {
+  background: var(--surface, #17171e); border: 1px solid var(--border, rgba(255, 255, 255, .08));
+  border-radius: 18px; overflow: hidden;
+}
+html[data-shell='phone'] .ms-config-divisoria {
+  height: 1px; background: var(--border, rgba(255, 255, 255, .08)); margin-left: 57px;
+}
+
+/* ── linhas ── */
+html[data-shell='phone'] .ms-config-linha {
+  display: flex; align-items: center; gap: 12px; padding: 13px 15px;
+  width: 100%; box-sizing: border-box; text-align: left;
+  background: none; border: none; color: inherit; font: inherit;
+}
+/* A linha inteira é o alvo quando ela abre outra tela: 30px de ícone mais 26
+   de padding passam de 44pt de altura com folga. */
+html[data-shell='phone'] .ms-config-linha--abre { cursor: pointer; }
+html[data-shell='phone'] .ms-config-icone {
+  width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center;
+}
+html[data-shell='phone'] .ms-config-icone--accent {
+  background: var(--accent-soft, rgba(154, 147, 255, .14)); color: var(--accent, #9a93ff);
+}
+html[data-shell='phone'] .ms-config-icone--ambar {
+  background: rgba(255, 167, 38, .13); color: var(--warning, #ffa726);
+}
+html[data-shell='phone'] .ms-config-icone--teal { background: rgba(38, 166, 154, .13); color: #26a69a; }
+html[data-shell='phone'] .ms-config-icone--verde { background: rgba(37, 211, 102, .13); color: #25d366; }
+
+html[data-shell='phone'] .ms-config-txt {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+}
+html[data-shell='phone'] .ms-config-nome { font-size: 14px; color: var(--text, #ececef); }
+html[data-shell='phone'] .ms-config-sub {
+  font-size: 11px; color: var(--text-faint, #5f5e6b);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── valores e selos à direita ── */
+html[data-shell='phone'] .ms-config-valor {
+  flex: none; max-width: 148px; font-size: 13px; color: var(--text-dim, #9594a0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-shell='phone'] .ms-config-valor--accent { color: var(--accent, #9a93ff); font-weight: 600; }
+html[data-shell='phone'] .ms-config-chevron { flex: none; color: var(--text-faint, #5f5e6b); }
+html[data-shell='phone'] .ms-config-selo {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; color: var(--user, #4ade80);
+}
+html[data-shell='phone'] .ms-config-ponto {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--user, #4ade80);
+}
+/* Falha de uma linha só: âmbar, não vermelho — o vermelho é do aviso do topo,
+   que é quem anuncia. */
+html[data-shell='phone'] .ms-config-status {
+  flex: none; font-size: 12px; color: var(--warning, #ffa726); text-align: right;
+}
+html[data-shell='phone'] .ms-config-desconectado {
+  flex: none; display: inline-flex; align-items: center; gap: 9px;
+}
+
+/* ── botão pequeno (Conectar) ── */
+html[data-shell='phone'] .ms-config-botao {
+  position: relative; border: 1px solid var(--border-strong, rgba(255, 255, 255, .12));
+  background: transparent; color: var(--text, #ececef); font: inherit;
+  font-size: 12px; font-weight: 600; padding: 6px 13px; border-radius: 9px; cursor: pointer;
+}
+html[data-shell='phone'] .ms-config-botao:disabled { opacity: .6; cursor: default; }
+/* O desenho tem 28px de altura; o dedo precisa de 44. O pseudo cresce por fora,
+   centrado, sem mexer no que está pintado — mesmo truque que o shell usa no ‹. */
+html[data-shell='phone'] .ms-config-botao::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+
+/* ── interruptor ── */
+html[data-shell='phone'] .ms-config-switch {
+  position: relative; flex: none; width: 44px; height: 26px; padding: 0;
+  border: none; border-radius: 14px; cursor: pointer;
+  background: rgba(255, 255, 255, .12); transition: background .16s ease;
+}
+html[data-shell='phone'] .ms-config-switch--on { background: var(--accent, #9a93ff); }
+html[data-shell='phone'] .ms-config-switch:disabled { opacity: .7; cursor: default; }
+html[data-shell='phone'] .ms-config-switch::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+html[data-shell='phone'] .ms-config-switch__bola {
+  position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%;
+  background: #cfcfda; transition: transform .16s ease, background .16s ease;
+}
+html[data-shell='phone'] .ms-config-switch--on .ms-config-switch__bola {
+  transform: translateX(18px); background: #fff;
+}
+
+/* ── esqueleto e rodapé ── */
+html[data-shell='phone'] .ms-config-skel {
+  flex: none; display: inline-block; border-radius: 6px;
+  background: rgba(255, 255, 255, .07); animation: ms-config-pulso 1.2s ease-in-out infinite;
+}
+@keyframes ms-config-pulso {
+  0%, 100% { opacity: .45; }
+  50% { opacity: .85; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-shell='phone'] .ms-config-skel { animation: none; }
+}
+
+html[data-shell='phone'] .ms-config-versao {
+  text-align: center; font-size: 11px; color: var(--text-faint, #5f5e6b); padding-top: 2px;
+}

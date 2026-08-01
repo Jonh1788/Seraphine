@@ -62,7 +62,14 @@ _action_states: dict[ActionName, _ActionState] = {
 
 class FactCreate(BaseModel):
     text: str = Field(..., min_length=1)
-    source: str = "explicit"
+    # MESMO Literal de `store.Fact.source`, e é load-bearing. Enquanto isto era
+    # `str`, um POST com `source` fora da lista respondia 201 e envenenava a
+    # tabela: `store.list_facts` reconstrói CADA linha por `Fact`, então a
+    # leitura passava a levantar para a lista INTEIRA — todos os outros fatos
+    # sumiam junto, e a linha ruim não podia ser apagada por tela nenhuma,
+    # porque nenhuma conseguia listá-la. Um 422 aqui custa uma requisição; um
+    # 201 custava a memória toda.
+    source: Literal["explicit", "reflection", "user_taught", "observation"] = "explicit"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 

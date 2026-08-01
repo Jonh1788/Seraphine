@@ -58,7 +58,7 @@ html[data-shell='phone'] .ms-tarefas__nova {
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(154,147,255,.14));
 }
 html[data-shell='phone'] .ms-tarefas__nova-input {
-  flex: 1; min-width: 0; min-height: 36px; font: inherit; font-size: 14px;
+  flex: 1; min-width: 0; min-height: 36px; font: inherit;
   background: none; border: none; outline: none; color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-tarefas__nova-input::placeholder { color: var(--text-faint, #5f5e6b); }

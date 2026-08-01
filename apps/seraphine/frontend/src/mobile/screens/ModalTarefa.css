@@ -1,0 +1,198 @@
+/* src/mobile/screens/ModalTarefa.css — modal de tarefa (handoff: frame
+   "Modal · nova tarefa"). Medidas tiradas de lá verbatim: cabeçalho com gap 10
+   e margin-bottom 14, título 18/600, botões 30×30 de raio 9, linhas
+   `padding: 11px 2px` com gap 11, quadradinho de ícone 26×26 de raio 8,
+   divisória de 1px com `margin-left: 37px`, ponto de 8px, chip de tag
+   `3px 4px 3px 9px` de raio 8 em accent-soft, descrição com raio 12,
+   `padding: 13px`, `line-height: 1.55` e `min-height: 74px`, rodapé de 12px a
+   `margin-top: 12px`.
+
+   A MOLDURA NÃO ESTÁ AQUI: backdrop, cantos de 28, grabber, respiro de home
+   indicator e a faixa do rodapé são do `MobileSheet` (`ms-sheet-*`). O painel
+   dele já traz o padding lateral de 20 — nada neste arquivo põe margem própria,
+   senão o conteúdo entraria duas vezes.
+
+   TRÊS COISAS QUE O HANDOFF DESENHA E ESTE CSS NÃO COPIA, de propósito, todas
+   por causa do alvo de 44pt da HIG:
+   - o vão ENTRE a lixeira e o fechar vai de 10 para 14. Com 10, os dois alvos
+     de 44 se sobrepõem em 4px e o toque na borda da direita da lixeira cairia
+     no fechar (ou pior, o contrário: fechar vira excluir). Com 14 eles se
+     encostam sem se invadirem: 30 + 14 = 44. O vão do título para o grupo
+     continua 10.
+   - o X do chip de tag fica com alvo de 24, não 44: o X é desenhado com 16 e os
+     chips têm 6 de vão, então um alvo de 44 cobriria o chip vizinho inteiro —
+     seria trocar "difícil de acertar" por "remove a tag errada". 24 é o maior
+     que cabe sem invadir (4px para cada lado, 2 de folga).
+   - o campo de nova tag cresce para ~32 e não 44: negativar a margem dele, como
+     o título faz, quebraria a quebra de linha dos chips.
+
+   Prefixo `ms-mtarefa-` em TUDO. (Não há `@keyframes` aqui: o modal não anima
+   nada por conta própria — quem anima a entrada é o `MobileSheet`.) */
+
+/* ── cabeçalho ─────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mtarefa-cabecalho {
+  display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px;
+}
+
+/* `padding` + `margin` negativa de mesmo valor: a caixa de toque vira 44 de
+   altura sem mover uma linha do desenho (a footprint no fluxo continua a do
+   texto). Os 11px que sobram para cima caem no respiro de 14 do grabber, cujo
+   alvo é enviesado para cima e termina na barrinha — não se cruzam. */
+html[data-shell='phone'] .ms-mtarefa-titulo {
+  flex: 1; min-width: 0;
+  padding: 11px 0; margin: -11px 0;
+  border: none; outline: none; background: none;
+  font-family: inherit; --ms-campo: 18px; font-weight: 600; line-height: 22px;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mtarefa-titulo::placeholder { color: var(--faint, #5f5e6b); }
+
+html[data-shell='phone'] .ms-mtarefa-acoes { display: flex; flex: none; gap: 14px; }
+
+html[data-shell='phone'] .ms-mtarefa-acao {
+  position: relative; flex: none;
+  display: grid; place-items: center;
+  height: 30px; padding: 0;
+  border: none; border-radius: 9px;
+  background: rgba(255, 255, 255, .06); color: var(--dim, #9594a0);
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+html[data-shell='phone'] .ms-mtarefa-acao--perigo {
+  background: rgba(239, 107, 107, .12); color: var(--danger, #ef6b6b);
+}
+html[data-shell='phone'] .ms-mtarefa-acao--icone { width: 30px; }
+/* Cresce só para a DIREITA (`left: 0`): o alvo da lixeira para exatamente onde
+   começa o do fechar, e o do fechar avança nos 20px de padding do painel. Se
+   fosse centrado, o da lixeira entraria 7px no título e um toque no fim do
+   título abriria a confirmação de excluir. */
+html[data-shell='phone'] .ms-mtarefa-acao--icone::after {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 44px; height: 44px; transform: translateY(-50%);
+}
+/* Os de texto (Sim/Não) já nascem largos; falta só a altura. */
+html[data-shell='phone'] .ms-mtarefa-acao--texto { min-width: 56px; padding: 0 12px; }
+html[data-shell='phone'] .ms-mtarefa-acao--texto::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
+html[data-shell='phone'] .ms-mtarefa-acao[disabled] { opacity: .6; }
+
+/* ── linhas de metadado ────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mtarefa-linha {
+  position: relative;
+  display: flex; align-items: center; gap: 11px; padding: 11px 2px;
+}
+
+html[data-shell='phone'] .ms-mtarefa-icone {
+  width: 26px; height: 26px; flex: none; border-radius: 8px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, .06); color: var(--dim, #9594a0);
+}
+html[data-shell='phone'] .ms-mtarefa-icone--data { background: rgba(66, 165, 245, .13); color: #42a5f5; }
+html[data-shell='phone'] .ms-mtarefa-icone--lembrete { background: rgba(255, 167, 38, .13); color: var(--warning, #ffa726); }
+html[data-shell='phone'] .ms-mtarefa-icone--tags { background: rgba(154, 147, 255, .13); color: var(--accent, #9a93ff); }
+
+html[data-shell='phone'] .ms-mtarefa-rotulo { flex: 1; font-size: 14px; color: var(--dim, #9594a0); }
+html[data-shell='phone'] .ms-mtarefa-rotulo--fixo { flex: none; }
+
+html[data-shell='phone'] .ms-mtarefa-valor {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 14px; font-weight: 600; color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mtarefa-valor--neutro { font-weight: 400; }
+html[data-shell='phone'] .ms-mtarefa-valor--data { gap: 10px; font-weight: 400; }
+
+html[data-shell='phone'] .ms-mtarefa-ponto { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+
+html[data-shell='phone'] .ms-mtarefa-divisoria {
+  height: 1px; background: var(--border, rgba(255, 255, 255, .08)); margin-left: 37px;
+}
+
+/* O controle nativo por cima do valor desenhado: no iPhone abre o seletor do
+   sistema e o dedo tem 44pt de alvo sem engordar a linha de 48. Invisível, não
+   removido — continua no DOM, focável e nomeado para quem lê tela. */
+html[data-shell='phone'] .ms-mtarefa-sobreposto {
+  position: absolute; left: 0; right: 0; top: 50%;
+  width: 100%; height: 44px; transform: translateY(-50%);
+  margin: 0; padding: 0; border: none;
+  opacity: 0; -webkit-appearance: none; appearance: none;
+  font-family: inherit; /* < 16px faz o iOS dar zoom ao focar */
+  cursor: pointer;
+}
+
+html[data-shell='phone'] .ms-mtarefa-campo { position: relative; display: inline-flex; align-items: center; gap: 5px; }
+html[data-shell='phone'] .ms-mtarefa-campo--hora { color: var(--dim, #9594a0); }
+html[data-shell='phone'] .ms-mtarefa-data--vazia { color: var(--faint, #5f5e6b); }
+
+/* ── tags ──────────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mtarefa-tags {
+  flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end;
+}
+
+html[data-shell='phone'] .ms-mtarefa-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 13px; font-weight: 500;
+  padding: 3px 4px 3px 9px; border-radius: 8px;
+  background: var(--accent-soft, rgba(154, 147, 255, .14)); color: var(--accent, #9a93ff);
+}
+
+html[data-shell='phone'] .ms-mtarefa-chip-x {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 4px; background: none; color: inherit;
+  cursor: pointer; opacity: .75;
+}
+html[data-shell='phone'] .ms-mtarefa-chip-x::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 24px; height: 24px; transform: translate(-50%, -50%);
+}
+
+html[data-shell='phone'] .ms-mtarefa-tag-input {
+  flex: 1 1 90px; min-width: 90px;
+  padding: 6px 0; border: none; outline: none; background: none;
+  font-family: inherit; text-align: right;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mtarefa-tag-input::placeholder { color: var(--faint, #5f5e6b); }
+
+/* ── descrição ─────────────────────────────────────────────────────────────── */
+
+html[data-shell='phone'] .ms-mtarefa-descricao {
+  display: block; width: 100%; min-height: 74px; margin-top: 12px; padding: 13px;
+  box-sizing: border-box; resize: vertical;
+  background: var(--app, #0f0f14);
+  border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 12px;
+  font-family: inherit; line-height: 1.55;
+  color: var(--text, #ececef);
+}
+html[data-shell='phone'] .ms-mtarefa-descricao::placeholder { color: var(--faint, #5f5e6b); }
+
+/* ── rodapé (fora da rolagem, por construção do MobileSheet) ───────────────── */
+
+html[data-shell='phone'] .ms-mtarefa-rodape {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 12px;
+}
+
+html[data-shell='phone'] .ms-mtarefa-criada { font-size: 12px; color: var(--faint, #5f5e6b); }
+
+html[data-shell='phone'] .ms-mtarefa-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--dim, #9594a0);
+}
+html[data-shell='phone'] .ms-mtarefa-status--salvo { color: var(--user, #4ade80); }
+/* O erro é o único texto do rodapé que precisa ser visto de longe: cor de
+   perigo e peso, porque é ele que impede o usuário de sair achando que salvou. */
+html[data-shell='phone'] .ms-mtarefa-status--erro { color: var(--danger, #ef6b6b); font-weight: 600; }
+
+html[data-shell='phone'] .ms-mtarefa-retentar {
+  min-height: 44px; padding: 0 10px;
+  border: none; background: none; color: inherit;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  text-decoration: underline; cursor: pointer;
+}

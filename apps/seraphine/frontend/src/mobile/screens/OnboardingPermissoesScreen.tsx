@@ -34,6 +34,15 @@ import './OnboardingPermissoesScreen.css';
 type Estado = 'lendo' | 'pendente' | 'concedido' | 'negado' | 'indisponivel';
 type Chave = 'microfone' | 'notificacoes';
 
+/** A frase que o classificador embarcado escuta de verdade
+ *  (`src-tauri/models/wakeword/ei_seraphine_v9.onnx`, limiar 0.92 validado):
+ *  não é texto de UI, é contrato com o modelo. O handoff dizia "oi Sera", que
+ *  não aciona nada — e esta tela é o primeiro contato com o recurso, onde a
+ *  pessoa aprende o que dizer. Uma constante só porque os três usos abaixo
+ *  incluem o `aria-label` do switch: se ele divergir do nome visível, o
+ *  VoiceOver passa a ditar uma frase que ninguém mais vê para conferir. */
+const FRASE_WAKE = 'Ei Seraphine';
+
 /** Está dentro do shell Tauri? Mesmo teste que a ponte do HealthKit usa. */
 function temTauri(): boolean {
   if (typeof window === 'undefined') return false;
@@ -155,7 +164,7 @@ export function OnboardingPermissoesScreen({ onDone }: ScreenProps) {
       <div className="ms-onb-perm-lista">
         <Cartao
           nome="Microfone"
-          desc={'Pra conversa por voz e o "oi Sera"'}
+          desc={`Pra conversa por voz e o "${FRASE_WAKE}"`}
           icone={<MicIcon size={21} />}
           tom="accent"
           estado={estados.microfone}
@@ -197,14 +206,14 @@ export function OnboardingPermissoesScreen({ onDone }: ScreenProps) {
             <SparkleIcon size={21} />
           </span>
           <div className="ms-onb-perm-txt">
-            <div className="ms-onb-perm-nome">{'Wake word "oi Sera"'}</div>
+            <div className="ms-onb-perm-nome">{`Wake word "${FRASE_WAKE}"`}</div>
             <div className="ms-onb-perm-desc">Ativar por voz com o app aberto</div>
           </div>
           <button
             type="button"
             role="switch"
             aria-checked={wakeWord}
-            aria-label={'Wake word "oi Sera"'}
+            aria-label={`Wake word "${FRASE_WAKE}"`}
             className={`ms-onb-perm-switch${wakeWord ? ' ms-onb-perm-switch--on' : ''}`}
             onClick={() => setWakeWord(!wakeWord)}
           >

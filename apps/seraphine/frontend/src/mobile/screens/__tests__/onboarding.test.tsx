@@ -217,6 +217,45 @@ describe('OnboardingPermissoesScreen', () => {
     expect(localStorage.getItem('seraphine.wakeWord')).toBe('true');
   });
 
+  /* Esta é a tela do PRIMEIRO contato com o recurso. A frase entre aspas é
+     contrato com o classificador embarcado (`ei_seraphine_v9.onnx`, limiar
+     0.92), treinado em "Ei Seraphine": quem aprender outra frase aqui conclui
+     que a wake word não funciona. Os três lugares são checados um a um porque
+     falham separado — e cada um afirma as duas metades, já que só a positiva
+     deixaria passar um texto que citasse as duas frases. */
+  describe('a wake word é anunciada com a frase que o modelo escuta', () => {
+    /** Deixa a leitura assíncrona de permissão assentar antes de terminar. */
+    const assentar = () =>
+      waitFor(() => expect(screen.queryAllByLabelText('lendo a permissão')).toHaveLength(0));
+
+    it('a descrição do cartão do microfone cita a frase certa', async () => {
+      render(<OnboardingPermissoesScreen onDone={vi.fn()} />);
+      const desc = screen.getByText(/Pra conversa por voz/).textContent ?? '';
+      expect(desc).toMatch(/ei seraphine/i);
+      expect(desc).not.toMatch(/oi sera\b/i);
+      await assentar();
+    });
+
+    it('o nome do toggle cita a frase certa', async () => {
+      render(<OnboardingPermissoesScreen onDone={vi.fn()} />);
+      const nome = screen.getByText(/Wake word/).textContent ?? '';
+      expect(nome).toMatch(/ei seraphine/i);
+      expect(nome).not.toMatch(/oi sera\b/i);
+      await assentar();
+    });
+
+    // O rótulo do switch é o que o VoiceOver fala. Se ele guardar a frase antiga,
+    // um usuário cego recebe a instrução errada pelo canal em que mais confia —
+    // e, diferente do texto na tela, não há como conferir de relance.
+    it('o aria-label do switch, que o VoiceOver lê, cita a frase certa', async () => {
+      render(<OnboardingPermissoesScreen onDone={vi.fn()} />);
+      const rotulo = screen.getByRole('switch').getAttribute('aria-label') ?? '';
+      expect(rotulo).toMatch(/ei seraphine/i);
+      expect(rotulo).not.toMatch(/oi sera\b/i);
+      await assentar();
+    });
+  });
+
   it('o "Continuar" conclui o onboarding pelo onDone do shell', async () => {
     const onDone = vi.fn();
     render(<OnboardingPermissoesScreen onDone={onDone} />);

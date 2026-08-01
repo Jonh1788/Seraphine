@@ -79,7 +79,7 @@ html[data-shell='phone'] .ms-whatsapp-campo {
 }
 html[data-shell='phone'] .ms-whatsapp-input {
   flex: 1; min-width: 0; background: none; border: none; outline: none; padding: 0;
-  font: inherit; font-size: 14px; color: var(--text, #ececef);
+  font: inherit; color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-whatsapp-input::placeholder { color: var(--text-faint, #5f5e6b); }
 html[data-shell='phone'] .ms-whatsapp-input:disabled { -webkit-text-fill-color: var(--text-faint, #5f5e6b); }

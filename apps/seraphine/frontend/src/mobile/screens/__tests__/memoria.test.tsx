@@ -4,9 +4,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mockamos o MÓDULO de api, não o `fetch`: um mock de fetch com `{ ok, json }`
 // sem `headers` faz helpers que leem `res.headers.get(...)` estourarem, e o
 // teste passaria pelo caminho de erro achando que testou o caminho feliz.
-vi.mock('../../../memory/api', () => ({ listFacts: vi.fn(), fetchProfile: vi.fn() }));
+// `createFact` entra porque a tela passou a montar o `ModalMemoria`, que o usa
+// como padrão do `criar`. Sem ele no mock, TODOS os testes desta tela quebram no
+// render — o default de prop é lido na montagem do modal, não no envio.
+vi.mock('../../../memory/api', () => ({
+  listFacts: vi.fn(),
+  fetchProfile: vi.fn(),
+  createFact: vi.fn(),
+}));
 
-import { listFacts, fetchProfile } from '../../../memory/api';
+import { listFacts, fetchProfile, createFact } from '../../../memory/api';
 import type { Fact } from '../../../memory/types';
 import { MemoriaScreen } from '../MemoriaScreen';
 
@@ -32,6 +39,7 @@ describe('MemoriaScreen', () => {
   beforeEach(() => {
     vi.mocked(listFacts).mockReset().mockResolvedValue([]);
     vi.mocked(fetchProfile).mockReset().mockResolvedValue(null);
+    vi.mocked(createFact).mockReset();
   });
 
   it('lista as lembranças com a categoria em eyebrow e a contagem no cabeçalho', async () => {
@@ -166,5 +174,75 @@ describe('MemoriaScreen', () => {
     await waitFor(() => expect(screen.getByText('Trabalha na Globo.')).toBeTruthy());
     expect(screen.queryByText('Trabalha na Acme.')).toBeNull();
     expect(screen.getByText('1 lembrança')).toBeTruthy();
+  });
+
+  /* O "+" — a ausência que deixou de ter justificativa.
+     Esta tela RECUSOU o "+" do handoff com um argumento correto na época:
+     `memory/api.ts` só lia, e um "+" sem POST é botão morto. A Task 10 abriu
+     `createFact`; o argumento caiu com ela, e o comentário que o repetia ficou
+     desatualizado no arquivo. */
+  describe('nova lembrança', () => {
+    const abrir = async () => {
+      vi.mocked(listFacts).mockResolvedValue(tres());
+      render(<MemoriaScreen />);
+      await waitFor(() => expect(screen.getByText('3 lembranças')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Nova lembrança' }));
+      return await screen.findByRole('dialog');
+    };
+
+    it('o "+" abre o sheet de nova lembrança', async () => {
+      const dialogo = await abrir();
+      expect(dialogo.getAttribute('aria-label')).toBe('Nova lembrança');
+    });
+
+    it('sem tocar no "+", não há sheet montado', async () => {
+      vi.mocked(listFacts).mockResolvedValue(tres());
+      render(<MemoriaScreen />);
+      await waitFor(() => expect(screen.getByText('3 lembranças')).toBeTruthy());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('salvar grava pela camada e refaz a leitura', async () => {
+      vi.mocked(createFact).mockResolvedValue(fato({ id: 'f9', text: 'Prefere reuniões depois das 10h.' }));
+      await abrir();
+      expect(listFacts).toHaveBeenCalledTimes(1);
+
+      fireEvent.change(screen.getByLabelText('Lembrança'), {
+        target: { value: 'Prefere reuniões depois das 10h.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+      await waitFor(() => expect(createFact).toHaveBeenCalledWith({
+        text: 'Prefere reuniões depois das 10h.',
+        source: 'explicit',
+        confidence: 1,
+      }));
+      // a contagem do cabeçalho sai da LISTA do servidor, não de um contador local
+      await waitFor(() => expect(listFacts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
+
+    it('fechar sem salvar não refaz a leitura', async () => {
+      await abrir();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(listFacts).toHaveBeenCalledTimes(1);
+      expect(createFact).not.toHaveBeenCalled();
+    });
+
+    it('reabrir depois de salvar traz o campo VAZIO', async () => {
+      // A tela mantém o modal MONTADO entre uma abertura e outra. Sem o reset na
+      // transição fechado→aberto, a "nova lembrança" seguinte nasceria com o
+      // texto que acabou de ser gravado — oferecido para ser gravado de novo.
+      vi.mocked(createFact).mockResolvedValue(fato({ id: 'f9', text: 'x' }));
+      await abrir();
+      fireEvent.change(screen.getByLabelText('Lembrança'), { target: { value: 'Odeia coentro.' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Nova lembrança' }));
+      await screen.findByRole('dialog');
+      expect((screen.getByLabelText('Lembrança') as HTMLTextAreaElement).value).toBe('');
+    });
   });
 });

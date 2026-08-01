@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -36,6 +37,43 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 # Refresh when we're within this window of expiry.
 REFRESH_SKEW = timedelta(minutes=5)
 DEFAULT_TIMEOUT = 20.0
+
+# ── The event id goes STRAIGHT into the request path ──────────────────────
+#
+# httpx normalizes dot segments before sending, so an id of ".." turns
+#
+#     DELETE {CALENDAR_API}/calendars/primary/events/..
+# into
+#     DELETE {CALENDAR_API}/calendars/primary
+#
+# which deletes the WHOLE CALENDAR, and "../../other" reaches an arbitrary
+# one. Measured, not theorized — see ``test_calendar_delete_route.py``.
+#
+# The guard therefore lives on the single write path (:meth:`delete_event`),
+# where no caller can skip it: the HTTP route validates for the sake of a
+# good 422 message, but the model's tool and Aura's route call the client
+# directly, with ids that came from an LLM.
+#
+# The charset is as permissive as the ids Google actually emits: a recurring
+# instance is "<base>_20260620T120000Z" (underscore + uppercase), an imported
+# event is "<uid>@google.com", and the documented ids are base32hex. The
+# lookahead demands one alphanumeric, which is exactly what rules out "."
+# and "..". 1024 is Google's documented ceiling.
+EVENT_ID_RE = re.compile(r"^(?=.*[A-Za-z0-9])[A-Za-z0-9_@.-]{1,1024}$")
+
+
+def ensure_event_id(event_id: str) -> str:
+    """Return ``event_id`` unchanged, or raise :class:`ValueError`.
+
+    See :data:`EVENT_ID_RE` for why this is not paranoia.
+    """
+    if not isinstance(event_id, str) or not EVENT_ID_RE.match(event_id):
+        raise ValueError(
+            f"identificador de evento inválido: {event_id!r} — esperado até "
+            "1024 caracteres entre A-Z a-z 0-9 _ @ . - com pelo menos um "
+            "alfanumérico"
+        )
+    return event_id
 
 # Phase C — Calendar event cache TTL (in seconds). Exposed so tests (and
 # future tuning) can monkeypatch it. 30s is short enough that users who
@@ -365,13 +403,31 @@ class GoogleClient:
         location: str | None = None,
         attendees: list[str] | None = None,
         calendar_id: str = "primary",
+        all_day: bool = False,
+        recurrence: list[str] | None = None,
     ) -> dict:
+        """Create one event. The single write path — the ``calendar_create_event``
+        tool and ``POST /google/calendar/events`` both come through here.
+
+        ``all_day``: ``start``/``end`` are the FIRST and LAST day of the event
+        (inclusive, as a human says it). Google wants ``date`` instead of
+        ``dateTime`` and treats ``end.date`` as EXCLUSIVE, so a one-day event on
+        the 19th is sent as 19 → 20. Both details are Google's rules, so they
+        live here and not in each caller. Getting the first one wrong is not a
+        rejected request: it silently creates a midnight appointment, because
+        ``isAllDay`` (frontend) and ``calendar_agg`` (backend) tell all-day from
+        timed by exactly this field.
+        """
         url = f"{CALENDAR_API}/calendars/{calendar_id}/events"
-        body: dict[str, Any] = {
-            "summary": summary,
-            "start": {"dateTime": _rfc3339(start)},
-            "end": {"dateTime": _rfc3339(end)},
-        }
+        body: dict[str, Any] = {"summary": summary}
+        if all_day:
+            body["start"] = {"date": start.date().isoformat()}
+            body["end"] = {"date": (end.date() + timedelta(days=1)).isoformat()}
+        else:
+            body["start"] = {"dateTime": _rfc3339(start)}
+            body["end"] = {"dateTime": _rfc3339(end)}
+        if recurrence:
+            body["recurrence"] = list(recurrence)
         if description is not None:
             body["description"] = description
         if location is not None:
@@ -412,7 +468,13 @@ class GoogleClient:
     async def delete_event(
         self, event_id: str, *, calendar_id: str = "primary"
     ) -> None:
-        url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{event_id}"
+        """Delete one event. The single delete path — ``DELETE
+        /google/calendar/events/{id}``, the ``calendar_delete_event`` tool and
+        the bulk tool all come through here, and so inherit
+        :func:`ensure_event_id`. Raises :class:`ValueError` for an id that
+        would escape the events resource (see :data:`EVENT_ID_RE`)."""
+        safe_id = ensure_event_id(event_id)
+        url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{safe_id}"
         await self._authed_request("DELETE", url)
         self._event_cache.invalidate_calendar(calendar_id)
 

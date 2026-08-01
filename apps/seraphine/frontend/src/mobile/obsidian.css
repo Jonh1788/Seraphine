@@ -74,6 +74,29 @@ html[data-shell='phone'] button[aria-label='Sair da lição']::after {
   width: 44px; height: 44px; transform: translate(-50%, -50%);
 }
 
+/* PISO DE 16px NOS CAMPOS — o zoom de foco do iOS.
+   O Safari do iPhone dá ZOOM na página quando um campo focado tem fonte abaixo
+   de 16px, e sair do zoom depois é manual. O handoff especifica 13–15px, então
+   isto atingia praticamente todo campo do app: tocar em qualquer busca, título
+   ou descrição empurrava a tela para perto e a deixava lá.
+   O remédio de viewport (`maximum-scale=1` / `user-scalable=no`) NÃO entra: o
+   iOS 10+ o ignora por acessibilidade, e desligar o pinch-zoom seria regressão
+   de acessibilidade para consertar um incômodo. `transform: scale()` também
+   não — quebra a posição do cursor e a seleção de texto.
+   Então a correção é a fonte, e é UMA regra: presa ao TIPO do controle, como a
+   de 44pt é presa ao rótulo. Vale para as telas de hoje e para as de amanhã,
+   sem ninguém precisar lembrar.
+   `!important` porque o piso tem de vencer o valor que cada tela declarou — e é
+   por isso que campo do celular NÃO declara `font-size` (as declarações antigas
+   viraram letra morta e saíram; `zoom-de-foco.test.tsx` prende isso).
+   Quem precisa de MAIS que o piso diz por `--ms-campo`, que o `max()` respeita:
+   o título do modal de tarefa (18px) e o do de evento (17px) passam por aí.
+   DESVIO DELIBERADO DO HANDOFF, registrado: os campos ficam visivelmente
+   maiores que o mockup. Dois pixels de infidelidade valem menos que o zoom. */
+html[data-shell='phone'] input,
+html[data-shell='phone'] select,
+html[data-shell='phone'] textarea { font-size: max(16px, var(--ms-campo, 0px)) !important; }
+
 /* ── hoje: mudou-se para screens/Hoje.css, que o HojeScreen importa ── */
 
 /* ── mais ── */

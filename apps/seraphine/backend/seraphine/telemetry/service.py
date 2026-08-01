@@ -6,6 +6,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from seraphine.telemetry.budget import (
+    build_budget_block,
+    read_budget,
+    spent_this_month,
+    write_budget,
+)
 from seraphine.telemetry.pricing import cost_for
 
 logger = logging.getLogger("seraphine.telemetry")
@@ -52,8 +58,35 @@ class TelemetryService:
         except Exception:
             logger.warning("telemetry record failed", exc_info=True)
 
+    async def get_budget(self) -> float | None:
+        """Teto mensal configurado, ou `None` se nunca foi configurado.
+
+        `None` e `0.0` são respostas diferentes: a primeira é "não configurei",
+        a segunda é um teto real de zero. Ver `budget.py`.
+        """
+        def _work() -> float | None:
+            with self.store._connect() as conn:
+                return read_budget(conn)
+        return await asyncio.to_thread(_work)
+
+    async def set_budget(self, monthly_usd: float | None) -> None:
+        """Define (ou limpa, com `None`) o teto mensal.
+
+        Ao contrário de `record()`, esta escrita NÃO engole erros: é uma ação
+        explícita do usuário, e um teto que some em silêncio é pior que um erro
+        na tela. Levanta `ValueError` em valor negativo ou não-finito.
+        """
+        def _work() -> None:
+            with self.store._connect() as conn:
+                write_budget(conn, monthly_usd)
+        await asyncio.to_thread(_work)
+
     async def summary(self, *, days: int = 7) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))).isoformat()
+        # Um único instante para o gasto do mês e para a contagem de dias: lidos
+        # de relógios diferentes, uma chamada na virada da meia-noite do dia 1º
+        # somaria o gasto de um mês com os dias do outro.
+        now = datetime.now(timezone.utc)
 
         def _work() -> dict[str, Any]:
             with self.store._connect() as conn:
@@ -75,8 +108,18 @@ class TelemetryService:
                     "SELECT backend, COALESCE(SUM(cost_usd),0), COUNT(*) FROM llm_usage"
                     " WHERE ts >= ? GROUP BY backend", (since,),
                 ).fetchall()
+                # O teto é MENSAL: o gasto abaixo é o do mês corrente e ignora
+                # o `days=` que recorta tudo que vem acima. Somar os últimos 30
+                # dias corridos daria um número que nunca zera no dia 1º e que
+                # não bate com nenhum extrato.
+                budget = build_budget_block(
+                    read_budget(conn), spent_this_month(conn, now=now), now=now
+                )
             return {
                 "days": int(days),
+                # `None` quando não há teto — a tela mostra o convite a definir
+                # um orçamento, não uma barra vazia.
+                "budget": budget,
                 "total": {"input_tokens": tot[0], "output_tokens": tot[1],
                           "cost_usd": round(tot[2], 6), "calls": tot[3]},
                 "by_model": [{"model": r[0], "input_tokens": r[1], "output_tokens": r[2],

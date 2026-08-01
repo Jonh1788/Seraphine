@@ -32,6 +32,7 @@ from typing import Any, Optional
 from google_integration.client import (
     CALENDAR_API,
     GMAIL_API,
+    GoogleAPIError,
     GoogleAuthError,
     GoogleClient,
     _rfc3339,
@@ -564,38 +565,34 @@ class CalendarCreateEventTool(Tool):
 
         calendar_id = str(args.get("calendar_id") or "primary")
 
-        body: dict[str, Any] = {
-            "summary": summary,
-            "start": {"dateTime": _rfc3339(start)},
-            "end": {"dateTime": _rfc3339(end)},
-        }
         description = args.get("description")
-        if description is not None:
-            body["description"] = str(description)
         location = args.get("location")
-        if location is not None:
-            body["location"] = str(location)
-        if attendees:
-            body["attendees"] = [{"email": a} for a in attendees]
 
-        url = f"{CALENDAR_API}/calendars/{calendar_id}/events"
+        # UM caminho de escrita, compartilhado com POST /google/calendar/events.
+        # Este método montava o corpo e chamava `_authed_request` na mão — uma
+        # segunda cópia de `client.create_event`, que já existia e já invalida o
+        # cache. Duas implementações da mesma escrita divergem com o tempo: a
+        # rota precisou de `date` para dia inteiro, e só uma das cópias teria
+        # ganhado isso.
         try:
             if not await self._client.is_authed():
                 return _not_authed_result()
-            resp = await self._client._authed_request("POST", url, json=body)
+            event = await self._client.create_event(
+                summary=summary,
+                start=start,
+                end=end,
+                description=str(description) if description is not None else None,
+                location=str(location) if location is not None else None,
+                attendees=attendees or None,
+                calendar_id=calendar_id,
+            )
         except GoogleAuthError:
             return _not_authed_result()
         except Exception as e:
             return ToolResult(ok=False, error=f"calendar create failed: {e}")
 
-        event = resp.json()
         event_id = event.get("id")
         html_link = event.get("htmlLink")
-        # Phase C cache: the event list for this calendar is now stale.
-        try:
-            self._client.event_cache.invalidate_calendar(calendar_id)
-        except Exception:
-            pass
         return ToolResult(
             ok=True,
             output=f"Evento criado: {summary} (id={event_id})",
@@ -737,20 +734,22 @@ class CalendarDeleteEventTool(Tool):
             return ToolResult(ok=False, error="event_id is required")
         calendar_id = str(args.get("calendar_id") or "primary")
 
-        url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{event_id}"
+        # UM caminho de exclusão, compartilhado com DELETE
+        # /google/calendar/events/{id}. Este método montava a URL na mão — uma
+        # segunda cópia de `client.delete_event`, que já invalida o cache e,
+        # agora, valida o identificador. O id daqui vem de um LLM, a fonte
+        # menos confiável de todas: um ".." alucinado apagaria o CALENDÁRIO.
         try:
             if not await self._client.is_authed():
                 return _not_authed_result()
-            await self._client._authed_request("DELETE", url)
+            await self._client.delete_event(event_id, calendar_id=calendar_id)
         except GoogleAuthError:
             return _not_authed_result()
+        except ValueError as e:
+            return ToolResult(ok=False, error=str(e))
         except Exception as e:
             return ToolResult(ok=False, error=f"calendar delete failed: {e}")
 
-        try:
-            self._client.event_cache.invalidate_calendar(calendar_id)
-        except Exception:
-            pass
         return ToolResult(
             ok=True,
             output=f"Evento {event_id} deletado.",
@@ -819,18 +818,24 @@ class CalendarBulkDeleteEventsTool(Tool):
             return ToolResult(ok=False, error=f"auth check failed: {e}")
 
         async def _delete_one(eid: str) -> tuple[str, bool, str | None]:
-            url = f"{CALENDAR_API}/calendars/{calendar_id}/events/{eid}"
+            # Pelo mesmo caminho de escrita do tool unitário e da rota: é o
+            # que traz o guarda do identificador para o lote, onde a lista
+            # inteira veio de um LLM.
             try:
-                resp = await self._client._authed_request("DELETE", url)
-                # Google returns 204 No Content on success; 410 Gone is
-                # acceptable too (already-deleted / cancelled).
-                if resp.status_code in (204, 200, 410):
-                    return eid, True, None
-                return eid, False, f"HTTP {resp.status_code}"
+                await self._client.delete_event(eid, calendar_id=calendar_id)
             except GoogleAuthError as e:
                 return eid, False, f"auth: {e}"
+            except GoogleAPIError as e:
+                # "Já não estava lá" conta como apagado — o resultado para quem
+                # pediu é o mesmo. O ramo anterior dizia aceitar 410, mas era
+                # código morto: `_authed_request` levanta em tudo >= 400, então
+                # um evento já apagado contava como FALHA do lote.
+                if e.status_code in (404, 410):
+                    return eid, True, None
+                return eid, False, str(e)
             except Exception as e:
                 return eid, False, str(e)
+            return eid, True, None
 
         # Fire all deletes in parallel. Google's per-user quota is ~10 r/s;
         # asyncio.gather means we submit them all at once and let httpx

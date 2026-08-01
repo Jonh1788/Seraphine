@@ -18,14 +18,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from seraphine.config import settings
-from google_integration.client import GoogleAPIError, GoogleAuthError, GoogleClient
+from google_integration.client import (
+    EVENT_ID_RE,
+    GoogleAPIError,
+    GoogleAuthError,
+    GoogleClient,
+    ensure_event_id,
+)
 from google_integration.oauth import OAuthFlow, WebOAuthFlow
 
 router = APIRouter(prefix="/google", tags=["google"])
@@ -303,6 +311,237 @@ async def calendar_events(
     except Exception as e:
         logger.exception("unexpected error listing calendar events")
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ── CRIAÇÃO DE EVENTO ────────────────────────────────────────────────────
+#
+# O modelo de ENTRADA está amarrado ao que a LEITURA consegue reconstruir.
+# Duas amarras, e as duas doem em silêncio se soltarem:
+#
+# 1. DIA INTEIRO CONTRA COM HORA. A leitura distingue os dois por
+#    ``start.date`` × ``start.dateTime`` (``google/utils.ts::isAllDay``, e
+#    ``calendar_agg`` usa o mesmo campo como chave do dia). Aceitar um
+#    "2026-06-19" no caminho com hora criaria um compromisso às 00:00 — a
+#    meia-noite inventada. Por isso a forma da string é validada, não só a
+#    parseabilidade.
+# 2. O CALENDÁRIO ALVO. Todo caminho de leitura deste app chama
+#    ``list_events`` sem passar ``calendar_id``, ou seja, sempre o "primary".
+#    Um evento criado em outro calendário nasceria invisível para o app
+#    inteiro. Por isso o payload NÃO tem campo de calendário: escrever onde
+#    ninguém lê é indistinguível de não ter escrito.
+#
+# O vocabulário de repetição é o mesmo que o modal produz (PT-BR). Traduzir
+# para um segundo conjunto ("weekly"...) só criaria mais um par para manter
+# alinhado — o mapa abaixo já é a única tradução, e o teste exige que ele
+# cubra o Literal inteiro.
+
+Repeticao = Literal["nunca", "diario", "semanal", "mensal", "anual"]
+
+_RRULE: dict[str, str | None] = {
+    "nunca": None,
+    "diario": "RRULE:FREQ=DAILY",
+    "semanal": "RRULE:FREQ=WEEKLY",
+    "mensal": "RRULE:FREQ=MONTHLY",
+    "anual": "RRULE:FREQ=YEARLY",
+}
+
+# Horário local sem fuso é America/Sao_Paulo — a mesma convenção de
+# ``planning/service.py``, ``journal`` e ``insights``. Ler as 14:00 do modal
+# como UTC agendaria o compromisso às 11:00 na tela de quem o criou.
+_SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+_SO_DIA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_COM_HORA = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+
+
+class CalendarEventCreate(BaseModel):
+    summary: str = Field(..., min_length=1)
+    # ``YYYY-MM-DD`` quando ``all_day``; ``YYYY-MM-DDTHH:MM[:SS][±hh:mm|Z]``
+    # caso contrário. String, e não ``datetime``, justamente para poder
+    # recusar a forma errada: o pydantic aceitaria "2026-06-19" como um
+    # datetime à meia-noite e a distinção morreria na porta de entrada.
+    start: str
+    end: str
+    all_day: bool = False
+    location: str = ""
+    description: str = ""
+    repeat: Repeticao = "nunca"
+
+    @field_validator("summary")
+    @classmethod
+    def _titulo_nao_pode_ser_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("summary não pode ser vazio")
+        return v
+
+    @model_validator(mode="after")
+    def _forma_das_datas(self) -> "CalendarEventCreate":
+        forma = _SO_DIA if self.all_day else _COM_HORA
+        rotulo = "YYYY-MM-DD (dia inteiro)" if self.all_day else "YYYY-MM-DDTHH:MM"
+        momentos: list[datetime] = []
+        for campo, valor in (("start", self.start), ("end", self.end)):
+            if not forma.match(valor):
+                raise ValueError(f"{campo} precisa estar em {rotulo}: {valor!r}")
+            # A forma não garante que a data existe (31 de fevereiro casa com
+            # o regex). Construir é a única checagem que não mente.
+            try:
+                momentos.append(_quando(valor, all_day=self.all_day))
+            except ValueError as e:
+                raise ValueError(f"{campo} não é uma data válida: {valor!r}") from e
+        # Comparação nos INSTANTES, não nas strings: dois fusos diferentes
+        # ordenam ao contrário como texto.
+        if momentos[1] < momentos[0]:
+            raise ValueError("end vem antes de start")
+        return self
+
+
+class CalendarEventCreated(BaseModel):
+    ok: bool
+    id: str
+    html_link: Optional[str] = None
+    # O que foi criado DE FATO, não o que foi pedido: é assim que quem chamou
+    # descobre que o dia inteiro virou dia inteiro e que a repetição pegou.
+    all_day: bool
+    recurrence: list[str]
+
+
+def _quando(valor: str, *, all_day: bool) -> datetime:
+    """A string do payload virando instante. Levanta ``ValueError`` se a data
+    não existe — é o que separa a FORMA (o regex) do CONTEÚDO."""
+    if all_day:
+        ano, mes, dia = (int(p) for p in valor.split("-"))
+        return datetime(ano, mes, dia, tzinfo=_SP_TZ)
+    dt = datetime.fromisoformat((valor[:-1] + "+00:00") if valor.endswith("Z") else valor)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_SP_TZ)
+
+
+@router.post("/calendar/events", status_code=201, response_model=CalendarEventCreated)
+async def calendar_create_event(
+    request: Request, payload: CalendarEventCreate
+) -> CalendarEventCreated:
+    """Cria um evento no calendário que este app lê.
+
+    Sem Google conectado responde 401 dizendo o que fazer — e não um
+    ``ok:true`` com zero eventos, que foi o que a tela de Planejamento teve
+    que aprender a desmentir.
+    """
+    client = _client_or_503(request)
+
+    try:
+        autenticado = await client.is_authed()
+    except Exception as e:
+        logger.warning("calendar create: auth check failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"criar evento: {e}")
+    if not autenticado:
+        raise HTTPException(
+            status_code=401,
+            detail="Google não está conectado — conecte em /google/oauth/start",
+        )
+
+    rrule = _RRULE[payload.repeat]
+    try:
+        evento = await client.create_event(
+            summary=payload.summary,
+            start=_quando(payload.start, all_day=payload.all_day),
+            end=_quando(payload.end, all_day=payload.all_day),
+            all_day=payload.all_day,
+            recurrence=[rrule] if rrule else None,
+            location=payload.location.strip() or None,
+            description=payload.description.strip() or None,
+        )
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Google: {e}")
+    except GoogleAPIError as e:
+        _raise_google_api_error(e, action="criar evento")
+        raise  # unreachable; keeps type-checkers happy
+    except Exception as e:
+        logger.exception("unexpected error creating calendar event")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return CalendarEventCreated(
+        ok=True,
+        id=str(evento.get("id") or ""),
+        html_link=evento.get("htmlLink"),
+        all_day=payload.all_day,
+        recurrence=[rrule] if rrule else [],
+    )
+
+
+# ── EXCLUSÃO DE EVENTO ───────────────────────────────────────────────────
+#
+# O que destrava o teste da criação: criar pelo celular e apagar pelo celular,
+# sem abrir o Google.
+#
+# O IDENTIFICADOR é o campo perigoso desta rota, e o dano não se mede em linha
+# — mede-se em calendário. O httpx normaliza segmentos de ponto antes de
+# mandar, então um id de ".." transforma o DELETE do evento num DELETE do
+# CALENDÁRIO INTEIRO (medido em ``test_calendar_delete_route.py``). O guarda
+# canônico mora em ``client.delete_event``, onde nenhum chamador o contorna;
+# aqui ele é chamado ANTES para o cliente receber um 422 que diz o que houve,
+# em vez de um 502 vindo de dentro.
+#
+# E o único ``ok:true`` que não apagou nada nesta chamada — o evento que já não
+# existia — vem MARCADO. A ``/planning/accept`` responde ``ok:true`` com zero
+# eventos quando não há Google, e a tela de Planejamento teve que desmentir
+# isso na mão; "não estava lá" e "eu apaguei" não podem ser a mesma resposta.
+
+# Reexportado para os testes lerem a forma canônica sem importar o cliente.
+_ID_DE_EVENTO = EVENT_ID_RE
+
+
+class CalendarEventDeleted(BaseModel):
+    ok: bool
+    # O id de VOLTA: é como quem chamou confere que sumiu o que pediu.
+    id: str
+    ja_nao_existia: bool = False
+
+
+@router.delete("/calendar/events/{event_id}", response_model=CalendarEventDeleted)
+async def calendar_delete_event(
+    request: Request, event_id: str
+) -> CalendarEventDeleted:
+    """Apaga um evento do calendário que este app lê."""
+    client = _client_or_503(request)
+
+    try:
+        ensure_event_id(event_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        autenticado = await client.is_authed()
+    except Exception as e:
+        logger.warning("calendar delete: auth check failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"apagar evento: {e}")
+    if not autenticado:
+        raise HTTPException(
+            status_code=401,
+            detail="Google não está conectado — conecte em /google/oauth/start",
+        )
+
+    try:
+        await client.delete_event(event_id)
+    except GoogleAuthError as e:
+        raise HTTPException(status_code=401, detail=f"Google: {e}")
+    except GoogleAPIError as e:
+        # 404/410: alguém já tinha apagado (a web, outro aparelho). O evento
+        # não está na agenda, que é o que foi pedido — mas a resposta diz que
+        # não foi esta chamada que o apagou.
+        if e.status_code in (404, 410):
+            logger.info("calendar delete: evento %s já não existia", event_id)
+            return CalendarEventDeleted(ok=True, id=event_id, ja_nao_existia=True)
+        _raise_google_api_error(e, action="apagar evento")
+        raise  # unreachable; keeps type-checkers happy
+    except ValueError as e:
+        # Rede de segurança: o guarda do cliente é o canônico, e um id que
+        # passasse aqui e falhasse lá é 422, nunca 502.
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("unexpected error deleting calendar event")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return CalendarEventDeleted(ok=True, id=event_id, ja_nao_existia=False)
 
 
 @router.get("/calendar/calendars")

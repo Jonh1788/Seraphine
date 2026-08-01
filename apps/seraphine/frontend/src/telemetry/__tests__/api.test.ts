@@ -61,6 +61,39 @@ describe('telemetry api', () => {
     await expect(api.fetchEngineInfo()).rejects.toThrow('HTTP 500');
   });
 
+  it('listFlatBackends hits /telemetry/flat-backends and unwraps `flat`', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ flat: ['claude_max', 'cliproxy', 'local', 'ollama'] }),
+      })),
+    );
+    const out = await api.listFlatBackends();
+    expect(String((fetch as any).mock.calls[0][0])).toContain('/telemetry/flat-backends');
+    expect(out).toEqual(['claude_max', 'cliproxy', 'local', 'ollama']);
+  });
+
+  it('listFlatBackends lowercases so the consumer can do a direct lookup', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ flat: ['CLIProxy', 'Ollama'] }) })),
+    );
+    expect(await api.listFlatBackends()).toEqual(['cliproxy', 'ollama']);
+  });
+
+  it('listFlatBackends throws on a non-ok response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await expect(api.listFlatBackends()).rejects.toThrow('HTTP 404');
+  });
+
+  it('listFlatBackends throws on a body without `flat` instead of returning []', async () => {
+    // Um [] silencioso classificaria TODA chamada como medida — número errado
+    // na tela sem nada quebrar. Falhar alto deixa a view cair no aviso.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
+    await expect(api.listFlatBackends()).rejects.toThrow('lista `flat`');
+  });
+
   it('readPower degrades to { supported: false } when Tauri is unavailable', async () => {
     // Outside the Tauri shell the dynamic import of @tauri-apps/api/core
     // rejects (or invoke throws) → readPower must swallow it.

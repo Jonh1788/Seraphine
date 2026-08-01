@@ -198,7 +198,6 @@ html[data-shell='phone'] .ms-licao-ex-campo {
   background: var(--surface, #17171e);
   color: var(--text, #ececef);
   font-family: inherit;
-  font-size: 15px;
   padding: 13px 15px;
   border-radius: 14px;
 }
