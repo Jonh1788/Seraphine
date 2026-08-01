@@ -1489,7 +1489,12 @@ class ConversationEngine:
         cliproxy default so the chat can never break on a misconfiguration.
         """
         try:
-            setting = await self.store.get_kv("chat_model")
+            from seraphine.deepsearch.providers import normalize_model_spec
+
+            # Lê o kv cru (não passa pelo service), então normaliza aqui também:
+            # é ESTE caminho que monta a chamada, e um prefixo duplicado gravado
+            # por cliente antigo chegaria inteiro na OpenRouter.
+            setting = normalize_model_spec(await self.store.get_kv("chat_model"))
             if not setting or not setting.startswith("openrouter:"):
                 return (self.llm, None)
             model_id = setting.split(":", 1)[1].strip()

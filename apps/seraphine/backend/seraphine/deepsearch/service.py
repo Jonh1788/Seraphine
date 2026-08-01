@@ -30,7 +30,11 @@ from typing import Any, AsyncIterator, Optional
 from uuid import uuid4
 
 from seraphine.deepsearch.engine import DeepResearchEngine
-from seraphine.deepsearch.providers import OpenRouterClient, resolve_role_model
+from seraphine.deepsearch.providers import (
+    OpenRouterClient,
+    normalize_model_spec,
+    resolve_role_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,11 +160,16 @@ class DeepSearchService:
         ``"cliproxy"`` (the default) routes chat through cliproxy/Claude;
         ``"openrouter:<model id>"`` routes it through OpenRouter. Stored in the
         shared ``kv`` table so the conversation engine reads the same setting.
+
+        Normaliza na LEITURA além da escrita: já existe valor corrompido
+        gravado, e clientes antigos seguem instalados mandando o prefixo
+        duplicado. Sem isso o app do usuário só volta a funcionar quando ele
+        reinstalar.
         """
-        return (await self.store.get_kv("chat_model")) or "cliproxy"
+        return normalize_model_spec(await self.store.get_kv("chat_model"))
 
     async def set_chat_model(self, chat_model: str) -> str:
-        await self.store.set_kv("chat_model", chat_model)
+        await self.store.set_kv("chat_model", normalize_model_spec(chat_model))
         return await self.get_chat_model()
 
     async def list_models(self) -> dict[str, list[dict[str, str]]]:

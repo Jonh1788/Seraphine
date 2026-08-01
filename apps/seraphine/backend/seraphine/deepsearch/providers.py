@@ -382,7 +382,36 @@ class RoleLLM:
                 yield tok.text
 
 
+KNOWN_PROVIDERS = ("openrouter", "cliproxy")
+
+
+def normalize_model_spec(spec: str | None) -> str:
+    """Colapsa um prefixo de provider repetido em ``<provider>:<model id>``.
+
+    ``/deepsearch/models`` já devolve ids COM prefixo (``openrouter:<id>``).
+    Um cliente que prefixe de novo grava ``openrouter:openrouter:<id>``; o
+    strip de um nível deixa ``openrouter:<id>`` como model id e a OpenRouter
+    responde 400 "is not a valid model ID" — que foi exatamente o que
+    aconteceu em produção.
+
+    Idempotente: um spec correto atravessa inalterado. Vazio vira o padrão
+    cliproxy, porque um model id vazio não é roteável.
+    """
+    s = (spec or "").strip()
+    if not s:
+        return "cliproxy"
+    for provider in KNOWN_PROVIDERS:
+        prefix = f"{provider}:"
+        if s.startswith(prefix):
+            rest = s[len(prefix):]
+            while rest.startswith(prefix):
+                rest = rest[len(prefix):]
+            return f"{prefix}{rest}" if rest else "cliproxy"
+    return s
+
+
 def resolve_role_model(spec: str, *, app_llm: Any, openrouter_key: str) -> RoleLLM:
+    spec = normalize_model_spec(spec)
     provider, _, model = spec.partition(":")
     if provider == "openrouter":
         if not openrouter_key:

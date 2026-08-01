@@ -90,7 +90,10 @@ export function ChatModelPanel(): JSX.Element {
   // still render it so the <select> keeps it selected.
   const currentIsKnown =
     chatModel === CLIPROXY_VALUE ||
-    openrouterModels.some((m) => `openrouter:${m.id}` === chatModel);
+    // `m.id` JÁ vem prefixado de /deepsearch/models ("openrouter:<id>").
+    // Prefixar de novo gravava "openrouter:openrouter:<id>" e a OpenRouter
+    // devolvia 400 "is not a valid model ID".
+    openrouterModels.some((m) => m.id === chatModel);
 
   const keySet = config?.openrouter_key_set ?? false;
 
@@ -111,7 +114,7 @@ export function ChatModelPanel(): JSX.Element {
           {openrouterModels.length > 0 && (
             <optgroup label="OpenRouter">
               {openrouterModels.map((m) => (
-                <option key={m.id} value={`openrouter:${m.id}`}>
+                <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
               ))}

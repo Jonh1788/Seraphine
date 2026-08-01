@@ -27,7 +27,10 @@ function stubs(): void {
   getChatModel.mockResolvedValue({ chat_model: 'cliproxy' });
   listModels.mockResolvedValue({
     cliproxy: [],
-    openrouter: [{ id: 'openai/gpt-4o-mini', name: 'GPT-4o mini' }],
+    // O id vem JÁ prefixado de /deepsearch/models (service.py monta
+    // `openrouter:{id}`). A fixture antiga vinha crua e por isso o painel
+    // podia prefixar de novo sem nenhum teste reclamar.
+    openrouter: [{ id: 'openrouter:openai/gpt-4o-mini', name: 'GPT-4o mini' }],
   });
   getConfig.mockResolvedValue({
     fanout_model: 'cliproxy:claude-haiku-4-5',
