@@ -1,18 +1,27 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
+// O MAPA É O INTERIOR DE UMA TRILHA, E SÓ ABRE A TRILHA QUE PEDIRAM.
+//
+// Até a Task 19 esta tela era a ABA Trilhas e, sem `id`, escolhia sozinha qual
+// trilha mostrar (`listCourses()` + "trilha em foco"). Era o relato do usuário:
+// "eu entro na trilhas, aí tá na eva" — quem tem três trilhas via sempre a
+// mesma. A aba passou a ser a LISTA; este mapa é o que o cartão dela empurra,
+// SEMPRE com o id da trilha tocada. Por isso todo render aqui manda `id`: é
+// assim que a tela nasce no app, e o caminho "sem id" não existe mais.
+// `listCourses` continua no mock só para o teste que afirma que ela NÃO é
+// chamada — sem ela no mock, "não consultou a lista" passaria por vácuo.
 vi.mock('../../../courses/api', () => ({
   listCourses: vi.fn(),
   getCourse: vi.fn(),
   getStats: vi.fn(),
 }));
 import { listCourses, getCourse, getStats } from '../../../courses/api';
-import type { Course, CourseSummary, Stats } from '../../../courses/api';
+import type { Course, Stats } from '../../../courses/api';
+import type { ScreenProps } from '../registry';
 import { TrilhasMapaScreen, caminhoSerpente } from '../TrilhasMapaScreen';
-
-const RESUMO: CourseSummary = {
-  id: 'c1', topic: 'rust', title: 'Rust do zero', status: 'ready', total: 5, done: 2,
-};
 
 const CURSO: Course = {
   id: 'c1', topic: 'rust', title: 'Rust do zero', description: null, status: 'ready',
@@ -39,9 +48,13 @@ function cursoCom(n: number): Course {
 }
 
 function felizes() {
-  vi.mocked(listCourses).mockResolvedValue([RESUMO]);
   vi.mocked(getCourse).mockResolvedValue(CURSO);
   vi.mocked(getStats).mockResolvedValue(STATS);
+}
+
+/** Como o app monta esta tela: empurrada, com o id da trilha tocada. */
+function mapa(props: ScreenProps = {}) {
+  return <TrilhasMapaScreen id="c1" {...props} />;
 }
 
 describe('TrilhasMapaScreen', () => {
@@ -53,7 +66,7 @@ describe('TrilhasMapaScreen', () => {
 
   it('renderiza a trilha, o progresso, o streak e o nó ativo', async () => {
     felizes();
-    render(<TrilhasMapaScreen />);
+    render(mapa());
     await waitFor(() => expect(screen.getByText('Rust do zero')).toBeTruthy());
     // 2 de 5 lições concluídas, lido das lições e não do resumo
     expect(screen.getByText('2/5')).toBeTruthy();
@@ -66,14 +79,14 @@ describe('TrilhasMapaScreen', () => {
 
   it('desenha um nó por lição da api, mais o troféu do fim', async () => {
     felizes();
-    const { unmount } = render(<TrilhasMapaScreen />);
+    const { unmount } = render(mapa());
     await waitFor(() => expect(screen.getAllByTestId('ms-trilhas-no').length).toBe(5));
     expect(screen.getAllByTestId('ms-trilhas-trofeu').length).toBe(1);
     unmount();
 
     // mesma tela, outra trilha: a contagem acompanha a api, não um layout fixo
     vi.mocked(getCourse).mockResolvedValue(cursoCom(9));
-    render(<TrilhasMapaScreen />);
+    render(mapa());
     await waitFor(() => expect(screen.getAllByTestId('ms-trilhas-no').length).toBe(9));
   });
 
@@ -86,7 +99,7 @@ describe('TrilhasMapaScreen', () => {
   it('um nó bloqueado não navega; um liberado abre a lição com o id dela', async () => {
     felizes();
     const onOpen = vi.fn();
-    render(<TrilhasMapaScreen onOpen={onOpen} />);
+    render(mapa({ onOpen }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Borrowing/ })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /^Borrowing/ }));
@@ -101,7 +114,7 @@ describe('TrilhasMapaScreen', () => {
     // tocar em "O que é Rust" abriria "Ownership" com o título errado.
     felizes();
     const onOpen = vi.fn();
-    render(<TrilhasMapaScreen onOpen={onOpen} />);
+    render(mapa({ onOpen }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^O que é Rust/ })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /^O que é Rust/ }));
@@ -110,9 +123,9 @@ describe('TrilhasMapaScreen', () => {
 
   it('enquanto carrega não afirma progresso nem streak nenhum', async () => {
     // promessas que nunca resolvem: a tela fica no estado de espera
-    vi.mocked(listCourses).mockReturnValue(new Promise(() => {}));
+    vi.mocked(getCourse).mockReturnValue(new Promise(() => {}));
     vi.mocked(getStats).mockReturnValue(new Promise(() => {}));
-    const { container } = render(<TrilhasMapaScreen />);
+    const { container } = render(mapa());
     // nem "0/0" de progresso, nem um "0" de sequência piscando antes do dado
     expect(screen.queryByText('0/0')).toBeNull();
     expect(screen.queryByText('0')).toBeNull();
@@ -121,9 +134,9 @@ describe('TrilhasMapaScreen', () => {
   });
 
   it('erro não deixa a fração afirmando 0/0', async () => {
-    vi.mocked(listCourses).mockRejectedValue(new Error('rede'));
+    vi.mocked(getCourse).mockRejectedValue(new Error('rede'));
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen />);
+    render(mapa());
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(screen.queryByText('0/0')).toBeNull();
   });
@@ -135,10 +148,9 @@ describe('TrilhasMapaScreen', () => {
       ...CURSO,
       lessons: CURSO.lessons.map((l) => ({ ...l, lock: 'locked' as const })),
     };
-    vi.mocked(listCourses).mockResolvedValue([RESUMO]);
     vi.mocked(getCourse).mockResolvedValue(travada);
     vi.mocked(getStats).mockResolvedValue(STATS);
-    const { container } = render(<TrilhasMapaScreen />);
+    const { container } = render(mapa());
     await waitFor(() => expect(screen.getAllByTestId('ms-trilhas-no').length).toBe(5));
 
     expect(screen.getByText('0/5')).toBeTruthy();
@@ -148,23 +160,25 @@ describe('TrilhasMapaScreen', () => {
     expect(solido.getAttribute('d')).toBe(caminhoSerpente(1));
   });
 
-  it('mostra estado vazio quando não há nenhuma trilha, e não some', async () => {
-    vi.mocked(listCourses).mockResolvedValue([]);
+  // "Nenhuma trilha ainda" NÃO é mais estado desta tela: quem diz isso é a
+  // lista, que é a aba, e é lá que fica o campo de criar a primeira. Aqui o
+  // vazio possível é outro — a trilha existe e as lições ainda não.
+  it('trilha sem lição diz que ainda está sendo montada, e não some', async () => {
+    vi.mocked(getCourse).mockResolvedValue({ ...CURSO, lessons: [] });
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen />);
-    await waitFor(() => expect(screen.getByText(/ainda não começou nenhuma trilha/i)).toBeTruthy());
-    expect(getCourse).not.toHaveBeenCalled();
+    render(mapa());
+    await waitFor(() => expect(screen.getByText(/ainda está montando as lições/i)).toBeTruthy());
     // a barra do rodapé continua de pé, dizendo o que falta
     expect(screen.getByText(/nenhuma lição para continuar/i)).toBeTruthy();
   });
 
   it('mostra erro quando a api falha, em vez de virar tela vazia', async () => {
-    vi.mocked(listCourses).mockRejectedValue(new Error('rede'));
+    vi.mocked(getCourse).mockRejectedValue(new Error('rede'));
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen />);
+    render(mapa());
     const alerta = await waitFor(() => screen.getByRole('alert'));
-    expect(alerta.textContent).toMatch(/não consegui carregar/i);
-    expect(screen.queryByText(/ainda não começou nenhuma trilha/i)).toBeNull();
+    expect(alerta.textContent).toMatch(/não consegui carregar esta trilha/i);
+    expect(screen.queryByText(/ainda está montando as lições/i)).toBeNull();
   });
 
   /* ── QUAL trilha o mapa abre ────────────────────────────────────── */
@@ -172,16 +186,18 @@ describe('TrilhasMapaScreen', () => {
   // Enquanto o mapa não lia `id`, a lista não podia empurrá-lo: tocar em
   // "Estatística aplicada" abriria a trilha em foco ("Rust do zero"). Foi o que
   // deixou `trilhas-lista` sem para onde levar — e, portanto, sem quem a abrisse.
-  it('com id, abre a trilha pedida — e nem consulta a lista', async () => {
+  it('abre a trilha pedida — e nem consulta a lista', async () => {
     const outra: Course = { ...CURSO, id: 'c9', title: 'Estatística aplicada' };
     // A lista EXISTE e aponta para outra trilha: é o que torna este teste capaz
     // de distinguir "obedeceu o id" de "reconsultou e escolheu o foco". Com o
     // mock da lista vazio, qualquer consulta explodiria e o teste morreria pelo
     // motivo errado — dizendo "quebrou" onde devia dizer "abriu a trilha errada".
-    vi.mocked(listCourses).mockResolvedValue([RESUMO]);
+    vi.mocked(listCourses).mockResolvedValue([
+      { id: 'c1', topic: 'rust', title: 'Rust do zero', status: 'ready', total: 5, done: 2 },
+    ]);
     vi.mocked(getCourse).mockImplementation(async (cid) => (cid === 'c9' ? outra : CURSO));
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen id="c9" />);
+    render(mapa({ id: 'c9' }));
 
     await waitFor(() => expect(screen.getByText('Estatística aplicada')).toBeTruthy());
     expect(vi.mocked(getCourse).mock.calls[0][0]).toBe('c9');
@@ -195,62 +211,57 @@ describe('TrilhasMapaScreen', () => {
   // silêncio — o bug que este teste existe para tornar impossível. Por isso ele
   // olha o ARGUMENTO: um id que a api recusa tem de chegar até ela como veio.
   it('id que a api recusa vira erro, e nunca outra trilha', async () => {
-    vi.mocked(listCourses).mockResolvedValue([RESUMO]);
     vi.mocked(getCourse).mockRejectedValue(new Error('404'));
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen id="sumiu" />);
+    render(mapa({ id: 'sumiu' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(vi.mocked(getCourse).mock.calls[0][0]).toBe('sumiu');
     expect(screen.queryByText('Rust do zero')).toBeNull();
   });
 
-  it('sem id continua escolhendo a trilha em foco, como a aba faz', async () => {
-    felizes();
-    render(<TrilhasMapaScreen />);
-    await waitFor(() => expect(screen.getByText('Rust do zero')).toBeTruthy());
-    expect(listCourses).toHaveBeenCalled();
-    expect(vi.mocked(getCourse).mock.calls[0][0]).toBe('c1');
-  });
-
-  /* ── a porta para a lista ───────────────────────────────────────── */
-
-  it('o "Todas" abre a lista de trilhas', async () => {
-    felizes();
-    const onOpen = vi.fn();
-    render(<TrilhasMapaScreen onOpen={onOpen} />);
-    await waitFor(() => expect(screen.getByText('Rust do zero')).toBeTruthy());
-
-    fireEvent.click(screen.getByRole('button', { name: 'Todas as trilhas' }));
-    expect(onOpen).toHaveBeenCalledWith({ key: 'trilhas-lista', title: 'Trilhas' });
-  });
-
-  // É no vazio que a lista mais importa: é lá que se cria a primeira trilha.
-  // Um controle que só aparece com trilha carregada deixaria quem não tem
-  // nenhuma exatamente onde estava.
-  it('o "Todas" continua de pé no vazio, e o texto do vazio aponta para ele', async () => {
-    vi.mocked(listCourses).mockResolvedValue([]);
+  // O caminho "sem id" era a escolha automática que virou o relato do usuário.
+  // Ele saiu, e o que ficou no lugar é uma frase — não uma tela em branco, e
+  // muito menos um palpite: adivinhar aqui é o bug de novo, com outro nome.
+  it('sem id não adivinha trilha nenhuma: diz que não sabe qual abrir', async () => {
     vi.mocked(getStats).mockResolvedValue(STATS);
-    render(<TrilhasMapaScreen onOpen={vi.fn()} />);
+    render(<TrilhasMapaScreen />);
 
-    await waitFor(() => expect(screen.getByText(/ainda não começou nenhuma trilha/i)).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Todas as trilhas' })).toBeTruthy();
-    // e não manda mais criar a trilha no Mac: agora dá para criar aqui
-    expect(screen.queryByText(/no Mac/i)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/não sei qual trilha abrir/i)).toBeTruthy());
+    expect(getCourse).not.toHaveBeenCalled();
+    expect(listCourses).not.toHaveBeenCalled();
   });
 
-  it('sem onOpen o "Todas" não existe — botão que não navega é botão morto', async () => {
+  // A saída da tela empurrada é DELA: na pilha não há tab bar, e o contêiner
+  // não desenha cabeçalho nenhum. Sem isto, o mapa é beco sem saída.
+  it('o ‹ do cabeçalho volta para quem empurrou', async () => {
     felizes();
-    render(<TrilhasMapaScreen />);
+    const onBack = vi.fn();
+    render(mapa({ onBack }));
     await waitFor(() => expect(screen.getByText('Rust do zero')).toBeTruthy());
-    expect(screen.queryByLabelText('Todas as trilhas')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Voltar' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  // `.mpushed__body` só entrega as safe areas: o recuo lateral é do CSS desta
+  // tela. Sem ele, o cabeçalho encosta nas duas bordas do telefone — o ‹ colado
+  // na esquerda, o streak cortado na direita. Foi assim que o mapa apareceu no
+  // aparelho quando virou tela empurrada, e agora ele é SEMPRE empurrado, o que
+  // torna a regra a única coisa entre o desenho e aquele defeito. jsdom não faz
+  // layout: o que se afirma é a cascata, como em `alvo-de-toque.test.tsx`.
+  it('empurrado, o mapa paga o próprio recuo lateral', () => {
+    const css = readFileSync(resolve(__dirname, '..', 'TrilhasMapaScreen.css'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const i = css.indexOf('.mpushed__body .ms-trilhas {');
+    expect(i).toBeGreaterThan(-1);
+    expect(css.slice(i, css.indexOf('}', i))).toMatch(/padding:\s*12px\s+16px\s+16px/);
   });
 
   it('o mapa sobrevive à queda do streak: cada bloco erra sozinho', async () => {
-    vi.mocked(listCourses).mockResolvedValue([RESUMO]);
     vi.mocked(getCourse).mockResolvedValue(CURSO);
     vi.mocked(getStats).mockRejectedValue(new Error('rede'));
-    render(<TrilhasMapaScreen />);
+    render(mapa());
     await waitFor(() => expect(screen.getAllByTestId('ms-trilhas-no').length).toBe(5));
     expect(screen.getByRole('alert').textContent).toMatch(/streak/i);
   });

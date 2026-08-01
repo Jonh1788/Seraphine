@@ -21,6 +21,16 @@ html[data-shell='phone'] .ms-trilhaslista {
   flex-direction: column;
   min-height: 100%;
 }
+/* ESTA TELA É A ABA TRILHAS, e cada bloco dela paga o próprio recuo de 20px
+   (o do frame). A aba nasce em `.mshell__content`, que já paga `12px+safe 16px
+   16px` para as telas que não pagam nada — e as duas somadas dariam 36px de
+   margem lateral, quase o dobro do desenho, com o cartão de criar estreitando.
+   Então a aba anula o recuo do contêiner e mantém só a safe area do topo (o
+   `-12px` come os 12px do padding, não o `env()` que vem somado a ele).
+   É o espelho da regra do mapa, que compensa o contêiner CONTRÁRIO. */
+html[data-shell='phone'] .mshell__content .ms-trilhaslista {
+  margin: -12px -16px -16px;
+}
 
 /* ── cabeçalho: título + XP + sequência ── */
 html[data-shell='phone'] .ms-trilhaslista-topo {

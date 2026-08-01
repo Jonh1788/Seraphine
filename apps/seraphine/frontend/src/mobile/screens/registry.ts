@@ -41,6 +41,11 @@ export const SCREENS: Record<ScreenKey, React.LazyExoticComponent<React.Componen
   'chat': lazy(() => import('./ChatScreen').then((m) => ({ default: m.ChatScreen }))),
   'voz': lazy(() => import('./VozScreen').then((m) => ({ default: m.VozScreen }))),
   'tarefas': lazy(() => import('./TarefasScreen').then((m) => ({ default: m.TarefasScreen }))),
+  /* CUIDADO COM ESTE PAR: `trilhas` é o INTERIOR de uma trilha (o mapa das
+     lições), destino EMPURRADO e sempre com `id` — quem o monta sem id não tem
+     o que mostrar. A ABA Trilhas monta `trilhas-lista`, lá embaixo. Foi o
+     contrário até a Task 19, e o efeito era a aba abrir sempre a mesma trilha:
+     "eu entro na trilhas, aí tá na eva". Os nomes são a herança disso. */
   'trilhas': lazy(() => import('./TrilhasMapaScreen').then((m) => ({ default: m.TrilhasMapaScreen }))),
   'financas': lazy(() => import('./FinancasScreen').then((m) => ({ default: m.FinancasScreen }))),
   'habitos': lazy(() => import('./HabitosScreen').then((m) => ({ default: m.HabitosScreen }))),
@@ -61,6 +66,7 @@ export const SCREENS: Record<ScreenKey, React.LazyExoticComponent<React.Componen
   'notas': lazy(() => import('./NotasScreen').then((m) => ({ default: m.NotasScreen }))),
   'tarefas-view': lazy(() => import('./TarefasScreen').then((m) => ({ default: m.TarefasScreen }))),
   'configuracoes': lazy(() => import('./ConfiguracoesScreen').then((m) => ({ default: m.ConfiguracoesScreen }))),
+  /* A ABA Trilhas (ver `PhoneShell`): índice das trilhas e onde se cria uma. */
   'trilhas-lista': lazy(() => import('./TrilhasListaScreen').then((m) => ({ default: m.TrilhasListaScreen }))),
   'planejamento': lazy(() => import('./PlanejamentoScreen').then((m) => ({ default: m.PlanejamentoScreen }))),
   'seletor-modelo': lazy(() => import('./SeletorModeloScreen').then((m) => ({ default: m.SeletorModeloScreen }))),

@@ -76,11 +76,17 @@ export function PhoneShell() {
             bar, e o handoff não desenha seta no cabeçalho da tela TAREFAS.
             Enquanto o shell o passava aqui, `onBack` deixava de distinguir aba
             de pilha e a tela tinha de perguntar ao DOM em qual contêiner nasceu.
-            A linha da Trilhas abaixo NÃO é o mesmo caso: lá o handoff desenha o
-            ‹ de verdade na tela do mapa (README tela 5), com tab bar e tudo. */}
+            Vale para as três: nenhuma aba recebe `onBack`. */}
         {tab === 'tarefas' && <ScreenHost keyName="tarefas" onOpen={empurrar} />}
         {tab === 'chat' && <ScreenHost keyName="chat" onOpen={empurrar} />}
-        {tab === 'trilhas' && <ScreenHost keyName="trilhas" onBack={() => setTab('hoje')} onOpen={empurrar} />}
+        {/* A aba Trilhas monta a LISTA, não o mapa. Enquanto montava o mapa
+            (`keyName="trilhas"`), a aba abria o INTERIOR de uma trilha e
+            escolhia sozinha qual — "eu entro na trilhas, aí tá na eva", com as
+            outras escondidas atrás de um "Todas ›" no cabeçalho dela. O frame
+            "Trilhas · lista" do handoff v3 desenha tab bar com Trilhas ativa: a
+            lista é a aba; o mapa é o que o cartão empurra por cima dela, sempre
+            com o `id` da trilha tocada. */}
+        {tab === 'trilhas' && <ScreenHost keyName="trilhas-lista" onOpen={empurrar} />}
         {tab === 'mais' && <MaisScreen onOpen={empurrar} />}
       </main>
       <TabBar tab={tab} onTab={setTab} />

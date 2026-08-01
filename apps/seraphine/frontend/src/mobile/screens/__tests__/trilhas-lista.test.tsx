@@ -230,6 +230,32 @@ describe('TrilhasListaScreen — o cartão abre a trilha', () => {
   });
 });
 
+describe('TrilhasListaScreen — a saída depende de quem monta', () => {
+  // Esta tela é a ABA Trilhas (Task 19), e aba não tem para onde voltar: quem
+  // tira dali é a tab bar, e o frame do handoff não desenha ‹ nenhum.
+  it('como aba, sem onBack, não desenha ‹ — seta que não volta é enfeite', async () => {
+    felizes();
+    render(<TrilhasListaScreen onOpen={vi.fn()} />);
+    await assentar();
+    expect(screen.queryByLabelText('Voltar')).toBeNull();
+  });
+
+  // O ‹ fica porque a saída é da TELA: na pilha não há tab bar e o contêiner
+  // empurrado não desenha cabeçalho. Hoje ninguém empurra esta lista — e é
+  // justamente por isso que o `onBack &&` não sai: quem a empurrar amanhã sem
+  // ele cria o beco sem saída da onda anterior, e nenhum teste do grafo pega
+  // isso (uma tela que não é destino de push não é conferida por lá).
+  it('empurrada, o ‹ existe e volta para quem empurrou', async () => {
+    felizes();
+    const onBack = vi.fn();
+    render(<TrilhasListaScreen onBack={onBack} onOpen={vi.fn()} />);
+    await assentar();
+
+    fireEvent.click(screen.getByLabelText('Voltar'));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('TrilhasListaScreen — a barra de progresso', () => {
   it('a barra do "gerando…" é indeterminada: nada de 35% inventado', async () => {
     felizes();
@@ -387,9 +413,16 @@ describe('TrilhasListaScreen — criar trilha', () => {
 });
 
 describe('TrilhasListaScreen — CSS', () => {
+  // As classes do SHELL não entram na regra: elas não são desta tela, são o
+  // contêiner em que ela nasce. Renomear `.mshell__content` aqui dentro só
+  // desligaria a regra que ela carrega — e é uma lista fechada, não um "menos
+  // as que não batem": qualquer OUTRO nome sem prefixo continua caindo.
+  const DO_SHELL = new Set(['mshell__content', 'mpushed__body']);
+
   it('toda classe e todo keyframe levam o prefixo da tela', () => {
     const css = lerCss();
-    const meu = (n: string): boolean => n === 'ms-trilhaslista' || n.startsWith('ms-trilhaslista-');
+    const meu = (n: string): boolean =>
+      n === 'ms-trilhaslista' || n.startsWith('ms-trilhaslista-') || DO_SHELL.has(n);
     for (const [, nome] of css.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
       expect(`classe ${nome}`).toBe(`classe ${meu(nome) ? nome : 'ms-trilhaslista-' + nome}`);
     }
@@ -412,6 +445,22 @@ describe('TrilhasListaScreen — CSS', () => {
   it('os controles tocáveis têm 44pt', () => {
     expect(blocoDe('.ms-trilhaslista-botao')).toMatch(/min-height:\s*44px/);
     expect(blocoDe('.ms-trilhaslista-campo')).toMatch(/min-height:\s*44px/);
+  });
+
+  // Cada bloco desta tela paga os 20px do frame; a aba nasce em
+  // `.mshell__content`, que já paga 16px para quem não paga nada. Somados dão
+  // 36px de margem lateral — quase o dobro do desenho, com o cartão de criar
+  // estreitando. A regra que anula o recuo do contêiner é a diferença, e é
+  // invisível para todo o resto do arquivo: jsdom não faz layout, então isto
+  // afirma a CASCATA (a regra existe e diz o que deve dizer), do mesmo jeito
+  // que `alvo-de-toque.test.tsx` afirma a de 44pt. O retângulo pintado
+  // continua sendo coisa de simulador.
+  it('como aba, anula o recuo do contêiner — e mantém a safe area do topo', () => {
+    const bloco = blocoDe('.mshell__content .ms-trilhaslista');
+    expect(bloco).toMatch(/margin:\s*-12px\s+-16px\s+-16px/);
+    // -12px come os 12px do padding do contêiner, NÃO o `env()` somado a eles:
+    // um `-44px` aqui puxaria a tela para debaixo do notch.
+    expect(bloco).not.toMatch(/env\(/);
   });
 
   // O alvo do cartão não é o texto do nome (~15px de alto): é o cartão inteiro,

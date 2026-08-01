@@ -8,9 +8,16 @@ import type { ScreenProps } from '../screens/registry';
 // (o shell acha a tela pela chave, passa onBack, e quem carrega não derruba a
 // tab bar) — não sobre o conteúdo das telas, que a Onda 2 reescreve.
 //
-// `trilhas` NUNCA resolve de propósito: é a tela usada para observar o estado
-// suspenso. As demais resolvem, e o React guarda o módulo resolvido no próprio
-// objeto do lazy — por isso cada chave é usada por um teste só.
+// `trilhas-lista` NUNCA resolve de propósito: é a tela usada para observar o
+// estado suspenso. As demais resolvem, e o React guarda o módulo resolvido no
+// próprio objeto do lazy — por isso cada chave é usada por um teste só.
+//
+// A chave é `trilhas-lista`, e não `trilhas`, porque a ABA Trilhas monta a
+// LISTA desde a Task 19: o mapa (`trilhas`) virou destino empurrado por ela. A
+// aba montava o interior de uma trilha e escolhia sozinha qual — "eu entro na
+// trilhas, aí tá na eva". Só a chave mudou; o que este teste afirma (a tab bar
+// sobrevive ao carregamento da tela da aba) é o mesmo. Quem prende o
+// comportamento novo, com as telas de VERDADE, é `trilhas-aba.test.tsx`.
 vi.mock('../screens/registry', () => ({
   SCREEN_KEYS: [],
   SCREENS: {
@@ -24,7 +31,7 @@ vi.mock('../screens/registry', () => ({
     chat: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => <div>tela:chat{onBack ? ':com-onBack' : ''}</div>,
     })),
-    trilhas: lazy(() => new Promise<{ default: () => JSX.Element }>(() => {})),
+    'trilhas-lista': lazy(() => new Promise<{ default: () => JSX.Element }>(() => {})),
     financas: lazy(async () => ({
       default: ({ onBack }: ScreenProps) => (
         <button type="button" onClick={onBack}>fechar-financas</button>
@@ -124,7 +131,8 @@ describe('PhoneShell monta pelo registry', () => {
   it('mantém a tab bar visível enquanto a tela da aba ainda carrega', () => {
     jaOnboardou();
     const { container, getByText } = render(<PhoneShell />);
-    fireEvent.click(getByText('Trilhas')); // suspende e nunca resolve
+    // a aba Trilhas monta `trilhas-lista`, que aqui suspende e nunca resolve
+    fireEvent.click(getByText('Trilhas'));
     expect(container.querySelector('.mshell__content')?.innerHTML).toBe('');
     // se o Suspense envolvesse o shell inteiro, o React esconderia a tab bar
     expect(visivel(container.querySelector('.mtabbar'))).toBe(true);

@@ -7,15 +7,14 @@ html[data-shell='phone'] .ms-trilhas {
   flex-direction: column;
   min-height: 100%;
 }
-/* ESTA TELA VIVE NOS DOIS CONTÊINERES, e eles não dão o mesmo recuo.
-   Como ABA ela nasce em `.mshell__content`, que já paga `12px+safe 16px 16px`.
-   EMPURRADA (a lista de Trilhas abre o mapa DAQUELA trilha) ela nasce em
-   `.mpushed__body`, que só entrega as safe areas — e aí o cabeçalho encostava
-   nas duas bordas do telefone: o ‹ colado na esquerda e o streak cortado na
-   direita. É a mesma assimetria que a tela de TAREFAS já tinha; lá o `onBack`
-   distingue os dois casos, aqui NÃO — o mapa recebe `onBack` também na aba (o
-   handoff desenha o ‹ dele com tab bar e tudo). Então quem distingue é o
-   contêiner real, pela cascata: nenhuma pergunta ao DOM do lado do componente. */
+/* ESTA TELA SÓ VIVE EMPURRADA — a aba Trilhas é a LISTA, e o mapa é o que o
+   cartão dela empurra. `.mpushed__body` entrega apenas as safe areas, então o
+   recuo lateral é daqui: sem ele o cabeçalho encostava nas duas bordas do
+   telefone (o ‹ colado na esquerda, o streak cortado na direita).
+   O seletor mantém o `.mpushed__body` na frente de propósito: este recuo é a
+   compensação de um contêiner específico, não uma medida da tela — escrito
+   solto, ele viraria recuo duplo no dia em que alguém montasse o mapa dentro
+   de `.mshell__content`, que já paga o dele. */
 html[data-shell='phone'] .mpushed__body .ms-trilhas {
   padding: 12px 16px 16px;
 }
@@ -41,15 +40,9 @@ html[data-shell='phone'] .ms-trilhas-titulo {
   color: var(--text, #ececef);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* "Todas" — o controle que abre a lista. Colado no título, com o padding
-   negativo do mesmo truque do ‹: 44px de alvo sem esticar o cabeçalho. */
-html[data-shell='phone'] .ms-trilhas-trocar {
-  flex: none; display: inline-flex; align-items: center; gap: 1px;
-  min-height: 44px; padding: 0 6px; margin: -13px -6px;
-  background: none; border: none; cursor: pointer;
-  font: inherit; font-size: 12px; font-weight: 700;
-  color: var(--text-dim, #9594a0);
-}
+/* Havia aqui um `.ms-trilhas-trocar` ("Todas"), a porta da lista enquanto o
+   mapa era a aba. Saiu junto com o botão: a lista é a aba agora, e este mapa
+   está empurrado em cima dela. */
 html[data-shell='phone'] .ms-trilhas-streak {
   flex: none; display: inline-flex; align-items: center; gap: 5px;
   font-size: 12px; font-weight: 700; color: #ff8a4c;

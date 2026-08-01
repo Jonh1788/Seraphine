@@ -30,7 +30,17 @@ import { SCREEN_KEYS, type ScreenKey } from '../screens/registry';
 const DIR_MOBILE = resolve(__dirname, '..');
 const DIR_TELAS = resolve(DIR_MOBILE, 'screens');
 
-const fonte = (caminho: string): string => readFileSync(caminho, 'utf8');
+/** O arquivo SEM COMENTÁRIOS. Sem isto, um `keyName="trilhas"` citado numa
+ *  explicação (e há uma, no `PhoneShell`, contando justamente que a aba parou
+ *  de montar o mapa) valeria por navegação de verdade: a chave voltava a ser
+ *  raiz e o teste de alcance passava a verde por causa de uma frase. Vale para
+ *  os dois lados — um `onOpen` comentado é uma porta fechada, e o grafo tem de
+ *  dizer isso. O `(^|\s)` antes do `//` poupa o `//` de uma URL, que vem
+ *  sempre depois de `:`. */
+const semComentarios = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|\s)\/\/[^\n]*/g, '$1');
+
+const fonte = (caminho: string): string => semComentarios(readFileSync(caminho, 'utf8'));
 const fonteDeTela = (arquivo: string): string => fonte(resolve(DIR_TELAS, arquivo));
 
 /** `'chave': lazy(() => import('./Arquivo')` — a única ligação entre uma chave
@@ -57,12 +67,21 @@ function empurra(src: string): ScreenKey[] {
 }
 
 /** O que o SHELL monta sozinho: as abas (`keyName="…"`) e os passos de
- *  onboarding (que vêm ANTES das abas, sem `onOpen` nenhum). */
+ *  onboarding (que vêm ANTES das abas, sem `onOpen` nenhum).
+ *
+ *  As duas fontes são lidas SEPARADAMENTE, e não por um varredor de aspas
+ *  solto. Um `/'([a-z-]+)'/g` sobre o arquivo inteiro também casava com o
+ *  `tab === 'trilhas'` do estado da tab bar — e `trilhas` continuava passando
+ *  por raiz depois de a aba deixar de montá-lo (Task 19). Uma raiz falsa é o
+ *  pior defeito possível aqui: ela deixa VERDE o teste de alcance para uma tela
+ *  que ninguém mais empurra, que é exatamente o buraco que este arquivo existe
+ *  para achar. Nome de aba não é chave de tela. */
 function montaDireto(src: string): ScreenKey[] {
-  return [
-    ...[...src.matchAll(/keyName="([a-z-]+)"/g)].map(([, k]) => k),
-    ...[...src.matchAll(/'([a-z-]+)'/g)].map(([, k]) => k),
-  ].filter(ehChave);
+  const abas = [...src.matchAll(/keyName="([a-z-]+)"/g)].map(([, k]) => k);
+  // o onboarding não vem por `keyName`: é a lista de chaves da constante
+  const lista = /const ONBOARDING:[^=]*=\s*\[([^\]]*)\]/.exec(src)?.[1] ?? '';
+  const passos = [...lista.matchAll(/'([a-z-]+)'/g)].map(([, k]) => k);
+  return [...abas, ...passos].filter(ehChave);
 }
 
 /** As duas telas que o shell importa direto, sem passar por chave: o que ELAS
@@ -140,7 +159,11 @@ describe('navegação do shell', () => {
     const r = raizes();
     expect(r.has('tarefas')).toBe(true);
     expect(r.has('chat')).toBe(true);
-    expect(r.has('trilhas')).toBe(true);
+    // a aba Trilhas monta a LISTA; o mapa é empurrado por ela, com o id da
+    // trilha tocada, e por isso NÃO é raiz. Enquanto era, a aba abria o
+    // interior de uma trilha escolhida por ela mesma.
+    expect(r.has('trilhas-lista')).toBe(true);
+    expect(r.has('trilhas')).toBe(false);
     expect(r.has('onboarding-boas-vindas')).toBe(true);
     expect(r.size).toBeLessThan(SCREEN_KEYS.length);
   });

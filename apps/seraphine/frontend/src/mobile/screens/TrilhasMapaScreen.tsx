@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowLeftIcon, CheckIcon, ChevronRightIcon, FlameIcon, LockIcon, PlayIcon, TrophyIcon,
+  ArrowLeftIcon, CheckIcon, FlameIcon, LockIcon, PlayIcon, TrophyIcon,
 } from '../../icons/Icons';
-import { listCourses, getCourse, getStats } from '../../courses/api';
-import type { Course, CourseSummary, LessonNode, Stats } from '../../courses/api';
+import { getCourse, getStats } from '../../courses/api';
+import type { Course, LessonNode, Stats } from '../../courses/api';
 import type { ScreenProps } from './registry';
 import './TrilhasMapaScreen.css';
 
@@ -65,17 +65,6 @@ export function caminhoSerpente(nos: number): string {
   return d;
 }
 
-/* ── escolha da trilha ─────────────────────────────────────────────────── */
-
-/** A trilha que o mapa mostra QUANDO NINGUÉM DISSE QUAL: a primeira em
- *  andamento; senão a primeira pronta; senão a primeira que existir (que pode
- *  ainda estar sendo gerada). Com `id` no empurrão esta escolha nem acontece —
- *  ver o efeito lá embaixo. */
-export function trilhaEmFoco(cursos: CourseSummary[]): CourseSummary | null {
-  const prontos = cursos.filter((c) => c.status === 'ready');
-  return prontos.find((c) => c.total > 0 && c.done < c.total) ?? prontos[0] ?? cursos[0] ?? null;
-}
-
 /* ── três saídas de cada bloco ─────────────────────────────────────────── */
 
 /** Linha de "não há nada": o bloco continua de pé e diz o porquê. */
@@ -109,38 +98,42 @@ export function TrilhasMapaScreen({ id, onBack, onOpen }: ScreenProps) {
   const [erroStats, setErroStats] = useState(false);
   const [carregandoStats, setCarregandoStats] = useState(true);
 
-  /* QUAL trilha o mapa abre.
+  /* QUAL trilha o mapa abre: a que o `id` diz, e SÓ ela.
    *
-   * Empurrado pela lista, o `id` vem no `onOpen` e é obedecido SEM CONSULTAR A
-   * LISTA: `getCourse(id)` direto. A tentação era manter o `listCourses()` e
-   * escolher `cursos.find(c => c.id === id) ?? trilhaEmFoco(cursos)` — uma
-   * linha, e com o bug inteiro dentro dela: no dia em que o id não estivesse na
-   * resposta (trilha apagada, lista filtrada), o `??` abriria OUTRA trilha em
-   * silêncio. Tocar em "Estatística aplicada" e cair em "Rust do zero" é
-   * exatamente o que segurou a lista até aqui; um erro honesto é melhor.
+   * `getCourse(id)` direto, sem consultar a lista. A tentação era
+   * `cursos.find(c => c.id === id) ?? trilhaEmFoco(cursos)` — uma linha, e com
+   * o bug inteiro dentro dela: no dia em que o id não estivesse na resposta
+   * (trilha apagada, lista filtrada), o `??` abriria OUTRA trilha em silêncio.
+   * Tocar em "Estatística aplicada" e cair em "Rust do zero" é exatamente o que
+   * segurou a lista até aqui; um erro honesto é melhor.
    *
-   * Sem `id` — que é como a ABA monta esta tela — nada muda: lista, escolhe a
-   * trilha em foco, carrega. */
+   * NÃO HÁ MAIS CAMINHO "SEM id". Ele existia porque esta tela era a ABA e
+   * tinha de escolher uma trilha por conta própria — a escolha que fazia quem
+   * tem três trilhas ver sempre a mesma. Agora a aba é a LISTA e o mapa só
+   * chega por empurrão dela, sempre com o id do cartão tocado. Sem id não há
+   * trilha a mostrar, e a tela DIZ isso em vez de adivinhar. */
   useEffect(() => {
+    if (!id) {
+      // Impossível pela navegação de hoje (o único empurrão manda o id); dito
+      // em voz alta mesmo assim, porque a alternativa a um erro honesto aqui é
+      // uma tela em branco — ou o palpite que acabou de sair daqui.
+      setCurso(null);
+      setErro('Não sei qual trilha abrir — volte e escolha uma na lista.');
+      setCarregando(false);
+      return;
+    }
     let vivo = true;
     setCarregando(true);
+    setErro(null);
     (async () => {
       try {
-        let alvo = id;
-        if (!alvo) {
-          const cursos = await listCourses();
-          if (!vivo) return;
-          const foco = trilhaEmFoco(cursos);
-          if (!foco) { setCurso(null); setErro(null); setCarregando(false); return; }
-          alvo = foco.id;
-        }
-        const c = await getCourse(alvo);
+        const c = await getCourse(id);
         if (!vivo) return;
         setCurso(c); setErro(null); setCarregando(false);
-      } catch (e) {
+      } catch {
         if (!vivo) return;
         setCurso(null);
-        setErro(e instanceof Error ? e.message : String(e));
+        setErro('Não consegui carregar esta trilha.');
         setCarregando(false);
       }
     })();
@@ -192,27 +185,11 @@ export function TrilhasMapaScreen({ id, onBack, onOpen }: ScreenProps) {
           {carregando
             ? <span className="ms-trilhas-skel ms-trilhas-skel--titulo" aria-hidden="true"><span /></span>
             : <h1 className="ms-trilhas-titulo">{curso ? (curso.title || curso.topic) : 'Trilhas'}</h1>}
-          {/* A única porta da lista de trilhas. Este mapa é o interior de UMA
-              trilha, e até aqui era a única coisa que a aba sabia mostrar: quem
-              tem três trilhas via sempre a mesma. O controle fica colado no
-              título porque é o título que ele troca — e continua de pé
-              carregando, vazio e no erro, que é justamente quando o usuário
-              mais precisa de outra trilha (ou de criar a primeira).
-
-              Fora do `<h1>` de propósito: dentro dele, o `aria-label` do botão
-              viraria o nome acessível do cabeçalho e o leitor de tela anunciaria
-              "Todas as trilhas" no lugar do nome da trilha. */}
-          {onOpen && (
-            <button
-              type="button"
-              className="ms-trilhas-trocar"
-              aria-label="Todas as trilhas"
-              onClick={() => onOpen({ key: 'trilhas-lista', title: 'Trilhas' })}
-            >
-              Todas
-              <ChevronRightIcon size={15} />
-            </button>
-          )}
+          {/* Havia aqui um "Todas ›", a única porta que a lista tinha enquanto o
+              mapa era a ABA. Saiu com a inversão: a lista virou a aba e este
+              mapa está EMPURRADO em cima dela, então o ‹ à esquerda já volta
+              para ela — e a tab bar leva ao mesmo lugar em um toque. Dois
+              controles para a tela de baixo é um a mais. */}
         </div>
         <span className="ms-trilhas-streak">
           {carregandoStats
@@ -236,11 +213,13 @@ export function TrilhasMapaScreen({ id, onBack, onOpen }: ScreenProps) {
 
       <div className="ms-trilhas-mapa" style={{ height: total ? altura : undefined }}>
         {carregando ? <Skel linhas={4} />
-          : erro ? <Erro>Não consegui carregar suas trilhas.</Erro>
-          /* Esta frase mandava criar a trilha NO MAC porque, quando foi escrita,
-             o celular não tinha onde criar. Agora tem: o "Todas" do cabeçalho
-             leva à lista, e é lá que fica o campo de criar. */
-          : !curso ? <Vazio>Você ainda não começou nenhuma trilha — toque em Todas, aqui em cima, para criar a primeira.</Vazio>
+          /* A frase vem do estado: "não consegui carregar ESTA trilha" e "não
+             sei qual trilha abrir" são falhas diferentes e o usuário faz coisas
+             diferentes com cada uma. Não havia mais estado VAZIO a desenhar
+             aqui — "você ainda não começou nenhuma trilha" era do tempo em que
+             este mapa listava para escolher; hoje quem diz isso é a lista, que
+             é a aba, e é lá que fica o campo de criar. */
+          : erro ? <Erro>{erro}</Erro>
           : !total ? <Vazio>A Seraphine ainda está montando as lições desta trilha — volte em instantes.</Vazio>
           : (
             <>
