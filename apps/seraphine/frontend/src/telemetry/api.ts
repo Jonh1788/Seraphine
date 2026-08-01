@@ -46,6 +46,28 @@ export async function fetchTelemetrySummary(days = 7): Promise<TelemetrySummary>
 }
 
 /* ------------------------------------------------------------------ */
+/*  Flat backends — GET /telemetry/flat-backends                       */
+/*                                                                     */
+/*  Quem custa $0 marginal é decidido pelo backend (pricing.py), que   */
+/*  é quem PRECIFICA e GRAVA. Esta view só EXIBE. Uma cópia local da   */
+/*  lista já divergiu uma vez — `ollama`/`local` eram gravados a       */
+/*  (3,15)/M e exibidos como flat, $18 contra $0 em 1M/1M. Buscar a    */
+/*  lista custa uma chamada e elimina a classe do bug.                 */
+/* ------------------------------------------------------------------ */
+
+export async function listFlatBackends(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/telemetry/flat-backends`);
+  if (!res.ok) throw new Error(`listFlatBackends: HTTP ${res.status}`);
+  const body = (await res.json()) as { flat?: unknown };
+  if (!Array.isArray(body.flat)) {
+    throw new Error('listFlatBackends: resposta sem a lista `flat`');
+  }
+  // Normaliza no ponto de entrada para que a comparação no consumidor seja
+  // um lookup direto, sem cada call-site lembrar de baixar a caixa.
+  return body.flat.map((b) => String(b).toLowerCase());
+}
+
+/* ------------------------------------------------------------------ */
 /*  Active inference engine — GET /llm/engine                          */
 /* ------------------------------------------------------------------ */
 

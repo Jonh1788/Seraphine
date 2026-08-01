@@ -94,6 +94,37 @@
   font-weight: 600;
 }
 
+/* Esqueleto do herói — enquanto `GET /telemetry/flat-backends` não responde a
+   view não sabe quem é flat e não pode classificar. As alturas espelham
+   .tel-hero-value / .tel-hero-meta / .tel-flat para não haver salto de layout
+   quando a lista chega. */
+.tel-hero-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+.tel-hero-skel__value { height: 52px; width: 58%; border-radius: var(--r-md); }
+.tel-hero-skel__meta { height: 13px; width: 76%; }
+.tel-hero-skel__flat {
+  margin-top: auto;
+  height: 42px;
+  width: 100%;
+  border-radius: var(--r-md);
+}
+
+/* Falha ao carregar a lista: dizer que não classificou é honesto; mostrar um
+   número seria chute (flat zera custo real, medido inventa custo). */
+.tel-hero-unavailable {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: rgba(251, 191, 36, 0.07);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+}
+
 /* ── Active engine card (drives the flat-vs-metered cost story) ───── */
 .tel-engine-card {
   display: flex;

@@ -13,6 +13,7 @@ import { ArrowLeftIcon, RefreshIcon, GaugeIcon } from '../icons/Icons';
 import {
   fetchTelemetrySummary,
   fetchEngineInfo,
+  listFlatBackends,
   readPower,
   type TelemetrySummary,
   type EngineInfo,
@@ -25,13 +26,13 @@ interface TelemetryViewProps {
 
 type Period = 7 | 30;
 
-/** Backends with $0 marginal cost: flat subscription (cliproxy / Claude Max)
- *  or fully local inference (ollama). Everything else is metered cloud. */
-const FLAT_BACKENDS = new Set(['cliproxy', 'claude_max', 'ollama', 'local']);
-
-function isFlatBackend(backend: string): boolean {
-  return FLAT_BACKENDS.has(backend.toLowerCase());
-}
+/* Quem é flat vem de `GET /telemetry/flat-backends` — NÃO existe cópia local.
+ * O backend precifica e grava; esta view só exibe. Quando as duas listas
+ * divergiam, a mesma chamada era gravada com um custo e mostrada com outro.
+ *
+ * Enquanto a lista não chegou, `split` é null e a view não classifica: chutar
+ * "flat" zera um custo real, chutar "medido" inventa um. Ambos os chutes dão
+ * número errado na tela, então o certo é o esqueleto. */
 
 /* ------------------------------------------------------------------ */
 /*  Formatting helpers                                                 */
@@ -162,7 +163,29 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
   const [engine, setEngine] = useState<EngineInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = ainda não sabemos quem é flat → não classificar.
+  const [flatBackends, setFlatBackends] = useState<Set<string> | null>(null);
+  const [flatError, setFlatError] = useState<string | null>(null);
   const reqId = useRef(0);
+
+  // A lista de backends flat não depende do período — busca uma vez no mount.
+  // Falha → `flatError`, e o bloco de custo diz que não pôde classificar em
+  // vez de mostrar um número que seria chute.
+  useEffect(() => {
+    let alive = true;
+    listFlatBackends()
+      .then((list) => {
+        if (!alive) return;
+        setFlatBackends(new Set(list));
+        setFlatError(null);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setFlatBackends(null);
+        setFlatError(e instanceof Error ? e.message : String(e));
+      });
+    return () => { alive = false; };
+  }, []);
 
   // The active engine is independent of the report period, so fetch it once
   // on mount. Any failure → null → the card hides; it never breaks the panel.
@@ -191,15 +214,17 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
   useEffect(() => { void load(period); }, [period, load]);
   const handleRefresh = useCallback(() => { void load(period); }, [period, load]);
 
-  /* Split backends into flat ($0 marginal) vs metered cloud. */
+  /* Split backends into flat ($0 marginal) vs metered cloud.
+   * `null` enquanto a lista do backend não chegou — ver a nota no topo. */
   const split = useMemo(() => {
+    if (!flatBackends) return null;
     const rows = summary?.by_backend ?? [];
     let flatCalls = 0;
     let meteredCalls = 0;
     let meteredCost = 0;
     const flatNames: string[] = [];
     for (const r of rows) {
-      if (isFlatBackend(r.backend)) {
+      if (flatBackends.has(r.backend.toLowerCase())) {
         flatCalls += r.calls;
         if (r.calls > 0) flatNames.push(r.backend);
       } else {
@@ -208,7 +233,7 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
       }
     }
     return { flatCalls, meteredCalls, meteredCost, flatNames };
-  }, [summary]);
+  }, [summary, flatBackends]);
 
   const total = summary?.total;
   const hasData = !!total && total.calls > 0;
@@ -275,21 +300,36 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
               <GaugeIcon size={14} />
               Nuvem (medido) · {period} dias
             </div>
-            <div className="tel-hero-value">
-              $<span>{fmtUsd(split.meteredCost)}</span>
-            </div>
-            <div className="tel-hero-meta">
-              <b>{split.meteredCalls}</b> chamadas medidas
-              {total && <> · <b>{total.calls}</b> chamadas no total</>}
-            </div>
-            <div className="tel-flat">
-              <span className="tel-flat__badge">FLAT / LOCAL</span>
-              <span className="tel-flat__text">
-                <b>{split.flatCalls}</b> chamadas em{' '}
-                {split.flatNames.length > 0 ? split.flatNames.join(', ') : 'cliproxy / local'} —{' '}
-                <b>$0 marginal</b> nessas chamadas (assinatura flat ou inferência local).
-              </span>
-            </div>
+            {split ? (
+              <>
+                <div className="tel-hero-value">
+                  $<span>{fmtUsd(split.meteredCost)}</span>
+                </div>
+                <div className="tel-hero-meta">
+                  <b>{split.meteredCalls}</b> chamadas medidas
+                  {total && <> · <b>{total.calls}</b> chamadas no total</>}
+                </div>
+                <div className="tel-flat">
+                  <span className="tel-flat__badge">FLAT / LOCAL</span>
+                  <span className="tel-flat__text">
+                    <b>{split.flatCalls}</b> chamadas em{' '}
+                    {split.flatNames.length > 0 ? split.flatNames.join(', ') : 'cliproxy / local'} —{' '}
+                    <b>$0 marginal</b> nessas chamadas (assinatura flat ou inferência local).
+                  </span>
+                </div>
+              </>
+            ) : flatError ? (
+              <div className="tel-hero-unavailable" role="status">
+                Não foi possível separar nuvem medida de local — a lista de
+                backends flat não carregou. Os totais abaixo seguem válidos.
+              </div>
+            ) : (
+              <div className="tel-hero-skel" aria-hidden="true" data-testid="tel-hero-skeleton">
+                <span className="skeleton tel-hero-skel__value" />
+                <span className="skeleton tel-hero-skel__meta" />
+                <span className="skeleton tel-hero-skel__flat" />
+              </div>
+            )}
           </div>
 
           <div className="tel-mini-grid">

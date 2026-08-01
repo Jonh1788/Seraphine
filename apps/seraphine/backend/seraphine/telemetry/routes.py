@@ -4,7 +4,21 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from seraphine.telemetry.pricing import FLAT_BACKENDS
+
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
+
+
+@router.get("/flat-backends")
+async def flat_backends() -> dict[str, list[str]]:
+    """Fonte única de quem custa $0 marginal. O front exibia uma cópia
+    divergente desta lista (tratava `ollama`/`local` como flat enquanto o
+    backend os cobrava), então a lista viaja em vez de ser reescrita.
+
+    Estática e sem dependência do `telemetry_service`: o front a busca no
+    mount, antes/independente do summary, e não pode classificar sem ela.
+    """
+    return {"flat": sorted(FLAT_BACKENDS)}
 
 
 @router.get("/summary")
