@@ -365,13 +365,31 @@ class GoogleClient:
         location: str | None = None,
         attendees: list[str] | None = None,
         calendar_id: str = "primary",
+        all_day: bool = False,
+        recurrence: list[str] | None = None,
     ) -> dict:
+        """Create one event. The single write path — the ``calendar_create_event``
+        tool and ``POST /google/calendar/events`` both come through here.
+
+        ``all_day``: ``start``/``end`` are the FIRST and LAST day of the event
+        (inclusive, as a human says it). Google wants ``date`` instead of
+        ``dateTime`` and treats ``end.date`` as EXCLUSIVE, so a one-day event on
+        the 19th is sent as 19 → 20. Both details are Google's rules, so they
+        live here and not in each caller. Getting the first one wrong is not a
+        rejected request: it silently creates a midnight appointment, because
+        ``isAllDay`` (frontend) and ``calendar_agg`` (backend) tell all-day from
+        timed by exactly this field.
+        """
         url = f"{CALENDAR_API}/calendars/{calendar_id}/events"
-        body: dict[str, Any] = {
-            "summary": summary,
-            "start": {"dateTime": _rfc3339(start)},
-            "end": {"dateTime": _rfc3339(end)},
-        }
+        body: dict[str, Any] = {"summary": summary}
+        if all_day:
+            body["start"] = {"date": start.date().isoformat()}
+            body["end"] = {"date": (end.date() + timedelta(days=1)).isoformat()}
+        else:
+            body["start"] = {"dateTime": _rfc3339(start)}
+            body["end"] = {"dateTime": _rfc3339(end)}
+        if recurrence:
+            body["recurrence"] = list(recurrence)
         if description is not None:
             body["description"] = description
         if location is not None:

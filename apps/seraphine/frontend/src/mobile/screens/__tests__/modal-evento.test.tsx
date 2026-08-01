@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeAll, afterAll, type Mock } from 'vitest
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { ModalEvento, criarEventoViaApi } from '../ModalEvento';
+import { CALENDARIOS, ModalEvento, REPETICOES, criarEventoViaApi } from '../ModalEvento';
+import {
+  CALENDARIO_DO_EVENTO,
+  ErroCriarEvento,
+  OUTRAS_CATEGORIAS,
+  REPETICOES_ACEITAS,
+} from '../../../calendar/api';
 
 // O QUE ESTE ARQUIVO PRENDE
 //
@@ -262,7 +268,7 @@ describe('ModalEvento — salvar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
     await assentar();
 
-    expect(screen.getByRole('alert').textContent).toMatch(/erro ao salvar/);
+    expect(screen.getByRole('alert').textContent).toMatch(/Falha HTTP 500/);
     expect(screen.getAllByRole('alert').length).toBe(1); // uma região de alerta, só
     expect(onFechar).not.toHaveBeenCalled();
     expect(onCriado).not.toHaveBeenCalled();
@@ -460,15 +466,115 @@ describe('ModalEvento — moldura e alvo de toque', () => {
   });
 });
 
-describe('ModalEvento — a api que ainda não existe', () => {
-  it('o adaptador padrão FALHA ALTO em vez de fingir que salvou', async () => {
-    // `calendar/api.ts` só expõe leitura (`fetchAggregate`, `fetchTasksByRange`)
-    // — não há POST de evento, e esta task não pode editar aquele arquivo. O
-    // caminho honesto é errar alto: o rodapé mostra "erro ao salvar" e o
-    // formulário fica de pé com tudo dentro.
+describe('ModalEvento — a falha diz o que aconteceu', () => {
+  // O rodapé mostrava "erro ao salvar" para tudo. O caso que mais importa
+  // depois do sucesso é o Google desconectado, e "erro ao salvar" não diz a
+  // ninguém que basta reconectar. A tela não INTERPRETA o erro — ela mostra o
+  // que a camada disse, que é onde mora o conhecimento do domínio.
+
+  it('mostra a MENSAGEM do erro, não um rótulo genérico', async () => {
+    const criar = vi.fn().mockRejectedValue(
+      new ErroCriarEvento('Google não está conectado — conecte em /google/oauth/start', {
+        retentavel: true,
+        status: 401,
+      }),
+    );
+    const { onFechar } = abrir({ criar });
+    preencher('Jantar com a Ana');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await assentar();
+
+    expect(screen.getByRole('alert').textContent).toMatch(/Google não está conectado/);
+    expect(screen.getByRole('alert').textContent).toMatch(/oauth\/start/);
+    expect(onFechar).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('Título do evento') as HTMLInputElement).value)
+      .toBe('Jantar com a Ana');
+    // dá para reconectar em outro lugar e reenviar o mesmo evento
+    expect(screen.getByRole('button', { name: 'tentar de novo' })).toBeTruthy();
+  });
+
+  it('a falha que NÃO adianta repetir não oferece "tentar de novo"', async () => {
+    // Uma recusa da camada (categoria que a leitura não reconstrói, título
+    // vazio) devolve exatamente a mesma coisa a cada toque. Um botão que
+    // promete outro resultado é uma promessa falsa.
+    const criar = vi.fn().mockRejectedValue(
+      new ErroCriarEvento('um evento do Google sempre volta como Agenda.', {
+        retentavel: false,
+      }),
+    );
+    abrir({ criar });
+    preencher('Jantar com a Ana');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await assentar();
+
+    expect(screen.getByRole('alert').textContent).toMatch(/sempre volta como Agenda/);
+    expect(screen.queryByRole('button', { name: 'tentar de novo' })).toBeNull();
+    // e o que foi digitado continua ali para a pessoa corrigir a escolha
+    expect((screen.getByLabelText('Título do evento') as HTMLInputElement).value)
+      .toBe('Jantar com a Ana');
+  });
+
+  it('erro sem mensagem nenhuma ainda diz que falhou', async () => {
+    const criar = vi.fn().mockRejectedValue(new Error(''));
+    abrir({ criar });
+    preencher();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await assentar();
+
+    expect(screen.getByRole('alert').textContent).toMatch(/erro ao salvar/);
+  });
+});
+
+describe('ModalEvento — o que o modal oferece e o que a camada aceita', () => {
+  // A lição do `FactCreate.source`: os dois lados divergirem é o que traz o
+  // bug de volta. O que segura é a igualdade dos CONJUNTOS, não uma lista de
+  // valores conhecidos.
+
+  it('toda repetição do seletor é uma repetição que a camada aceita', () => {
+    expect(new Set(REPETICOES.map((o) => o.valor))).toEqual(new Set(REPETICOES_ACEITAS));
+  });
+
+  it('todo chip de calendário ou é o aceito, ou tem explicação de onde vem', () => {
+    // Um chip novo sem explicação cairia num texto genérico ("de outra fonte
+    // do calendário") — barrado, mas sem ensinar nada.
+    expect(new Set(CALENDARIOS.map((c) => c.valor))).toEqual(
+      new Set([CALENDARIO_DO_EVENTO, ...Object.keys(OUTRAS_CATEGORIAS)]),
+    );
+  });
+});
+
+describe('ModalEvento — o adaptador padrão', () => {
+  it('fala com a camada do domínio: POST /google/calendar/events', async () => {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      status: 201,
+      statusText: 'Created',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ ok: true, id: 'evt-1', html_link: null, all_day: false, recurrence: [] }),
+      text: async () => '',
+    }));
+    vi.stubGlobal('fetch', spy);
+
+    await criarEventoViaApi({
+      titulo: 'Retro do time', diaInteiro: false,
+      inicio: `${SEXTA}T09:00`, fim: `${SEXTA}T10:00`,
+      local: '', repetir: 'nunca', calendario: 'agenda',
+    });
+
+    expect(String(spy.mock.calls[0][0])).toContain('/google/calendar/events');
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    vi.unstubAllGlobals();
+  });
+
+  it('a recusa da camada chega ao modal com a mensagem inteira', async () => {
+    // O chip "Lembretes" existe no desenho, mas um evento do Google nunca
+    // volta como lembrete. Quem sabe disso é a camada; a tela só mostra.
     await expect(criarEventoViaApi({
       titulo: 'x', diaInteiro: false, inicio: `${SEXTA}T09:00`, fim: `${SEXTA}T10:00`,
-      local: '', repetir: 'nunca', calendario: 'agenda',
-    })).rejects.toThrow(/calendar\/api\.ts/);
+      local: '', repetir: 'nunca', calendario: 'lembretes',
+    })).rejects.toThrow(/Agenda/);
   });
 });

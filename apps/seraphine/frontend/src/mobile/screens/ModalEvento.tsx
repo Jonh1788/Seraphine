@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MobileSheet } from '../MobileSheet';
 import { AlertTriangleIcon, CalendarIcon, ClockIcon, RepeatIcon, TargetIcon } from '../../icons/Icons';
+import { ErroCriarEvento, criarEvento } from '../../calendar/api';
 import './ModalEvento.css';
 
 // MODAL DE EVENTO (handoff: frame "Modal · novo evento").
@@ -12,8 +13,13 @@ import './ModalEvento.css';
 // pessoa digitou. Um formulário de criação que se esvazia (ou se fecha) num erro
 // obriga a redigitar tudo de cabeça. Daí, e é o que o teste prende:
 //  - a falha NÃO fecha, NÃO limpa nada e aparece com `role="alert"` no rodapé,
-//    que fica fora da área rolável por construção do `MobileSheet`;
-//  - "tentar de novo" reenvia o MESMO evento, sem a pessoa tocar em nada;
+//    que fica fora da área rolável por construção do `MobileSheet`, DIZENDO O
+//    QUE ACONTECEU: é a mensagem da camada, não um "erro ao salvar" fixo —
+//    senão "conecte o Google" e "esta categoria não existe no calendário"
+//    virariam a mesma frase muda;
+//  - "tentar de novo" reenvia o MESMO evento, sem a pessoa tocar em nada, e só
+//    aparece quando repetir pode dar outro resultado (uma recusa da camada
+//    devolveria o mesmo para sempre);
 //  - Cancelar com o formulário sujo pergunta antes de jogar fora — e o backdrop
 //    e o Escape passam pelo mesmo caminho, senão um toque torto no vidro
 //    apagaria o formulário inteiro sem uma palavra;
@@ -60,19 +66,15 @@ export interface ModalEventoProps {
   onCriado?: (evento: NovoEvento) => void;
 }
 
-// ── O QUE `calendar/api.ts` SUSTENTA, VERIFICADO NA FONTE ─────────────────────
-// `src/calendar/api.ts` exporta hoje `fetchAggregate` e `fetchTasksByRange` — as
-// duas de LEITURA. Não há criação de evento em lugar nenhum do front (o
-// `google/api.ts` também só lista: `listEvents`, `listCalendars`), e no backend
-// a criação existe apenas como ferramenta do modelo (`calendar_create_event`,
-// em `seraphine/tools/google.py`), sem rota HTTP. Esta task não pode editar
-// `calendar/api.ts` (arquivo de outro dono) e telas não fazem `fetch`. Então o
-// adaptador abaixo ERRA ALTO, em vez de fingir que salvou: o rodapé mostra
-// "erro ao salvar", o formulário fica de pé com tudo dentro e o "tentar de novo"
-// espera a api aparecer. O relatório da task pede o `criarEvento(evento)` em
-// `calendar/api.ts` — no dia em que existir, é esta função que encolhe.
-export async function criarEventoViaApi(_evento: NovoEvento): Promise<void> {
-  throw new Error('calendar/api.ts nao expoe criacao de evento (falta criarEvento; a rota HTTP tambem nao existe)');
+// ── O ADAPTADOR PADRÃO ───────────────────────────────────────────────────────
+// Encolheu para uma linha, como estava previsto: `calendar/api.ts` passou a
+// expor `criarEvento`, que fala com `POST /google/calendar/events`. A tela
+// continua sem `fetch` e sem regra de domínio — inclusive a mais escorregadia
+// daqui, que é a categoria: um evento do Google não carrega categoria nenhuma,
+// e quem sabe disso (e recusa) é a camada, não o formulário. `criar` segue
+// injetável porque é o que deixa o teste exercitar falha e sucesso sem rede.
+export async function criarEventoViaApi(evento: NovoEvento): Promise<void> {
+  await criarEvento(evento);
 }
 
 /** Taxonomia REAL do calendário — conferida em `calendar/CalendarView.tsx:95`,
@@ -81,7 +83,7 @@ export async function criarEventoViaApi(_evento: NovoEvento): Promise<void> {
  *  finanças sai acentuado: o `CATEGORY_LABELS` de lá guarda "Financas" sem
  *  cedilha, coisa da tela de desktop; a chave — que é o que viaja no payload —
  *  continua `financas`. */
-const CALENDARIOS: { valor: Calendario; rotulo: string; cor: string }[] = [
+export const CALENDARIOS: { valor: Calendario; rotulo: string; cor: string }[] = [
   { valor: 'agenda', rotulo: 'Agenda', cor: '#42a5f5' },
   { valor: 'financas', rotulo: 'Finanças', cor: '#66bb6a' },
   { valor: 'tarefas', rotulo: 'Tarefas', cor: '#9a93ff' },
@@ -89,7 +91,7 @@ const CALENDARIOS: { valor: Calendario; rotulo: string; cor: string }[] = [
   { valor: 'outros', rotulo: 'Outros', cor: '#78909c' },
 ];
 
-const REPETICOES: { valor: Repeticao; rotulo: string }[] = [
+export const REPETICOES: { valor: Repeticao; rotulo: string }[] = [
   { valor: 'nunca', rotulo: 'Nunca' },
   { valor: 'diario', rotulo: 'Todo dia' },
   { valor: 'semanal', rotulo: 'Toda semana' },
@@ -153,6 +155,9 @@ export function ModalEvento({
   const [aviso, setAviso] = useState('');
   const [tocado, setTocado] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
+  /** Só faz sentido oferecer "tentar de novo" quando repetir pode dar outro
+   *  resultado. Uma recusa da camada devolve o mesmo a cada toque. */
+  const [retentavel, setRetentavel] = useState(true);
 
   /** As horas que o "dia inteiro" tirou da tela. Sem isto, desligar o toggle
    *  devolveria 09:00/10:00 e comeria o horário que a pessoa tinha escolhido —
@@ -198,6 +203,7 @@ export function ModalEvento({
       setCalendario('agenda');
       setEstado('ocioso');
       setAviso('');
+      setRetentavel(true);
       setTocado(false);
       setConfirmando(false);
       guardadas.current = { inicio: '09:00', fim: '10:00' };
@@ -267,8 +273,16 @@ export function ModalEvento({
       setEstado('ocioso');
       onCriado?.(evento);
       onFechar();
-    } catch {
-      if (vivo.current) setEstado('erro');
+    } catch (e) {
+      if (vivo.current) {
+        // A tela não INTERPRETA o erro — mostra o que a camada disse. É lá que
+        // mora o "Google não está conectado" e o motivo de uma categoria não
+        // servir; um "erro ao salvar" fixo apagaria os dois.
+        const dito = e instanceof Error ? e.message.trim() : '';
+        setAviso(dito || 'erro ao salvar');
+        setRetentavel(!(e instanceof ErroCriarEvento) || e.retentavel);
+        setEstado('erro');
+      }
     } finally {
       enviando.current = false;
     }
@@ -328,8 +342,8 @@ export function ModalEvento({
           // competindo pela leitura.
           <span className="ms-mevento-status ms-mevento-status--erro" role="alert">
             <AlertTriangleIcon size={12} />
-            {estado === 'erro' ? 'erro ao salvar' : aviso}
-            {estado === 'erro' ? (
+            {aviso}
+            {estado === 'erro' && retentavel ? (
               <button type="button" className="ms-mevento-retentar" onClick={() => void salvar()}>
                 tentar de novo
               </button>
