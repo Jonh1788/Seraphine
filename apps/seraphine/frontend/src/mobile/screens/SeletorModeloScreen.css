@@ -1,0 +1,309 @@
+/* Seletor de modelo — medidas e cores verbatim do frame "Seletor de modelo"
+   do handoff v3. Prefixo `ms-seletor-` em tudo, keyframes inclusive (nome de
+   keyframe é global e não respeita módulo). */
+
+.ms-seletor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--app, #0f0f14);
+  color: var(--text, #ececef);
+}
+
+/* ── cabeçalho ── */
+.ms-seletor-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 20px 10px;
+}
+.ms-seletor-voltar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim, #9a99a8);
+  cursor: pointer;
+}
+/* O alvo de 44pt vem da regra compartilhada de `mobile/obsidian.css`, presa ao
+   aria-label='Voltar' — não redesenhar aqui. */
+.ms-seletor-titulo {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ── busca ── */
+.ms-seletor-busca {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 20px 10px;
+  padding: 0 13px;
+  min-height: 44px; /* HIG: o campo é o controle mais tocado da tela */
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+}
+.ms-seletor-busca__icone {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-faint, #5f5e6b);
+}
+.ms-seletor-busca__campo {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text, #ececef);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.ms-seletor-busca__campo::placeholder { color: var(--text-faint, #5f5e6b); }
+.ms-seletor-busca__campo::-webkit-search-cancel-button { display: none; }
+.ms-seletor-busca__campo:disabled { opacity: 0.55; }
+
+/* ── corpo ── */
+.ms-seletor-corpo {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.ms-seletor-secao { display: flex; flex-direction: column; }
+.ms-seletor-secao__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ms-seletor-eyebrow {
+  margin: 0;
+  padding: 0 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint, #5f5e6b);
+}
+.ms-seletor-medido-rotulo {
+  padding: 0 4px 8px;
+  font-size: 11px;
+  color: var(--warning, #ffa726);
+}
+
+/* ── card do Padrão ── */
+.ms-seletor-padrao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 14px 15px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  font: inherit;
+  color: var(--text, #ececef);
+  text-align: left;
+  cursor: pointer;
+}
+.ms-seletor-padrao--ativo {
+  border-color: var(--accent, #9a93ff);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(154, 147, 255, 0.14));
+}
+.ms-seletor-padrao:disabled { opacity: 0.6; }
+.ms-seletor-padrao__icone {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--accent-soft, rgba(154, 147, 255, 0.14));
+  color: var(--accent, #9a93ff);
+  display: grid;
+  place-items: center;
+}
+.ms-seletor-padrao__texto { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ms-seletor-padrao__nome { font-size: 14px; font-weight: 700; }
+.ms-seletor-padrao__selo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--user, #4ade80);
+}
+.ms-seletor-padrao__ponto {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--user, #4ade80);
+}
+.ms-seletor-check { flex: none; display: inline-flex; color: var(--accent, #9a93ff); }
+
+/* ── modelo gravado que não está no catálogo ── */
+.ms-seletor-orfao {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 15px;
+  background: var(--surface, #17171e);
+  border: 1px solid rgba(255, 167, 38, 0.3);
+  border-radius: 16px;
+}
+.ms-seletor-orfao .ms-seletor-modelo__nome {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ms-seletor-orfao__nota {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim, #9a99a8);
+}
+
+/* ── lista do OpenRouter ── */
+.ms-seletor-lista {
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  overflow: hidden;
+}
+.ms-seletor-grupo__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.ms-seletor-grupo + .ms-seletor-grupo .ms-seletor-grupo__head {
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+.ms-seletor-grupo__ponto { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+.ms-seletor-grupo__ponto--anthropic { background: #d97757; }
+.ms-seletor-grupo__ponto--google { background: #4285f4; }
+.ms-seletor-grupo__ponto--deepseek { background: #4d6bfe; }
+.ms-seletor-grupo__ponto--outros { background: var(--text-dim, #9a99a8); }
+.ms-seletor-grupo__rotulo {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint, #5f5e6b);
+}
+.ms-seletor-modelo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 44px; /* HIG: a linha do handoff dá ~41px; o dedo precisa de 44 */
+  padding: 11px 15px;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: none;
+  font: inherit;
+  color: var(--text, #ececef);
+  text-align: left;
+  cursor: pointer;
+}
+.ms-seletor-modelo:last-child { border-bottom: none; }
+.ms-seletor-modelo--ativo { background: var(--accent-soft, rgba(154, 147, 255, 0.14)); }
+.ms-seletor-modelo:disabled { opacity: 0.6; }
+.ms-seletor-modelo__nome {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-seletor-modelo__selo {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--warning, #ffa726);
+  background: rgba(255, 167, 38, 0.12);
+  padding: 3px 8px;
+  border-radius: 7px;
+}
+
+/* ── mensagens ── */
+.ms-seletor-vazio,
+.ms-seletor-alerta,
+.ms-seletor-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim, #9a99a8);
+}
+.ms-seletor-vazio {
+  padding: 14px 15px;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+}
+.ms-seletor-alerta {
+  padding: 12px 14px;
+  color: #ff8a80;
+  background: rgba(255, 138, 128, 0.1);
+  border: 1px solid rgba(255, 138, 128, 0.28);
+  border-radius: 14px;
+}
+.ms-seletor-rodape { display: flex; flex-direction: column; gap: 6px; }
+.ms-seletor-status--ok { color: var(--user, #4ade80); font-weight: 600; }
+.ms-seletor-status code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text, #ececef);
+  overflow-wrap: anywhere;
+}
+.ms-seletor-retry {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #ececef);
+  cursor: pointer;
+}
+
+/* ── esqueleto (sem texto: aria-hidden no .tsx) ── */
+.ms-seletor-skel { display: flex; flex-direction: column; gap: 10px; }
+.ms-seletor-skel__card,
+.ms-seletor-skel__linha {
+  display: block;
+  border-radius: 12px;
+  background: var(--surface, #17171e);
+  animation: ms-seletor-pulso 1.4s ease-in-out infinite;
+}
+.ms-seletor-skel__card { height: 66px; border-radius: 16px; }
+.ms-seletor-skel__linha { height: 44px; }
+
+@keyframes ms-seletor-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-seletor-skel__card,
+  .ms-seletor-skel__linha { animation: none; }
+}
