@@ -171,6 +171,82 @@ def _stringify_content(content: Any) -> str:
     return str(content or "")
 
 
+def _to_openai_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    """Converte o histórico do engine para o formato OpenAI do OpenRouter.
+
+    O ponto todo é o round-trip de ferramenta. `ChatMessage` só tem `role` e
+    `content` — não há onde guardar o `tool_calls` do assistente, então o
+    engine grava só a mensagem `role="tool"` com um JSON
+    ``{"tool", "args", "ok", "output"|"error"}``. Achatar isso para
+    ``{"role": "tool", "content": "..."}`` produz um histórico inválido: numa
+    API compatível com OpenAI, toda mensagem `tool` exige `tool_call_id` E uma
+    mensagem `assistant` com `tool_calls` antes dela. Sem isso o upstream
+    devolve 500 — foi o que quebrou o chat via Sonnet depois da primeira
+    ferramenta.
+
+    Reconstruímos os dois lados a partir do payload gravado, espelhando o que
+    ``llm_adapters.anthropic._convert_messages`` já faz para o Claude direto.
+
+    Os `arguments` levam os args REAIS. Com argumentos vazios o modelo lê o
+    histórico como "chamei sem argumentos, preciso repetir direito" e refaz a
+    mesma tool em loop — a mesma armadilha documentada no lado Anthropic.
+    """
+    out: list[dict[str, Any]] = []
+    counter = 0
+    for m in messages:
+        role = getattr(m, "role", "user")
+        content = getattr(m, "content", "")
+
+        if role != "tool":
+            out.append({"role": role, "content": _stringify_content(content)})
+            continue
+
+        tool_name = "unknown_tool"
+        tool_args: dict[str, Any] = {}
+        tool_output = ""
+        try:
+            body = json.loads(content) if isinstance(content, str) else content
+            if isinstance(body, dict):
+                tool_name = str(body.get("tool") or "unknown_tool")
+                maybe_args = body.get("args")
+                if isinstance(maybe_args, dict):
+                    tool_args = maybe_args
+                payload = body.get("output")
+                if payload is None:
+                    payload = body.get("error")
+                tool_output = (
+                    payload if isinstance(payload, str) else json.dumps(payload or body)
+                )
+            else:
+                tool_output = json.dumps(body)
+        except (json.JSONDecodeError, TypeError):
+            tool_output = content if isinstance(content, str) else str(content)
+
+        call_id = f"call_synth_{counter:04d}"
+        counter += 1
+
+        out.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            # `arguments` é STRING no formato OpenAI, não objeto.
+                            "arguments": json.dumps(tool_args),
+                        },
+                    }
+                ],
+            }
+        )
+        out.append({"role": "tool", "tool_call_id": call_id, "content": tool_output})
+
+    return out
+
+
 class OpenRouterChatClient:
     """OpenRouter chat client matching the engine's ``llm.chat`` contract.
 
@@ -231,10 +307,7 @@ class OpenRouterChatClient:
 
         # ``audio`` and ``think`` are intentionally ignored for v1 — we don't
         # forward reasoning/audio params; keep the request minimal and portable.
-        oai_messages = [
-            {"role": m.role, "content": _stringify_content(m.content)}
-            for m in messages
-        ]
+        oai_messages = _to_openai_messages(messages)
         body: dict[str, Any] = {
             "model": model or "openai/gpt-4o-mini",
             "messages": oai_messages,
