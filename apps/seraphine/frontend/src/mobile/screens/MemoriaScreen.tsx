@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ArrowLeftIcon, SearchIcon } from '../../icons/Icons';
+import { ArrowLeftIcon, PlusIcon, SearchIcon } from '../../icons/Icons';
 import { fetchProfile, listFacts } from '../../memory/api';
 import type { Fact, MemoryProfile } from '../../memory/types';
+import { ModalMemoria } from './ModalMemoria';
 import type { ScreenProps } from './registry';
 import './MemoriaScreen.css';
 
@@ -9,11 +10,13 @@ import './MemoriaScreen.css';
 // Cabeçalho, perfil e lista têm cada um as três saídas — dado, vazio desenhado
 // e erro — e cada bloco erra com a SUA frase, para o teste apontar um bloco só.
 //
-// O handoff (linha 491) desenha um "+" accent no cabeçalho, para ensinar um
-// fato novo. Ele NÃO está aqui: `memory/api.ts` só expõe leitura (`listFacts`,
-// `fetchProfile`), a task proíbe `fetch` direto e proíbe tocar em arquivo de
-// outro dono. Um "+" sem POST seria botão morto, que é pior que ausente — fica
-// registrado como lacuna no relatório, para a task que abrir a escrita.
+// O "+" accent do cabeçalho (handoff linha 491) EXISTE agora. Ele foi recusado
+// enquanto `memory/api.ts` só sabia ler: um "+" sem POST é botão morto, pior
+// que ausente. A Task 10 abriu a escrita (`createFact`, sobre
+// `POST /memory/facts`), e com ela a ausência deixou de ter justificativa — o
+// que sustentava o argumento era a falta da rota, não uma decisão de desenho.
+// O "+" abre o `ModalMemoria`, e é ele quem conhece o que a api aceita
+// (confiança sim, categoria não).
 
 /** Quantos fatos pedir. O mesmo teto que a tela de desktop usa. */
 const LIMITE = 100;
@@ -73,6 +76,8 @@ export function MemoriaScreen({ onBack }: ScreenProps) {
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState('');
   const [grupo, setGrupo] = useState<Grupo>('Tudo');
+  const [criando, setCriando] = useState(false);
+  const [recarga, setRecarga] = useState(0);
 
   const termo = busca.trim();
 
@@ -90,7 +95,10 @@ export function MemoriaScreen({ onBack }: ScreenProps) {
     if (!termo) { buscar(); return () => { vivo = false; }; }
     const t = setTimeout(buscar, DEBOUNCE_MS);
     return () => { vivo = false; clearTimeout(t); };
-  }, [termo]);
+    // `recarga` entra nas deps para a lembrança recém-criada aparecer: o POST
+    // devolve o fato, mas a lista é do servidor e a contagem do cabeçalho sai
+    // dela — remontar o dado inteiro é mais honesto que enfiar uma linha local.
+  }, [termo, recarga]);
 
   // Fato substituído já não vale: o backend guarda o histórico, a tela mostra
   // só o que a Seraphine considera verdade hoje.
@@ -120,6 +128,15 @@ export function MemoriaScreen({ onBack }: ScreenProps) {
             : termo ? <Vazio>nenhuma lembrança casa com a busca</Vazio>
             : <Vazio>nenhuma lembrança guardada ainda</Vazio>}
         </div>
+        <button
+          type="button"
+          className="ms-memoria-novo"
+          aria-label="Nova lembrança"
+          aria-haspopup="dialog"
+          onClick={() => setCriando(true)}
+        >
+          <PlusIcon size={18} />
+        </button>
       </header>
 
       <div className="ms-memoria-busca">
@@ -175,6 +192,16 @@ export function MemoriaScreen({ onBack }: ScreenProps) {
           : grupo !== 'Tudo' && ativos.length ? <div className="ms-memoria-card"><Vazio>Nenhuma lembrança em {grupo} — as que existem estão em outras categorias.</Vazio></div>
           : <div className="ms-memoria-card"><Vazio>Nenhuma memória guardada ainda — a Seraphine anota o que você conta ao longo das conversas.</Vazio></div>}
       </div>
+
+      {/* O modal fecha sozinho no 201; `onCriada` só refaz a leitura. Note que
+          a lembrança nova pode NÃO aparecer na hora: com uma busca escrita ou
+          um chip ligado, ela só entra se casar com o recorte — é filtro do
+          usuário, e a contagem do cabeçalho sobe de qualquer jeito. */}
+      <ModalMemoria
+        aberto={criando}
+        onFechar={() => setCriando(false)}
+        onCriada={() => setRecarga((r) => r + 1)}
+      />
     </div>
   );
 }

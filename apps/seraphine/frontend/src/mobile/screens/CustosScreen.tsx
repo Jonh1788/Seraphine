@@ -397,9 +397,14 @@ export function CustosScreen({ onBack, onOpen }: ScreenProps) {
               reconheço. Prefiro não mostrar número a mostrar o número errado.
             </p>
           ) : leitura.tipo === 'sem-teto' ? (
+            /* A frase NÃO manda mais "definir em Configurações": a tela de
+               Configurações não tem esse controle, e mandar alguém a um lugar
+               que não oferece o que se prometeu é pior que não dizer nada. A
+               rota (`PUT /telemetry/budget`) existe; a tela que a chama, não —
+               fica registrado, e a frase diz só o que é verdade hoje. */
             <p className="ms-custos-teto__convite">
-              Você ainda não definiu um teto mensal. Defina um em Configurações para
-              acompanhar quanto do mês já foi gasto.
+              Nenhum teto mensal definido — sem ele não dá para dizer quanto do mês
+              já foi gasto. Por enquanto o teto só se define fora do telefone.
             </p>
           ) : (
             <BlocoTeto teto={leitura.teto} dias={dias} />

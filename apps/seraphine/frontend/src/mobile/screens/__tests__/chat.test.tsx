@@ -342,6 +342,210 @@ describe('ChatScreen', () => {
       expect(linha).not.toMatch(/oi sera\b/i);
     });
   });
+
+  /* O RACIOCÍNIO NÃO É RESPOSTA.
+     O desktop separa `<think>…</think>` (e o `<|channel>thought` da Gemma) desde
+     sempre, num parser privado do `ChatView.tsx`. O telefone não tinha como
+     alcançá-lo e renderizava o fluxo cru: a bolha começava com "O usuário quer
+     saber a previsão…", tags e tudo, antes da frase de verdade. O parser mudou-se
+     para `chat/thinking.ts` e as duas telas leem a MESMA definição — copiá-lo
+     para o mobile daria dois parsers da mesma string, que é como a lista de
+     backends flat já pôs um número errado na tela desta casa. */
+  describe('o raciocínio do modelo não vaza na bolha', () => {
+    it('esconde o bloco <think> e mostra só a resposta', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>O usuário quer saber a previsão do tempo.</think>Hoje faz 24°.'));
+      expect(screen.getByText('Hoje faz 24°.')).toBeTruthy();
+      expect(screen.queryByText(/previsão do tempo/)).toBeNull();
+      // e nem as tags cruas
+      expect(document.body.textContent).not.toMatch(/<\/?think>/);
+    });
+
+    it('o formato de canal da Gemma some do mesmo jeito', () => {
+      const { ws } = montar();
+      ws.emite(token('<|channel>thought\nDeixa eu ver a agenda.<channel|>Você tem 2 eventos.'));
+      expect(screen.getByText('Você tem 2 eventos.')).toBeTruthy();
+      expect(screen.queryByText(/Deixa eu ver a agenda/)).toBeNull();
+      expect(document.body.textContent).not.toMatch(/channel/);
+    });
+
+    it('enquanto só houve raciocínio, a bolha DIZ que está pensando', () => {
+      // Sem isto a bolha fica muda: o bloco abriu, nada saiu em voz alta, e uma
+      // bolha vazia é indistinguível de uma que travou.
+      const { ws } = montar();
+      ws.emite(token('<think>Preciso checar o clima'));
+      const aviso = screen.getByText('pensando…');
+      expect(aviso.getAttribute('role')).toBe('status');
+      expect(screen.queryByText(/Preciso checar o clima/)).toBeNull();
+    });
+
+    it('chegando a resposta, o aviso de "pensando" sai de cena', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>Preciso checar o clima'));
+      expect(screen.getByText('pensando…')).toBeTruthy();
+      ws.emite(token('</think>Está 24° e sem chuva.'));
+      expect(screen.getByText('Está 24° e sem chuva.')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('texto sem raciocínio nenhum passa intacto', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia! Como você está?'));
+      expect(screen.getByText('Bom dia! Como você está?')).toBeTruthy();
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+  });
+
+  /* A RESPOSTA É MARKDOWN, e ia como texto puro.
+     Na conversa real chegou `**hoje e dos próximos dias**` com os asteriscos à
+     mostra: a ênfase que o modelo pediu virava ruído. O desktop renderiza
+     markdown desde sempre; o telefone não importava nada. */
+  describe('markdown da bolha', () => {
+    it('negrito vira negrito, e os asteriscos somem', () => {
+      const { ws, container } = montar();
+      ws.emite(token('a previsão é de **hoje e dos próximos dias**'));
+      const forte = container.querySelector('.ms-chat-bolha__texto strong');
+      expect(forte?.textContent).toBe('hoje e dos próximos dias');
+      expect(container.textContent).not.toContain('**');
+    });
+
+    it('lista vira lista', () => {
+      const { ws, container } = montar();
+      ws.emite(token('leve:\n- guarda-chuva\n- casaco'));
+      const itens = container.querySelectorAll('.ms-chat-bolha__texto li');
+      expect([...itens].map((i) => i.textContent)).toEqual(['guarda-chuva', 'casaco']);
+    });
+
+    it('HTML cru do MODELO sai como TEXTO, não como marcação', () => {
+      // A decisão central: sem `rehype-raw`. O conteúdo vem do modelo, e uma
+      // `<div>` que ele escrevesse não pode virar árvore de verdade dentro da
+      // bolha. Mesma escolha da tela de Lição de teoria, e aqui pesa mais.
+      const { ws, container } = montar();
+      ws.emite(token('cuidado: <div class="rich-card">nao sou cartao</div>'));
+      expect(container.querySelector('.ms-chat-bolha__texto .rich-card')).toBeNull();
+      expect(container.querySelector('.ms-chat-bolha__texto div div')).toBeNull();
+      expect(container.textContent).toContain('nao sou cartao');
+    });
+
+    it('o texto sem marcação nenhuma continua chegando inteiro', () => {
+      const { ws, container } = montar();
+      ws.emite(token('Ilhéus tá com 24°C e chuva nas proximidades.'));
+      expect(container.querySelector('.ms-chat-bolha__texto')?.textContent)
+        .toBe('Ilhéus tá com 24°C e chuva nas proximidades.');
+    });
+
+    it('a bolha do USUÁRIO não passa por markdown', () => {
+      // O que ele digitou vai para a tela como foi digitado — asterisco de
+      // ênfase que ele escreveu é asterisco que ele quis ver.
+      const { container } = montar();
+      escrever(container, 'manda **isso** literal');
+      const minha = container.querySelector('.ms-chat-bolha--voce');
+      expect(minha?.textContent).toBe('manda **isso** literal');
+      expect(minha?.querySelector('strong')).toBeNull();
+    });
+  });
+
+  /* A ESPERA ENTRE O ENVIO E O PRIMEIRO TOKEN.
+     Medido no aparelho: um turno que roda ferramentas leva ~30s, e nesse tempo
+     a tela era IDÊNTICA a ociosa — nenhuma bolha dela, nenhum cursor. Quem está
+     do outro lado conclui que a pergunta se perdeu e manda de novo; foi assim
+     que a conversa real ficou com quatro falas do usuário seguidas, que
+     pareciam turnos mortos e não eram (a resposta veio, junta, no fim). */
+  describe('espera pela resposta', () => {
+    it('mandou: a conversa diz que está pensando', () => {
+      const { container } = montar();
+      escrever(container, 'oi');
+      expect(screen.getByText('pensando…').getAttribute('role')).toBe('status');
+    });
+
+    it('some no PRIMEIRO token, sem esperar o turno fechar', () => {
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.emite(token('Oi! Tudo'));
+      expect(screen.queryByText('pensando…')).toBeNull();
+      expect(screen.getByText('Oi! Tudo')).toBeTruthy();
+    });
+
+    it('some também quando o primeiro sinal é uma FERRAMENTA', () => {
+      // O engine corta o stream no pedaço que traz `tool_calls`: num turno que
+      // vai direto à ferramenta, o `tool_result` chega antes de qualquer token.
+      const { ws, container } = montar();
+      escrever(container, 'cria uma tarefa');
+      ws.emite({
+        type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+        metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending' } },
+      });
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('some no erro — senão a tela pensaria para sempre', () => {
+      const { ws, container } = montar();
+      escrever(container, 'oi');
+      ws.emite({ type: 'error', message: 'o modelo caiu' });
+      expect(screen.queryByText('pensando…')).toBeNull();
+      expect(screen.getByText(/o modelo caiu/)).toBeTruthy();
+    });
+
+    it('sem socket, nada é mandado e nada fica pensando', () => {
+      // `enviarTexto` devolve false sem `ws`: prometer espera por uma mensagem
+      // que não saiu seria a mentira ao contrário.
+      const { container } = render(<ChatScreen />);
+      escrever(container, 'oi');
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('em repouso, ninguém está pensando', () => {
+      const { ws } = montar();
+      ws.emite(token('Bom dia!'));
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+  });
+
+  /* A BOLHA VAZIA É UM TURNO PERDIDO.
+     Na conversa real apareceram duas falas do usuário seguidas, sem resposta no
+     meio. Uma bolha da Seraphine que fecha sem NADA dentro é indistinguível de
+     "ela ignorou a pergunta" — e a tela é a única que sabe a diferença. */
+  describe('turno que fecha sem uma palavra', () => {
+    it('só raciocínio e fim de turno: a bolha diz o que houve, em vez de ficar vazia', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>ia responder o clima</think>'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/pensei, mas não cheguei a responder/)).toBeTruthy();
+      expect(screen.queryByText(/ia responder o clima/)).toBeNull();
+      // e UMA frase só: "pensando…" ao lado de "não cheguei a responder" seriam
+      // duas afirmações contraditórias na mesma bolha.
+      expect(screen.queryByText('pensando…')).toBeNull();
+    });
+
+    it('resposta que só tinha marcação também não vira bolha muda', () => {
+      // `limpar` come `[anim:…]` e comentários de cartão. Sobrando nada, o
+      // resultado era uma bolha em branco.
+      const { ws } = montar();
+      ws.emite(token('[anim:acenar]'));
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText(/não veio resposta desta vez/)).toBeTruthy();
+    });
+
+    it('enquanto o turno está aberto, vazio é ESPERA e não falha', () => {
+      const { ws } = montar();
+      ws.emite(token('<think>pensando ainda'));
+      expect(screen.getByText('pensando…')).toBeTruthy();
+      expect(screen.queryByText(/não cheguei a responder/)).toBeNull();
+    });
+
+    it('bolha com cartão e sem texto não é muda', () => {
+      // O cartão de tarefa É a resposta nesse turno; dizer "não veio resposta"
+      // ao lado dele seria contradizer o que está na tela.
+      const { ws } = montar();
+      ws.emite({
+        type: 'tool_result', request_id: 'r1', ok: true, output: 'ok', error: null,
+        metadata: { task: { id: 7, title: 'Pagar aluguel', status: 'pending' } },
+      });
+      ws.emite({ type: 'turn_end', conversation_id: 'c1', turn_id: 't1' });
+      expect(screen.getByText('Pagar aluguel')).toBeTruthy();
+      expect(screen.queryByText(/não veio resposta desta vez/)).toBeNull();
+    });
+  });
 });
 
 // Task 28 — a integração com o estado vazio do handoff (tela 19). Antes disto a

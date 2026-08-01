@@ -102,6 +102,107 @@ describe('updateTaskStatus', () => {
   });
 });
 
+describe('updateTask', () => {
+  it('PATCHes only the keys it was given', async () => {
+    mockFetch(jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { title: 'Pagar o aluguel' });
+    const { url, init } = lastCall();
+    expect(url).toMatch(/\/tasks\/7$/);
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(String(init?.body))).toEqual({ title: 'Pagar o aluguel' });
+  });
+
+  it('carries the current category along when the patch touches tags', async () => {
+    // THE ONE THIS FUNCTION EXISTS FOR. `update_task` (service.py:846) ends with
+    // `elif tags is not None: category = _derive_task_category(tags_json, None)`
+    // — a tags-only patch REWRITES the category from the tags. The task is
+    // filed under `contas`; adding the tag "trabalho" would silently refile it
+    // while the screen keeps showing `contas`.
+    mockFetch(jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { tags: ['trabalho'] });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      tags: ['trabalho'],
+      category: 'contas',
+    });
+  });
+
+  it('does NOT invent a category when the task has none — the backend derives', async () => {
+    // The guard preserves a CHOICE; it does not veto the feature. With nothing
+    // chosen, sending `''` would order a clear and kill the derivation.
+    mockFetch(jsonResponse({ ok: true }), jsonResponse({ ok: true }));
+    await api.updateTask({ id: 7, category: null }, { tags: ['casa'] });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ tags: ['casa'] });
+    await api.updateTask({ id: 7, category: '' }, { tags: ['casa'] });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ tags: ['casa'] });
+  });
+
+  it('never overrides a category the caller stated — including an explicit clear', async () => {
+    mockFetch(jsonResponse({ ok: true }), jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { tags: ['x'], category: 'moradia' });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      tags: ['x'],
+      category: 'moradia',
+    });
+    // `null` is "clear it", not "I said nothing": it survives JSON.stringify
+    // and the backend reads it as an order.
+    await api.updateTask(TASK, { tags: ['x'], category: null });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ tags: ['x'], category: null });
+  });
+
+  it('protects the category even when the key is present but undefined', async () => {
+    // The case that separates `body.category === undefined` from
+    // `'category' in body`: JSON.stringify DROPS an undefined value, so this
+    // reaches the backend as a tags-only patch — exactly the one that derives
+    // the category away. `in` would have called it "stated" and stood down.
+    mockFetch(jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { tags: ['x'], category: undefined });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ tags: ['x'], category: 'contas' });
+  });
+
+  it('the same reading applies to tags: an undefined tags key is not a tags patch', async () => {
+    mockFetch(jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { title: 'x', tags: undefined });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ title: 'x' });
+  });
+
+  it('leaves a patch without tags alone, category or not', async () => {
+    mockFetch(jsonResponse({ ok: true }));
+    await api.updateTask(TASK, { status: 'completed', priority: '' });
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      status: 'completed',
+      priority: '',
+    });
+  });
+
+  it('refuses the empty patch without touching the network', async () => {
+    mockFetch(jsonResponse({ ok: true }));
+    await expect(api.updateTask(TASK, {})).rejects.toThrow(/sem nenhum campo/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects with the backend detail on HTTP 422', async () => {
+    mockFetch(jsonResponse({ detail: 'priority must be one of [...]' }, 422));
+    await expect(api.updateTask(TASK, { priority: 'urgentissima' })).rejects.toThrow(
+      'priority must be one of [...]',
+    );
+  });
+});
+
+describe('deleteTask', () => {
+  it('DELETEs /tasks/{id}', async () => {
+    mockFetch(jsonResponse({ ok: true }));
+    await api.deleteTask(7);
+    const { url, init } = lastCall();
+    expect(url).toMatch(/\/tasks\/7$/);
+    expect(init?.method).toBe('DELETE');
+  });
+
+  it('rejects with the backend detail when the row is already gone', async () => {
+    mockFetch(jsonResponse({ detail: 'task not found' }, 404));
+    await expect(api.deleteTask(9999)).rejects.toThrow('task not found');
+  });
+});
+
 describe('createTask', () => {
   it('POSTs the payload to /tasks and returns the new id', async () => {
     mockFetch(jsonResponse({ id: 42, ok: true }));

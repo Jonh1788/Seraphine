@@ -48,18 +48,25 @@ vi.mock('../screens/registry', () => ({
     // `inbox`, que o Mais abre) mostra `undefined` — é o caso das quinze telas
     // que não mandam nem leem o campo.
     inbox: lazy(async () => ({
-      default: ({ onOpen, id }: ScreenProps) => (
+      default: ({ onOpen, onBack, id }: ScreenProps) => (
         <div>
           <span>inbox-id:{String(id)}</span>
           <button type="button"
             onClick={() => onOpen?.({ key: 'whatsapp', title: 'Ana', id: '5511999999999@c.us' })}>
             abrir-thread
           </button>
+          <button type="button" onClick={onBack}>fechar-inbox</button>
         </div>
       ),
     })),
     whatsapp: lazy(async () => ({
-      default: ({ id }: ScreenProps) => <div>thread:{id ?? 'sem-id'}</div>,
+      default: ({ id, onBack }: ScreenProps) => (
+        <div>
+          <span>thread:{id ?? 'sem-id'}</span>
+          {/* o ‹ é da tela, como no app: é ele que desfaz o degrau */}
+          <button type="button" onClick={onBack}>fechar-thread</button>
+        </div>
+      ),
     })),
     'onboarding-boas-vindas': lazy(async () => ({
       default: ({ onDone }: ScreenProps) => (
@@ -180,6 +187,36 @@ describe('PhoneShell monta pelo registry', () => {
     // ela empurra outra COM id, e o id atravessa o estado do shell até a tela
     fireEvent.click(getByText('abrir-thread'));
     expect(await findByText('thread:5511999999999@c.us')).toBeTruthy();
+    await settle();
+  });
+
+  // O buraco que este teste tranca: `pushed` era UM SLOT, então o `onBack` de
+  // qualquer tela empurrada voltava para a ABA. Toda cadeia de dois níveis
+  // perdia o meio do caminho em silêncio — Configurações → Seletor de modelo
+  // caía no Mais, Custos → detalhe idem, Trilhas → lista → mapa idem.
+  it('voltar de um segundo nível cai no PRIMEIRO, e não na aba', async () => {
+    jaOnboardou();
+    const { container, getByText, findByText, queryByText } = render(<PhoneShell />);
+    fireEvent.click(getByText('Mais'));
+    await settle();
+
+    fireEvent.click(getByText('Inbox')); // degrau 1
+    expect(await findByText('inbox-id:undefined')).toBeTruthy();
+    fireEvent.click(getByText('abrir-thread')); // degrau 2
+    expect(await findByText('thread:5511999999999@c.us')).toBeTruthy();
+    expect(queryByText('inbox-id:undefined')).toBeNull(); // só o topo é montado
+
+    fireEvent.click(getByText('fechar-thread'));
+
+    // A ASSERÇÃO: o degrau 1 volta. Com um slot só, aqui aparecia a tab bar e o
+    // Inbox tinha sumido — e nenhum teste dizia nada.
+    expect(await findByText('inbox-id:undefined')).toBeTruthy();
+    expect(container.querySelector('.mtabbar')).toBeNull();
+
+    // e só o segundo voltar esvazia a pilha e devolve a tab bar
+    fireEvent.click(getByText('fechar-inbox'));
+    expect(queryByText('inbox-id:undefined')).toBeNull();
+    expect(container.querySelector('.mtabbar')).toBeTruthy();
     await settle();
   });
 

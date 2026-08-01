@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAppRefs } from '../../stores/RefsContext';
 import { useChatStore } from '../../stores/chatStore';
 import { useRealtimeStore } from '../../stores/realtimeStore';
@@ -7,6 +9,7 @@ import { ArrowLeftIcon, MicIcon, SendIcon, SparkleIcon, VolumeIcon } from '../..
 import { ChatVazioMiolo } from './ChatVazioScreen';
 import { updateTaskStatus } from '../../tasks/api';
 import { fetchConversationTurns } from '../../chat/api';
+import { parseThinking } from '../../chat/thinking';
 import type { ConversationTurn } from '../../chat/types';
 import type { SeraphineWS } from '../../ws/client';
 import type { ScreenProps } from './registry';
@@ -70,6 +73,8 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
   );
   const [bolhas, setBolhas] = useState<Bolha[]>([]);
   const [falha, setFalha] = useState<string | null>(null);
+  /** Mandou e ainda não voltou NADA daquele turno. Ver `enviarTexto`. */
+  const [aguardando, setAguardando] = useState(false);
   const [rascunho, setRascunho] = useState('');
   // Restauro do transcrito: só há o que esperar se já existe conversa gravada.
   const [restaurando, setRestaurando] = useState(() => !!localStorage.getItem(CONV_KEY));
@@ -149,6 +154,14 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
       // Uma união de envelopes é chata de estreitar campo a campo; aqui só os
       // poucos que a tela desenha importam, e cada leitura já vem checada.
       const msg = raw as unknown as Record<string, unknown>;
+
+      // Chegou QUALQUER coisa do servidor sobre este turno: a espera acabou.
+      // (`assistant_opener` também conta — é fala dela.)
+      if (msg.type === 'token' || msg.type === 'tool_result'
+        || msg.type === 'turn_end' || msg.type === 'error'
+        || msg.type === 'assistant_opener') {
+        setAguardando(false);
+      }
 
       if (msg.type === 'token') {
         const turnId = String(msg.turn_id ?? '');
@@ -242,6 +255,15 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
     if (!texto || !ws) return false;
     setBolhas((prev) => [...prev, { id: `voce-${prev.length}-${Date.now()}`, autor: 'voce', texto }]);
     setFalha(null);
+    // ENTRE O ENVIO E O PRIMEIRO TOKEN A TELA FICAVA IDÊNTICA A OCIOSA.
+    // Um turno que roda ferramentas leva DEZENAS de segundos (medido no
+    // aparelho: ~30s para clima + aviso na casa), e nesse intervalo não há
+    // bolha dela, nem cursor, nem nada. Quem está do outro lado conclui que a
+    // pergunta se perdeu e pergunta de novo — foi assim que a conversa real
+    // ficou com quatro falas do usuário seguidas, que pareciam turnos mortos e
+    // não eram: a resposta veio, junta, no fim. Nenhum estado de bolha cobre
+    // isto, porque a bolha dela só nasce com o primeiro token.
+    setAguardando(true);
     ws.send({
       type: 'user_message',
       conversation_id: conversaRef.current,
@@ -335,12 +357,49 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
               </div>
             );
           }
-          const texto = limpar(b.texto);
+          // O RACIOCÍNIO NÃO É RESPOSTA. Sem esta separação o `<think>…</think>`
+          // (e o `<|channel>thought` da Gemma) ia cru para a bolha: a pessoa lia
+          // "O usuário quer saber a previsão…" antes da frase de verdade, com as
+          // tags e tudo. O parser é o MESMO do desktop (`chat/thinking.ts`) —
+          // dois parsers da mesma string divergem, e esta casa já pagou por isso.
+          const { thinking, response, thinkingDone } = parseThinking(b.texto);
+          const texto = limpar(response);
+          const pensando = (thinking ?? '').trim();
+          // A BOLHA VAZIA É UM TURNO PERDIDO, e ela existe de verdade: um turno
+          // que só emite raciocínio (ou cuja resposta é só marcação que a
+          // `limpar` come) fecha sem UMA palavra na tela. Na conversa isso
+          // aparece como duas falas do usuário seguidas, sem resposta no meio —
+          // o defeito lido como "a Seraphine ignorou a pergunta". Enquanto
+          // streaming, vazio é espera; fechado, vazio é falha, e ela é dita.
+          const mudo = !texto
+            && !(b.tarefas ?? []).length
+            && !b.orcamento
+            && !b.erroFerramenta
+            && !b.streaming;
           return (
             <div key={b.id} className="ms-chat-linha ms-chat-linha--sera">
               <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
               <div className={`ms-chat-bolha ms-chat-bolha--sera${b.streaming ? ' ms-chat-bolha--vindo' : ''}`}>
-                {texto && <p className="ms-chat-bolha__texto">{texto}</p>}
+                {/* Enquanto o bloco não fechou, a bolha ficaria MUDA — o modelo
+                    está pensando e nada saiu ainda. O aviso é o que separa
+                    "pensando" de "travou"; fechado, ele some e dá lugar à
+                    resposta (o telefone não tem espaço para a gaveta de
+                    raciocínio que o desktop abre, e o handoff não a desenha). */}
+                {pensando && !thinkingDone && !texto && (
+                  <p className="ms-chat-bolha__pensando" role="status">pensando…</p>
+                )}
+                {texto && (
+                  <div className="ms-chat-bolha__texto">
+                    <Markdown remarkPlugins={[remarkGfm]} components={COMPONENTES_MD}>{texto}</Markdown>
+                  </div>
+                )}
+                {mudo && (
+                  <p className="ms-chat-bolha__mudo" role="status">
+                    {pensando
+                      ? 'pensei, mas não cheguei a responder — pergunte de novo.'
+                      : 'não veio resposta desta vez — pergunte de novo.'}
+                  </p>
+                )}
                 {(b.tarefas ?? []).map((t) => <CardDeTarefa key={t.id} tarefa={t} />)}
                 {b.orcamento && <BarraDeOrcamento orcamento={b.orcamento} />}
                 {b.erroFerramenta && <Erro>Uma ação falhou: {b.erroFerramenta}.</Erro>}
@@ -348,6 +407,19 @@ export function ChatScreen({ onOpen, onBack }: ScreenProps) {
             </div>
           );
         })}
+
+        {/* A ESPERA, desenhada. Não é bolha de verdade — não tem id nem texto e
+            some no primeiro sinal do turno —, mas ocupa o lugar dela para a
+            conversa nunca parecer parada. Sem isto, mandar e esperar 30s é
+            visualmente idêntico a não ter mandado nada. */}
+        {aguardando && (
+          <div className="ms-chat-linha ms-chat-linha--sera">
+            <span className="ms-chat-avatar" aria-hidden="true"><SparkleIcon size={13} /></span>
+            <div className="ms-chat-bolha ms-chat-bolha--sera">
+              <p className="ms-chat-bolha__pensando" role="status">pensando…</p>
+            </div>
+          </div>
+        )}
 
         {/* O vazio do handoff (tela 19), embutido: orb de 88px, "Sobre o que a
             gente conversa primeiro?" e as quatro sugestões. Tocar numa manda o
@@ -560,6 +632,31 @@ function orcamentoDe(meta: unknown): Orcamento | null {
 }
 
 const brl = (n: number) => `R$ ${Math.round(n).toLocaleString('pt-BR')}`;
+
+/* ── markdown da bolha ─────────────────────────────────────────────────────
+   A resposta SEMPRE foi markdown — o desktop a renderiza desde sempre. Aqui ela
+   ia como texto puro, então `**hoje e dos próximos dias**` chegava ao olho com
+   os asteriscos: a ênfase que o modelo pediu virava ruído.
+
+   SEM `rehype-raw`, e isto é a decisão, não um detalhe: o conteúdo vem do
+   MODELO. Com `rehype-raw`, uma `<div>` que ele escrevesse (por engano, por
+   eco de um payload, ou porque alguém pediu) viraria marcação de verdade dentro
+   da bolha. É o mesmo raciocínio da tela de Lição de teoria, e aqui pesa mais,
+   porque lá o markdown vem de um campo gerado uma vez e aqui vem de cada turno.
+   Sem o plugin, HTML cru sai como TEXTO — visível, inerte.
+
+   `remark-gfm` entra porque é o que o desktop usa e é o que o modelo escreve:
+   tabela, lista de tarefas, tachado. */
+const COMPONENTES_MD = {
+  // `p` com margem só ENTRE parágrafos: a bolha já tem o padding dela, e a
+  // margem de topo do primeiro empurraria o texto para longe do avatar.
+  p: ({ children }: { children?: ReactNode }) => <p className="ms-chat-md__p">{children}</p>,
+  // Link em `_blank`: navegar a WKWebView para fora levaria o app inteiro
+  // junto, e não há botão de voltar no telefone para trazê-lo de volta.
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+    <a className="ms-chat-md__link" href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+  ),
+};
 
 /** Os tokens carregam marcações que só o avatar do desktop consome
  *  (`[happy]`, `[anim:acenar]`) e comentários de dado estruturado que já

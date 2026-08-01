@@ -76,7 +76,7 @@ html[data-shell='phone'] .ms-mmemoria-campo {
   box-sizing: border-box; resize: vertical;
   background: var(--app, #0f0f14);
   border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 14px;
-  font-family: inherit; font-size: 16px; line-height: 1.6;
+  font-family: inherit; line-height: 1.6;
   color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-mmemoria-campo::placeholder { color: var(--faint, #5f5e6b); }
@@ -126,7 +126,7 @@ html[data-shell='phone'] .ms-mmemoria-sobreposto {
   width: 100%; height: 44px; transform: translateY(-50%);
   margin: 0; padding: 0; border: none;
   opacity: 0; -webkit-appearance: none; appearance: none;
-  font-family: inherit; font-size: 16px; /* < 16px faz o iOS dar zoom ao focar */
+  font-family: inherit; /* < 16px faz o iOS dar zoom ao focar */
   cursor: pointer;
 }
 

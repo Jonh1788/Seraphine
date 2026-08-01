@@ -7,6 +7,18 @@ html[data-shell='phone'] .ms-trilhas {
   flex-direction: column;
   min-height: 100%;
 }
+/* ESTA TELA VIVE NOS DOIS CONTÊINERES, e eles não dão o mesmo recuo.
+   Como ABA ela nasce em `.mshell__content`, que já paga `12px+safe 16px 16px`.
+   EMPURRADA (a lista de Trilhas abre o mapa DAQUELA trilha) ela nasce em
+   `.mpushed__body`, que só entrega as safe areas — e aí o cabeçalho encostava
+   nas duas bordas do telefone: o ‹ colado na esquerda e o streak cortado na
+   direita. É a mesma assimetria que a tela de TAREFAS já tinha; lá o `onBack`
+   distingue os dois casos, aqui NÃO — o mapa recebe `onBack` também na aba (o
+   handoff desenha o ‹ dele com tab bar e tudo). Então quem distingue é o
+   contêiner real, pela cascata: nenhuma pergunta ao DOM do lado do componente. */
+html[data-shell='phone'] .mpushed__body .ms-trilhas {
+  padding: 12px 16px 16px;
+}
 
 /* ── cabeçalho: ‹ + título + streak ── */
 html[data-shell='phone'] .ms-trilhas-topo {

@@ -75,7 +75,7 @@ html[data-shell='phone'] .ms-diario-campo {
   display: block; width: 100%; min-height: 52px; resize: none;
   background: var(--app, #0f0f14); border: 1px solid var(--border, rgba(255, 255, 255, .08));
   border-radius: 13px; padding: 12px 14px;
-  font-family: inherit; font-size: 13px; line-height: 1.5; color: var(--text, #ececef);
+  font-family: inherit; line-height: 1.5; color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-diario-campo::placeholder { color: var(--text-faint, #5f5e6b); }
 html[data-shell='phone'] .ms-diario-campo:focus { outline: none; border-color: var(--border-strong, rgba(255, 255, 255, .12)); }

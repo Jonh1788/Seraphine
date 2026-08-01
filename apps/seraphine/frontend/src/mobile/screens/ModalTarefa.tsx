@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as EventoDeTecla } from 'react';
 import { MobileSheet } from '../MobileSheet';
-import { updateTaskStatus } from '../../tasks/api';
-import type { Task, TaskStatus } from '../../tasks/types';
+import { deleteTask, updateTask } from '../../tasks/api';
+import type { Task } from '../../tasks/types';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from '../../finance/types';
 import { AlertTriangleIcon, BellIcon, BookmarkIcon, BriefcaseIcon, CalendarIcon, CheckIcon, ClockIcon, FlagIcon, TrashIcon, XIcon } from '../../icons/Icons';
 import './ModalTarefa.css';
@@ -40,8 +40,8 @@ export interface ModalTarefaProps {
    *  chamador já possui. */
   tarefa: Task;
   onFechar: () => void;
-  /** Persiste um patch. Injetável para o teste; o padrão fala com `tasks/api.ts`
-   *  (ver `salvarTarefaViaApi` e a ressalva registrada lá). */
+  /** Persiste um patch. Injetável para o teste; o padrão é `updateTask` da
+   *  camada, com a categoria que está NA TELA agora (ver o bloco acima). */
   salvar?: (id: number, patch: PatchTarefa) => Promise<void>;
   excluir?: (id: number) => Promise<void>;
   /** Cada PATCH que volta OK — quem abriu costuma querer relistar. */
@@ -50,30 +50,21 @@ export interface ModalTarefaProps {
 }
 
 // ── O QUE `tasks/api.ts` SUSTENTA, VERIFICADO NA FONTE ────────────────────────
-// `src/tasks/api.ts` exporta hoje `listTasks`, `updateTaskStatus` e
-// `createTask` — e só. Não há `updateTask(id, patch)` genérico nem `deleteTask`,
-// embora o backend aceite os dois (`TaskEditorModal.tsx:135,233` os chama com
-// `fetch` cru). Esta task não pode editar `tasks/api.ts` (arquivo de outro
-// dono), e telas não fazem `fetch`. Então os adaptadores abaixo fazem o que a
-// camada de api sustenta — `status`, via `updateTaskStatus`, que é um
-// `PATCH /tasks/:id` de verdade — e ERRAM ALTO no resto, em vez de fingir que
-// salvaram. O erro aparece no rodapé como "erro ao salvar", que é o
-// comportamento honesto enquanto a função não existir. O relatório da task pede
-// o `updateTask(id, patch)`/`deleteTask(id)` em `tasks/api.ts`; no dia em que
-// existirem, é este arquivo que encolhe.
-
-export async function salvarTarefaViaApi(id: number, patch: PatchTarefa): Promise<void> {
-  const semRota = Object.keys(patch).filter((campo) => campo !== 'status');
-  if (semRota.length) {
-    throw new Error(`tasks/api.ts nao expoe PATCH /tasks/:id para ${semRota.join(', ')} (falta updateTask)`);
-  }
-  if (patch.status === undefined) return;
-  await updateTaskStatus(id, patch.status as TaskStatus);
-}
-
-export async function excluirTarefaViaApi(id: number): Promise<void> {
-  throw new Error(`tasks/api.ts nao expoe DELETE /tasks/${id} (falta deleteTask)`);
-}
+// Este arquivo ENCOLHEU, como o comentário anterior previa. Enquanto a camada
+// só tinha `listTasks`/`updateTaskStatus`/`createTask`, os adaptadores daqui
+// erravam alto em tudo que não fosse `status` — o modal desenhava sete linhas
+// e salvava uma. A task de integração acrescentou `updateTask`/`deleteTask` a
+// `src/tasks/api.ts` (o backend sempre aceitou os dois: `TaskPatch` em
+// routes.py:103 e o `DELETE /tasks/{id}` em routes.py:393), e agora todas as
+// linhas gravam.
+//
+// O default do `salvar` nasce DENTRO do componente, e não como função de
+// módulo, por um motivo concreto: `updateTask` precisa da categoria ATUAL para
+// protegê-la (um patch com `tags` e sem `category` faz o backend rederivar a
+// categoria a partir das tags — ver o comentário longo em `tasks/api.ts`). A
+// categoria atual é estado deste componente, não do `tarefa` que chegou por
+// prop: quem já trocou a categoria aqui dentro tem na tela um valor mais novo
+// que o da lista que abriu o modal.
 
 // ── Valores exatos do spec ───────────────────────────────────────────────────
 
@@ -148,8 +139,8 @@ export function ModalTarefa({
   aberto,
   tarefa,
   onFechar,
-  salvar = salvarTarefaViaApi,
-  excluir = excluirTarefaViaApi,
+  salvar,
+  excluir = deleteTask,
   onSalvo,
   onExcluida,
 }: ModalTarefaProps): JSX.Element {
@@ -172,6 +163,21 @@ export function ModalTarefa({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voando = useRef<Promise<boolean> | null>(null);
   const vivo = useRef(true);
+
+  /** A categoria que está na tela AGORA, lida por `salvar` na hora do PATCH.
+   *  Em ref, não em dependência: se ela entrasse nas deps de `enviar`, trocar a
+   *  categoria recriaria `enviar` e `agendar` no meio de um debounce em curso. */
+  const categoriaAtual = useRef(categoria);
+  categoriaAtual.current = categoria;
+
+  /** O padrão do `salvar`: `updateTask` com a categoria viva, que é o que
+   *  impede o backend de rederivá-la a partir das tags do próprio patch. */
+  const gravar = useCallback(
+    (id: number, patch: PatchTarefa) =>
+      updateTask({ id, category: categoriaAtual.current || null }, patch),
+    [],
+  );
+  const persistir = salvar ?? gravar;
 
   useEffect(() => {
     vivo.current = true;
@@ -218,7 +224,7 @@ export function ModalTarefa({
       pendente.current = null;
       setEstado('salvando');
       try {
-        await salvar(tarefa.id, patch);
+        await persistir(tarefa.id, patch);
         if (vivo.current) {
           setEstado('salvo');
           onSalvo?.();
@@ -237,7 +243,7 @@ export function ModalTarefa({
       if (voando.current === promessa) voando.current = null;
     });
     return promessa;
-  }, [salvar, tarefa.id, onSalvo]);
+  }, [persistir, tarefa.id, onSalvo]);
 
   /** Acumula a mudança e reinicia o debounce de 800ms. */
   const agendar = useCallback((patch: PatchTarefa): void => {

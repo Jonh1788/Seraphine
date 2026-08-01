@@ -91,6 +91,25 @@ export function ModalMemoria({ aberto, onFechar, criar = createFact, onCriada }:
   const [confianca, setConfianca] = useState(CONFIANCAS[0].valor);
   const [estado, setEstado] = useState<Estado>('ocioso');
 
+  // ABRIU: O FORMULÁRIO RECOMEÇA — mesmo ajuste do irmão `ModalEvento`, e pela
+  // mesma razão. Quem abre o modal costuma mantê-lo montado entre uma abertura
+  // e outra (é o que a tela de Memória faz), e sem isto a "nova lembrança"
+  // seguinte nasceria com o texto da anterior dentro — o texto que ACABOU de
+  // ser gravado, agora oferecido para ser gravado de novo.
+  //
+  // Na TRANSIÇÃO fechado→aberto e durante o RENDER, não num `useEffect`: o
+  // efeito só correria depois da primeira pintura e o sheet subiria por um
+  // quadro com o conteúdo anterior à mostra.
+  const [abertoAntes, setAbertoAntes] = useState(aberto);
+  if (aberto !== abertoAntes) {
+    setAbertoAntes(aberto);
+    if (aberto) {
+      setTexto('');
+      setConfianca(CONFIANCAS[0].valor);
+      setEstado('ocioso');
+    }
+  }
+
   const limpo = texto.trim();
   const degrau = CONFIANCAS.find((c) => c.valor === confianca) ?? CONFIANCAS[0];
 

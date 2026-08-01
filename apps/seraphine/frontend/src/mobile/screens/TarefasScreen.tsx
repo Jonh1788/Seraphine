@@ -4,6 +4,7 @@ import { listTasks, updateTaskStatus, createTask } from '../../tasks/api';
 import type { Task, TaskStatus } from '../../tasks/types';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from '../../finance/types';
 import { ArrowLeftIcon, CheckIcon, PlusIcon, ChevronRightIcon } from '../../icons/Icons';
+import { ModalTarefa } from './ModalTarefa';
 import './TarefasScreen.css';
 
 /* Tela TAREFAS do handoff mobile (linha 159 de `Seraphine Mobile.dc.html`).
@@ -152,7 +153,14 @@ export function TarefasScreen({ onBack }: ScreenProps) {
    *  caixa e a tarefa desaparecia da tela. */
   const [otimista, setOtimista] = useState<Record<number, { status: TaskStatus; em: number }>>({});
   const [falha, setFalha] = useState<string | null>(null);
-  const [expandida, setExpandida] = useState<number | null>(null);
+  /** A tarefa aberta no modal de edição, ou `null` com o modal fechado. É a
+   *  LINHA que a lista tinha em mãos: o modal não recarrega nada, então abrir
+   *  não pisca esqueleto por dado que esta tela já possui. */
+  const [editando, setEditando] = useState<Task | null>(null);
+  /** O modal salva sozinho, campo a campo. Relistar a cada PATCH seria um GET
+   *  por tecla digitada; então marca-se que houve escrita e a lista se refaz
+   *  UMA vez, quando o modal fecha — que é quando a lista volta a ser vista. */
+  const [sujo, setSujo] = useState(false);
   const [compondo, setCompondo] = useState(false);
   const [titulo, setTitulo] = useState('');
   const [salvando, setSalvando] = useState(false);
@@ -344,8 +352,7 @@ export function TarefasScreen({ onBack }: ScreenProps) {
               agora={agora}
               hoje={hoje}
               amanha={amanha}
-              expandida={expandida === t.id}
-              onExpandir={() => setExpandida((id) => (id === t.id ? null : t.id))}
+              onAbrir={() => setEditando(t)}
               onConcluir={() => concluir(t, 'completed')}
             />
           ))
@@ -392,20 +399,44 @@ export function TarefasScreen({ onBack }: ScreenProps) {
           <li className="ms-tarefas__estado"><p className="ms-tarefas-vazio">Você ainda não concluiu nenhuma tarefa.</p></li>
         )}
       </ul>
+
+      {/* Montado SÓ com uma tarefa escolhida: `ModalTarefa` exige `tarefa`, e
+          mantê-lo montado com um objeto de mentira faria o sheet fechado
+          carregar estado de uma tarefa que ninguém abriu. Fechar recarrega a
+          lista uma única vez, e só se algo foi mesmo gravado. */}
+      {editando && (
+        <ModalTarefa
+          aberto
+          tarefa={editando}
+          onFechar={() => {
+            setEditando(null);
+            if (sujo) {
+              setSujo(false);
+              setRecarga((r) => r + 1);
+            }
+          }}
+          onSalvo={() => setSujo(true)}
+          onExcluida={() => {
+            // A exclusão não espera o fechamento: a linha some da lista, e é a
+            // única mudança que o usuário não pode desfazer daqui.
+            setSujo(false);
+            setRecarga((r) => r + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /** Uma tarefa aberta. A primeira da lista é a "em foco": borda accent, anel e
  *  a barra do prazo — é o tratamento que o handoff dá ao item do momento. */
-function Linha({ tarefa, foco, agora, hoje, amanha, expandida, onExpandir, onConcluir }: {
+function Linha({ tarefa, foco, agora, hoje, amanha, onAbrir, onConcluir }: {
   tarefa: Task;
   foco: boolean;
   agora: number;
   hoje: string;
   amanha: string;
-  expandida: boolean;
-  onExpandir: () => void;
+  onAbrir: () => void;
   onConcluir: () => void;
 }) {
   const chip = chipDe(tarefa);
@@ -423,12 +454,16 @@ function Linha({ tarefa, foco, agora, hoje, amanha, expandida, onExpandir, onCon
       >
         <CheckIcon size={13} />
       </button>
+      {/* Tocar na linha ABRE O EDITOR (o sheet do handoff), em vez de expandir
+          a descrição no lugar. O modal mostra a mesma descrição e mais sete
+          campos que gravam de verdade — a expansão inline era a versão pobre
+          dele, de quando `tasks/api.ts` só sabia mudar o status. */}
       <button
         type="button"
         className="ms-tarefas-row__body"
-        aria-label={`Detalhes de ${tarefa.title}`}
-        aria-expanded={expandida}
-        onClick={onExpandir}
+        aria-label={`Editar ${tarefa.title}`}
+        aria-haspopup="dialog"
+        onClick={onAbrir}
       >
         <span className="ms-tarefas-row__texto">
           <span className={`ms-tarefas-row__title${foco ? ' ms-tarefas-row__title--foco' : ''}`}>{tarefa.title}</span>
@@ -464,14 +499,9 @@ function Linha({ tarefa, foco, agora, hoje, amanha, expandida, onExpandir, onCon
               <span className="ms-tarefas-foco__label">em foco</span>
             </span>
           )}
-          {expandida && (
-            <span className="ms-tarefas-row__desc">
-              {tarefa.description?.trim() || 'Sem descrição — só o título.'}
-            </span>
-          )}
         </span>
         {!foco && (
-          <span className={`ms-tarefas-row__chevron${expandida ? ' ms-tarefas-row__chevron--aberta' : ''}`} aria-hidden="true">
+          <span className="ms-tarefas-row__chevron" aria-hidden="true">
             <ChevronRightIcon size={16} />
           </span>
         )}

@@ -31,8 +31,32 @@ export interface TelemetryBackendRow {
   calls: number;
 }
 
+/**
+ * O teto mensal, como `GET /telemetry/summary` o entrega.
+ *
+ * `null` no envelope = NUNCA CONFIGURADO, que é diferente de "zero" — o zero é
+ * um teto real (e `over_budget` fica `true` com qualquer gasto). Por isso
+ * `pct_used` também é anulável: com teto zero a divisão não existe, e quem
+ * responde "estourou?" é `over_budget`, não a porcentagem.
+ *
+ * ARMADILHA DE JANELA: `spent_usd` é DO MÊS e ignora o `?days=` de propósito —
+ * o teto é mensal. Ele vai discordar dos agregados de 7/30 dias exibidos ao
+ * lado, e a tela precisa rotular os dois ("este mês" vs "últimos N dias") ou
+ * mostra dois totais contraditórios e parece quebrada.
+ */
+export interface TelemetryBudget {
+  monthly_usd: number;
+  spent_usd: number;
+  days_left: number;
+  projected_usd: number;
+  pct_used: number | null;
+  over_budget: boolean;
+}
+
 export interface TelemetrySummary {
   days: number;
+  /** Ausente nos backends antigos; `null` quando nunca foi configurado. */
+  budget?: TelemetryBudget | null;
   total: TelemetryTotal;
   by_model: TelemetryModelRow[];
   by_feature: TelemetryFeatureRow[];

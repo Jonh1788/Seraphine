@@ -66,7 +66,7 @@ html[data-shell='phone'] .ms-mevento-titulo {
   padding: 0 2px 14px;
   border: none; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08));
   outline: none; background: none;
-  font-family: inherit; font-size: 17px; font-weight: 600; line-height: 30px;
+  font-family: inherit; --ms-campo: 17px; font-weight: 600; line-height: 30px;
   color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-mevento-titulo::placeholder { color: var(--faint, #5f5e6b); }
@@ -128,7 +128,7 @@ html[data-shell='phone'] .ms-mevento-sobreposto {
   width: 100%; height: 44px; transform: translateY(-50%);
   margin: 0; padding: 0; border: none;
   opacity: 0; -webkit-appearance: none; appearance: none;
-  font-family: inherit; font-size: 16px; /* < 16px faz o iOS dar zoom ao focar */
+  font-family: inherit; /* < 16px faz o iOS dar zoom ao focar */
   cursor: pointer;
 }
 
@@ -165,7 +165,7 @@ html[data-shell='phone'] .ms-mevento-toggle--ligado .ms-mevento-botao {
 html[data-shell='phone'] .ms-mevento-local {
   flex: 1; min-width: 0; min-height: 44px; margin: -9px 0;
   padding: 0; border: none; outline: none; background: none;
-  font-family: inherit; font-size: 16px; text-align: right;
+  font-family: inherit; text-align: right;
   color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-mevento-local::placeholder { color: var(--faint, #5f5e6b); }

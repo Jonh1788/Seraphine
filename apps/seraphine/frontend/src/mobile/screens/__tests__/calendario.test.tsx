@@ -4,8 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../../calendar/api', () => ({
   fetchAggregate: vi.fn(),
   fetchTasksByRange: vi.fn(),
+  // O "+" desta tela passou a abrir o `ModalEvento`, que salva por `criarEvento`
+  // e reconhece `ErroCriarEvento` para decidir se "tentar de novo" faz sentido.
+  // Os dois precisam existir no mock ou o modal quebra no render.
+  criarEvento: vi.fn(),
+  ErroCriarEvento: class ErroCriarEvento extends Error {},
 }));
-import { fetchAggregate, fetchTasksByRange } from '../../../calendar/api';
+import { fetchAggregate, fetchTasksByRange, criarEvento } from '../../../calendar/api';
 import type { AggregateDay, Task } from '../../../calendar/types';
 import { CalendarioScreen } from '../CalendarioScreen';
 
@@ -59,6 +64,7 @@ describe('CalendarioScreen', () => {
   beforeEach(() => {
     vi.mocked(fetchAggregate).mockReset();
     vi.mocked(fetchTasksByRange).mockReset();
+    vi.mocked(criarEvento).mockReset().mockResolvedValue(undefined as never);
   });
 
   it('renderiza os itens do dia selecionado', async () => {
@@ -166,5 +172,63 @@ describe('CalendarioScreen', () => {
 
     fireEvent.click(screen.getByLabelText('Voltar'));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  /* O "+" — o buraco que a integração fechou.
+     `ModalEvento` estava pronto e sem quem o montasse. O "+" desta tela abria a
+     LISTA DE TAREFAS, porque criar evento não tinha rota: existia só como
+     ferramenta do modelo. Com `POST /google/calendar/events` de pé, o controle
+     passou a fazer o que a tela em que ele está promete. */
+  describe('novo evento', () => {
+    const abrir = async () => {
+      comDado();
+      const onOpen = vi.fn();
+      render(<CalendarioScreen onOpen={onOpen} />);
+      await waitFor(() => expect(screen.getByText('Call com o time')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Novo evento' }));
+      return { dialogo: await screen.findByRole('dialog'), onOpen };
+    };
+
+    it('abre o sheet de novo evento em vez de navegar para outra tela', async () => {
+      const { dialogo, onOpen } = await abrir();
+      expect(dialogo.getAttribute('aria-label')).toBe('Novo evento');
+      // A regressão que isto tranca: o "+" voltar a empurrar `tarefas-view`.
+      expect(onOpen).not.toHaveBeenCalled();
+    });
+
+    it('sem tocar no "+", não há sheet montado', async () => {
+      comDado();
+      render(<CalendarioScreen />);
+      await waitFor(() => expect(screen.getByText('Call com o time')).toBeTruthy());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('nasce no DIA SELECIONADO, e não em hoje', async () => {
+      comDado();
+      render(<CalendarioScreen />);
+      await waitFor(() => expect(screen.getByText('Call com o time')).toBeTruthy());
+      // escolhe outro dia na grade antes de abrir
+      fireEvent.click(screen.getByLabelText(new RegExp(`^${OUTRO_DIA} de `)));
+      fireEvent.click(screen.getByRole('button', { name: 'Novo evento' }));
+
+      await screen.findByRole('dialog');
+      expect((screen.getByLabelText('Data de início') as HTMLInputElement).value)
+        .toBe(iso(OUTRO_DIA));
+    });
+
+    it('criado, o mês inteiro se refaz', async () => {
+      await abrir();
+      expect(fetchAggregate).toHaveBeenCalledTimes(1);
+
+      fireEvent.change(screen.getByLabelText('Título do evento'), {
+        target: { value: 'Dentista' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+      await waitFor(() => expect(criarEvento).toHaveBeenCalledTimes(1));
+      // O mês, não só o dia: o evento novo pode cair em qualquer célula.
+      await waitFor(() => expect(fetchAggregate).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
   });
 });

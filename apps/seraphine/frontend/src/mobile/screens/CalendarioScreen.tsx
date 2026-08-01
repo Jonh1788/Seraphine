@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { fetchAggregate, fetchTasksByRange } from '../../calendar/api';
 import type { AggregateDay, Task } from '../../calendar/types';
 import { ArrowLeftIcon, PlusIcon } from '../../icons/Icons';
+import { ModalEvento } from './ModalEvento';
 import type { ScreenProps } from './registry';
 import './CalendarioScreen.css';
 
@@ -96,7 +97,7 @@ function itensDoDia(dia: AggregateDay | undefined, tarefas: Map<number, Task>): 
   return itens;
 }
 
-export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
+export function CalendarioScreen({ onBack }: ScreenProps) {
   // O mês exibido é o corrente; `hoje` é fixado no primeiro render para o
   // destaque não escorregar se a tela ficar aberta pela virada do dia.
   const hoje = useMemo(() => new Date(), []);
@@ -112,6 +113,8 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [sel, setSel] = useState(isoHoje);
+  const [criando, setCriando] = useState(false);
+  const [recarga, setRecarga] = useState(0);
 
   useEffect(() => {
     let vivo = true;
@@ -128,7 +131,7 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
         setCarregando(false);
       });
     return () => { vivo = false; };
-  }, [inicio, fim]);
+  }, [inicio, fim, recarga]);
 
   // dia (YYYY-MM-DD) → linhas daquele dia. Uma passada só serve grade e lista.
   const porDia = useMemo(() => {
@@ -171,11 +174,18 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
                 {eventosHoje ? `${plural(eventosHoje, 'evento', 'eventos')} hoje` : 'nada marcado hoje'}
               </p>}
         </div>
+        {/* O "+" desta tela cria EVENTO, não tarefa. Ele apontava para a lista
+            de tarefas porque a criação de evento não tinha rota: existia só
+            como ferramenta do modelo. Com `POST /google/calendar/events` de pé
+            (e `criarEvento` na camada), o controle passou a fazer o que a tela
+            em que ele está sugere. A porta para `tarefas-view` não se perdeu:
+            o Hoje continua abrindo a lista de tarefas por dois caminhos. */}
         <button
           type="button"
           className="ms-calendario-novo"
-          aria-label="Nova tarefa"
-          onClick={() => onOpen?.({ key: 'tarefas-view', title: 'Tarefas' })}
+          aria-label="Novo evento"
+          aria-haspopup="dialog"
+          onClick={() => setCriando(true)}
         >
           <PlusIcon size={18} />
         </button>
@@ -252,6 +262,20 @@ export function CalendarioScreen({ onBack, onOpen }: ScreenProps) {
           ))
           : <Vazio>Nada marcado neste dia — nenhum evento, tarefa ou registro.</Vazio>}
       </section>
+
+      {/* `dia={sel}` e não "hoje": o modal nasce no dia que a grade está
+          mostrando, senão marcar algo para dia 20 exigiria escolher a data
+          duas vezes. Criado, o mês inteiro se refaz — o evento novo pode cair
+          em qualquer célula, não só na selecionada. */}
+      <ModalEvento
+        aberto={criando}
+        dia={sel}
+        onFechar={() => setCriando(false)}
+        onCriado={() => {
+          setCriando(false);
+          setRecarga((r) => r + 1);
+        }}
+      />
     </div>
   );
 }

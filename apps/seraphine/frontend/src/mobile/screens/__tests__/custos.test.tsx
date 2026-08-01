@@ -270,7 +270,10 @@ describe('CustosScreen', () => {
     comDado({ budget: null });
     const { container } = render(<CustosScreen />);
 
-    await waitFor(() => expect(screen.getByText(/ainda não definiu um teto mensal/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nenhum teto mensal definido/i)).toBeTruthy());
+    // e NÃO manda a pessoa a um lugar que não oferece o controle: a tela de
+    // Configurações não define teto nenhum.
+    expect(screen.queryByText(/em Configurações/i)).toBeNull();
     expect(q(container, '.ms-custos-teto__trilho')).toBeNull();
     expect(q(container, '.ms-custos-teto__fill')).toBeNull();
     expect(screen.queryByText('$0,00')).toBeNull();
@@ -289,7 +292,7 @@ describe('CustosScreen', () => {
     const { container } = render(<CustosScreen />);
 
     await waitFor(() => expect(screen.getByText('de $0,00')).toBeTruthy());
-    expect(screen.queryByText(/ainda não definiu um teto mensal/i)).toBeNull();
+    expect(screen.queryByText(/nenhum teto mensal definido/i)).toBeNull();
     expect(screen.getByText('$11,60')).toBeTruthy();
     expect(screen.getByText(/teto estourado/i)).toBeTruthy();
     // e desenha a barra, que o convite não tem: é um teto, não uma ausência

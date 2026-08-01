@@ -85,7 +85,7 @@ html[data-shell='phone'] .ms-trilhaslista-campo {
   border: 1px solid var(--border, rgba(255, 255, 255, .08));
   border-radius: 12px;
   padding: 11px 13px;
-  font: inherit; font-size: 14px;
+  font: inherit;
   color: var(--text, #ececef);
 }
 html[data-shell='phone'] .ms-trilhaslista-campo::placeholder { color: var(--text-faint, #5f5e6b); }

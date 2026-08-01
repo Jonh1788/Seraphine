@@ -125,9 +125,13 @@ describe('ModalMemoria — o que o handoff desenha', () => {
   it('o campo livre tem os 96px de altura mínima do handoff', () => {
     abrir();
     expect(declarado(campo(), 'min-height')).toBe('96px');
-    // Abaixo de 16px o iOS dá zoom ao focar — numa tela cujo único trabalho é
-    // digitar, isso empurraria o painel inteiro para fora antes da 1ª palavra.
-    expect(px(campo(), 'font-size')).toBeGreaterThanOrEqual(16);
+    // A fonte NÃO é afirmada aqui. O piso de 16px (abaixo disso o iOS dá zoom
+    // ao focar) deixou de ser coisa de cada tela e virou uma regra só, em
+    // `mobile/obsidian.css`, presa ao tipo do controle — quem a prende é
+    // `mobile/__tests__/zoom-de-foco.test.tsx`, inclusive exigindo que NENHUMA
+    // tela declare `font-size` num campo. Repetir a asserção aqui, contra um
+    // arquivo que não declara mais nada, media o vazio e dava 0.
+    expect(declarado(campo(), 'font-size')).toBe('');
   });
 
   it('Alta, Média e Baixa têm ponto verde, âmbar e vermelho', () => {
@@ -432,7 +436,8 @@ describe('ModalMemoria — moldura e alvo de toque', () => {
     const seletor = screen.getByLabelText('Confiança');
     expect(declarado(seletor, 'position')).toBe('absolute');
     expect(px(seletor, 'height')).toBe(44);
-    // < 16px faz o iOS dar zoom ao focar o controle
-    expect(px(seletor, 'font-size')).toBeGreaterThanOrEqual(16);
+    // A fonte do controle é do piso compartilhado, não desta tela — ver
+    // `zoom-de-foco.test.tsx`.
+    expect(declarado(seletor, 'font-size')).toBe('');
   });
 });
