@@ -256,6 +256,9 @@ async def test_resolve_chat_llm_repassa_o_sink_de_telemetria(tmp_path):
             "model": "google/gemini-2.5-flash",
             "input_tokens": 11,
             "output_tokens": 22,
+            # Cache de prompt: zero quando o usage não traz os contadores.
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
         }
     ]
 

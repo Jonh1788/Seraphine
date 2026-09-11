@@ -8,11 +8,22 @@
  *   - getConfig()     -> whether an OpenRouter key is set (+ fanout/synth for PUT)
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { getChatModel, getConfig, listModels, putChatModel, putConfig } from '../research/api';
-import type { DeepsearchConfig, ModelOption } from '../research/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  getChatEffort,
+  getChatModel,
+  getConfig,
+  listModels,
+  putChatEffort,
+  putChatModel,
+  putConfig,
+} from '../research/api';
+import type { DeepsearchConfig, Effort, ModelOption } from '../research/types';
+import { EffortPicker, ModelPicker } from '../ui';
+import type { ModelPickerGroup } from '../ui';
 
 const CLIPROXY_VALUE = 'cliproxy';
+const CLIPROXY_LABEL = 'Padrão — cliproxy / Claude';
 
 export function ChatModelPanel(): JSX.Element {
   const [chatModel, setChatModel] = useState<string>(CLIPROXY_VALUE);
@@ -27,12 +38,24 @@ export function ChatModelPanel(): JSX.Element {
   const [orKey, setOrKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
 
+  // Esforço de raciocínio (kv separado do modelo, mesma tela).
+  const [effort, setEffort] = useState<string>('');
+  const [savingEffort, setSavingEffort] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [cm, mdl, cfg] = await Promise.all([getChatModel(), listModels(), getConfig()]);
+      const [cm, mdl, cfg, ef] = await Promise.all([
+        getChatModel(),
+        listModels(),
+        getConfig(),
+        // Secundário: se só o esforço falhar, a tela continua servindo o
+        // seletor de modelo em vez de virar um erro inteiro.
+        getChatEffort().catch(() => ({ effort: '' })),
+      ]);
       setChatModel(cm.chat_model || CLIPROXY_VALUE);
       setOpenrouterModels(mdl.openrouter);
       setConfig(cfg);
+      setEffort(ef.effort || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -86,43 +109,80 @@ export function ChatModelPanel(): JSX.Element {
     }
   }, [config, orKey]);
 
-  // If the saved chat_model is an openrouter id not present in the catalogue,
-  // still render it so the <select> keeps it selected.
-  const currentIsKnown =
-    chatModel === CLIPROXY_VALUE ||
-    // `m.id` JÁ vem prefixado de /deepsearch/models ("openrouter:<id>").
-    // Prefixar de novo gravava "openrouter:openrouter:<id>" e a OpenRouter
-    // devolvia 400 "is not a valid model ID".
-    openrouterModels.some((m) => m.id === chatModel);
+  // `m.id` JÁ vem prefixado de /deepsearch/models ("openrouter:<id>"), e é ele
+  // que vai para o ModelPicker e volta VERBATIM no onChange. Prefixar de novo
+  // gravava "openrouter:openrouter:<id>" e a OpenRouter devolvia 400 "is not a
+  // valid model ID" — em toda conversa, não só nesta tela.
+  const grupos = useMemo<ModelPickerGroup[]>(
+    () => [
+      { label: 'Padrão', options: [{ id: CLIPROXY_VALUE, name: CLIPROXY_LABEL }] },
+      { label: 'OpenRouter', options: openrouterModels },
+    ],
+    [openrouterModels],
+  );
 
   const keySet = config?.openrouter_key_set ?? false;
+
+  /* Esforço só faz efeito em modelo do OpenRouter que anuncia `reasoning`. O
+     Padrão (cliproxy) roteia por outro caminho, que não passa por este ajuste
+     — dizer isso é melhor que deixar o controle ligado sem efeito. */
+  const modeloAtual = openrouterModels.find((m) => m.id === chatModel);
+  const suportaEsforco = Boolean(modeloAtual?.reasoning);
+  const motivoNaoSuportado =
+    chatModel === CLIPROXY_VALUE
+      ? 'O Padrão (cliproxy / Claude) não passa por este ajuste. Escolha um modelo OpenRouter que aceite raciocínio.'
+      : modeloAtual
+        ? `${modeloAtual.name} não aceita esforço de raciocínio, então o ajuste não teria efeito.`
+        : 'Não sei se este modelo aceita raciocínio — ele não está no catálogo que a OpenRouter devolveu agora.';
+
+  const handleEffort = useCallback(async (value: Effort) => {
+    setSavingEffort(true);
+    setError(null);
+    const anterior = effort;
+    setEffort(value); // otimista
+    try {
+      const saved = await putChatEffort(value);
+      setEffort(saved.effort ?? value);
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1800);
+    } catch (err) {
+      // Devolve: deixar o otimismo de pé faria a tela afirmar um esforço que
+      // o backend não tem gravado — e é ele que monta a requisição.
+      setEffort(anterior);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingEffort(false);
+    }
+  }, [effort]);
 
   return (
     <section className="settings-drawer__section">
       <h3 className="settings-drawer__section-title">Modelo do chat</h3>
 
-      <label className="settings-notif__row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+      <div className="settings-notif__row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
         <span className="settings-notif__label">Modelo</span>
-        <select
-          className="settings-notif__input"
-          style={{ width: '100%' }}
+        <ModelPicker
+          label="Modelo do chat"
           value={chatModel}
-          onChange={(e) => void handleChange(e.target.value)}
+          groups={grupos}
           disabled={!loaded || saving}
-        >
-          <option value={CLIPROXY_VALUE}>Padrao &mdash; cliproxy / Claude</option>
-          {openrouterModels.length > 0 && (
-            <optgroup label="OpenRouter">
-              {openrouterModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {!currentIsKnown && <option value={chatModel}>{chatModel}</option>}
-        </select>
-      </label>
+          onChange={(id) => void handleChange(id)}
+        />
+      </div>
+
+      <div
+        className="settings-notif__row"
+        style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 10 }}
+      >
+        <span className="settings-notif__label">Esforço de raciocínio</span>
+        <EffortPicker
+          value={effort}
+          onChange={(e) => void handleEffort(e)}
+          suportado={suportaEsforco}
+          disabled={!loaded || savingEffort}
+          motivoNaoSuportado={motivoNaoSuportado}
+        />
+      </div>
 
       {saving && <p className="settings-drawer__status">Salvando...</p>}
       {savedFlash && !saving && (
@@ -164,7 +224,8 @@ export function ChatModelPanel(): JSX.Element {
       {error && <p className="settings-drawer__status settings-drawer__status--err">{error}</p>}
 
       <p className="settings-drawer__hint">
-        Selecionar um modelo OpenRouter roteia o chat por ele (precisa de creditos na conta
+        A lista traz o catalogo inteiro da OpenRouter &mdash; digite no campo para filtrar por nome
+        ou id. Selecionar um modelo OpenRouter roteia o chat por ele (precisa de creditos na conta
         OpenRouter). Padrao usa o Claude via cliproxy.
       </p>
     </section>

@@ -297,18 +297,17 @@ async def _build_finance_block(
         return {"income": 0, "expenses": 0, "balance": 0}
 
     try:
-        # list_entries filters by month/year only; pull the covering
-        # months and filter in-memory.
-        months: set[tuple[int, int]] = {
-            (monday.year, monday.month),
-            (sunday.year, sunday.month),
-        }
-        entries: list[Any] = []
-        for y, m in months:
-            batch = await finance_svc.list_entries(
-                month=m, year=y, limit=1000,
-            )
-            entries.extend(batch)
+        # Sem filtro de mes, de proposito. `list_entries(month=..., year=...)`
+        # filtra pelo MES DE CAIXA — para uma compra no cartao, o mes em que a
+        # fatura vence ou e paga. O recorte daqui embaixo e por `e.date`, a
+        # data da COMPRA. As duas perguntas sao diferentes: pedir o mes da
+        # semana e depois filtrar por `e.date` descarta toda compra de cartao,
+        # que cai no mes da fatura e nunca na semana em que foi feita — nem
+        # depois do pagamento, quando o mes de caixa anda para a frente e a
+        # data da compra fica para tras. O relatorio semanal e sobre o que foi
+        # gasto NAQUELA semana, entao a data da compra e a referencia; buscar
+        # sem mes e recortar aqui e o jeito de as duas pontas concordarem.
+        entries: list[Any] = await finance_svc.list_entries(limit=1000)
     except Exception:
         logger.exception("weekly: list_entries failed")
         return {"income": 0, "expenses": 0, "balance": 0}

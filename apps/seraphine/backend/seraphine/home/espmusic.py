@@ -89,6 +89,42 @@ class EspMusicAdapter:
         if room:
             await self.select_room(room)
 
+    async def _alvo(self, room: str | None, *, mirar: bool) -> str | None:
+        """Resolve o cômodo em UMA ida ao servidor, e decide como alcançá-lo.
+
+        Devolve o nome da caixa quando dá para MIRAR (o ajuste vai com
+        `device` no corpo e a música não sai do lugar), ou ``None`` depois de
+        já ter feito o `/api/device` — que é mover o áudio, e é o certo para
+        as ações de transporte e para servidor antigo.
+
+        Uma ida só importa aqui mais que em código normal: cada requisição
+        atravessa VPS → WebSocket → cliente Tauri → LAN. Buscar o status duas
+        vezes para responder "aumenta o volume" dobra essa viagem inteira.
+
+        `mirar=False`, ou servidor sem `device_scoped_control`, cai no
+        `/api/device` de sempre. A marca existe porque o EspMusic do PC é
+        atualizado à mão: sem checá-la, mandar `device` seria PIOR que o
+        comportamento antigo — o FastAPI ignora campo desconhecido, então o
+        ajuste iria para a caixa errada em silêncio.
+        """
+        if not room:
+            return None
+        snap = await self._snapshot()
+        wanted = f"{DEVICE_PREFIX}{slugify_room(room)}"
+        devices = list(snap.get("devices") or [])
+        # Validado aqui, antes de qualquer escrita: "aumenta o volume na
+        # garagem" merece a frase que lista as caixas que existem, e não um
+        # 404 cru do EspMusic.
+        if wanted not in devices:
+            known = ", ".join(_label(d) for d in devices) or "nenhuma"
+            raise UnknownRoom(
+                f"não conheço o cômodo '{room}'. Caixas disponíveis: {known}"
+            )
+        if mirar and "device_scoped_control" in (snap.get("features") or []):
+            return wanted
+        await self._t.request("POST", "/api/device", json_body={"name": wanted})
+        return None
+
     # ------------------------------------------------------------ tocar
 
     async def play(
@@ -111,17 +147,29 @@ class EspMusicAdapter:
 
     # ---------------------------------------------------------- controle
 
+    # Ações que mexem em AJUSTE DE CAIXA, não no que está tocando. São as que
+    # o EspMusic sabe mirar por `device` sem religar o áudio.
+    _AJUSTE = frozenset(
+        {"mute", "volume_up", "volume_down", "volume_set"}
+    )
+
     async def control(
         self, action: str, *, value: float | None = None, room: str | None = None
     ) -> str:
-        await self._maybe_select(room)
-        # `room` não é um filtro: `/api/device` religa o áudio na caixa
-        # nova (core.py:743, `set_device` → `rewire`). "aumenta o volume
-        # do quarto" com música na sala move a música junto, porque o
-        # EspMusic toca em uma caixa por vez e o volume é guardado por
-        # caixa. A frase de volta precisa dizer onde foi, senão o som
-        # troca de cômodo em silêncio.
+        # Duas rotas, e a diferença é o que a ação faz:
+        #
+        # AJUSTE DE CAIXA (volume, mudo) vai mirado: `device` no corpo, o
+        # EspMusic grava só naquela caixa e A MÚSICA NÃO SAI DO LUGAR. Antes o
+        # único caminho era `/api/device`, que chama `rewire` — "aumenta o
+        # volume do quarto" com música na sala levava a música junto.
+        #
+        # TRANSPORTE (pause, next, stop, rádio) age sobre o que está tocando, e
+        # só existe um pipeline: pedir isso noutro cômodo significa mesmo mover
+        # o áudio, e aí `/api/device` é o certo. A frase de volta diz onde foi.
+        device = await self._alvo(room, mirar=action in self._AJUSTE)
+
         where = f" na {room}" if room else ""
+        alvo: dict[str, Any] = {"device": device} if device else {}
 
         if action == "pause":
             await self._t.request("POST", "/api/pause", json_body={"on": True})
@@ -141,17 +189,17 @@ class EspMusicAdapter:
             # "set" — mas a resposta já traz o estado resultante, então
             # devolvemos ele em vez de "alternei", e quem leu a frase
             # (usuário ou LLM) enxerga o efeito no mesmo turno.
-            data = await self._t.request("POST", "/api/mute", json_body={})
+            data = await self._t.request("POST", "/api/mute", json_body=alvo)
             state = "mudo ligado" if data.get("muted") else "mudo desligado"
             return f"{state}{where}"
         if action == "volume_up":
             await self._t.request(
-                "POST", "/api/volume", json_body={"delta_db": VOLUME_STEP_DB}
+                "POST", "/api/volume", json_body={"delta_db": VOLUME_STEP_DB, **alvo}
             )
             return f"aumentei o volume{where}"
         if action == "volume_down":
             await self._t.request(
-                "POST", "/api/volume", json_body={"delta_db": -VOLUME_STEP_DB}
+                "POST", "/api/volume", json_body={"delta_db": -VOLUME_STEP_DB, **alvo}
             )
             return f"abaixei o volume{where}"
         if action == "volume_set":
@@ -161,7 +209,7 @@ class EspMusicAdapter:
             # vai em dB e o que a Seraphine fala.
             pct = clamp_pct(value)
             await self._t.request(
-                "POST", "/api/volume", json_body={"db": pct_to_db(pct)}
+                "POST", "/api/volume", json_body={"db": pct_to_db(pct), **alvo}
             )
             return f"volume em {round(pct)}%{where}"
         if action in ("radio_on", "radio_off"):

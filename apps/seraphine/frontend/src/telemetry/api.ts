@@ -4,19 +4,53 @@ import { API_BASE } from '../api';
 /*  Cost telemetry — GET /telemetry/summary                            */
 /* ------------------------------------------------------------------ */
 
-export interface TelemetryTotal {
+/* Cache de prompt (OpenRouter).
+ *
+ * Duas colunas SEPARADAS de propósito: escrever no cache custa 1,25x do preço
+ * de entrada e ler custa 0,1x. Somar as duas apagaria justamente a distinção
+ * que responde "o cache está pagando ou custando?".
+ *
+ * ARMADILHA: não saem de `input_tokens`. Na semântica OpenAI que o OpenRouter
+ * normaliza, `prompt_tokens` já é o TOTAL e o cache é um subconjunto dele —
+ * subtrair contaria duas vezes ao contrário. Qualquer soma de "entrada + cache"
+ * nesta tela seria dupla contagem.
+ *
+ * Opcionais porque backends antigos (e chamadas do cliproxy, que não reporta)
+ * não trazem os campos. `undefined` é tratado como zero em todo lugar. */
+interface CacheTokens {
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}
+
+export interface TelemetryTotal extends CacheTokens {
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
   calls: number;
 }
 
-export interface TelemetryModelRow {
+export interface TelemetryModelRow extends CacheTokens {
   model: string;
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
   calls: number;
+}
+
+/** Fração da entrada que veio do cache, ou `null` quando não dá para dizer.
+ *
+ *  `null` e `0` são coisas diferentes e a tela precisa distingui-las: zero
+ *  significa "o cache não pegou nada" (informação acionável), `null` significa
+ *  "não houve entrada" ou "este backend não reporta" — afirmar 0% aí seria
+ *  inventar um diagnóstico. */
+export function cacheHitRate(row: CacheTokens & { input_tokens: number }): number | null {
+  const entrada = row.input_tokens || 0;
+  if (entrada <= 0) return null;
+  const lido = row.cache_read_tokens ?? 0;
+  const escrito = row.cache_write_tokens ?? 0;
+  // Nenhum dos dois reportado = backend que não fala de cache (cliproxy).
+  if (lido === 0 && escrito === 0) return null;
+  return lido / entrada;
 }
 
 export interface TelemetryFeatureRow {

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
@@ -144,9 +147,43 @@ class OpenRouterClient:
             r = await client.get(f"{OPENROUTER_BASE}/models", headers=_or_headers(self.api_key))
             r.raise_for_status()
             return [
-                {"id": m["id"], "name": m.get("name", m["id"])}
+                {
+                    "id": m["id"],
+                    "name": m.get("name", m["id"]),
+                    "reasoning": _anuncia_reasoning(m),
+                }
                 for m in r.json().get("data", [])
             ]
+
+
+def _anuncia_reasoning(modelo: dict[str, Any]) -> bool:
+    """O modelo aceita o bloco ``reasoning`` (esforço de raciocínio)?
+
+    A resposta do `/models` traz `supported_parameters` por modelo, e é ele
+    quem manda — não uma lista nossa de famílias, que envelheceria a cada
+    lançamento. Medido em 2026-08-02: 212 dos 337 modelos anunciam
+    ``reasoning``; `openai/gpt-4o-mini` não anuncia e `anthropic/claude-*`,
+    `openai/gpt-5` e `google/gemini-2.5-*` anunciam.
+
+    Checamos ``reasoning`` e não ``reasoning_effort``: o segundo é o parâmetro
+    nativo da OpenAI (89 modelos) e o primeiro é o bloco normalizado da
+    OpenRouter, que traduz `effort` para o orçamento de tokens dos modelos
+    Anthropic/Gemini. É o bloco normalizado que enviamos.
+    """
+    params = modelo.get("supported_parameters")
+    return isinstance(params, list) and "reasoning" in params
+
+
+def _as_int(value: Any) -> int:
+    """Inteiro tolerante para contadores vindos do provedor.
+
+    `None`, string e dict aparecem de verdade nesses campos dependendo do
+    provedor por trás do OpenRouter; um `int()` cru levantaria dentro do
+    caminho de telemetria.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
 
 
 def _stringify_content(content: Any) -> str:
@@ -171,7 +208,41 @@ def _stringify_content(content: Any) -> str:
     return str(content or "")
 
 
-def _to_openai_messages(messages: list[Any]) -> list[dict[str, Any]]:
+#: Prefixos de model id cujo provedor exige um breakpoint EXPLÍCITO de cache.
+#: O catálogo do OpenRouter tem 300+ modelos e o comportamento se divide em
+#: três: (1) cache automático, sem marcador nenhum — OpenAI, DeepSeek, Grok,
+#: Moonshot, Groq; (2) breakpoint explícito — Anthropic; (3) explícito com
+#: outra economia — Gemini cobra ARMAZENAMENTO por hora no cache explícito, o
+#: que pode custar mais que o que economiza num chat esporádico, então fica de
+#: fora até ser medido. Marcar quem não precisa não traz ganho e mexe no corpo
+#: enviado a caminhos que hoje funcionam; por isso a lista é fechada.
+_CACHE_BREAKPOINT_PREFIXES = ("anthropic/",)
+
+
+def _supports_cache_breakpoints(model: str | None) -> bool:
+    """O modelo precisa de um marcador `cache_control` explícito no corpo?
+
+    Falso para o resto do catálogo — nesses casos o corpo enviado continua
+    byte a byte igual ao de antes desta mudança.
+    """
+    m = (model or "").strip().lower()
+    return m.startswith(_CACHE_BREAKPOINT_PREFIXES)
+
+
+def _cached_text_block(text: str) -> dict[str, Any]:
+    """Bloco de conteúdo OpenAI-shaped com o breakpoint de cache.
+
+    A API da Anthropic recebe `cache_control` num campo do próprio bloco; o
+    OpenRouter é OpenAI-shaped, então o marcador vai DENTRO do bloco de
+    conteúdo da mensagem — não num campo separado no corpo. Ele traduz o
+    marcador para o formato de cada provedor na saída.
+    """
+    return {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+
+
+def _to_openai_messages(
+    messages: list[Any], *, cache_system: bool = False
+) -> list[dict[str, Any]]:
     """Converte o histórico do engine para o formato OpenAI do OpenRouter.
 
     O ponto todo é o round-trip de ferramenta. `ChatMessage` só tem `role` e
@@ -190,15 +261,34 @@ def _to_openai_messages(messages: list[Any]) -> list[dict[str, Any]]:
     Os `arguments` levam os args REAIS. Com argumentos vazios o modelo lê o
     histórico como "chamei sem argumentos, preciso repetir direito" e refaz a
     mesma tool em loop — a mesma armadilha documentada no lado Anthropic.
+
+    Com ``cache_system=True`` a PRIMEIRA mensagem `system` sai como lista de
+    blocos, com o breakpoint de cache no único bloco. Só a primeira: o engine
+    empilha várias `system` depois dela (data e hora, humor, música, recall)
+    que mudam a cada turno, e o cache é casamento de PREFIXO — um breakpoint
+    dentro do trecho volátil dá 100% de miss pagando 1,25x na escrita. Como a
+    Anthropic renderiza `tools` → `system` → `messages`, o breakpoint no
+    primeiro system cobre também o bloco de ferramentas, que é a maior parte
+    fixa do prompt. Desligado, a saída é byte a byte a de antes.
     """
     out: list[dict[str, Any]] = []
     counter = 0
+    # Vira False assim que o breakpoint é gasto — garante um só marcador.
+    pending_cache = cache_system
     for m in messages:
         role = getattr(m, "role", "user")
         content = getattr(m, "content", "")
 
         if role != "tool":
-            out.append({"role": role, "content": _stringify_content(content)})
+            text = _stringify_content(content)
+            # `text` vazio (ou só espaço) não vira bloco: nunca alcançaria o
+            # mínimo cacheável e a Anthropic rejeita bloco de texto vazio —
+            # trocaria economia por 400.
+            if pending_cache and role == "system" and text.strip():
+                pending_cache = False
+                out.append({"role": role, "content": [_cached_text_block(text)]})
+            else:
+                out.append({"role": role, "content": text})
             continue
 
         tool_name = "unknown_tool"
@@ -247,6 +337,57 @@ def _to_openai_messages(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+"""Esforços de raciocínio aceitos pela OpenRouter, do mais barato ao mais caro.
+
+A lista é a da documentação inteira, não a do que a UI mostra hoje: validar
+aqui pelo conjunto completo significa que expor `minimal` ou `xhigh` na tela
+depois não pede mudança nenhuma no backend.
+
+`none` está fora de propósito. Ele DESLIGA o raciocínio de um modelo que pensa
+por padrão — semântica diferente de "não mandar o parâmetro", que é o nosso
+desligado e deixa o modelo no comportamento dele. Misturar os dois num controle
+só faria "Desligado" significar duas coisas.
+"""
+_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+
+
+class _ReasoningRecusado(Exception):
+    """A OpenRouter recusou a requisição por causa do bloco ``reasoning``.
+
+    Interna e nunca escapa do adaptador: `chat` a captura para repetir sem o
+    bloco. Uma exceção em vez de um valor de retorno porque quem detecta está
+    dentro de um gerador que já podia estar emitindo tokens — só que não está,
+    e é justamente isso que ela afirma.
+    """
+
+
+def _erro_de_reasoning(corpo: str) -> bool:
+    """O erro da OpenRouter fala do parâmetro de raciocínio?
+
+    Casamento por texto porque não há código de erro estruturado para isso: a
+    mensagem vem do provedor por trás e o formato varia. O risco de um falso
+    positivo é baixo e o custo é uma repetição sem o bloco — nunca uma resposta
+    errada. Um falso NEGATIVO é que seria caro (o turno morre), então a busca é
+    deliberadamente larga.
+    """
+    return "reasoning" in (corpo or "").lower()
+
+
+def normalize_effort(value: Any) -> str | None:
+    """Esforço válido, ou ``None`` para "não enviar".
+
+    Tolerante de propósito: o valor vem de um kv que clientes de qualquer
+    versão escrevem. Lixo vira ``None`` (o comportamento de antes da feature)
+    em vez de derrubar a montagem da requisição — errar para o lado de não
+    mandar o parâmetro é sempre recuperável; errar para o lado de mandar algo
+    inválido custa um 400 no meio da conversa.
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    return v if v in _EFFORTS else None
+
+
 class OpenRouterChatClient:
     """OpenRouter chat client matching the engine's ``llm.chat`` contract.
 
@@ -263,12 +404,17 @@ class OpenRouterChatClient:
         *,
         timeout: float = 180.0,
         telemetry: Callable[[dict[str, Any]], None] | None = None,
+        effort: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.timeout = timeout
         # Optional per-call usage sink (default None → no-op). Same opt-in
         # contract as AnthropicClient.
         self._telemetry = telemetry
+        # Esforço de raciocínio escolhido pelo usuário. `None`/vazio = não
+        # manda `reasoning` nenhum, e aí o corpo da requisição fica
+        # byte-a-byte igual ao de antes desta feature — que é o default.
+        self.effort = normalize_effort(effort)
 
     def _emit_usage(self, model: str, usage: dict[str, Any]) -> None:
         """Forward OpenRouter usage to the optional sink. Never raises."""
@@ -288,6 +434,19 @@ class OpenRouterChatClient:
             cost = usage.get("cost")
             if isinstance(cost, (int, float)):
                 rec["cost_usd"] = float(cost)
+            # Cache: `cached_tokens` é o que foi LIDO do cache (0,1x do preço)
+            # e `cache_write_tokens` o que foi ESCRITO nele (1,25x). São a
+            # única evidência direta de que o breakpoint pegou — o custo
+            # sozinho não distingue "cache acertou" de "turno curto".
+            #
+            # Nada disso é subtraído de `input_tokens`: na semântica OpenAI que
+            # o OpenRouter normaliza, `prompt_tokens` já é o TOTAL e
+            # `cached_tokens` é um subconjunto dele. Descontar contaria duas
+            # vezes ao contrário e faria a entrada parecer despencar.
+            details = usage.get("prompt_tokens_details")
+            details = details if isinstance(details, dict) else {}
+            rec["cache_read_tokens"] = _as_int(details.get("cached_tokens"))
+            rec["cache_write_tokens"] = _as_int(details.get("cache_write_tokens"))
             self._telemetry(rec)
         except Exception:
             pass
@@ -307,9 +466,17 @@ class OpenRouterChatClient:
 
         # ``audio`` and ``think`` are intentionally ignored for v1 — we don't
         # forward reasoning/audio params; keep the request minimal and portable.
-        oai_messages = _to_openai_messages(messages)
+        model_id = model or "openai/gpt-4o-mini"
+        # Cache de prompt: o prompt de sistema + o bloco de ferramentas são
+        # grandes e estáveis entre turnos, e eram reenviados a preço cheio a
+        # cada chamada (medido: ~59k tokens de entrada por chamada, 816:1
+        # contra a saída). Só marcamos onde o provedor exige o breakpoint
+        # explícito; para o resto do catálogo o corpo não muda.
+        oai_messages = _to_openai_messages(
+            messages, cache_system=_supports_cache_breakpoints(model_id)
+        )
         body: dict[str, Any] = {
-            "model": model or "openai/gpt-4o-mini",
+            "model": model_id,
             "messages": oai_messages,
             "temperature": temperature,
             "stream": True,
@@ -322,6 +489,44 @@ class OpenRouterChatClient:
         # — otherwise the request stays byte-for-byte identical to before.
         if self._telemetry is not None:
             body["usage"] = {"include": True}
+        # Esforço de raciocínio, quando o usuário escolheu um. Mandamos o bloco
+        # normalizado da OpenRouter (`reasoning.effort`) e não o
+        # `reasoning_effort` nativo da OpenAI: é ele que a OpenRouter traduz
+        # para o orçamento de tokens dos modelos Anthropic e Gemini.
+        if self.effort is not None:
+            body["reasoning"] = {"effort": self.effort}
+
+        try:
+            async for tok in self._stream(body, model_id):
+                yield tok
+            return
+        except _ReasoningRecusado:
+            # Rede de segurança: a UI só oferece esforço para modelo que anuncia
+            # `reasoning` no catálogo, mas o ajuste fica GRAVADO e o modelo pode
+            # mudar depois (ou o provedor por trás pode recusar). Repetir uma vez
+            # sem o bloco é melhor que derrubar o turno — o usuário perde o
+            # raciocínio, não a resposta. `_stream` só levanta isso antes de
+            # qualquer token ter saído, então repetir não duplica nada na tela.
+            logger.warning(
+                "OpenRouter recusou reasoning em %s; repetindo sem esforço", model_id
+            )
+        # CÓPIA, não `body.pop`. O dicionário original já foi entregue ao cliente
+        # HTTP da primeira tentativa; mutá-lo depende de o httpx ter serializado
+        # na hora — verdade hoje, e uma corrupção silenciosa da requisição no dia
+        # em que deixar de ser. A cópia também é o que torna a diferença entre as
+        # duas tentativas observável (e testável): exatamente o bloco removido.
+        sem_reasoning = {k: v for k, v in body.items() if k != "reasoning"}
+        async for tok in self._stream(sem_reasoning, model_id):
+            yield tok
+
+    async def _stream(self, body: dict[str, Any], model_id: str) -> AsyncIterator[Any]:
+        """Uma tentativa: abre o stream, emite os Tokens, registra o usage.
+
+        Levanta ``_ReasoningRecusado`` quando o corpo levava ``reasoning`` e a
+        OpenRouter recusou por causa dele — sempre ANTES do primeiro yield, que
+        é o que torna a repetição do chamador segura.
+        """
+        from llm_adapters.types import Token
 
         # index -> accumulated tool call ({"id","name","arguments"}).
         acc: dict[int, dict[str, str]] = {}
@@ -336,6 +541,8 @@ class OpenRouterChatClient:
             ) as r:
                 if r.status_code != 200:
                     raw = (await r.aread()).decode("utf-8", "replace")
+                    if "reasoning" in body and _erro_de_reasoning(raw):
+                        raise _ReasoningRecusado()
                     raise RuntimeError(
                         f"OpenRouter chat failed: {r.status_code} {raw[:500]}"
                     )
@@ -374,7 +581,7 @@ class OpenRouterChatClient:
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
 
-        self._emit_usage(model or "openai/gpt-4o-mini", usage)
+        self._emit_usage(model_id, usage)
 
         if acc:
             tool_calls = [

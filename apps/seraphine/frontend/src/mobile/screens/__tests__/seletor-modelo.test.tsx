@@ -24,9 +24,18 @@ vi.mock('../../../research/api', () => ({
   listModels: vi.fn(),
   getConfig: vi.fn(),
   putChatModel: vi.fn(),
+  getChatEffort: vi.fn(),
+  putChatEffort: vi.fn(),
 }));
 
-import { getChatModel, getConfig, listModels, putChatModel } from '../../../research/api';
+import {
+  getChatEffort,
+  getChatModel,
+  getConfig,
+  listModels,
+  putChatEffort,
+  putChatModel,
+} from '../../../research/api';
 import { SeletorModeloScreen } from '../SeletorModeloScreen';
 
 /** Como `GET /deepsearch/models` responde de verdade: `service.list_models()`
@@ -52,16 +61,24 @@ const CONFIG_COM_CHAVE = {
 
 interface Cenario {
   chatModel?: string;
-  modelos?: { id: string; name: string }[];
+  modelos?: { id: string; name: string; reasoning?: boolean }[];
   chaveSalva?: boolean;
+  esforco?: string;
 }
 
-function comDado({ chatModel = 'cliproxy', modelos = MODELOS, chaveSalva = true }: Cenario = {}) {
+function comDado({
+  chatModel = 'cliproxy',
+  modelos = MODELOS,
+  chaveSalva = true,
+  esforco = '',
+}: Cenario = {}) {
   vi.mocked(getChatModel).mockResolvedValue({ chat_model: chatModel });
   vi.mocked(listModels).mockResolvedValue({ cliproxy: [], openrouter: modelos });
   vi.mocked(getConfig).mockResolvedValue({ ...CONFIG_COM_CHAVE, openrouter_key_set: chaveSalva });
   // O backend ecoa o que gravou (e normaliza na escrita — rede de segurança).
   vi.mocked(putChatModel).mockImplementation(async (id: string) => ({ chat_model: id }));
+  vi.mocked(getChatEffort).mockResolvedValue({ effort: esforco });
+  vi.mocked(putChatEffort).mockImplementation(async (e: string) => ({ effort: e }));
 }
 
 const linha = (nome: string | RegExp) => screen.getByRole('button', { name: nome });
@@ -72,6 +89,8 @@ describe('SeletorModeloScreen', () => {
     vi.mocked(listModels).mockReset();
     vi.mocked(getConfig).mockReset();
     vi.mocked(putChatModel).mockReset();
+    vi.mocked(getChatEffort).mockReset();
+    vi.mocked(putChatEffort).mockReset();
   });
 
   /* ── estado 1: dado ─────────────────────────────────────────────── */
@@ -248,6 +267,144 @@ describe('SeletorModeloScreen', () => {
     fireEvent.change(busca, { target: { value: 'padrao' } });
     expect(linha(/Padrão/)).toBeTruthy();
     expect(screen.queryByText('Gemini 3.5 Flash')).toBeNull();
+  });
+
+  /* ── catálogo inteiro (o teto de 80 saiu do backend) ────────────── */
+
+  it('dá cabeçalho próprio aos provedores de volume, em vez de despejar tudo em OUTROS', async () => {
+    /* Em 2026-08-02 o `[:80]` alfabético saiu de `deepsearch/service`. Com o
+       catálogo inteiro (~400) chegando, os três provedores nomeados do handoff
+       deixariam ~330 modelos num único OUTROS — uma lista sem estrutura. */
+    comDado({
+      modelos: [
+        { id: 'openrouter:anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+        { id: 'openrouter:openai/gpt-5-mini', name: 'GPT-5 mini' },
+        { id: 'openrouter:google/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+        { id: 'openrouter:x-ai/grok-5', name: 'Grok 5' },
+        { id: 'openrouter:deepseek/deepseek-v4', name: 'DeepSeek V4' },
+        { id: 'openrouter:qwen/qwen4-max', name: 'Qwen4 Max' },
+        { id: 'openrouter:meta-llama/llama-5-70b', name: 'Llama 5 70B' },
+        { id: 'openrouter:mistralai/mistral-large-3', name: 'Mistral Large 3' },
+        { id: 'openrouter:cohere/command-a', name: 'Command A' },
+      ],
+    });
+    render(<SeletorModeloScreen />);
+    await waitFor(() => expect(screen.getByText('ANTHROPIC')).toBeTruthy());
+
+    const grupos = Array.from(document.querySelectorAll('.ms-seletor-grupo__rotulo')).map(
+      (n) => n.textContent,
+    );
+    expect(grupos).toEqual([
+      'ANTHROPIC', 'OPENAI', 'GOOGLE', 'X-AI', 'DEEPSEEK', 'QWEN', 'META', 'MISTRAL', 'OUTROS',
+    ]);
+
+    const doGrupo = (rotulo: string) =>
+      Array.from(
+        document
+          .querySelector(`[data-grupo-rotulo="${rotulo}"]`)
+          ?.querySelectorAll('.ms-seletor-modelo__nome') ?? [],
+      ).map((n) => n.textContent);
+
+    expect(doGrupo('OPENAI')).toEqual(['GPT-5 mini']);
+    expect(doGrupo('QWEN')).toEqual(['Qwen4 Max']);
+    expect(doGrupo('META')).toEqual(['Llama 5 70B']);
+    // Cauda longa (um vendor com um modelo) continua em OUTROS, de propósito.
+    expect(doGrupo('OUTROS')).toEqual(['Command A']);
+
+    // Cada grupo novo tem o ponto de cor da sua chave (a classe vem do vendor).
+    const ponto = (rotulo: string) =>
+      document.querySelector(`[data-grupo-rotulo="${rotulo}"] .ms-seletor-grupo__ponto`);
+    expect(ponto('OPENAI')?.className).toContain('ms-seletor-grupo__ponto--openai');
+    expect(ponto('X-AI')?.className).toContain('ms-seletor-grupo__ponto--x-ai');
+    expect(ponto('MISTRAL')?.className).toContain('ms-seletor-grupo__ponto--mistralai');
+  });
+
+  it('afirma o tamanho do catálogo, e quanto a busca recortou dele', async () => {
+    /* O corte de 80 era MUDO: o modelo simplesmente não existia na tela. O
+       número é o antídoto — a tela agora diz quantos há. */
+    comDado();
+    render(<SeletorModeloScreen />);
+    await waitFor(() => expect(screen.getByText('ANTHROPIC')).toBeTruthy());
+
+    const total = document.querySelector('.ms-seletor-eyebrow__n');
+    expect(total?.textContent).toBe('5');
+    // Contagem por grupo: ANTHROPIC tem dois na fixture, GOOGLE tem um.
+    const n = (rotulo: string) =>
+      document.querySelector(`[data-grupo-rotulo="${rotulo}"] .ms-seletor-grupo__n`)?.textContent;
+    expect(n('ANTHROPIC')).toBe('2');
+    expect(n('GOOGLE')).toBe('1');
+
+    // Filtrando, o número vira "quantos de quantos".
+    fireEvent.change(screen.getByLabelText('Buscar modelo'), { target: { value: 'claude' } });
+    expect(document.querySelector('.ms-seletor-eyebrow__n')?.textContent).toBe('2/5');
+  });
+
+  /* ── esforço de raciocínio ──────────────────────────────────────── */
+
+  const PENSA = { id: 'openrouter:openai/gpt-5', name: 'GPT-5', reasoning: true };
+
+  it('salva o esforço escolhido quando o modelo aceita raciocínio', async () => {
+    comDado({ chatModel: PENSA.id, modelos: [PENSA] });
+    render(<SeletorModeloScreen />);
+
+    const alto = await screen.findByRole('button', { name: 'Alto' });
+    await waitFor(() => expect((alto as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(alto);
+
+    await waitFor(() => expect(vi.mocked(putChatEffort)).toHaveBeenCalledWith('high'));
+    await waitFor(() => expect(alto.getAttribute('aria-pressed')).toBe('true'));
+  });
+
+  it('no Padrão o controle fica apagado e diz o porquê', async () => {
+    comDado({ modelos: [PENSA] });
+    render(<SeletorModeloScreen />);
+
+    const alto = await screen.findByRole('button', { name: 'Alto' });
+    expect((alto as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/O Padrão não passa por este ajuste/)).toBeTruthy();
+
+    fireEvent.click(alto);
+    expect(vi.mocked(putChatEffort)).not.toHaveBeenCalled();
+  });
+
+  it('modelo que não raciocina: apagado, e o motivo nomeia o modelo', async () => {
+    comDado({ chatModel: MODELOS[0].id });
+    render(<SeletorModeloScreen />);
+
+    await waitFor(() => expect(screen.getByText('ANTHROPIC')).toBeTruthy());
+    // A fixture não marca `reasoning`, que é o que a api devolve para quem não
+    // anuncia o parâmetro.
+    expect((screen.getByRole('button', { name: 'Médio' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Claude Sonnet 4\.6 não aceita/)).toBeTruthy();
+  });
+
+  it('some durante a busca: quem digita está procurando modelo', async () => {
+    comDado({ chatModel: PENSA.id, modelos: [PENSA] });
+    render(<SeletorModeloScreen />);
+
+    await waitFor(() => expect(screen.getByText('ESFORÇO DE RACIOCÍNIO')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Buscar modelo'), { target: { value: 'gpt' } });
+    expect(screen.queryByText('ESFORÇO DE RACIOCÍNIO')).toBeNull();
+
+    // E volta ao limpar a busca.
+    fireEvent.change(screen.getByLabelText('Buscar modelo'), { target: { value: '' } });
+    expect(screen.getByText('ESFORÇO DE RACIOCÍNIO')).toBeTruthy();
+  });
+
+  it('falhar só o esforço não derruba a tela de modelos', async () => {
+    comDado({ chatModel: PENSA.id, modelos: [PENSA] });
+    vi.mocked(getChatEffort).mockRejectedValue(new Error('HTTP 503'));
+
+    render(<SeletorModeloScreen />);
+
+    // A lista, que é o principal daqui, continua de pé.
+    await waitFor(() => expect(linha(/GPT-5/)).toBeTruthy());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Desligado' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   });
 
   /* ── estado 2: vazio ────────────────────────────────────────────── */

@@ -818,6 +818,16 @@ const CARTAO_TAGS = new Set([
   // Os ícones do backend são SVG inline (`tools/svg_icons.py`): a casa não usa
   // emoji, então uma lista que só pensasse em `div` apagaria todos eles.
   'SVG', 'G', 'PATH', 'POLYLINE', 'POLYGON', 'CIRCLE', 'LINE', 'RECT', 'ELLIPSE',
+  // `TEXT` entrou com o gráfico hora a hora do clima (`weather.py`), que desenha
+  // os rótulos de temperatura, hora e % de chuva dentro do próprio SVG.
+  //
+  // Foi a ÚNICA adição que ele exigiu, e de propósito: `style` continua fora
+  // (ver o comentário de `sanearCartao`), então a cor, o tamanho e o
+  // alinhamento do texto vêm de CLASSE, como no resto do cartão — e sobram só
+  // os atributos de geometria (`x`, `y`), que já estavam na lista. Um elemento
+  // de texto não navega, não busca e não executa; o que o tornaria perigoso
+  // seria justamente o `style` que ele não tem. */
+  'TEXT',
 ]);
 
 /** Atributos de geometria/traço que os ícones precisam. Comparados em

@@ -16,17 +16,33 @@ export interface VrmAvatarProps {
 
 export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
   const { avatarUrl, width, height, onReady, cameraControls, cameraMinDistance, cameraMaxDistance } = props;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const [recreateKey, setRecreateKey] = useState(0);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const controller = new VrmAvatarController(canvas, {
-      cameraControls,
-      minDistance: cameraMinDistance,
-      maxDistance: cameraMaxDistance,
-    });
+    const host = canvasHostRef.current;
+    if (!host) return;
+    // dispose() releases the WebGL context. A new effect (including React
+    // StrictMode's setup/cleanup/setup) must get a fresh canvas as well.
+    const canvas = document.createElement('canvas');
+    canvas.width = width ?? 400;
+    canvas.height = height ?? 600;
+    host.appendChild(canvas);
+    setError(false);
+    let controller: VrmAvatarController;
+    try {
+      controller = new VrmAvatarController(canvas, {
+        cameraControls,
+        minDistance: cameraMinDistance,
+        maxDistance: cameraMaxDistance,
+      });
+    } catch (err) {
+      console.warn('[VrmAvatar] renderer unavailable', err);
+      canvas.remove();
+      setError(true);
+      return;
+    }
     // After a real WebGL context loss, three's GL state is unusable — rebuild.
     controller.onContextRestoreNeeded = () => setRecreateKey((k) => k + 1);
     let cancelled = false;
@@ -37,18 +53,30 @@ export function VrmAvatar(props: VrmAvatarProps): JSX.Element {
         onReady?.(controller);
       })
       .catch((err: unknown) => {
+        if (cancelled) return;
         // eslint-disable-next-line no-console
         console.error("[VrmAvatar] failed to load avatar", err);
+        canvas.hidden = true;
+        setError(true);
       });
     return () => {
       cancelled = true;
       controller.dispose();
+      canvas.remove();
     };
-  }, [avatarUrl, onReady, cameraControls, cameraMinDistance, cameraMaxDistance, recreateKey]);
+  }, [avatarUrl, width, height, onReady, cameraControls, cameraMinDistance, cameraMaxDistance, recreateKey]);
 
   return (
-    <div id="seraphine-avatar-root" role="img" aria-label="Seraphine avatar">
-      <canvas ref={canvasRef} width={width ?? 400} height={height ?? 600} />
+    <div id="seraphine-avatar-root">
+      <div ref={canvasHostRef} role="img" aria-label="Avatar da Seraphine" />
+      {error && (
+        <div role="status">
+          <p>O avatar 3D não pôde ser carregado.</p>
+          <button type="button" onClick={() => setRecreateKey((key) => key + 1)}>
+            Recarregar avatar
+          </button>
+        </div>
+      )}
     </div>
   );
 }

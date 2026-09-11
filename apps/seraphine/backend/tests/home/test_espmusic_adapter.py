@@ -294,3 +294,105 @@ async def test_status_says_when_nothing_is_playing(transport: FakeTransport) -> 
     transport.responses["/api/status"] = {**SNAPSHOT, "playing": None}
     text = await EspMusicAdapter(transport).status()
     assert "nada tocando" in text
+
+
+# --------------------------------------------- cômodo sem roubar a música
+
+# O SNAPSHOT do topo é de um servidor ANTIGO: não anuncia `features`. Isso é
+# de propósito — os testes acima continuam exercitando o caminho de queda.
+SNAPSHOT_NOVO = {**SNAPSHOT, "features": ["device_scoped_control"]}
+
+
+@pytest.fixture()
+def novo() -> FakeTransport:
+    """Transporte com um EspMusic que sabe mirar a caixa."""
+    return FakeTransport({"/api/status": SNAPSHOT_NOVO})
+
+
+def _rotas(t: FakeTransport) -> list[str]:
+    return [path for _, path, _ in t.calls]
+
+
+def _corpo(t: FakeTransport, path: str) -> Any:
+    for _, p, body in t.calls:
+        if p == path:
+            return body
+    raise AssertionError(f"não chamou {path}")
+
+
+async def test_volume_in_another_room_no_longer_moves_the_music(novo) -> None:
+    """A regressão que motivou tudo isto.
+
+    "aumenta o volume no banheiro" com música na sala trocava o cômodo do som,
+    porque o único jeito de alcançar a outra caixa era `/api/device` — e ele
+    chama `rewire`. A ausência de `/api/device` aqui é a asserção forte.
+    """
+    await EspMusicAdapter(novo).control("volume_up", room="banheiro")
+
+    assert "/api/device" not in _rotas(novo)
+    assert _corpo(novo, "/api/volume")["device"] == "espmusic-banheiro"
+
+
+@pytest.mark.parametrize(
+    "action,path",
+    [
+        ("volume_up", "/api/volume"),
+        ("volume_down", "/api/volume"),
+        ("mute", "/api/mute"),
+    ],
+)
+async def test_every_setting_action_is_aimed_not_moved(novo, action, path) -> None:
+    await EspMusicAdapter(novo).control(action, room="banheiro")
+    assert "/api/device" not in _rotas(novo)
+    assert _corpo(novo, path)["device"] == "espmusic-banheiro"
+
+
+async def test_volume_set_keeps_aiming_and_still_converts_to_db(novo) -> None:
+    out = await EspMusicAdapter(novo).control("volume_set", value=30, room="banheiro")
+    corpo = _corpo(novo, "/api/volume")
+    assert corpo["device"] == "espmusic-banheiro"
+    # A tradução de % para dB não pode ter se perdido no caminho.
+    assert corpo["db"] == pct_to_db(30)
+    assert "30%" in out
+
+
+@pytest.mark.parametrize("action", ["pause", "next", "stop", "radio_on"])
+async def test_transport_actions_still_move_the_audio(novo, action) -> None:
+    """E DEVEM mover: só existe um pipeline.
+
+    Pedir "pausa no banheiro" com música na sala não tem leitura sensata que
+    não seja mover o áudio para lá. O que era surpresa no volume é a semântica
+    correta aqui — por isso `/api/device` continua sendo chamado.
+    """
+    await EspMusicAdapter(novo).control(action, room="banheiro")
+    assert "/api/device" in _rotas(novo)
+
+
+async def test_an_old_server_falls_back_to_switching_devices(transport) -> None:
+    """O EspMusic do PC é atualizado à mão; a versão dele não acompanha.
+
+    Sem a marca `device_scoped_control`, mandar `device` seria pior que o
+    comportamento antigo: o FastAPI ignora campo desconhecido, então o volume
+    iria para a caixa ERRADA em silêncio. A queda é para `/api/device`.
+    """
+    await EspMusicAdapter(transport).control("volume_up", room="banheiro")
+
+    assert "/api/device" in _rotas(transport)
+    assert "device" not in (_corpo(transport, "/api/volume") or {})
+
+
+async def test_no_room_sends_no_device_and_no_switch(novo) -> None:
+    await EspMusicAdapter(novo).control("volume_up")
+    assert "/api/device" not in _rotas(novo)
+    assert "device" not in (_corpo(novo, "/api/volume") or {})
+
+
+async def test_an_unknown_room_is_named_before_any_request_goes_out(novo) -> None:
+    """A frase que lista as caixas vale mais que um 404 cru do EspMusic."""
+    with pytest.raises(UnknownRoom) as e:
+        await EspMusicAdapter(novo).control("volume_up", room="garagem")
+
+    assert "garagem" in str(e.value)
+    assert "banheiro" in str(e.value) and "sala" in str(e.value)
+    # Ausência afirmada: nada foi alterado em caixa nenhuma.
+    assert "/api/volume" not in _rotas(novo)

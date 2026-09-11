@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { greeting, monthExpenses } from '../hoje';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { greeting, monthSummaryUrl } from '../hoje';
+import { fetchSummary } from '../../finance/api';
+import { API_BASE } from '../../api';
 
 describe('greeting', () => {
   it('bom dia até 11h', () => expect(greeting(8)).toBe('Bom dia'));
@@ -8,14 +10,30 @@ describe('greeting', () => {
   it('boa noite madrugada', () => expect(greeting(3)).toBe('Boa noite'));
 });
 
-describe('monthExpenses', () => {
-  const now = new Date('2026-07-13T12:00:00');
-  it('soma só despesas do mês corrente', () => {
-    expect(monthExpenses([
-      { amount: 100, kind: 'expense', date: '2026-07-02' },
-      { amount: 50, kind: 'expense', date: '2026-06-30' },   // mês passado
-      { amount: 999, kind: 'income', date: '2026-07-05' },   // receita
-    ], now)).toBe(100);
+describe('monthSummaryUrl', () => {
+  it('manda o mês em BASE 1', () => {
+    // Janeiro é 0 no `Date` e 1 na rota. Sem o +1 o bloco mostraria o mês
+    // passado parecendo certo.
+    expect(monthSummaryUrl('http://x', new Date(2026, 0, 15))).toBe(
+      'http://x/finance/summary?month=1&year=2026',
+    );
+    expect(monthSummaryUrl('http://x', new Date(2026, 7, 3))).toBe(
+      'http://x/finance/summary?month=8&year=2026',
+    );
   });
-  it('vazio → 0', () => expect(monthExpenses([], now)).toBe(0));
+
+  it('bate byte a byte com a URL que a tela de Finanças pede', async () => {
+    // "Mesma fonte" tem de continuar verdade quando alguém mexer em um dos
+    // dois lados: se `fetchSummary` mudar de rota ou de nome de parâmetro, o
+    // Hoje volta a ter um número próprio, e em silêncio.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    global.fetch = fetchMock as never;
+    await fetchSummary(8, 2026);
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      monthSummaryUrl(API_BASE, new Date(2026, 7, 3)),
+    );
+  });
+
+  beforeEach(() => { vi.restoreAllMocks(); });
 });

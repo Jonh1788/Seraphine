@@ -389,10 +389,21 @@ export function attachToolProxy(ws: SeraphineWS): () => void {
   return off;
 }
 
-/** Announce this client as Tauri so the server prefers it for proxy calls. */
+/** Announce this client as Tauri so the server prefers it for proxy calls.
+ *
+ * `tools` é a lista real de handlers deste build, e não uma constante: o
+ * servidor usa ela para escolher PARA QUEM mandar cada `tool_proxy_request`.
+ * Sem isso ele mandava para um cliente qualquer dos conectados, e um pedido
+ * que só o desktop sabe atender podia cair no iPhone — que responderia
+ * "no handler for ..." em vez de o comando funcionar no aparelho que podia.
+ *
+ * Derivado de `handlers` de propósito: uma lista escrita à mão aqui
+ * envelheceria calada no dia em que alguém acrescentasse um handler.
+ */
 export function sendClientHello(ws: SeraphineWS): void {
   ws.send({
     type: 'client_hello',
     is_tauri: true,
+    tools: Object.keys(handlers),
   } as never);
 }

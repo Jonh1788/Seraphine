@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,7 +22,11 @@ class CreateRecurringBody(BaseModel):
     weekday: int | None = None
     day_of_month: int | None = None
     time: str | None = None
+    end_date: str | None = None
     description: str | None = None
+    # "at_time" | "1h_before" | "" (desliga). Omitido = padrão do serviço
+    # (at_time quando há hora). `1d_before` não vale para regra recorrente.
+    remind: str | None = None
 
 
 class PatchRecurringBody(BaseModel):
@@ -29,8 +34,11 @@ class PatchRecurringBody(BaseModel):
     time: str | None = None
     weekday: int | None = None
     day_of_month: int | None = None
+    frequency: str | None = None
+    end_date: str | None = None
     title: str | None = None
     description: str | None = None
+    remind: str | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -195,10 +203,25 @@ async def create_rule(
             day_of_month=body.day_of_month,
             time=body.time,
             description=body.description,
+            end_date=body.end_date,
+            remind=body.remind,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"id": rule.id, "recurring": rule.to_dict()}
+
+
+@router.post("/{rule_id}/today/complete")
+async def complete_today(request: Request, rule_id: str) -> dict[str, Any]:
+    """Conclui a ocorrência de hoje. Alvo do botão "Concluir" da
+    notificação nativa do iOS, que carrega o rule_id e não o task_id."""
+    svc = _service_or_503(request)
+    task_id = await svc.complete_today(rule_id, datetime.now(timezone.utc))
+    if task_id is None:
+        raise HTTPException(
+            status_code=404, detail="no occurrence for this rule today",
+        )
+    return {"ok": True, "task_id": task_id}
 
 
 @router.patch("/{rule_id}")
@@ -216,11 +239,16 @@ async def patch_rule(
             time=fields.get("time"),
             weekday=fields.get("weekday"),
             day_of_month=fields.get("day_of_month"),
+            frequency=fields.get("frequency"),
+            end_date=fields.get("end_date"),
             title=fields.get("title"),
             description=fields.get("description"),
+            remind=fields.get("remind"),
+            _remind_provided="remind" in fields,
             _time_provided="time" in fields,
             _weekday_provided="weekday" in fields,
             _day_of_month_provided="day_of_month" in fields,
+            _end_date_provided="end_date" in fields,
             _description_provided="description" in fields,
         )
     except ValueError as exc:

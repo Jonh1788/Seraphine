@@ -49,6 +49,8 @@ def test_migrate_creates_table_and_is_idempotent():
     assert cols == {
         "id", "ts", "backend", "model", "feature",
         "input_tokens", "output_tokens", "cost_usd",
+        # Cache de prompt: leitura (0,1x) e escrita (1,25x) somam separado.
+        "cache_read_tokens", "cache_write_tokens",
     }
 
 
@@ -113,6 +115,7 @@ async def test_summary_empty(service):
     summary = await service.summary(days=30)
     assert summary["total"] == {
         "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "calls": 0,
+        "cache_read_tokens": 0, "cache_write_tokens": 0,
     }
     assert summary["by_model"] == []
     assert summary["by_feature"] == []

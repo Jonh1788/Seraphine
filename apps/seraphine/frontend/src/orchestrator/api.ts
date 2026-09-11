@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { SessionInfo, AgentEvent, PermissionMode, HostStatus, SiSession, DiffFile, GateResult, PermissionRule } from './types';
 
@@ -35,9 +35,9 @@ export const resumeSession = (sessionId: string, cwd: string, goal: string, m: P
 export const forkSession = (sessionId: string, cwd: string, goal: string, m: PermissionMode) =>
   invoke<string>('maestro_fork_session', { sessionId, cwd, goal, permissionMode: m });
 export const onAgentEvent = (cb: (e: AgentEvent) => void): Promise<UnlistenFn> =>
-  listen<AgentEvent>('maestro:agent-event', (ev) => cb(ev.payload));
+  isTauri() ? listen<AgentEvent>('maestro:agent-event', (ev) => cb(ev.payload)) : Promise.resolve(() => {});
 export const onAgentExit = (cb: (agentId: string) => void): Promise<UnlistenFn> =>
-  listen<string>('maestro:agent-exit', (ev) => cb(ev.payload));
+  isTauri() ? listen<string>('maestro:agent-exit', (ev) => cb(ev.payload)) : Promise.resolve(() => {});
 
 // Maestro — global permission interception (local approval server + Claude Code
 // hook). Toggling installs/removes the global hook; resolving unblocks a session
@@ -49,7 +49,7 @@ export const resolvePermission = (id: string, allow: boolean, reason = '', remem
 export const approvalsStatus = () =>
   invoke<{ enabled: boolean; port: number }>('maestro_approvals_status');
 export const onPermissionPending = (cb: (p: RawPendingPermission) => void): Promise<UnlistenFn> =>
-  listen<RawPendingPermission>('maestro:permission-pending', (ev) => cb(ev.payload));
+  isTauri() ? listen<RawPendingPermission>('maestro:permission-pending', (ev) => cb(ev.payload)) : Promise.resolve(() => {});
 
 // Maestro — persisted allow/deny rules. A rule auto-resolves matching
 // permission prompts (first match wins; safe read-only tools are never

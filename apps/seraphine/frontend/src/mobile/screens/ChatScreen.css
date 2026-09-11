@@ -99,6 +99,24 @@ html[data-shell='phone'] .ms-chat__thread {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* A CONVERSA NÃO ANDA PARA O LADO.
+   *
+   * A linha acima não deixa o outro eixo em paz: pela regra do CSS, um
+   * `overflow-x: visible` ao lado de um valor não-visible COMPUTA para `auto`.
+   * Ou seja, `overflow-y: auto` transformou a thread num rolador horizontal
+   * sem ninguém pedir, e bastava um filho mais largo que os 390px para a
+   * conversa inteira arrastar de lado. Medido no navegador em 2026-08-02:
+   * `overflow-x` computado `auto`, 550px de curso, `scrollLeft` obedecendo.
+   *
+   * `hidden`, e não `clip`: `clip` seria melhor (não cria contêiner de rolagem
+   * nenhum), mas ao lado de um eixo `auto` ele COMPUTA PARA `hidden` de
+   * qualquer jeito — verificado no mesmo teste. Escrever `clip` aqui seria
+   * letra morta com cara de intenção.
+   *
+   * Não é varrer para baixo do tapete: o que legitimamente é largo — bloco de
+   * código e tabela — rola DENTRO de si (ver as regras de `pre` e `table`
+   * abaixo). Aqui embaixo não há nada para alcançar de lado. */
+  overflow-x: hidden;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;

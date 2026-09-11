@@ -47,10 +47,54 @@ class ProxyBroker:
             return
         fut.set_result(ToolResult(ok=False, error=error))
 
+    def clients_for(self, app_state: Any, tool_name: str) -> list[Any]:
+        """Clientes que podem atender ``tool_name``, do melhor para o pior.
+
+        Substitui o `pool[0]` de um **set**, cuja ordem de iteração é
+        arbitrária: com o Mac e o iPhone conectados ao mesmo tempo, o pedido
+        caía em qualquer um dos dois a cada chamada. Para o relé da casa isso
+        é a diferença entre funcionar e não funcionar — o aparelho que está
+        fora de casa não alcança a LAN.
+
+        Ordem:
+
+        1. quem DECLAROU o handler no `client_hello` (`tools`);
+        2. quem é Tauri mas não declarou nada — cliente de uma versão anterior
+           ao campo, que provavelmente atende; tentar é melhor que ignorar;
+        3. o resto, só se não sobrou ninguém.
+
+        Devolve LISTA, e não um cliente: quem despacha pode tentar o próximo
+        quando o primeiro não responde. Um aparelho conectado mas fora de casa
+        (ou com o app em segundo plano) não pode condenar o comando quando há
+        outro capaz do lado.
+        """
+        ws_clients = list(getattr(app_state, "ws_clients", None) or [])
+
+        declarou: list[Any] = []
+        tauri_mudo: list[Any] = []
+        resto: list[Any] = []
+        for ws in ws_clients:
+            tools = getattr(ws, "_proxy_tools", None)
+            if tools and tool_name in tools:
+                declarou.append(ws)
+            elif getattr(ws, "_is_tauri", False) and not tools:
+                tauri_mudo.append(ws)
+            elif not getattr(ws, "_is_tauri", False):
+                resto.append(ws)
+            # Tauri que declarou uma lista SEM esta tool fica de fora: ele já
+            # disse que não sabe atender, e mandar assim mesmo só gastaria o
+            # timeout para receber "no handler for ...".
+
+        return declarou + tauri_mudo + (resto if not (declarou or tauri_mudo) else [])
+
     def any_client(self, app_state: Any) -> Any | None:
-        """Return the first connected Tauri WS client, or None."""
+        """Compat: o primeiro cliente Tauri conectado, ou None.
+
+        Preservada para quem só precisa saber SE há cliente. Quem despacha
+        tool deve usar `clients_for`, que filtra por capacidade e devolve
+        alternativas.
+        """
         ws_clients = getattr(app_state, "ws_clients", None) or set()
-        # Prefer clients flagged as Tauri; fall back to any.
         tauri_first = [
             ws for ws in ws_clients if getattr(ws, "_is_tauri", False)
         ]

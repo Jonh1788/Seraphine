@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, ChevronRightIcon, GaugeIcon, InsightsIcon, RefreshIcon } from '../../icons/Icons';
 import {
+  cacheHitRate,
   fetchEngineInfo,
   fetchTelemetrySummary,
   listFlatBackends,
@@ -232,6 +233,8 @@ export function CustosScreen({ onBack, onOpen }: ScreenProps) {
   const leitura = resumo ? lerTeto(resumo) : null;
   const semChamadas = !!resumo && (resumo.total?.calls ?? 0) === 0;
   const total = resumo?.total;
+  /** `null` = não dá para dizer (sem entrada, ou backend que não reporta). */
+  const taxaCache = total ? cacheHitRate(total) : null;
 
   return (
     <div className="ms-custos">
@@ -419,6 +422,17 @@ export function CustosScreen({ onBack, onOpen }: ScreenProps) {
             valor={total && !erro ? fmtCount(total.output_tokens) : null} />
           <Tile rotulo="Chamadas" sub={`nos últimos ${dias} dias`} carregando={carregando && !erro}
             valor={total && !erro ? fmtCount(total.calls) : null} />
+          {/* Cache de prompt. O tile só aparece quando há dado: `cacheHitRate`
+              devolve `null` para backend que não reporta (cliproxy), e um "0%"
+              ali afirmaria que o cache não pegou — diagnóstico que não temos. */}
+          {taxaCache !== null && !erro && (
+            <Tile
+              rotulo="Cache de prompt"
+              sub={`${fmtCount(total?.cache_read_tokens ?? 0)} lidos`}
+              carregando={false}
+              valor={`${Math.round(taxaCache * 100)}%`}
+            />
+          )}
         </section>
 
         {/* ── motor de inferência ── */}

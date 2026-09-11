@@ -243,8 +243,11 @@ class TestBuildWeatherHtml:
     def test_single_day_shows_hourly(self, frozen_today):
         html = build_weather_html("Itabuna", SAMPLE_WTTR, days=1)
         assert "Hoje por hora" in html
-        # Should show hourly time entries
-        assert "6:00" in html or "06:00" in html or "600" in html
+        # O hora a hora virou gráfico: a hora agora é o eixo x do SVG, rotulada
+        # em duas casas ("06"), e não mais "06:00" numa linha empilhada.
+        assert 'class="rich-card__wx"' in html
+        assert '<text class="rich-card__wx-hora" x="' in html
+        assert ">06<" in html
 
     def test_rain_chance_in_forecast(self):
         html = build_weather_html("Itabuna", SAMPLE_WTTR, days=3)
@@ -565,7 +568,11 @@ XSS_EVENT = '<img src=x onerror="alert(1)">'
 # inline SVG icons from svg_icons.py. Anything else in the parsed output came
 # from the data, which means it was never escaped.
 OWN_TAGS = frozenset(
-    {"div", "span", "hr", "svg", "path", "polyline", "circle", "line", "rect"}
+    # `text` entrou com o gráfico hora a hora (`build_hourly_chart`): os
+    # rótulos de temperatura, hora e % de chuva são desenhados DENTRO do SVG,
+    # porque o saneador do celular descarta `style` e um gráfico posicionado
+    # por style sairia vazio no telefone.
+    {"div", "span", "hr", "svg", "path", "polyline", "circle", "line", "rect", "text"}
 )
 
 
@@ -690,25 +697,18 @@ class TestWeatherCardEscaping:
         assert f'<span class="rich-card__detail">{SUNRISE} 05:43</span>' in card
         assert f'<span class="rich-card__detail">{SUNSET} 17:32</span>' in card
         assert f'<div class="rich-card__item-meta">{CLOUD_RAIN} 40%</div>' in card
-        assert f'<div class="rich-card__item-meta">{UMBRELLA} 10%</div>' in card
-        # The forecast row and the first hourly row both show SUN in an
-        # identical wrapper, so each is pinned together with the title that
-        # only it has -- otherwise one row's icon covers for the other's.
+        # O hora a hora virou GRÁFICO (`build_hourly_chart`), então os ícones
+        # por hora e o `__item-meta` do guarda-chuva deixaram de existir ali —
+        # a chuva agora é a barra azul. O que sobrou de linha é o dia da seção
+        # "Previsao", e é nele que o ícone continua pinado.
         assert (
             f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{SUN}</div>'
             f'  <div class="rich-card__item-body">'
             f'    <div class="rich-card__item-title">Dom 12/04</div>'
         ) in card
-        assert (
-            f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{SUN}</div>'
-            f'  <div class="rich-card__item-body">'
-            f'    <div class="rich-card__item-title">06:00</div>'
-        ) in card
-        assert (
-            f'<div class="rich-card__item-icon rich-card__item-icon--neutral">{CLOUD}</div>'
-            f'  <div class="rich-card__item-body">'
-            f'    <div class="rich-card__item-title">12:00</div>'
-        ) in card
+        # E o gráfico está lá, com a hora como eixo x em vez das linhas.
+        assert 'class="rich-card__wx"' in card
+        assert '<text class="rich-card__wx-hora"' in card
         # The layout still parses into the elements it is supposed to have.
         parsed = parse_card(card)
         assert "hr" in parsed.tags
@@ -799,14 +799,25 @@ class TestWeatherCardEscaping:
         assert "&lt;img" in card
         assert_structure_is_ours(card)
 
-    def test_hourly_rain_chance_is_escaped(self):
+    def test_hourly_rain_chance_is_dropped_not_rendered(self):
+        """A chance de chuva virou ALTURA DE BARRA, e altura é número.
+
+        Antes este campo era texto e o contrato era "aparece escapado". Agora
+        `build_hourly_chart` passa por `int()`, e o que não é número vira 0% —
+        mais forte que escapar, porque o valor não chega à marcação de forma
+        nenhuma. O que continua obrigatório é a estrutura ser só nossa.
+        """
         card = build_weather_html(
             "Itabuna", wttr_with(hour0={"chanceofrain": XSS_SCRIPT}), days=1
         )
 
         assert "<script>" not in card
         parsed = assert_structure_is_ours(card)
-        assert XSS_SCRIPT in parsed.text
+        # Nem como marcação, nem como texto: descartado.
+        assert XSS_SCRIPT not in parsed.text
+        assert "script" not in card
+        # E o cartão continua desenhando — dado ruim numa hora não derruba o dia.
+        assert 'class="rich-card__wx"' in card
 
     def test_every_text_field_poisoned_at_once(self):
         """Catch-all: nothing textual anywhere in the payload may escape into

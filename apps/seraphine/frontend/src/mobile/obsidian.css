@@ -27,6 +27,24 @@
 /* ── shell (layout phone) ── */
 html[data-shell='phone'] .mshell { display: flex; flex-direction: column; height: 100dvh; background: var(--app, #0f0f14); }
 html[data-shell='phone'] .mshell__content { flex: 1; min-height: 0; overflow-y: auto; padding: calc(12px + env(safe-area-inset-top, 44px)) 16px 16px; }
+/* Nenhuma tela anda para o lado.
+ *
+ * Estes dois são os painéis que rolam na vertical, e é isso que os torna
+ * perigosos: pela regra do CSS, `overflow-x: visible` ao lado de um valor
+ * não-visible COMPUTA para `auto`. Cada um virou um rolador horizontal por
+ * acidente, e qualquer filho mais largo que a tela arrasta o conteúdo inteiro
+ * de lado — foi exatamente o que aconteceu na thread do chat (ver
+ * `screens/ChatScreen.css`, onde o arrasto foi medido). A armadilha é a mesma
+ * para as outras telas, e é por isso que a trava vem para o shell também, e
+ * não só para o chat.
+ *
+ * `hidden` e não `clip`: ao lado de um eixo `auto`, `clip` computa para
+ * `hidden` de qualquer forma. O que é legitimamente largo (tabela, bloco de
+ * código) rola dentro de si. */
+html[data-shell='phone'] .mshell__content,
+html[data-shell='phone'] .mpushed__body {
+  overflow-x: hidden;
+}
 html[data-shell='phone'] .mtabbar {
   flex: none; display: flex; align-items: flex-end; justify-content: space-around;
   background: var(--nav, #131319); border-top: 1px solid var(--border, rgba(255,255,255,.08));

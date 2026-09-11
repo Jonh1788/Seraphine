@@ -11,6 +11,7 @@ import './obsidian.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, RefreshIcon, GaugeIcon } from '../icons/Icons';
 import {
+  cacheHitRate,
   fetchTelemetrySummary,
   fetchEngineInfo,
   listFlatBackends,
@@ -239,6 +240,9 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
 
   const total = summary?.total;
   const hasData = !!total && total.calls > 0;
+  // `null` = não dá para dizer (sem entrada, ou backend que não reporta cache).
+  // Distinto de 0%, que é "o cache não pegou nada" — um diagnóstico de verdade.
+  const cacheRate = total ? cacheHitRate(total) : null;
   const modelMax = useMemo(
     () => Math.max(1, ...(summary?.by_model ?? []).map((m) => m.cost_usd)),
     [summary],
@@ -357,6 +361,23 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
               </div>
               <div className="tel-mini-sub">apenas nuvem medida</div>
             </div>
+            {/* Cache de prompt: a única evidência direta de que o breakpoint
+                pegou. O custo sozinho não distingue "cache acertou" de "turno
+                curto", e era por isso que o número existia no banco sem
+                aparecer em lugar nenhum. */}
+            <div className="tel-mini">
+              <div className="tel-mini-label">Cache de prompt</div>
+              <div className="tel-mini-value">
+                {cacheRate === null ? '--' : `${Math.round(cacheRate * 100)}%`}
+              </div>
+              <div className="tel-mini-sub">
+                {cacheRate === null
+                  ? 'sem dado de cache no período'
+                  : `${fmtCount(total?.cache_read_tokens ?? 0)} lidos · ${fmtCount(
+                      total?.cache_write_tokens ?? 0,
+                    )} escritos`}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -383,6 +404,18 @@ export function TelemetryView({ onBack }: TelemetryViewProps): JSX.Element {
                           <span className={`tel-row__cost${zero ? ' tel-row__cost--zero' : ''}`}>
                             {zero ? '$0' : `$${fmtUsd(m.cost_usd)}`}
                           </span>
+                          {/* Por modelo é onde a taxa vira decisão: o cache é
+                              por prefixo de prompt, então um modelo pode estar
+                              acertando enquanto outro nunca aquece. Omitido
+                              (não zerado) quando o backend não reporta. */}
+                          {cacheHitRate(m) !== null && (
+                            <span
+                              className="tel-row__cache"
+                              title={`${fmtCount(m.cache_read_tokens ?? 0)} tokens lidos do cache de ${fmtCount(m.input_tokens)} de entrada`}
+                            >
+                              cache {Math.round((cacheHitRate(m) as number) * 100)}%
+                            </span>
+                          )}
                           <span className="tel-row__calls">{m.calls}×</span>
                         </div>
                         <div className="tel-row__track">

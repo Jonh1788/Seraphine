@@ -271,6 +271,175 @@ def _max_rain_chance(hourly: list[dict[str, Any]]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Gráfico do hora a hora
+#
+# Antes: 8 horas = 8 linhas `__item` empilhadas, ~900px de conversa para dizer
+# "esfria à noite e chove de manhã". O usuário lia número por número e montava
+# a tendência de cabeça. Agora: uma curva de temperatura e uma faixa de chuva
+# em ~150px, e a forma do dia aparece de relance.
+#
+# TUDO DENTRO DE UM ÚNICO <svg>, E ISSO NÃO É ESTÉTICA — É O QUE FAZ O CARTÃO
+# EXISTIR NO CELULAR. O saneador de cartões do app (`ChatScreen.sanearCartao`)
+# descarta `style` por ser vetor de injeção, e sobrevivem `class` e os
+# atributos de GEOMETRIA do SVG. O desenho de referência posicionava cada ponto
+# e cada barra por `style` inline; do jeito dele o cartão apareceria no desktop
+# e sairia vazio no telefone.
+#
+# Daí a regra deste bloco: aqui só saem números de geometria (`x`, `y`,
+# `points`, `d`, `width`, `height`) e nomes de classe. Cor, tamanho de fonte,
+# espessura e alinhamento moram em `styles.css`, como no resto do cartão.
+#
+# As unidades são as do viewBox, não pixels: o SVG escala uniformemente com a
+# largura disponível (~300px no celular, ~448px no desktop). Por isso a caixa
+# foi desenhada em 360 — perto do meio da faixa, de modo que o texto não fique
+# miúdo num nem gigante no outro.
+# ---------------------------------------------------------------------------
+
+_WX_W = 360.0
+_WX_GUTTER = 26.0  # calha do rótulo "60%"; a curva usa a MESMA, senão o ponto
+# de temperatura não pousa em cima da sua própria barra de chuva.
+_WX_CURVE_TOP = 30.0  # o topo real é 30 - 9 do rótulo, e cabe nos 22 de folga
+_WX_CURVE_H = 46.0
+_WX_AREA_BOTTOM = 84.0
+_WX_TRACK_TOP = 106.0
+_WX_TRACK_H = 34.0
+_WX_BAR_W = 15.0
+_WX_H_COM_CHUVA = 158.0
+_WX_H_SEM_CHUVA = 96.0
+
+# "Pode chover" vira "leva guarda-chuva". Uma constante, e não um número solto
+# repetido: a barra cheia, o número em destaque e a linha de corte têm de
+# concordar sobre onde fica o limiar.
+_WX_ALERTA_CHUVA = 60
+
+# Menos que isto não é curva, é ligar dois pontos — e duas horas não dizem nada
+# sobre a forma do dia. Abaixo do mínimo o chamador volta para a lista.
+_WX_MIN_PONTOS = 3
+# Acima disto a coluna fica fina demais para o rótulo da hora; amostra de 3 em
+# 3 horas, que é a granularidade que a wttr.in já entrega por padrão.
+_WX_MAX_COLUNAS = 12
+
+
+def _num(v: str) -> str:
+    """Número curto para atributo de geometria (sem `.0` pendurado)."""
+    return f"{v:.1f}".rstrip("0").rstrip(".")
+
+
+def _wx_pontos(hourly: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
+    """(hora, temperatura, chance de chuva) de cada entrada utilizável."""
+    out: list[tuple[str, int, int]] = []
+    for h in hourly:
+        try:
+            temp = int(h.get("tempC", 0))
+        except (TypeError, ValueError):
+            continue  # sem temperatura não há ponto na curva
+        try:
+            chuva = int(h.get("chanceofrain", 0))
+        except (TypeError, ValueError):
+            chuva = 0
+        htime = str(h.get("time", "0")).zfill(4)
+        out.append((htime[:-2], temp, max(0, min(100, chuva))))
+    if len(out) > _WX_MAX_COLUNAS:
+        out = out[::3]
+    return out
+
+
+def build_hourly_chart(hourly: list[dict[str, Any]]) -> str:
+    """SVG do hora a hora, ou ``""`` quando não há curva que valha a pena.
+
+    ``""`` é resposta legítima e o chamador cai de volta na lista de `__item`:
+    com menos de três horas a curva não diz nada que as linhas não digam.
+    """
+    pontos = _wx_pontos(hourly)
+    if len(pontos) < _WX_MIN_PONTOS:
+        return ""
+
+    n = len(pontos)
+    temps = [p[1] for p in pontos]
+    tmin, tmax = min(temps), max(temps)
+    # Dia inteiro sem chuva: a faixa toda some e sobra a curva. Uma fileira de
+    # zeros ocuparia 60px para não informar nada.
+    tem_chuva = any(p[2] > 0 for p in pontos)
+    altura = _WX_H_COM_CHUVA if tem_chuva else _WX_H_SEM_CHUVA
+
+    larg = (_WX_W - _WX_GUTTER) / n
+
+    def cx(i: int) -> float:
+        return _WX_GUTTER + (i + 0.5) * larg
+
+    def cy(t: int) -> float:
+        # Temperatura constante: reta no meio da faixa. Sem o ramo, a conta
+        # dividiria por zero — e o dia mais estável do ano quebraria o cartão.
+        if tmax == tmin:
+            return _WX_CURVE_TOP + _WX_CURVE_H / 2
+        return _WX_CURVE_TOP + (1 - (t - tmin) / (tmax - tmin)) * _WX_CURVE_H
+
+    xs = [cx(i) for i in range(n)]
+    ys = [cy(t) for _, t, _ in pontos]
+
+    linha = " ".join(f"{_num(x)},{_num(y)}" for x, y in zip(xs, ys))
+    area = (
+        "M "
+        + " L ".join(f"{_num(x)} {_num(y)}" for x, y in zip(xs, ys))
+        + f" L {_num(xs[-1])} {_num(_WX_AREA_BOTTOM)}"
+        + f" L {_num(xs[0])} {_num(_WX_AREA_BOTTOM)} Z"
+    )
+
+    partes = [
+        f'<svg class="rich-card__wx" viewBox="0 0 {_num(_WX_W)} {_num(altura)}">',
+        f'<path class="rich-card__wx-area" d="{area}"/>',
+        f'<polyline class="rich-card__wx-line" points="{linha}"/>',
+    ]
+
+    for (hora, temp, _chuva), x, y in zip(pontos, xs, ys):
+        partes.append(
+            f'<circle class="rich-card__wx-dot" cx="{_num(x)}" cy="{_num(y)}" r="3.5"/>'
+        )
+        partes.append(
+            f'<text class="rich-card__wx-temp" x="{_num(x)}" y="{_num(y - 9)}">{temp}°</text>'
+        )
+
+    if tem_chuva:
+        corte_y = _WX_TRACK_TOP + _WX_TRACK_H * (1 - _WX_ALERTA_CHUVA / 100)
+        partes.append(
+            f'<line class="rich-card__wx-corte" x1="{_num(_WX_GUTTER)}"'
+            f' y1="{_num(corte_y)}" x2="{_num(_WX_W)}" y2="{_num(corte_y)}"/>'
+        )
+        partes.append(
+            f'<text class="rich-card__wx-corte-rotulo" x="0"'
+            f' y="{_num(corte_y - 3)}">{_WX_ALERTA_CHUVA}%</text>'
+        )
+
+    for (hora, _temp, chuva), x in zip(pontos, xs):
+        if tem_chuva:
+            alto = chuva >= _WX_ALERTA_CHUVA
+            # Altura PERCENTUAL dentro de um trilho de altura fixa: é o que faz
+            # a linha de corte pousar exatamente no 60% de qualquer barra.
+            h_barra = _WX_TRACK_H * chuva / 100
+            cls_barra = "rich-card__wx-bar rich-card__wx-bar--alto" if alto else "rich-card__wx-bar"
+            cls_pct = "rich-card__wx-pct rich-card__wx-pct--alto" if alto else "rich-card__wx-pct"
+            partes.append(
+                f'<text class="{cls_pct}" x="{_num(x)}"'
+                f' y="{_num(_WX_TRACK_TOP - 6)}">{chuva}</text>'
+            )
+            if h_barra > 0:
+                partes.append(
+                    f'<rect class="{cls_barra}" x="{_num(x - _WX_BAR_W / 2)}"'
+                    f' y="{_num(_WX_TRACK_TOP + _WX_TRACK_H - h_barra)}"'
+                    f' width="{_num(_WX_BAR_W)}" height="{_num(h_barra)}" rx="1.5"/>'
+                )
+        # A hora é o eixo x e fica mesmo sem a faixa de chuva — sem ela a curva
+        # não diz QUANDO esfria.
+        y_hora = altura - 6
+        partes.append(
+            f'<text class="rich-card__wx-hora" x="{_num(x)}" y="{_num(y_hora)}">{_esc(hora)}</text>'
+        )
+
+    partes.append("</svg>")
+    return "".join(partes)
+
+
+# ---------------------------------------------------------------------------
 # Escaping
 #
 # The card's markup is ours; its content is not. `city` arrives in the model's
@@ -396,25 +565,45 @@ def build_weather_html(
         rel = _relative_label(parsed, today) if parsed is not None else ""
         heading = rel.capitalize() if rel else _date_label(hourly_date)
         html += '<hr class="rich-card__divider">'
-        html += f'<div class="rich-card__section">{_esc(heading)} por hora</div>'
-        for h in forecasts[0]["hourly"]:
-            htime = h.get("time", "0").zfill(4)
-            htime_fmt = f"{htime[:len(htime)-2]}:{htime[-2:]}"
-            h_temp = int(h.get("tempC", 0))
-            h_desc = h.get("weatherDesc", [{}])[0].get("value", "")
-            h_icon = _get_icon(h_desc)
-            h_rain = h.get("chanceofrain", "0")
-            h_cls = _temp_class(h_temp)
+        grafico = build_hourly_chart(forecasts[0]["hourly"])
+        if grafico:
+            # Legenda com as duas chaves: sem elas a faixa azul embaixo da curva
+            # é só uma faixa azul.
             html += (
-                f'<div class="rich-card__item">'
-                f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{h_icon}</div>'
-                f'  <div class="rich-card__item-body">'
-                f'    <div class="rich-card__item-title">{_esc(htime_fmt)}</div>'
-                f'    <div class="rich-card__item-meta">{UMBRELLA} {_esc(h_rain)}%</div>'
-                f'  </div>'
-                f'  <div class="rich-card__item-value {h_cls}">{h_temp}°C</div>'
-                f'</div>'
+                '<div class="rich-card__wx-head">'
+                f'  <span class="rich-card__section">{_esc(heading)} por hora</span>'
+                '  <span class="rich-card__wx-chaves">'
+                '    <span class="rich-card__wx-chave">'
+                '      <span class="rich-card__wx-swatch rich-card__wx-swatch--temp"></span>temp</span>'
+                '    <span class="rich-card__wx-chave">'
+                '      <span class="rich-card__wx-swatch rich-card__wx-swatch--chuva"></span>'
+                'chuva provável</span>'
+                '  </span>'
+                '</div>'
             )
+            html += grafico
+        else:
+            # Menos de três horas: a curva não diria nada que as linhas não
+            # digam, então o formato antigo continua sendo o certo.
+            html += f'<div class="rich-card__section">{_esc(heading)} por hora</div>'
+            for h in forecasts[0]["hourly"]:
+                htime = h.get("time", "0").zfill(4)
+                htime_fmt = f"{htime[:len(htime)-2]}:{htime[-2:]}"
+                h_temp = int(h.get("tempC", 0))
+                h_desc = h.get("weatherDesc", [{}])[0].get("value", "")
+                h_icon = _get_icon(h_desc)
+                h_rain = h.get("chanceofrain", "0")
+                h_cls = _temp_class(h_temp)
+                html += (
+                    f'<div class="rich-card__item">'
+                    f'  <div class="rich-card__item-icon rich-card__item-icon--neutral">{h_icon}</div>'
+                    f'  <div class="rich-card__item-body">'
+                    f'    <div class="rich-card__item-title">{_esc(htime_fmt)}</div>'
+                    f'    <div class="rich-card__item-meta">{UMBRELLA} {_esc(h_rain)}%</div>'
+                    f'  </div>'
+                    f'  <div class="rich-card__item-value {h_cls}">{h_temp}°C</div>'
+                    f'</div>'
+                )
 
     html += '</div><!--/card-->'
     return html

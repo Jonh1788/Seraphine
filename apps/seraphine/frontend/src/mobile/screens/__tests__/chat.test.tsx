@@ -591,6 +591,50 @@ describe('ChatScreen', () => {
       expect(container.querySelector('.ms-chat-cartao svg circle')).toBeTruthy();
     });
 
+    it('o gráfico hora a hora do clima chega inteiro no celular', () => {
+      /* O contrato que fez este gráfico ser desenhado como foi.
+       *
+       * `build_hourly_chart` (weather.py) monta a curva, os pontos e as barras
+       * de chuva DENTRO de um `<svg>`, com a apresentação toda em `class`. O
+       * desenho de referência posicionava cada ponto por `style` inline — e
+       * como o saneador descarta `style` (ver o teste acima, que é quem trava
+       * isso), aquele cartão apareceria no desktop e sairia VAZIO aqui.
+       *
+       * `<text>` foi a única tag que o gráfico exigiu acrescentar à lista
+       * branca; este teste é o que afirma que ela de fato passa. */
+      const GRAFICO = '<!--card--><div class="rich-card rich-card--weather">'
+        + '<svg class="rich-card__wx" viewBox="0 0 360 158">'
+        + '<path class="rich-card__wx-area" d="M 26 30 L 200 76 L 350 50 Z"/>'
+        + '<polyline class="rich-card__wx-line" points="26,30 200,76 350,50"/>'
+        + '<circle class="rich-card__wx-dot" cx="26" cy="30" r="3.5"/>'
+        + '<text class="rich-card__wx-temp" x="26" y="21">22°</text>'
+        + '<line class="rich-card__wx-corte" x1="26" y1="119.6" x2="360" y2="119.6"/>'
+        + '<rect class="rich-card__wx-bar rich-card__wx-bar--alto" x="18" y="110"'
+        + ' width="15" height="30" rx="1.5"/>'
+        + '<text class="rich-card__wx-hora" x="26" y="152">06</text>'
+        + '</svg></div><!--/card-->';
+
+      const { ws, container } = montar();
+      ws.emite(ferramentaOk({ html_card: GRAFICO }));
+      const cartao = container.querySelector('.ms-chat-cartao');
+
+      // A curva e a área.
+      expect(cartao?.querySelector('polyline.rich-card__wx-line')).toBeTruthy();
+      expect(cartao?.querySelector('path.rich-card__wx-area')).toBeTruthy();
+      // Os rótulos — a parte que a lista branca não aceitava antes.
+      const temp = cartao?.querySelector('text.rich-card__wx-temp');
+      expect(temp?.textContent).toBe('22°');
+      expect(cartao?.querySelector('text.rich-card__wx-hora')?.textContent).toBe('06');
+      // A barra de chuva e a linha de corte.
+      expect(cartao?.querySelector('rect.rich-card__wx-bar--alto')).toBeTruthy();
+      expect(cartao?.querySelector('line.rich-card__wx-corte')).toBeTruthy();
+      // A geometria sobrevive: sem ela o gráfico desenha tudo no canto.
+      expect(temp?.getAttribute('x')).toBe('26');
+      expect(cartao?.querySelector('rect')?.getAttribute('height')).toBe('30');
+      // E a regra que não mudou: nada de `style`, nem aqui.
+      expect(cartao?.querySelector('[style]')).toBeNull();
+    });
+
     it('o cartão sobrevive ao restauro da conversa', async () => {
       // O engine grava o `html_card` no próprio texto do turno
       // (`engine.py:1300`) para o transcrito não perder o cartão. Sem lê-lo, o

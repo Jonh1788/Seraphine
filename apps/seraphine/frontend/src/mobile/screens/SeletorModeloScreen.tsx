@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftIcon, CheckIcon, SearchIcon, SparkleIcon } from '../../icons/Icons';
-import { getChatModel, getConfig, listModels, putChatModel } from '../../research/api';
-import type { ModelOption } from '../../research/types';
+import {
+  getChatEffort,
+  getChatModel,
+  getConfig,
+  listModels,
+  putChatEffort,
+  putChatModel,
+} from '../../research/api';
+import type { Effort, ModelOption } from '../../research/types';
+import { EffortPicker } from '../../ui';
 import type { ScreenProps } from './registry';
 import './SeletorModeloScreen.css';
 
@@ -37,14 +45,34 @@ const PADRAO = 'cliproxy';
 /*  Agrupamento por provedor (apresentação, e só)                      */
 /* ------------------------------------------------------------------ */
 
+/* Em 2026-08-02 o backend parou de cortar o catálogo em 80 (o corte era
+ * alfabético e mudo — ver `deepsearch/service.list_models`). Com ~400 modelos
+ * chegando, os três provedores nomeados do handoff deixariam ~330 itens num
+ * único OUTROS, que é uma lista sem estrutura nenhuma. Os nomeados aqui são os
+ * vendors que de fato aparecem no catálogo em volume; o resto continua em
+ * OUTROS, e quem procura um específico usa a busca do topo.
+ *
+ * A ORDEM importa: ANTHROPIC antes de GOOGLE antes de DEEPSEEK é o que o
+ * handoff pede, e OUTROS é sempre o último. */
 const GRUPOS = [
   { chave: 'anthropic', rotulo: 'ANTHROPIC' },
+  { chave: 'openai', rotulo: 'OPENAI' },
   { chave: 'google', rotulo: 'GOOGLE' },
+  { chave: 'x-ai', rotulo: 'X-AI' },
   { chave: 'deepseek', rotulo: 'DEEPSEEK' },
+  { chave: 'qwen', rotulo: 'QWEN' },
+  { chave: 'meta-llama', rotulo: 'META' },
+  { chave: 'mistralai', rotulo: 'MISTRAL' },
   { chave: 'outros', rotulo: 'OUTROS' },
 ] as const;
 
 type ChaveGrupo = (typeof GRUPOS)[number]['chave'];
+
+/** Vendors com cabeçalho próprio — derivado de GRUPOS para os dois não
+ *  divergirem quando alguém acrescentar um provedor. */
+const NOMEADOS = new Set<string>(
+  GRUPOS.map((g) => g.chave).filter((c) => c !== 'outros'),
+);
 
 /** Vendor de um id do catálogo — `openrouter:anthropic/claude-x` → `anthropic`.
  *
@@ -58,13 +86,12 @@ function vendorDe(id: string): string {
   return (barra > 0 ? semPrefixo.slice(0, barra) : semPrefixo).toLowerCase();
 }
 
-/** O handoff nomeia três provedores e joga o resto em OUTROS. Com um catálogo
- *  de centenas de modelos, OUTROS é grande de propósito: quem procura um modelo
- *  específico usa a busca do topo, que é para isso que ela está lá. */
+/** Vendor nomeado ganha cabeçalho próprio; o resto cai em OUTROS — que segue
+ *  grande de propósito (o catálogo tem uma cauda longa de provedores com um ou
+ *  dois modelos), e é para ela que a busca do topo existe. */
 function grupoDe(id: string): ChaveGrupo {
   const v = vendorDe(id);
-  if (v === 'anthropic' || v === 'google' || v === 'deepseek') return v;
-  return 'outros';
+  return (NOMEADOS.has(v) ? v : 'outros') as ChaveGrupo;
 }
 
 /* ------------------------------------------------------------------ */
@@ -93,6 +120,11 @@ export function SeletorModeloScreen({ onBack }: ScreenProps) {
   const [catalogo, setCatalogo] = useState<ModelOption[]>([]);
   const [chave, setChave] = useState<Chave>(null);
   const [busca, setBusca] = useState('');
+  /** Esforço de raciocínio: kv próprio, mesma tela — quem escolhe o modelo é
+   *  quem decide quanto ele pensa, e separar em duas telas faria o usuário
+   *  navegar para descobrir que o modelo escolhido nem aceita o ajuste. */
+  const [esforco, setEsforco] = useState<string>('');
+  const [salvandoEsforco, setSalvandoEsforco] = useState(false);
 
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(false);
@@ -119,10 +151,17 @@ export function SeletorModeloScreen({ onBack }: ScreenProps) {
     setErro(null);
     setDivergencia(null);
     try {
-      const [cm, mdl] = await Promise.all([getChatModel(), listModels()]);
+      const [cm, mdl, ef] = await Promise.all([
+        getChatModel(),
+        listModels(),
+        // Secundário: falhar só o esforço não pode derrubar a tela inteira —
+        // sem ele ainda dá para trocar de modelo, que é o principal daqui.
+        getChatEffort().catch(() => ({ effort: '' })),
+      ]);
       if (!vivo.current) return;
       setModelo(cm.chat_model || PADRAO);
       setCatalogo(mdl.openrouter);
+      setEsforco(ef.effort || '');
       setEstado('ok');
     } catch (e) {
       if (!vivo.current) return;
@@ -174,6 +213,42 @@ export function SeletorModeloScreen({ onBack }: ScreenProps) {
       if (vivo.current) setSalvando(false);
     }
   }, [modelo, salvando]);
+
+  const escolherEsforco = useCallback(async (e: Effort) => {
+    if (e === esforco || salvandoEsforco) return;
+    const anterior = esforco;
+    setEsforco(e); // otimista
+    setSalvandoEsforco(true);
+    setErro(null);
+    try {
+      const r = await putChatEffort(e);
+      if (!vivo.current) return;
+      setEsforco(r.effort ?? e);
+      setSalvo(true);
+      if (flash.current !== undefined) window.clearTimeout(flash.current);
+      flash.current = window.setTimeout(() => { if (vivo.current) setSalvo(false); }, 2200);
+    } catch (err) {
+      if (!vivo.current) return;
+      setEsforco(anterior);
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (vivo.current) setSalvandoEsforco(false);
+    }
+  }, [esforco, salvandoEsforco]);
+
+  /* Quem aceita raciocínio é o catálogo que diz. O Padrão roteia por outro
+     caminho (cliproxy), que não passa por este ajuste. */
+  const modeloAtual = catalogo.find((m) => m.id === modelo);
+  const suportaEsforco = Boolean(modeloAtual?.reasoning);
+  const motivoSemEsforco =
+    modelo === PADRAO
+      ? 'O Padrão não passa por este ajuste. Escolha um modelo do OpenRouter que aceite raciocínio.'
+      : modeloAtual
+        ? `${modeloAtual.name} não aceita esforço de raciocínio.`
+        // Modelo órfão: a seção SELECIONADO logo acima já explica que ele sumiu
+        // do catálogo. Repetir o diagnóstico aqui só faria a tela dizer a mesma
+        // coisa duas vezes — o que falta é o efeito sobre ESTE controle.
+        : 'Não dá para saber se este modelo aceita raciocínio.';
 
   const alvo = norm(busca.trim());
   const casa = useCallback((...campos: string[]) =>
@@ -290,9 +365,33 @@ export function SeletorModeloScreen({ onBack }: ScreenProps) {
               </section>
             )}
 
+            {/* Só fora da busca: quem está digitando está procurando modelo, e
+                a escala de esforço no meio dos resultados seria ruído. */}
+            {alvo === '' && (
+              <section className="ms-seletor-secao">
+                <p className="ms-seletor-eyebrow">ESFORÇO DE RACIOCÍNIO</p>
+                <EffortPicker
+                  value={esforco}
+                  onChange={(e) => void escolherEsforco(e)}
+                  suportado={suportaEsforco}
+                  disabled={salvandoEsforco}
+                  motivoNaoSuportado={motivoSemEsforco}
+                />
+              </section>
+            )}
+
             <section className="ms-seletor-secao ms-seletor-secao--lista">
               <div className="ms-seletor-secao__head">
-                <p className="ms-seletor-eyebrow">OPENROUTER</p>
+                <p className="ms-seletor-eyebrow">
+                  OPENROUTER
+                  {catalogo.length > 0 && (
+                    <span className="ms-seletor-eyebrow__n">
+                      {alvo === ''
+                        ? `${catalogo.length}`
+                        : `${agrupado.reduce((n, g) => n + g.modelos.length, 0)}/${catalogo.length}`}
+                    </span>
+                  )}
+                </p>
                 <span className="ms-seletor-medido-rotulo">custo medido</span>
               </div>
 
@@ -322,6 +421,10 @@ export function SeletorModeloScreen({ onBack }: ScreenProps) {
                           aria-hidden="true"
                         />
                         <span className="ms-seletor-grupo__rotulo">{g.rotulo}</span>
+                        {/* Quantos há ali: com o catálogo inteiro, OUTROS pode
+                            ter centenas, e rolar até descobrir isso é pior que
+                            ler o número. */}
+                        <span className="ms-seletor-grupo__n">{g.modelos.length}</span>
                       </div>
                       {g.modelos.map((m) => (
                         <button

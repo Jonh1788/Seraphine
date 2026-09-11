@@ -105,19 +105,33 @@ async def finance_list_entries(
     request: Request,
     month: int | None = None,
     year: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     category: str | None = None,
     type: str | None = None,
     status: str | None = None,
     limit: int = 100,
     user_id: str | None = Depends(get_current_user_id),
 ) -> dict[str, Any]:
+    """`month`/`year` recortam pelo MÊS DE CAIXA; `date_from`/`date_to`
+    (ISO, extremos incluídos) recortam pela DATA DA COMPRA.
+
+    Quem desenha um período — o calendário, uma semana — pergunta pela data
+    da compra: pedir o mês de caixa e depois posicionar por `date` faria a
+    compra no cartão sumir do dia em que ela aconteceu.
+    """
     svc = _service_or_503(request)
     try:
         entries = await svc.list_entries(
-            month=month, year=year, category=category,
-            type=type, status=status, limit=limit, user_id=user_id,
+            month=month, year=year, date_from=date_from, date_to=date_to,
+            category=category, type=type, status=status, limit=limit,
+            user_id=user_id,
         )
         return {"entries": [dataclasses.asdict(e) for e in entries]}
+    except ValueError as e:
+        # Data fora do ISO é pedido malformado, não erro do servidor: um 500
+        # aqui mandaria o cliente tentar de novo com a mesma data para sempre.
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("finance list entries failed")
         raise HTTPException(status_code=500, detail=str(e))

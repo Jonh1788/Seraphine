@@ -37,6 +37,12 @@ import { useAnimationCatalog, resolveAnimationTag } from '../avatar/animationCat
 import { extractAnimTags } from './animTag';
 import { parseThinking, stripAudioTags } from './thinking';
 import { usePendingAttachments } from '../attachments/usePendingAttachments';
+import { notify } from '../utils/notify';
+
+/** iOS roda notificação local nativa própria; ver useRecurringNotifications. */
+function isIOS(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
 
 /**
  * Mapping from audio/emotion tags to avatar expression + optional gesture.
@@ -712,6 +718,7 @@ function ChatViewImpl({
                 weekday: recurringMeta['weekday'] as number | null | undefined,
                 day_of_month: recurringMeta['day_of_month'] as number | null | undefined,
                 time: recurringMeta['time'] as string | null | undefined,
+                end_date: recurringMeta['end_date'] as string | null | undefined,
               };
               turn.recurring = [...(turn.recurring || []), rule];
             }
@@ -830,15 +837,10 @@ function ChatViewImpl({
         });
       } else if (msg.type === 'reminder') {
         const rem = msg as ReminderMessage;
-        // Browser notification
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          new Notification('Seraphine - Lembrete', { body: rem.message });
-        } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
-          Notification.requestPermission().then((perm) => {
-            if (perm === 'granted') {
-              new Notification('Seraphine - Lembrete', { body: rem.message });
-            }
-          });
+        // No iOS a notificação local nativa já tocou — o WS só traz a
+        // bolha. Duplicar aqui daria dois alertas para o mesmo lembrete.
+        if (!isIOS()) {
+          void notify('Seraphine - Lembrete', rem.message);
         }
       } else {
         console.warn('[ws] unknown msg.type', (msg as { type?: string }).type);

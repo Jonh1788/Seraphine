@@ -119,12 +119,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 # Presente só quando o provedor reporta o valor cobrado
                 # (OpenRouter). None → o service estima pela tabela.
                 cost_usd=rec.get("cost_usd"),
+                # Cache de prompt (OpenRouter). Zero para quem não reporta —
+                # é o que diz se o breakpoint pegou, já que o custo sozinho
+                # não distingue cache de turno curto.
+                cache_read_tokens=rec.get("cache_read_tokens", 0),
+                cache_write_tokens=rec.get("cache_write_tokens", 0),
             ))
         except Exception:
             pass
 
-    from seraphine.llm.factory import build_engine
-    llm, engine_info = build_engine(settings, telemetry=_telemetry_sink)
+    from seraphine.llm.selection import SelectableEngine
+    llm = SelectableEngine(settings, telemetry=_telemetry_sink)
+    saved_backend = await store.get_kv("llm_backend")
+    if saved_backend:
+        try:
+            await llm.select(saved_backend, store, persist=False)
+        except Exception as e:
+            logger.warning("Saved LLM selection unavailable: %s", e)
+    engine_info = llm.info
     try:
         from seraphine.conversation.engine import DEFAULT_SYSTEM_PROMPT
         await llm.warmup(system_prompt=DEFAULT_SYSTEM_PROMPT)
@@ -256,13 +268,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Recurring tasks — always enabled (SQLite-backed)
     # ------------------------------------------------------------------
     recurring_service = None
+    recurring_schema_ready = False
     routine_service = None
     try:
         store.register_migrator("seraphine_recurring", recurring_schema.migrate)
         await store.ensure_schema()  # idempotent
-        if task_service is not None:
-            recurring_service = RecurringService(store, task_service)
-            logger.info("Recurring service wired")
+        recurring_schema_ready = True
+        # RecurringService itself is constructed further down, right after the
+        # reminder scheduler exists: it needs the scheduler to turn a
+        # materialized occurrence into an actual notification, and building it
+        # here would hand it a permanent `scheduler=None`.
         # Routines (prompt launchers) share the recurring migrator. Seed the
         # code-owned catalog once; seeding is idempotent (keyed by stable id).
         routine_service = RoutineService(store)
@@ -606,6 +621,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning("Reminder scheduler failed (non-critical): %s", e)
 
+    # ------------------------------------------------------------------
+    # Recurring service — built here, not with the other SQLite services,
+    # because the reminder scheduler only exists from this point on. A rule
+    # with `remind` set materializes today's task either way; without the
+    # scheduler it just never notifies.
+    # ------------------------------------------------------------------
+    if recurring_schema_ready and task_service is not None:
+        try:
+            recurring_service = RecurringService(
+                store, task_service, scheduler=reminder_scheduler,
+            )
+            logger.info(
+                "Recurring service wired (reminders=%s)",
+                reminder_scheduler is not None,
+            )
+        except Exception as e:
+            logger.warning("Recurring service failed (non-critical): %s", e)
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
@@ -796,9 +829,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # service on the RTX box (spec 007). Toggle via SERAPHINE_STT_BACKEND.
     # When remote is configured, local MLX is kept as fallback.
     stt: Any
-    local_stt = WhisperSTT(
-        model=settings.stt_model, language=settings.stt_language
-    )
+    if settings.stt_backend == "faster_whisper":
+        from seraphine.stt.faster_whisper import FasterWhisperSTT
+
+        local_stt = FasterWhisperSTT(
+            model=settings.stt_model, language=settings.stt_language
+        )
+    else:
+        local_stt = WhisperSTT(
+            model=settings.stt_model, language=settings.stt_language
+        )
     if settings.stt_backend == "remote":
         from seraphine.stt.remote import RemoteWhisperSTT
 
@@ -827,11 +867,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         stt = local_stt
         logger.info(
-            "WhisperSTT wired (model=%s language=%s)",
+            "Local STT wired (model=%s language=%s)",
             settings.stt_model,
             settings.stt_language,
         )
-    # Warmup local MLX: transcribe tiny silent PCM so model loads eagerly.
+    # Load the selected local Whisper implementation eagerly.
     try:
         await local_stt.transcribe(b"\x00" * 3200, sample_rate=16000)
         logger.info("Local WhisperSTT warmup complete")

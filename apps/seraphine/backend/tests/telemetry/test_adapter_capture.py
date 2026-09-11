@@ -336,6 +336,9 @@ async def test_openrouter_chat_emits_usage_to_sink() -> None:
             "model": "openai/gpt-4o-mini",
             "input_tokens": 12,
             "output_tokens": 34,
+            # Cache de prompt: zero quando o usage não traz os contadores.
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
         }
     ]
 

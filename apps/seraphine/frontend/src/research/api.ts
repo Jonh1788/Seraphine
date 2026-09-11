@@ -92,6 +92,22 @@ export async function putChatModel(chat_model: string): Promise<{ chat_model: st
   return data;
 }
 
+export async function getChatEffort(): Promise<{ effort: string }> {
+  const data = await request<{ effort: string }>('/deepsearch/chat-effort');
+  // Ausente vira desligado: um esforço que a gente não conseguiu ler não pode
+  // virar um esforço inventado na tela.
+  return { effort: data?.effort ?? '' };
+}
+
+export async function putChatEffort(effort: string): Promise<{ effort: string }> {
+  const data = await request<{ effort: string }>('/deepsearch/chat-effort', {
+    method: 'PUT',
+    body: JSON.stringify({ effort }),
+  });
+  if (!data) throw new Error('Empty response from PUT /deepsearch/chat-effort');
+  return data;
+}
+
 export async function listModels(): Promise<{
   cliproxy: ModelOption[];
   openrouter: ModelOption[];

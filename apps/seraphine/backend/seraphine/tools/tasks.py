@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from seraphine.reminders.tasks import schedule_task_reminder as _schedule_task_reminder
 from seraphine.tools.base import Tool, ToolResult
 from seraphine.tools.cards import text as _esc
 from seraphine.tools.svg_icons import (
@@ -39,58 +38,6 @@ _REMIND_LABELS: dict[str, str] = {
     "1h_before": "1h antes",
     "1d_before": "1 dia antes",
 }
-
-_SP_TZ = ZoneInfo("America/Sao_Paulo")
-
-
-def _compute_fire_time(
-    due_date: str,
-    due_time: str | None,
-    remind: str,
-) -> datetime | None:
-    """Calculate the datetime to fire the reminder notification."""
-    try:
-        if due_time:
-            dt = datetime.strptime(f"{due_date} {due_time}", "%Y-%m-%d %H:%M")
-        else:
-            # No time specified — default to 09:00
-            dt = datetime.strptime(due_date, "%Y-%m-%d").replace(hour=9, minute=0)
-        dt = dt.replace(tzinfo=_SP_TZ)
-    except ValueError:
-        return None
-
-    if remind == "1h_before":
-        dt -= timedelta(hours=1)
-    elif remind == "1d_before":
-        dt -= timedelta(days=1)
-    # "at_time" — no offset
-
-    return dt
-
-
-def _schedule_task_reminder(
-    scheduler: Any,
-    task_id: int,
-    title: str,
-    due_date: str,
-    due_time: str | None,
-    remind: str,
-) -> str | None:
-    """Schedule a reminder via ReminderScheduler. Returns the job id or None."""
-    fire_at = _compute_fire_time(due_date, due_time, remind)
-    if fire_at is None:
-        return None
-    job_id = f"task-remind-{task_id}"
-    try:
-        scheduler.add_reminder(
-            fire_at=fire_at,
-            message=f"Lembrete de tarefa: {title}",
-            reminder_id=job_id,
-        )
-        return job_id
-    except Exception:
-        logger.exception("failed to schedule reminder for task %d", task_id)
-        return None
 
 
 def _build_task_card(
@@ -464,10 +411,16 @@ class UpdateTaskTool(Tool):
         if self._scheduler is not None:
             job_id = f"task-remind-{task_id}"
             if task.remind and task.due_date:
-                _schedule_task_reminder(
+                booked = _schedule_task_reminder(
                     self._scheduler, int(task_id), task.title,
                     task.due_date, task.due_time, task.remind,
                 )
+                if booked is None:
+                    # Nada foi agendado (data impossível de ler, ou a hora
+                    # já passou). Um job de uma edição anterior ainda
+                    # dispararia no horário velho, então derruba o fantasma
+                    # em vez de deixá-lo avisar de uma tarefa que mudou.
+                    self._scheduler.cancel_reminder(job_id)
             else:
                 # No remind or no due_date — cancel any existing job
                 self._scheduler.cancel_reminder(job_id)

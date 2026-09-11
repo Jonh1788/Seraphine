@@ -63,6 +63,18 @@ class ChatModelBody(BaseModel):
     chat_model: str = Field(min_length=1)
 
 
+class ChatEffortBody(BaseModel):
+    """Esforço de raciocínio do chat.
+
+    Sem ``min_length``: ``""`` é o valor legítimo de "desligado", e é como o
+    usuário volta atrás. A validação do conteúdo fica no service
+    (`normalize_effort`), que é quem também protege a leitura de kv escrito por
+    cliente antigo — validar só aqui deixaria a outra porta aberta.
+    """
+
+    effort: str = ""
+
+
 # -- config + models (static paths first) ----------------------------------
 
 
@@ -96,6 +108,17 @@ async def get_chat_model(request: Request) -> dict[str, str]:
 async def put_chat_model(request: Request, body: ChatModelBody) -> dict[str, str]:
     svc = _service_or_503(request)
     return {"chat_model": await svc.set_chat_model(body.chat_model)}
+
+
+@router.get("/chat-effort")
+async def get_chat_effort(request: Request) -> dict[str, str]:
+    return {"effort": await _service_or_503(request).get_chat_effort()}
+
+
+@router.put("/chat-effort")
+async def put_chat_effort(request: Request, body: ChatEffortBody) -> dict[str, str]:
+    svc = _service_or_503(request)
+    return {"effort": await svc.set_chat_effort(body.effort)}
 
 
 # -- runs: collection ------------------------------------------------------

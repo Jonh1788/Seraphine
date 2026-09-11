@@ -232,8 +232,11 @@
 .tr-steps__ctrl { display: inline-flex; gap: 6px; }
 .tr-steps__ctrl button { background: var(--elev); border: 1px solid var(--border-strong); color: var(--text-dim); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; }
 
-.tr-create__tutor {
-  flex: none; max-width: 160px; padding: 10px 10px; border-radius: 12px; font: inherit; font-size: 12.5px;
+/* Wrapper do ModelPicker (era um `<select>`): aqui só o tamanho — o campo em si
+   é estilizado por `ui/ModelPicker.css`. */
+.tr-create__tutor { flex: none; width: 190px; }
+.tr-create__tutor .mp__input {
+  padding: 10px 26px 10px 10px; border-radius: 12px; font-size: 12.5px;
   background: var(--surface, #17171e); color: var(--text-dim, #9594a0);
   border: 1px solid var(--border-strong, rgba(255,255,255,.12));
 }

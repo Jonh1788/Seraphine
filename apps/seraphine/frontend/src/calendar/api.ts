@@ -1,4 +1,5 @@
 import { API_BASE } from '../api';
+import type { FinanceEntry } from '../finance/types';
 import type { AggregateDay, AggregateResponse, Task, TasksByRangeResponse } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -35,6 +36,30 @@ export async function fetchTasksByRange(start: string, end: string): Promise<Tas
   const params = new URLSearchParams({ start, end });
   const data = await request<TasksByRangeResponse>(`/tasks/by-date-range?${params.toString()}`);
   return Array.isArray(data?.tasks) ? data.tasks : [];
+}
+
+/**
+ * Lançamentos cuja DATA DA COMPRA cai no intervalo [start, end] (YYYY-MM-DD,
+ * extremos incluídos) — a mesma pergunta que `fetchTasksByRange` faz às
+ * tarefas, e a única que o calendário tem.
+ *
+ * NÃO usa `month`/`year`: esses recortam pelo MÊS DE CAIXA, o mês em que o
+ * dinheiro sai, que para uma compra no cartão é o do vencimento ou o do
+ * pagamento da fatura. O calendário posiciona cada lançamento por `date`, a
+ * data da compra — pedir um e desenhar o outro faz a compra de 15/07 numa
+ * fatura que vence em 10/08 nunca ser buscada para a semana de 13–19/07, e
+ * sumir do dia em que aconteceu.
+ */
+export async function fetchFinanceEntriesByRange(
+  start: string, end: string, limit = 500,
+): Promise<FinanceEntry[]> {
+  const params = new URLSearchParams({
+    date_from: start, date_to: end, limit: String(limit),
+  });
+  const data = await request<{ entries?: FinanceEntry[] }>(
+    `/finance/entries?${params.toString()}`,
+  );
+  return Array.isArray(data?.entries) ? data.entries : [];
 }
 
 /* ------------------------------------------------------------------ */

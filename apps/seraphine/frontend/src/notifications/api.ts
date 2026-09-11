@@ -1,4 +1,5 @@
 import { API_BASE } from '../api';
+import type { RecurringRuleDTO } from './recurringSync';
 
 /* ------------------------------------------------------------------ */
 /*  Preferências de notificação — GET/PATCH /notifications/settings    */
@@ -86,4 +87,27 @@ export async function setNotificationType(
   return patchNotificationSettings({
     per_type_enabled: { ...atual.per_type_enabled, [tipo]: ligado },
   });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Regras recorrentes cruas — insumo do sync de notificação local.    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * As regras recorrentes cruas. `GET /recurring` devolve `{recurring: [...]}`.
+ *
+ * REJEITA em HTTP não-ok em vez de devolver lista vazia, e a diferença não é
+ * estilística: no `sync_recurring` do Swift a lista é a verdade inteira — o
+ * que não vem nela é VARRIDO. "Backend devolveu 502 no meio de um deploy"
+ * viraria "o usuário não tem mais nenhuma regra", e todo lembrete recorrente
+ * seria cancelado calado. Lista vazia só pode significar lista vazia.
+ */
+export async function fetchRecurringRules(): Promise<RecurringRuleDTO[]> {
+  const res = await fetch(`${API_BASE}/recurring`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as { recurring?: RecurringRuleDTO[] };
+  // Mesmo raciocínio: payload sem a chave é resposta que não entendemos, não
+  // é ausência de regras.
+  if (!Array.isArray(data.recurring)) throw new Error('resposta sem `recurring`');
+  return data.recurring;
 }
