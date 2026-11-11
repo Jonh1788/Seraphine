@@ -32,6 +32,7 @@ from uuid import uuid4
 from seraphine.deepsearch.engine import DeepResearchEngine
 from seraphine.deepsearch.providers import (
     OpenRouterClient,
+    normalize_effort,
     normalize_model_spec,
     resolve_role_model,
 )
@@ -54,8 +55,46 @@ _CLIPROXY_MODELS = [
     {"id": "cliproxy:claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
 ]
 
-# Cap on OpenRouter models returned (keeps the picker manageable).
-_OPENROUTER_CAP = 80
+# Sem teto no catálogo do OpenRouter (2026-08-02).
+#
+# Havia um `[:80]` aqui, aplicado DEPOIS da ordenação por nome — ou seja, não
+# eram "os 80 mais relevantes", eram os 80 primeiros em ordem alfabética. Com o
+# catálogo em ~400 modelos isso cortava tudo a partir do meio do alfabeto (os
+# `openai/*` e `qwen/*` inteiros, entre outros) e não havia nada na UI dizendo
+# que a lista estava truncada: o modelo simplesmente não existia para o usuário.
+#
+# O motivo original do corte era o `<select>` chapado do desktop ficar
+# impraticável. Isso agora é problema da UI, e ela resolve com busca
+# (`ui/ModelPicker.tsx` no desktop, `SeletorModeloScreen` no mobile) — não
+# escondendo modelo.
+
+# Cache do catálogo do OpenRouter (segundos).
+#
+# Sem ele, TODA montagem de picker vira um GET em `openrouter.ai/api/v1/models`
+# — e são quatro no app (chat, fan-out, síntese, tutor das trilhas), cada um
+# baixando os metadados de ~400 modelos para extrair id+nome. O catálogo muda em
+# escala de dias: 10 minutos é curto o bastante para um modelo novo aparecer no
+# mesmo dia e longo o bastante para a UI abrir instantânea.
+_OPENROUTER_TTL_S = 600.0
+
+
+class _CatalogoOR:
+    """Catálogo do OpenRouter em memória, com a chave que o produziu.
+
+    A chave faz parte da identidade do cache de propósito: trocar a chave da
+    OpenRouter pode mudar o catálogo (contas veem conjuntos diferentes), então
+    guardar só os modelos serviria a lista da chave antiga para a nova.
+    """
+
+    __slots__ = ("key", "expira_em", "modelos")
+
+    def __init__(self, key: str, expira_em: float, modelos: list[dict[str, Any]]):
+        self.key = key
+        self.expira_em = expira_em
+        self.modelos = modelos
+
+    def vale_para(self, key: str, agora: float) -> bool:
+        return self.key == key and agora < self.expira_em
 
 
 def _now_iso() -> str:
@@ -89,6 +128,11 @@ class DeepSearchService:
         # loop keeps a strong ref (create_task results are GC-eligible otherwise);
         # each removes itself on completion.
         self._wiki_ingest_tasks: set[asyncio.Task] = set()
+        # Catálogo do OpenRouter em cache + o lock que garante UM fetch por
+        # expiração: as telas do app montam vários pickers ao mesmo tempo e sem
+        # o lock cada um abriria a sua própria requisição para o mesmo dado.
+        self._or_catalogo: Optional[_CatalogoOR] = None
+        self._or_lock = asyncio.Lock()
 
     # -- config ------------------------------------------------------------
 
@@ -172,29 +216,90 @@ class DeepSearchService:
         await self.store.set_kv("chat_model", normalize_model_spec(chat_model))
         return await self.get_chat_model()
 
-    async def list_models(self) -> dict[str, list[dict[str, str]]]:
+    # -- esforço de raciocínio do chat (kv) --------------------------------
+
+    async def get_chat_effort(self) -> str:
+        """Esforço de raciocínio do chat principal, ou ``""`` para desligado.
+
+        Normaliza na LEITURA pelo mesmo motivo de `get_chat_model`: o valor sai
+        de um kv que qualquer versão do cliente escreve, e um valor inválido
+        chegando na montagem da requisição custa um 400 no meio da conversa.
+        ``""`` significa "não mandar `reasoning`" — o modelo fica no
+        comportamento padrão dele, que não é a mesma coisa que `effort: none`
+        (esse DESLIGA o raciocínio de quem pensa por padrão).
+        """
+        return normalize_effort(await self.store.get_kv("chat_reasoning_effort")) or ""
+
+    async def set_chat_effort(self, effort: str) -> str:
+        await self.store.set_kv(
+            "chat_reasoning_effort", normalize_effort(effort) or ""
+        )
+        return await self.get_chat_effort()
+
+    async def list_models(self) -> dict[str, list[dict[str, Any]]]:
         """Return selectable models grouped by provider.
 
-        ``cliproxy`` is a static curated list. ``openrouter`` is fetched live
-        when a key is configured (capped + sorted by name); any error or a
-        missing key yields ``[]`` — never raises.
+        ``cliproxy`` is a static curated list. ``openrouter`` é o catálogo
+        INTEIRO, ordenado por nome e cacheado por ``_OPENROUTER_TTL_S``; any
+        error or a missing key yields ``[]`` — never raises.
         """
         cfg = await asyncio.to_thread(self._read_config)
-        openrouter: list[dict[str, str]] = []
+        openrouter: list[dict[str, Any]] = []
         if cfg.openrouter_key:
+            openrouter = await self._catalogo_openrouter(cfg.openrouter_key)
+        return {"cliproxy": list(_CLIPROXY_MODELS), "openrouter": openrouter}
+
+    async def _catalogo_openrouter(self, key: str) -> list[dict[str, Any]]:
+        """O catálogo da OpenRouter, do cache ou da rede. Nunca levanta.
+
+        Duas garantias que valem o tamanho desta função:
+
+        1. UM fetch por expiração, não um por picker. As telas montam vários
+           pickers ao mesmo tempo; sem o lock cada um dispararia a sua própria
+           requisição para exatamente o mesmo dado.
+        2. Falha não apaga o que já se sabia. Se a rede cai com um catálogo
+           válido em memória, servir o vencido é melhor que servir vazio — a
+           lista vazia faz a UI dizer "o catálogo voltou vazio", que é uma
+           afirmação mais forte (e errada) do que "está um pouco velho".
+        """
+        agora = time.monotonic()
+        cache = self._or_catalogo
+        if cache is not None and cache.vale_para(key, agora):
+            return cache.modelos
+
+        async with self._or_lock:
+            # Recheca dentro do lock: quem esperou aqui provavelmente esperou
+            # justamente o fetch de outra corrotina terminar.
+            agora = time.monotonic()
+            cache = self._or_catalogo
+            if cache is not None and cache.vale_para(key, agora):
+                return cache.modelos
+
             try:
-                raw = await OpenRouterClient(cfg.openrouter_key).list_models()
-                mapped = [
-                    {"id": f"openrouter:{m['id']}", "name": m.get("name", m["id"])}
-                    for m in raw
-                    if m.get("id")
-                ]
-                mapped.sort(key=lambda m: m["name"].lower())
-                openrouter = mapped[:_OPENROUTER_CAP]
+                raw = await OpenRouterClient(key).list_models()
             except Exception as exc:  # noqa: BLE001 — never fail the picker
                 logger.warning("deepsearch: list_models openrouter failed: %s", exc)
-                openrouter = []
-        return {"cliproxy": list(_CLIPROXY_MODELS), "openrouter": openrouter}
+                # Vencido é melhor que vazio — mas só o da MESMA chave.
+                if cache is not None and cache.key == key:
+                    return cache.modelos
+                return []
+
+            mapped = [
+                {
+                    "id": f"openrouter:{m['id']}",
+                    "name": m.get("name", m["id"]),
+                    # Quem aceita esforço de raciocínio. Vem do
+                    # `supported_parameters` do próprio catálogo (212 de 337 em
+                    # 2026-08-02) — a UI usa para só oferecer o controle onde
+                    # ele faz efeito, em vez de o usuário descobrir por um 400.
+                    "reasoning": bool(m.get("reasoning")),
+                }
+                for m in raw
+                if m.get("id")
+            ]
+            mapped.sort(key=lambda m: m["name"].lower())
+            self._or_catalogo = _CatalogoOR(key, time.monotonic() + _OPENROUTER_TTL_S, mapped)
+            return mapped
 
     # -- runs: persistence helpers ----------------------------------------
 

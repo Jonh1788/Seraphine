@@ -3,9 +3,7 @@
  *
  * Collects:
  *   - user_name (free text, optional)
- *   - llm_backend ("ollama" | "claude") — FAKE selector. Writes to
- *     localStorage.seraphine.llm_backend but the backend does NOT currently
- *     read it. TODO: wire backend runtime switch (tracked for a follow-up).
+ *   - llm_backend: applied and persisted by the backend before advancing.
  *   - Google OAuth connection — reuses /google/oauth/start; opens consent in
  *     a new window. User can click "Talvez depois" to advance without it.
  */
@@ -14,7 +12,7 @@ import { useState } from 'react';
 import { startOAuth } from '../google/api';
 import { ChevronLeftIcon, ChevronRightIcon, CheckIcon } from '../icons/Icons';
 
-export type LlmBackend = 'ollama' | 'claude';
+export type LlmBackend = 'ollama' | 'claude' | 'codex';
 
 interface Props {
   name: string;
@@ -23,6 +21,8 @@ interface Props {
   onLlmBackendChange: (v: LlmBackend) => void;
   onBack: () => void;
   onNext: () => void;
+  busy?: boolean;
+  error?: string | null;
 }
 
 export function SetupStep({
@@ -32,6 +32,8 @@ export function SetupStep({
   onLlmBackendChange,
   onBack,
   onNext,
+  busy = false,
+  error,
 }: Props): JSX.Element {
   const [googleStatus, setGoogleStatus] = useState<
     'idle' | 'opening' | 'opened' | 'error'
@@ -84,6 +86,7 @@ export function SetupStep({
               (llmBackend === 'ollama' ? ' is-selected' : '')
             }
             onClick={() => onLlmBackendChange('ollama')}
+            disabled={busy}
             aria-pressed={llmBackend === 'ollama'}
           >
             <div className="onboarding-backend-card__title">
@@ -105,6 +108,7 @@ export function SetupStep({
               (llmBackend === 'claude' ? ' is-selected' : '')
             }
             onClick={() => onLlmBackendChange('claude')}
+            disabled={busy}
             aria-pressed={llmBackend === 'claude'}
           >
             <div className="onboarding-backend-card__title">
@@ -119,7 +123,27 @@ export function SetupStep({
               Nuvem, mais capacidade, requer chave de API.
             </div>
           </button>
+          <button
+            type="button"
+            className={'onboarding-backend-card' + (llmBackend === 'codex' ? ' is-selected' : '')}
+            onClick={() => onLlmBackendChange('codex')}
+            aria-pressed={llmBackend === 'codex'}
+            disabled={busy}
+          >
+            <div className="onboarding-backend-card__title">
+              Codex
+              {llmBackend === 'codex' && (
+                <span className="onboarding-backend-card__check" aria-hidden="true">
+                  <CheckIcon size={14} />
+                </span>
+              )}
+            </div>
+            <div className="onboarding-backend-card__desc">
+              Usa sua conta conectada ao Codex neste computador.
+            </div>
+          </button>
         </div>
+        {error && <div className="onboarding-error" role="alert">{error}</div>}
       </div>
 
       <div className="onboarding-field">
@@ -154,6 +178,7 @@ export function SetupStep({
           type="button"
           className="onboarding-btn onboarding-btn--ghost"
           onClick={onBack}
+          disabled={busy}
         >
           <ChevronLeftIcon size={18} />
           Voltar
@@ -162,8 +187,10 @@ export function SetupStep({
           type="button"
           className="onboarding-btn onboarding-btn--primary"
           onClick={onNext}
+          disabled={busy}
+          aria-busy={busy}
         >
-          Proximo
+          {busy ? 'Conectando...' : 'Proximo'}
           <ChevronRightIcon size={18} />
         </button>
       </div>

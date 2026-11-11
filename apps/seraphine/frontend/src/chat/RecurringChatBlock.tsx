@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { RepeatIcon, ClockIcon } from '../icons/Icons';
+import { RepeatIcon, ClockIcon, CalendarIcon } from '../icons/Icons';
 
 const FREQ_LABELS: Record<string, string> = {
   daily: 'Diaria',
@@ -16,6 +16,7 @@ export interface RecurringRule {
   weekday?: number | null;
   day_of_month?: number | null;
   time?: string | null;
+  end_date?: string | null;
 }
 
 export interface RecurringChatBlockProps {
@@ -54,6 +55,12 @@ function RecurringChatBlockImpl({ rule }: RecurringChatBlockProps): JSX.Element 
           <div className="recurring-chat-block__detail">
             <ClockIcon size={14} />
             <span>{rule.time}</span>
+          </div>
+        )}
+        {rule.end_date && (
+          <div className="recurring-chat-block__detail">
+            <CalendarIcon size={14} />
+            <span>até {rule.end_date.split('-').reverse().join('/')}</span>
           </div>
         )}
       </div>

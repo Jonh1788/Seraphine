@@ -17,7 +17,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
         construção dos agregados de 7/30 dias exibidos ao lado. Sem rótulo, a
         tela mostra dois totais contraditórios. */
 
-vi.mock('../../../telemetry/api', () => ({
+vi.mock('../../../telemetry/api', async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  // Só as chamadas de REDE são falsas — `cacheHitRate` é lógica pura.
   fetchTelemetrySummary: vi.fn(),
   listFlatBackends: vi.fn(),
   fetchEngineInfo: vi.fn(),
@@ -465,6 +467,56 @@ describe('CustosScreen', () => {
     render(<CustosScreen />);
     await waitFor(() => expect(screen.getByText('$2,84')).toBeTruthy());
     expect(screen.queryByText('Onde foi o custo')).toBeNull();
+  });
+
+  /* ── cache de prompt ────────────────────────────────────────────── */
+
+  it('mostra a taxa do cache de prompt quando o backend reporta', async () => {
+    /* O backend gravava esses contadores havia semanas sem NENHUMA tela
+       mostrá-los: o número existia só no banco. 2,55M lidos de 3,4M = 75%. */
+    comDado({
+      total: {
+        input_tokens: 3_400_000,
+        output_tokens: 812_000,
+        cost_usd: 2.84,
+        calls: 1840,
+        cache_read_tokens: 2_550_000,
+        cache_write_tokens: 400_000,
+      },
+    });
+    render(<CustosScreen />);
+
+    await waitFor(() => expect(screen.getByText('Cache de prompt')).toBeTruthy());
+    expect(screen.getByText('75%')).toBeTruthy();
+  });
+
+  it('backend que não reporta cache não ganha um tile de 0% — o tile some', async () => {
+    /* "0%" afirmaria que o cache falhou. No cliproxy não há cache nessa rota:
+       a resposta certa é não dizer nada. */
+    comDado();
+    render(<CustosScreen />);
+
+    await waitFor(() => expect(screen.getByText('$2,84')).toBeTruthy());
+    expect(screen.queryByText('Cache de prompt')).toBeNull();
+  });
+
+  it('cache escrito e nada lido é 0% de verdade, e aparece', async () => {
+    // Primeiro turno: pagou 1,25x para escrever e não leu nada ainda. Zero é
+    // acionável — é o custo do cache sem o benefício.
+    comDado({
+      total: {
+        input_tokens: 1_000_000,
+        output_tokens: 10_000,
+        cost_usd: 1.0,
+        calls: 10,
+        cache_read_tokens: 0,
+        cache_write_tokens: 1_000_000,
+      },
+    });
+    render(<CustosScreen />);
+
+    await waitFor(() => expect(screen.getByText('Cache de prompt')).toBeTruthy());
+    expect(screen.getByText('0%')).toBeTruthy();
   });
 
   it('não usa emoji — os ícones são SVG', async () => {

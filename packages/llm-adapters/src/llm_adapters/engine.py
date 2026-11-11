@@ -39,10 +39,12 @@ def describe_engine(*, backend: str, model: str, base_url: str = "") -> EngineIn
     is_cliproxy = b in ("anthropic", "claude_max") and any(h in bu for h in ("cliproxy", *_LOCAL_HINTS))
     local = b in ("openai", "ollama", "apple_fm") or any(h in bu for h in _LOCAL_HINTS)
     flat = b in ("claude_max", "openai", "ollama", "apple_fm") or is_cliproxy
-    tools = b in ("anthropic", "claude_max", "openai", "ollama")
+    tools = b in ("anthropic", "claude_max", "openai", "ollama", "codex")
     vision = b in ("anthropic", "claude_max")
     if b in ("anthropic", "claude_max"):
         name = "Claude (cliproxy)" if is_cliproxy else ("Claude Max" if b == "claude_max" else "Claude")
+    elif b == "codex":
+        name = "Codex"
     elif b == "openai":
         name = "Local (MLX/LM Studio)"
     elif b == "ollama":

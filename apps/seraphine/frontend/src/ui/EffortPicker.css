@@ -1,0 +1,61 @@
+/* EffortPicker — escala de esforço de raciocínio, desktop e mobile.
+ * Alvos de 44px de altura porque a mesma marcação serve ao polegar (HIG). */
+
+.efp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.efp__linha {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.efp__btn {
+  flex: 1 1 auto;
+  min-width: 62px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: var(--bg-0, #14141a);
+  color: var(--text-dim, #9a99a8);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.efp__btn:hover:not(:disabled) {
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.12));
+  color: var(--text, #e6e6ea);
+}
+
+.efp__btn--ativo {
+  border-color: var(--accent, #7c6cff);
+  background: var(--accent-soft, rgba(154, 147, 255, 0.14));
+  color: var(--text, #e6e6ea);
+  font-weight: 600;
+}
+
+.efp__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.efp__nota {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim, #9a99a8);
+}
+
+.efp__nota code {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}

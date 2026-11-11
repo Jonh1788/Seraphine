@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { ArrowLeftIcon, ZapIcon, FlameIcon, SparkleIcon, TrilhasIcon, CheckIcon, LinkIcon, CommandIcon } from '../icons/Icons';
 import {
   listCourses, createCourse, getCourse, getStats, listModels,
@@ -6,6 +6,8 @@ import {
 } from './api';
 import { CourseMap } from './CourseMap';
 import { LessonPlayer } from './LessonPlayer';
+import { ModelPicker } from '../ui';
+import type { ModelPickerGroup } from '../ui';
 import './obsidian.css';
 
 type Mode = { kind: 'list' } | { kind: 'map'; courseId: string } | { kind: 'lesson'; courseId: string; lessonId: string };
@@ -31,6 +33,13 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
   useEffect(() => { refreshList().catch(() => {}); }, [refreshList]);
 
   useEffect(() => { listModels().then(setModels).catch(() => {}); }, []);
+
+  /* `/courses/models` achata o mesmo catálogo do deepsearch — desde que o teto
+     de 80 saiu do backend são ~400 entradas, então o campo é de busca. */
+  const modelGroups = useMemo<ModelPickerGroup[]>(() => [
+    { label: 'Tutor', options: [{ id: '', name: 'Tutor: Padrão' }] },
+    { label: 'Modelos', options: models },
+  ], [models]);
 
   // poll enquanto algum curso está 'generating'
   useEffect(() => {
@@ -134,10 +143,13 @@ export function TrilhasView({ onBack }: { onBack: () => void }) {
           onClick={() => setCodeMode((v) => !v)}>
           <CommandIcon size={13} /> colar código
         </button>
-        <select className="tr-create__tutor" value={tutorModel} onChange={(e) => setTutorModel(e.target.value)}>
-          <option value="">Tutor: Padrão</option>
-          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        <ModelPicker
+          className="tr-create__tutor"
+          label="Modelo do tutor"
+          value={tutorModel}
+          groups={modelGroups}
+          onChange={setTutorModel}
+        />
         <button type="button" className="tr-btn" disabled={creating || (codeMode ? !code.trim() : !topic.trim())} onClick={create}>
           {creating ? 'Criando…' : 'Criar trilha'}
         </button>

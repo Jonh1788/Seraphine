@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://localhost:11434"
+    ollama_num_ctx: int | None = None
+    ollama_num_batch: int = 2048
     llm_base_url: str = "http://localhost:1234"
     llm_model: str = "gemma-4-26b-a4b-jang_4m-crack"
     # "openai" (vMLX/LM Studio), "ollama", "anthropic", "claude_max".
@@ -23,6 +25,9 @@ class Settings(BaseSettings):
     # login) and uses the Max subscription with 20× higher rate limits
     # and zero API cost. Default stays local-first.
     llm_backend: str = "openai"
+    # Official local Codex CLI; an empty model uses the CLI's default.
+    codex_model: str = ""
+    codex_executable: str = "codex"
     embedding_model: str = "nomic-embed-text"
 
     # Anthropic cloud LLM — optional alternative to the local stack.
@@ -52,7 +57,8 @@ class Settings(BaseSettings):
     # from Hugging Face to ~/.cache/huggingface/hub.
     stt_model: str = "mlx-community/whisper-small-mlx"
     stt_language: str = "pt"
-    # STT backend: "local" (mlx-whisper on Apple Silicon) or "remote"
+    # STT backend: "local" (mlx-whisper on Apple Silicon), "faster_whisper"
+    # (Windows/Linux CPU int8; install the windows extra), or "remote"
     # (HTTP client for the RTX whisper service defined in spec 007).
     stt_backend: str = "local"
     stt_remote_base_url: str = "http://192.168.15.6:8012"

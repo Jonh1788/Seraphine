@@ -1,0 +1,166 @@
+/* ModelPicker — combobox de modelo com busca (desktop).
+ * Usa só os tokens já existentes do tema (--bg-0/--surface/--border/--text/…)
+ * para o campo ler igual aos `<select>` que ele substituiu. */
+
+.mp {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.mp__campo {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.mp__input {
+  width: 100%;
+  background: var(--bg-0, #14141a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  padding: 9px 30px 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text, #e6e6ea);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.mp__input:focus {
+  outline: none;
+  border-color: var(--accent, #7c6cff);
+  cursor: text;
+}
+
+.mp__input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mp__input::placeholder {
+  color: var(--text-faint, #5f5e6b);
+}
+
+.mp__caret {
+  position: absolute;
+  right: 11px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-dim, #9a99a8);
+}
+
+/* ── popover ── */
+
+.mp__pop {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface, #17171e);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.mp__lista {
+  /* ~400 modelos cabem porque a lista rola; o campo de busca é quem faz o
+     recorte de verdade. */
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+
+.mp__grupo {
+  list-style: none;
+}
+
+.mp__grupo-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mp__grupo-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 9px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint, #5f5e6b);
+}
+
+.mp__grupo-n {
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
+.mp__opcao {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text, #e6e6ea);
+  cursor: pointer;
+}
+
+.mp__opcao--ativa {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mp__opcao--sel .mp__opcao-nome {
+  color: var(--accent, #7c6cff);
+  font-weight: 600;
+}
+
+.mp__opcao-nome {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp__opcao-selo {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent, #7c6cff);
+  background: var(--accent-soft, rgba(154, 147, 255, 0.14));
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.mp__opcao-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-faint, #5f5e6b);
+}
+
+.mp__rodape {
+  margin: 0;
+  padding: 7px 11px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  color: var(--text-dim, #9a99a8);
+}

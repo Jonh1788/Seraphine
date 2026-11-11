@@ -143,6 +143,13 @@ function fmtBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/** 'YYYY-MM-DD' -> 'DD/MM'. Split rather than `new Date` so a bare date
+ *  string isn't parsed as UTC and shifted a day back in BRT. */
+function formatBrDate(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return m && d ? `${d}/${m}` : iso;
+}
+
 function isWithinDays(iso: string, days: number): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();
@@ -380,6 +387,7 @@ interface RecurringRule {
   weekday: number | null;
   day_of_month: number | null;
   time: string | null;
+  end_date: string | null;
   active: boolean;
   description: string | null;
 }
@@ -1440,6 +1448,7 @@ export function TasksView({ onBack, focusId }: TasksViewProps): JSX.Element {
                   {rule.frequency === 'monthly' && rule.day_of_month != null && (
                     <span>dia {rule.day_of_month}</span>
                   )}
+                  {rule.end_date && <span>até {formatBrDate(rule.end_date)}</span>}
                 </div>
                 <button
                   type="button"

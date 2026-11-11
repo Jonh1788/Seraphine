@@ -98,6 +98,13 @@
   letter-spacing: 0.06em;
   color: var(--text-faint, #5f5e6b);
 }
+.ms-seletor-eyebrow__n {
+  margin-left: 6px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
 .ms-seletor-medido-rotulo {
   padding: 0 4px 8px;
   font-size: 11px;
@@ -196,14 +203,27 @@
 }
 .ms-seletor-grupo__ponto { width: 6px; height: 6px; flex: none; border-radius: 50%; }
 .ms-seletor-grupo__ponto--anthropic { background: #d97757; }
+.ms-seletor-grupo__ponto--openai { background: #10a37f; }
 .ms-seletor-grupo__ponto--google { background: #4285f4; }
+.ms-seletor-grupo__ponto--x-ai { background: #e4e4e7; }
 .ms-seletor-grupo__ponto--deepseek { background: #4d6bfe; }
+.ms-seletor-grupo__ponto--qwen { background: #a855f7; }
+.ms-seletor-grupo__ponto--meta-llama { background: #0866ff; }
+.ms-seletor-grupo__ponto--mistralai { background: #ff7000; }
 .ms-seletor-grupo__ponto--outros { background: var(--text-dim, #9a99a8); }
 .ms-seletor-grupo__rotulo {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--text-faint, #5f5e6b);
+}
+.ms-seletor-grupo__n {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint, #5f5e6b);
+  opacity: 0.7;
 }
 .ms-seletor-modelo {
   display: flex;

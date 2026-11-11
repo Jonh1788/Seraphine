@@ -250,12 +250,14 @@ class OllamaClient:
         *,
         timeout: float = 120.0,
         num_batch: int = 2048,
+        num_ctx: int | None = None,
         keep_alive: str | int = -1,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.num_batch = num_batch
+        self.num_ctx = num_ctx
         self.keep_alive = keep_alive
         self._client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=self.base_url, timeout=timeout
@@ -264,7 +266,7 @@ class OllamaClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def warmup(self) -> None:
+    async def warmup(self, system_prompt: str = "") -> None:
         """Prime the model on the server: one dummy request at startup so
         the first real user message doesn't pay the cold-load cost
         (~4.5 s for gemma4:e4b on Apple Silicon). Also primes the prefix
@@ -272,11 +274,17 @@ class OllamaClient:
         the backend should start even if Ollama is momentarily down."""
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": "."}],
+            "messages": (
+                ([{"role": "system", "content": system_prompt}] if system_prompt else [])
+                + [{"role": "user", "content": "."}]
+            ),
             "stream": False,
+            "think": False,
             "keep_alive": self.keep_alive,
             "options": {"num_predict": 1, "num_batch": self.num_batch},
         }
+        if self.num_ctx is not None:
+            body["options"]["num_ctx"] = self.num_ctx
         try:
             resp = await self._client.post("/api/chat", json=body, timeout=60.0)
             resp.raise_for_status()
@@ -319,6 +327,8 @@ class OllamaClient:
                 "num_batch": self.num_batch,
             },
         }
+        if self.num_ctx is not None:
+            body["options"]["num_ctx"] = self.num_ctx
         if tools is not None:
             body["tools"] = tools
         done_seen = False

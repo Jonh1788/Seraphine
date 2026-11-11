@@ -24,6 +24,11 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "sqlalchemy>=2.0",
     "pdfplumber>=0.10",
+    # Decripta PDF com senha antes de mandar ao LLM. Sem ela, TODA fatura
+    # protegida pula a única estratégia que lê fatura escaneada, e o erro
+    # vira um "nenhuma transacao encontrada" indistinguível de documento
+    # vazio — foi o que aconteceu com a fatura do C6 em 2026-08-03.
+    "pikepdf>=9",
     "pdf2image>=1.17",
     "pytesseract>=0.3.13",
     "pywebpush>=2",
@@ -51,6 +56,9 @@ dev = [
     "pytest-timeout>=2.3",
     "anyio>=4",
     "ruff>=0.6",
+]
+windows = [
+    "faster-whisper>=1.2,<2",
 ]
 
 [dependency-groups]

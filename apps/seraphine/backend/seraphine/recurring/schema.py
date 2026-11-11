@@ -17,6 +17,11 @@ def migrate(conn: sqlite3.Connection) -> None:
           weekday                INTEGER,
           day_of_month           INTEGER,
           time                   TEXT,
+          -- Inclusive last day the rule fires (YYYY-MM-DD). NULL = forever.
+          end_date               TEXT,
+          -- at_time | 1h_before. NULL = regra sem lembrete. (Sem 1d_before:
+          -- a ocorrência nasce no dia em que vence.)
+          remind                 TEXT,
           active                 INTEGER NOT NULL DEFAULT 1,
           last_materialized_date TEXT,
           created_at             TEXT NOT NULL,
@@ -61,6 +66,17 @@ def migrate(conn: sqlite3.Connection) -> None:
     # before a given column existed) get the missing columns added with a
     # default, never dropping/rewriting existing data.
     # ------------------------------------------------------------------
+    try:
+        rec_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(recurring_tasks)").fetchall()
+        }
+        for col in ("end_date", "remind"):
+            if col not in rec_cols:
+                conn.execute(f"ALTER TABLE recurring_tasks ADD COLUMN {col} TEXT")
+    except sqlite3.DatabaseError:
+        pass
+
     try:
         cols = {
             row[1] for row in conn.execute("PRAGMA table_info(routines)").fetchall()

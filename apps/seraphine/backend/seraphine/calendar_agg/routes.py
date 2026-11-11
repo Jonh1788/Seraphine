@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -75,6 +75,42 @@ def _score(day: dict[str, Any]) -> int:
     if mood and mood.get("avg_valence", 0) > 0.5:
         s += 1
     return min(s, 7)
+
+
+def _event_row(ev: dict[str, Any]) -> dict[str, Any]:
+    """Projeção de um evento do Google para o agregado.
+
+    Pura de propósito: é o que o widget e a lista do dia leem, e testar
+    pela rota exigiria Google, tarefas, hábitos, saúde e água de pé.
+    """
+    start = ev.get("start", {}) or {}
+    end = ev.get("end", {}) or {}
+    return {
+        # O id do Google vai junto porque é o que torna a linha ACIONÁVEL:
+        # a lista do dia do celular sai daqui, e sem ele apagar viraria
+        # adivinhação por título e horário — dois "Dentista" às 14h são
+        # dois eventos diferentes. Sempre presente, ainda que vazio, para
+        # o consumidor não ter que distinguir ausência de vazio.
+        "id": str(ev.get("id") or ""),
+        "title": ev.get("summary", "(sem titulo)"),
+        "start": start.get("dateTime") or start.get("date") or "",
+        "end": end.get("dateTime") or end.get("date") or "",
+        # O Google devolve `location` e o agregado descartava. O widget
+        # grande mostra "Dentista · Av. Paulista" na linha da agenda.
+        "location": str(ev.get("location") or ""),
+    }
+
+
+def _task_row(task: Any) -> dict[str, Any]:
+    """Projeção de uma tarefa para o agregado. Ver `_event_row`."""
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        # due_time existe no TaskService e o agregado descartava; o widget
+        # mostra o prazo à direita da linha.
+        "due_time": getattr(task, "due_time", None) or "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +217,6 @@ async def aggregate(
                 else:
                     cursor = date(cursor.year, cursor.month + 1, 1)
 
-            # Build a map habit_id -> set of completed dates
-            habit_map: dict[str, str] = {h.id: h.title for h in habits}
             logs_by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
             for habit in habits:
@@ -387,37 +421,18 @@ async def aggregate(
         # Parse start date from Google Calendar event
         ev_start = ev.get("start", {})
         raw_dt = ev_start.get("dateTime") or ev_start.get("date") or ""
-        ev_end_raw = ev.get("end", {})
-        raw_end = ev_end_raw.get("dateTime") or ev_end_raw.get("date") or ""
         try:
             dt_str = raw_dt[:10]
             if dt_str in day_map:
-                day_map[dt_str]["events"].append({
-                    # O id do Google vai junto porque é o que torna a linha
-                    # ACIONÁVEL: a lista do dia do celular sai daqui, e sem
-                    # ele apagar viraria adivinhação por título e horário —
-                    # dois "Dentista" às 14h são dois eventos diferentes.
-                    # Sempre presente, ainda que vazio, para o consumidor não
-                    # ter que distinguir ausência de vazio.
-                    "id": str(ev.get("id") or ""),
-                    "title": ev.get("summary", "(sem titulo)"),
-                    "start": raw_dt,
-                    "end": raw_end,
-                })
+                day_map[dt_str]["events"].append(_event_row(ev))
         except (ValueError, IndexError):
             continue
 
     # Populate tasks
-    import dataclasses as _dc
-
     for task in tasks_raw:
         dd = task.due_date
         if dd and dd in day_map:
-            day_map[dd]["tasks"].append({
-                "id": task.id,
-                "title": task.title,
-                "status": task.status,
-            })
+            day_map[dd]["tasks"].append(_task_row(task))
 
     # Populate habits
     for dt_iso, logs in habits_by_date.items():

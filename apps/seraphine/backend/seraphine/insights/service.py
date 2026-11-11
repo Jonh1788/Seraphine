@@ -334,9 +334,20 @@ class InsightEngine:
             out.extend(self._finance_month_delta(current, prior, period))
 
         # Category weekday outliers: need raw entries for the month.
+        #
+        # Sem filtro de mes, de proposito, e pela mesma razao de
+        # `insights/weekly.py`. `list_entries(month=, year=)` filtra pelo MES
+        # DE CAIXA — para uma compra no cartao, o mes em que a fatura vence ou
+        # e paga. `_finance_weekday_outliers` agrupa pela data da COMPRA e
+        # carimba o insight com `period`. Pedir o mes de caixa e depois
+        # agrupar por `e.date` mistura dois conjuntos: o insight de 2026-08
+        # sairia calculado sobre compras de julho, e as compras de julho numa
+        # fatura ainda nao paga faltariam na analise do proprio julho. Buscar
+        # sem mes e recortar por `period` no analisador faz as duas pontas
+        # concordarem na data da compra.
         try:
             entries = await self._finance.list_entries(
-                month=month, year=year, type="expense", limit=1000,
+                type="expense", limit=1000,
             )
         except Exception:
             logger.exception("finance list_entries failed")
@@ -1026,7 +1037,13 @@ class InsightEngine:
         period: str,
     ) -> list[Insight]:
         """Detect category/weekday pairs that spend >= OUTLIER_PCT above
-        the category's average across the *other* weekdays."""
+        the category's average across the *other* weekdays.
+
+        O recorte do mes acontece AQUI, num lugar so, e pela data da COMPRA
+        (`e.date`) — a mesma que decide o dia da semana logo abaixo. Quem
+        chama busca sem mes justamente para isto: `period` carimba o insight,
+        entao `period` tem de ser o mes das compras que o produziram.
+        """
         totals: dict[tuple[str, int], float] = defaultdict(float)
         counts: dict[tuple[str, int], int] = defaultdict(int)
         cat_weekdays: dict[str, set[int]] = defaultdict(set)
@@ -1040,6 +1057,8 @@ class InsightEngine:
             amt = float(getattr(e, "amount", 0) or 0)
             date_str = getattr(e, "date", None)
             if not cat or amt <= 0 or not date_str:
+                continue
+            if not str(date_str).startswith(period):
                 continue
             d = _parse_iso_date(date_str)
             if d is None:

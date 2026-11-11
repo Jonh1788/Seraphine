@@ -1,10 +1,12 @@
 import './obsidian.css';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  listSessions, readTranscript, sendToAgent, stopAgent, respondPermission, resumeSession, forkSession,
+  readTranscript, sendToAgent, stopAgent, respondPermission, resumeSession, forkSession,
   listHosts,
 } from './api';
 import { useAgentStream } from './useAgentStream';
+import { deriveStatus, STATUS_META, type SessionStatus } from './sessionStatus';
+import { useSessions } from './useSessions';
 import { SelfImprove } from './SelfImprove';
 import { SkillsPanel } from './SkillsPanel';
 import { useSelfImproveStore } from './selfImproveStore';
@@ -13,6 +15,22 @@ import { useApprovalsStore } from './approvalsStore';
 import { Timeline } from './Timeline';
 import { NewAgentDialog } from './NewAgentDialog';
 import type { SessionInfo, PermissionMode, AgentEvent, AgentEventKind, HostStatus, PermissionRule } from './types';
+// Os helpers de transcript moraram aqui até o poller precisar deles: MaestroView
+// importa o poller, então deixá-los aqui fecharia um ciclo de import. Quem os
+// chama agora é `useSessions`; a re-exportação de `transcriptEndedCleanly`
+// continua porque `__tests__/transcript.test.ts` a importa deste módulo.
+export { transcriptEndedCleanly } from './transcript';
+
+/** Folga em px para considerar que o usuário está "no fim" da timeline. */
+export const FOLLOW_SLACK_PX = 40;
+
+/** A timeline deve acompanhar o conteúdo novo? Só quando o usuário já está no
+ *  fim. Quem subiu para ler algo não é arrastado de volta. */
+export function shouldFollow(
+  el: { scrollTop: number; scrollHeight: number; clientHeight: number },
+): boolean {
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= FOLLOW_SLACK_PX;
+}
 
 /**
  * Classify a persisted-transcript JSONL line into an AgentEventKind — the JS
@@ -44,8 +62,6 @@ const MODES: { v: PermissionMode; label: string }[] = [
   { v: 'full_auto', label: 'Autonomia total' },
 ];
 
-type SessionStatus = 'running' | 'waiting' | 'done' | 'idle';
-
 // ---- inline SVG icons (Lucide-style, no emojis) ----
 const svg = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 const IconRefresh = (): JSX.Element => <svg width="14" height="14" viewBox="0 0 24 24" {...svg}><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>;
@@ -71,13 +87,6 @@ const IconGraph = (p: { size?: number; sw?: number }): JSX.Element => (
     <path d="M8.2 7.3 15.5 11M8.2 16.7 15.5 13" />
   </svg>
 );
-
-const STATUS_META: Record<SessionStatus, { label: string; cls: string }> = {
-  running: { label: 'RODANDO', cls: 'running' },
-  waiting: { label: 'AGUARDANDO', cls: 'waiting' },
-  done: { label: 'CONCLUÍDA', cls: 'done' },
-  idle: { label: 'OCIOSA', cls: 'idle' },
-};
 
 export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   // Land on the Melhorar tab only while a self-improve run is ACTIVELY in flight
@@ -109,7 +118,12 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [draftRules, setDraftRules] = useState<PermissionRule[]>([]);
   const openRules = (): void => { setDraftRules(rules.map((r) => ({ ...r }))); setRulesOpen(true); };
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // Lista de sessões, resumo da última atividade e "fechou limpo?" — tudo vem do
+  // poller, que reconsulta a cada poucos segundos. ATENÇÃO: `refreshNow` (e o
+  // objeto devolvido) têm identidade nova a cada render; nunca entram em array de
+  // dependência, só em handler de evento. `sessions`/`activity`/`cleanEnd` são
+  // estado e podem entrar.
+  const { sessions, activity, cleanEnd, refreshNow } = useSessions();
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<PermissionMode>('auto_reads');
   const [cwd, setCwd] = useState('');
@@ -125,13 +139,8 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const [observed, setObserved] = useState<SessionInfo | null>(null);
   const [observedEvents, setObservedEvents] = useState<AgentEvent[]>([]);
   const [takeoverGoal, setTakeoverGoal] = useState('');
-  // Per past-session: did its transcript end cleanly (last assistant end_turn)?
-  // Used to derive concluída vs ociosa for sessions with no live stream.
-  const [cleanEnd, setCleanEnd] = useState<Record<string, boolean>>({});
   const events = useAgentStream();
 
-  const refresh = (): void => { void listSessions().then(setSessions).catch(() => {}); };
-  useEffect(() => { refresh(); }, []);
   useEffect(() => { void listHosts().then(setHosts).catch(() => {}); }, []);
   useEffect(() => { void initApprovals(); }, [initApprovals]);
   useEffect(() => {
@@ -139,16 +148,43 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [onBack]);
 
+  // O gatilho é o mtime da sessão observada ter mudado, NÃO o status dela.
+  // Amarrar em `running` perderia as últimas mensagens exatamente na transição
+  // para "sua vez", que é quando a resposta final chega.
+  const observedMtime = observed
+    ? sessions.find((s) => s.session_id === observed.session_id)?.last_modified_ms
+    : undefined;
+
   // Load the observed session's transcript (read-only) when it changes.
   useEffect(() => {
-    if (!observed) { setObservedEvents([]); return; }
+    if (!observed) return;
     let live = true;
-    setObservedEvents([]); setTakeoverGoal('');
     void readTranscript(observed.slug, observed.session_id, 200, observed.host ?? undefined)
       .then((lines) => { if (live) setObservedEvents(transcriptToEvents(observed.session_id, lines)); })
       .catch(() => {});
     return () => { live = false; };
-  }, [observed]);
+  }, [observed, observedMtime]);
+
+  // Trocar de sessão (ou fechar o painel) limpa a timeline e o composer: a
+  // sessão nova não pode aparecer com o histórico da anterior embaixo do
+  // cabeçalho dela. Recarregar a MESMA sessão não limpa nada — limpar a cada
+  // tick faria a timeline piscar, e é por isso que este reset mora aqui, fora
+  // do caminho de recarga.
+  useEffect(() => { setObservedEvents([]); setTakeoverGoal(''); }, [observed?.session_id]);
+
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const seguir = useRef(true);
+
+  // Decide ANTES do conteúdo novo entrar: depois do render a posição já mudou.
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (el) seguir.current = shouldFollow(el);
+  }, [observedMtime]);
+
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (el && seguir.current) el.scrollTop = el.scrollHeight;
+  }, [observedEvents]);
 
   const agentEvents = useMemo(() => events.filter((e) => e.agent_id === selected), [events, selected]);
   const pending = useMemo(() => {
@@ -175,10 +211,11 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     return { sessionToAgent: s2a, agentToSession: a2s };
   }, [events]);
 
-  // Per-session status derived from the live event stream + transcript freshness.
-  // Pending permission anywhere in a session's events => AGUARDANDO. Else owned +
-  // live (no result yet, recent) => RODANDO. Else latest event is result => CONCLUÍDA.
-  // Else OCIOSA. Maps each session_id to the set of events sharing its init session_id.
+  // Status por sessão: a REGRA mora em `deriveStatus` (sessionStatus.ts, testada).
+  // Aqui só se junta o que ela precisa — eventos do stream vivo agrupados pelo
+  // session_id do init, mais o mtime e o "fechou limpo" vindos do poller.
+  // `ownedSessionIds` não entra: exigir sessão própria era o bug — uma sessão de
+  // terminal, trabalhando agora, aparecia como OCIOSA.
   const statusBySession = useMemo(() => {
     const evBySession = new Map<string, AgentEvent[]>();
     for (const e of events) {
@@ -191,41 +228,16 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
     const now = Date.now();
     for (const s of sessions) {
       const evs = evBySession.get(s.session_id) ?? [];
-      const owned = ownedSessionIds.has(s.session_id);
-      const hasPending = evs.some((e) => e.kind.kind === 'permission_request');
-      const last = evs[evs.length - 1];
-      const finished = last?.kind.kind === 'result';
-      const recent = now - s.last_modified_ms < 1000 * 60 * 5; // active within 5 min
-      if (hasPending) map[s.session_id] = 'waiting';
-      else if (finished) map[s.session_id] = 'done';
-      else if (owned && evs.length > 0 && recent) map[s.session_id] = 'running';
-      // Past (non-owned) sessions have no live stream — derive from the
-      // transcript: ended cleanly (last assistant `end_turn`) AND recent (<6h)
-      // → concluída; interrupted or old/dormant → ociosa.
-      else if (!owned && cleanEnd[s.session_id] && now - s.last_modified_ms < 6 * 60 * 60 * 1000) map[s.session_id] = 'done';
-      else map[s.session_id] = 'idle';
+      map[s.session_id] = deriveStatus({
+        lastModifiedMs: s.last_modified_ms,
+        hasPendingPermission: evs.some((e) => e.kind.kind === 'permission_request'),
+        hasResultEvent: evs[evs.length - 1]?.kind.kind === 'result',
+        endedCleanly: cleanEnd[s.session_id] ?? false,
+        now,
+      });
     }
     return map;
-  }, [events, sessions, ownedSessionIds, agentToSession, cleanEnd]);
-
-  // Last-activity summary per session (read from the transcript tail).
-  const [activity, setActivity] = useState<Record<string, string>>({});
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      const next: Record<string, string> = {};
-      const ends: Record<string, boolean> = {};
-      await Promise.allSettled(sessions.slice(0, 40).map(async (s) => {
-        try {
-          const lines = await readTranscript(s.slug, s.session_id, 10);
-          next[s.session_id] = summarizeTranscript(lines);
-          ends[s.session_id] = transcriptEndedCleanly(lines);
-        } catch { /* ignore unreadable */ }
-      }));
-      if (live) { setActivity(next); setCleanEnd(ends); }
-    })();
-    return () => { live = false; };
-  }, [sessions]);
+  }, [events, sessions, agentToSession, cleanEnd]);
 
   const q = query.trim().toLowerCase();
   const visibleSessions = q
@@ -244,7 +256,8 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
   const selectedSession = selectedSessionId ? sessions.find((s) => s.session_id === selectedSessionId) : undefined;
   const runningCount = Object.values(statusBySession).filter((st) => st === 'running').length;
   const waitingCount = Object.values(statusBySession).filter((st) => st === 'waiting').length;
-  const subtitle = `${sessions.length} sessões · ${runningCount} rodando · ${waitingCount} aguardando você`;
+  const yourTurnCount = Object.values(statusBySession).filter((st) => st === 'your_turn').length;
+  const subtitle = `${sessions.length} sessões · ${runningCount} rodando · ${waitingCount} aguardando você · ${yourTurnCount} na sua vez`;
 
   return (
     <div className="obs-screen maestro">
@@ -274,7 +287,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
             >
               <IconShield />Regras{rules.length > 0 ? ` (${rules.length})` : ''}
             </button>
-            <button type="button" className="obs-btn obs-btn--ghost" onClick={refresh}><IconRefresh />Atualizar</button>
+            <button type="button" className="obs-btn obs-btn--ghost" onClick={() => refreshNow()}><IconRefresh />Atualizar</button>
             <button type="button" className="obs-btn obs-btn--primary" onClick={() => setNewOpen(true)}><IconPlus size={14} />Novo agente</button>
           </div>
         )}
@@ -477,7 +490,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
                   </div>
                 </div>
 
-                <div className="maestro__timeline">
+                <div className="maestro__timeline" ref={timelineRef}>
                   {observedEvents.length > 0
                     ? <Timeline events={observedEvents} />
                     : <div className="maestro__empty-body" style={{ padding: '20px' }}>Carregando transcript… (ou sessão sem histórico)</div>}
@@ -516,7 +529,7 @@ export function MaestroView({ onBack }: { onBack: () => void }): JSX.Element {
           setRemoteSessions={setRemoteSessions}
           recentRepos={[...new Set(sessions.map((s) => s.cwd))].filter(Boolean).slice(0, 3)}
           onClose={() => setNewOpen(false)}
-          onCreated={(id) => { setSelected(id); setGoal(''); setNewOpen(false); refresh(); }}
+          onCreated={(id) => { setSelected(id); setGoal(''); setNewOpen(false); refreshNow(); }}
         />
       )}
     </div>
@@ -555,39 +568,6 @@ function permCommand(events: AgentEvent[], tool: string): string {
     }
   }
   return tool;
-}
-
-/** Best-effort one-line summary of a transcript's most recent meaningful line. */
-/**
- * Did this transcript end cleanly? True when the LAST assistant message stopped
- * with `end_turn` (the agent gave a final response and finished its turn) rather
- * than being cut off mid-tool / interrupted. Used to label a past session
- * "concluída" vs "ociosa" (it has no live stream to read status from).
- */
-export function transcriptEndedCleanly(lines: unknown[]): boolean {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const v = lines[i] as Record<string, unknown> | null;
-    if (!v || typeof v !== 'object' || v.type !== 'assistant') continue;
-    return (v.message as { stop_reason?: unknown } | undefined)?.stop_reason === 'end_turn';
-  }
-  return false;
-}
-
-function summarizeTranscript(lines: unknown[]): string {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const v = lines[i] as Record<string, unknown> | null;
-    if (!v || typeof v !== 'object') continue;
-    if (v.type === 'summary' && typeof v.summary === 'string') return v.summary;
-    const content = (v.message as { content?: unknown } | undefined)?.content;
-    if (Array.isArray(content)) {
-      const text = (content.find((c) => (c as { type?: string }).type === 'text') as { text?: string } | undefined)?.text;
-      if (typeof text === 'string' && text.trim()) return text.trim().replace(/\s+/g, ' ').slice(0, 90);
-      const tool = (content.find((c) => (c as { type?: string }).type === 'tool_use') as { name?: string } | undefined)?.name;
-      if (tool) return `→ ${tool}`;
-    }
-    if (typeof v.type === 'string') return v.type;
-  }
-  return '—';
 }
 
 function SessionRow({ s, status, owned, activity, selected, onSelect, onResume, onFork }: {

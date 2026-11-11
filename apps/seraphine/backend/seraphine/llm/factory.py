@@ -52,6 +52,11 @@ def build_engine(
             model=settings.anthropic_model,
             base_url=settings.anthropic_base_url,
         )
+    elif backend == "codex":
+        from llm_adapters.codex import CodexClient
+
+        engine = CodexClient(settings.codex_model, executable=settings.codex_executable)
+        info = describe_engine(backend="codex", model=settings.codex_model or "default")
     elif backend == "apple_fm":
         from llm_adapters.apple_fm import AppleFoundationModelsClient
 
@@ -71,7 +76,11 @@ def build_engine(
     else:
         from llm_adapters.client import OllamaClient
 
-        engine = OllamaClient(settings.ollama_base_url, settings.llm_model)
+        engine = OllamaClient(
+            settings.ollama_base_url, settings.llm_model,
+            num_ctx=getattr(settings, "ollama_num_ctx", None),
+            num_batch=getattr(settings, "ollama_num_batch", 2048),
+        )
         info = describe_engine(
             backend="ollama", model=settings.llm_model, base_url=settings.ollama_base_url
         )

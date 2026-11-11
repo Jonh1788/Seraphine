@@ -118,6 +118,12 @@ html[data-shell='phone'] .ms-custosdet-linha__custo--flat { color: var(--user, #
 html[data-shell='phone'] .ms-custosdet-linha__chamadas {
   font-size: 11px; color: var(--text-faint, #5f5e6b);
 }
+html[data-shell='phone'] .ms-custosdet-linha__cache {
+  font-size: 9.5px; font-weight: 700; white-space: nowrap;
+  color: var(--accent, #9a93ff);
+  background: var(--accent-soft, rgba(154, 147, 255, 0.14));
+  padding: 1px 5px; border-radius: 5px;
+}
 html[data-shell='phone'] .ms-custosdet-linha__trilho {
   display: block; height: 6px; border-radius: 4px; overflow: hidden;
   background: rgba(255, 255, 255, .05);

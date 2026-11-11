@@ -15,6 +15,8 @@ class RecurringRule:
     weekday: int | None  # 0=Mon..6=Sun, weekly only
     day_of_month: int | None  # 1..31, monthly only
     time: str | None  # HH:MM
+    end_date: str | None  # YYYY-MM-DD, inclusive; None = runs forever
+    remind: str | None  # at_time | 1h_before; None = sem lembrete
     active: bool
     last_materialized_date: str | None  # YYYY-MM-DD
     created_at: str
@@ -29,6 +31,8 @@ class RecurringRule:
             "weekday": self.weekday,
             "day_of_month": self.day_of_month,
             "time": self.time,
+            "end_date": self.end_date,
+            "remind": self.remind,
             "active": self.active,
             "last_materialized_date": self.last_materialized_date,
             "created_at": self.created_at,

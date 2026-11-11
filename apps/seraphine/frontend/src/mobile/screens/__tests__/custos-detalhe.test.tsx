@@ -16,7 +16,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
      4. o card de sugestão é derivado dos dados. Sem dado suficiente, não há
         sugestão nenhuma — inventar conselho sobre dinheiro é pior que calar. */
 
-vi.mock('../../../telemetry/api', () => ({
+vi.mock('../../../telemetry/api', async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  // Só as chamadas de REDE são falsas. `cacheHitRate` é lógica pura e tem o
+  // seu próprio teste — mockar faria esta tela exercitar uma taxa inventada
+  // em vez da que ela vai mostrar de verdade.
   fetchTelemetrySummary: vi.fn(),
   listFlatBackends: vi.fn(),
   readPower: vi.fn(),
@@ -518,6 +522,43 @@ describe('CustosDetalheScreen', () => {
     render(<CustosDetalheScreen />);
     await waitFor(() => expect(screen.getByText('$2,84 no total')).toBeTruthy());
     expect(() => fireEvent.click(screen.getByLabelText('Voltar'))).not.toThrow();
+  });
+
+  /* ── cache de prompt ────────────────────────────────────────────── */
+
+  it('o selo de cache aparece só nos modelos que reportam', async () => {
+    /* O cache é por PREFIXO de prompt: um modelo pode estar acertando enquanto
+       outro nunca aquece. É por modelo que a taxa vira decisão — e é por isso
+       que ela precisa estar AQUI, não só no total. */
+    comDado(resumo({
+      by_model: [
+        {
+          model: 'anthropic/claude-haiku-4.5',
+          input_tokens: 1_000_000, output_tokens: 210_000, cost_usd: 1.92, calls: 68,
+          cache_read_tokens: 700_000, cache_write_tokens: 100_000,
+        },
+        // Sem contadores: cliproxy não reporta cache nessa rota.
+        { model: 'claude-sonnet-4.6', input_tokens: 2_000_000, output_tokens: 500_000, cost_usd: 0, calls: 1402 },
+      ],
+    }) as never);
+    render(<CustosDetalheScreen />);
+
+    await waitFor(() => expect(screen.getByText('cache 70%')).toBeTruthy());
+    // Ausência afirmada: quem não reporta NÃO ganha um "cache 0%" — isso
+    // afirmaria que o cache falhou, quando não há cache nessa rota.
+    expect(screen.getAllByText(/^cache \d+%$/)).toHaveLength(1);
+  });
+
+  it('linha de gasto válida não some por falta de contador de cache', async () => {
+    /* O cache é informação EXTRA sobre uma linha válida. Numa tela de dinheiro,
+       descartar um gasto real porque falta um campo opcional esconderia
+       custo — que é exatamente a falha que esta tela não pode ter. */
+    comDado();
+    render(<CustosDetalheScreen />);
+
+    await waitFor(() => expect(screen.getByText('$2,84 no total')).toBeTruthy());
+    expect(document.querySelectorAll('[data-modelo]')).toHaveLength(3);
+    expect(screen.queryByText(/^cache \d+%$/)).toBeNull();
   });
 
   it('não usa emoji — os ícones são SVG', async () => {

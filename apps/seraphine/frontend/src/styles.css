@@ -1187,6 +1187,7 @@ button:disabled {
 
 .bubble--user .bubble__content {
   background: rgba(74, 222, 128, 0.08);
+  color: var(--text);
   border: 1px solid rgba(74, 222, 128, 0.12);
   border-radius: 16px 16px 4px 16px;
 }
@@ -8875,6 +8876,116 @@ button:disabled {
   line-height: 1;
 }
 
+/* ── clima: hora a hora como gráfico ──
+ *
+ * O SVG é montado em `tools/weather.py` (`build_hourly_chart`) e chega pelo
+ * `meta.html_card`. TODA a apresentação mora aqui, e não em `style` inline,
+ * por um motivo duro: o saneador de cartões do app (`ChatScreen.sanearCartao`)
+ * descarta `style` — sobrevivem `class` e os atributos de geometria. Um
+ * gráfico estilizado por `style` apareceria no desktop e sairia vazio no
+ * telefone.
+ *
+ * O SVG escala uniformemente com a largura do cartão (~300px no celular,
+ * ~448px aqui), e o `viewBox` foi desenhado em 360 unidades para o texto não
+ * ficar miúdo num nem gigante no outro. Por isso os tamanhos abaixo estão em
+ * unidades do viewBox, não em pixels de tela. */
+.rich-card__wx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.rich-card__wx-chaves {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.rich-card__wx-chave {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rich-card__wx-swatch { flex: none; }
+.rich-card__wx-swatch--temp {
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: #f59e0b;
+}
+.rich-card__wx-swatch--chuva {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #42a5f5;
+}
+
+.rich-card__wx {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 4px 0 2px;
+  overflow: visible;
+}
+.rich-card__wx-area {
+  fill: #f59e0b;
+  fill-opacity: 0.16;
+}
+.rich-card__wx-line {
+  fill: none;
+  stroke: #f59e0b;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* Sem isto a espessura escalaria junto com o viewBox e a linha ficaria fina
+     no celular e grossa no desktop. Como propriedade CSS, e não atributo:
+     atributo novo seria mais uma entrada na lista branca do saneador. */
+  vector-effect: non-scaling-stroke;
+}
+.rich-card__wx-dot {
+  fill: #f59e0b;
+  /* O anel na cor do cartão abre respiro entre o ponto e a linha. */
+  stroke: var(--surface);
+  stroke-width: 2.5;
+}
+.rich-card__wx-temp {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+.rich-card__wx-hora {
+  fill: var(--text-faint);
+  font-size: 10px;
+  text-anchor: middle;
+}
+.rich-card__wx-pct {
+  fill: var(--text-faint);
+  font-size: 9px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+/* Acima do limiar de "leva guarda-chuva" o número e a barra acendem juntos —
+   é a mesma afirmação dita duas vezes, e é de propósito. */
+.rich-card__wx-pct--alto {
+  fill: #8fc9fb;
+  font-weight: 700;
+}
+.rich-card__wx-bar { fill: rgba(66, 165, 245, 0.28); }
+.rich-card__wx-bar--alto { fill: #42a5f5; }
+.rich-card__wx-corte {
+  stroke: rgba(66, 165, 245, 0.3);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.rich-card__wx-corte-rotulo {
+  fill: rgba(143, 201, 251, 0.7);
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .rich-card__details {
   display: flex;
   flex-wrap: wrap;
@@ -13536,7 +13647,7 @@ body.qc-window .quick-capture {
 
 .onboarding-backends {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
 }
 
@@ -13559,6 +13670,16 @@ body.qc-window .quick-capture {
 .onboarding-backend-card:hover {
   border-color: var(--border-strong);
   background: var(--bg-2);
+}
+
+.onboarding-backend-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.onboarding-backend-card:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .onboarding-backend-card.is-selected {

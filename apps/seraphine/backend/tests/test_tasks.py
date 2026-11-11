@@ -165,8 +165,11 @@ async def test_execute_missing_task() -> None:
         s.register_migrator("mod_tasks", tasks_schema.migrate)
         await s.ensure_schema()
         svc = TaskService(s)
-        with pytest.raises(ValueError):
-            await svc.execute_task(999, {})
+        try:
+            with pytest.raises(ValueError):
+                await svc.execute_task(999, {})
+        finally:
+            await s.aclose()
 
 
 # ------------------------------------------------------------------
@@ -608,3 +611,54 @@ def test_routes_execute_shape(tmp_path: Path) -> None:
             assert resp.status_code == 501
         finally:
             _reset_task_service(prev)
+
+
+# ----------------------------------------------------------------------
+# update_task e o lembrete fantasma
+# ----------------------------------------------------------------------
+
+
+class _RecordingScheduler:
+    """Anota o que foi agendado e o que foi cancelado."""
+
+    def __init__(self) -> None:
+        self.added: list[dict[str, Any]] = []
+        self.cancelled: list[str] = []
+
+    def add_reminder(self, **kwargs: Any) -> str:
+        self.added.append(kwargs)
+        return kwargs.get("reminder_id", "")
+
+    def cancel_reminder(self, reminder_id: str) -> None:
+        self.cancelled.append(reminder_id)
+
+
+async def test_update_cancels_the_reminder_when_the_task_moves_into_the_past(
+    service: TaskService,
+) -> None:
+    """Mover a tarefa para uma data passada não pode deixar o job antigo vivo.
+
+    Antes de o agendador recusar horas passadas, `add_reminder` sobrescrevia
+    o job (`replace_existing=True`). Agora ele não é chamado, então o job
+    futuro de uma edição anterior continuaria disparando para uma tarefa que
+    foi movida para trás.
+    """
+    from seraphine.tools.tasks import UpdateTaskTool
+
+    task_id = await service.create_task(
+        type="generic", title="Pagar boleto", description="", source="system",
+        payload={}, due_date="2099-01-10", due_time="10:00", remind="at_time",
+    )
+    sched = _RecordingScheduler()
+    tool = UpdateTaskTool(service, sched)
+
+    # Primeiro a tarefa ganha um lembrete de verdade, no futuro.
+    first = await tool.execute({"task_id": task_id, "due_date": "2099-01-10"})
+    assert first.ok, first.error
+    assert sched.added[0]["reminder_id"] == f"task-remind-{task_id}"
+
+    # Depois é movida para o passado, com o remind ainda ligado.
+    second = await tool.execute({"task_id": task_id, "due_date": "2020-01-10"})
+    assert second.ok, second.error
+    assert len(sched.added) == 1  # nada de novo foi agendado
+    assert f"task-remind-{task_id}" in sched.cancelled

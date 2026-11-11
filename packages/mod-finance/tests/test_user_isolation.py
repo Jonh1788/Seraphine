@@ -106,3 +106,26 @@ async def test_recurring_isolation(store: Store) -> None:
 
     assert await svc.deactivate_recurring(a_id, user_id="user-b") == 0
     assert await svc.deactivate_recurring(a_id, user_id="user-a") == 1
+
+
+async def test_fill_invoice_header_is_scoped(store: Store) -> None:
+    """Preencher o cabeçalho de fatura alheia moveria dinheiro de mês em
+    outro inquilino: `due_date` decide o mês de caixa das despesas ligadas."""
+    svc = FinanceService(store)
+
+    a_id = await svc.create_invoice(
+        card="C6", closing_date=None, due_date=None, total=None,
+        user_id="user-a",
+    )
+
+    assert await svc.fill_invoice_header(
+        a_id, due_date="2026-08-10", total=240.0, user_id="user-b",
+    ) is None
+    alheia = await svc.get_invoice(a_id)
+    assert alheia is not None and alheia.due_date is None
+
+    minha = await svc.fill_invoice_header(
+        a_id, due_date="2026-08-10", total=240.0, user_id="user-a",
+    )
+    assert minha is not None
+    assert (minha.due_date, minha.total) == ("2026-08-10", 240.0)

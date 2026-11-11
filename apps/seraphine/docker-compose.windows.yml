@@ -1,0 +1,38 @@
+name: seraphine-local
+
+services:
+  cliproxy:
+    profiles: [legacy-proxy]
+    image: seraphine-cliproxy:latest
+    restart: unless-stopped
+    ports:
+      - "8317:8317"
+    volumes:
+      - /opt/seraphine-local/cliproxy-config.yaml:/CLIProxyAPI/config.yaml:ro
+      - cliproxy-auths:/root/.cli-proxy-api
+
+  whatsapp-bridge:
+    image: seraphine-whatsapp-bridge:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      WEBHOOK_URL: "http://${SERAPHINE_WINDOWS_HOST:?Windows WSL gateway required}:18000/webhook/whatsapp"
+      TZ: America/Bahia
+      LOG_LEVEL: info
+    ports:
+      - "3001:3001"
+    volumes:
+      - whatsapp-auth:/app/.wwebjs_auth
+      - whatsapp-cache:/app/.wwebjs_cache
+    shm_size: "512m"
+
+volumes:
+  cliproxy-auths:
+    name: seraphine_local_cliproxy_auths
+    external: true
+  whatsapp-auth:
+    name: seraphine_local_whatsapp_auth
+    external: true
+  whatsapp-cache:
+    name: seraphine_local_whatsapp_cache
+    external: true

@@ -4,6 +4,8 @@ import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeftIcon, SearchIcon } from '../icons/Icons';
+import { ModelPicker } from '../ui';
+import type { ModelPickerGroup } from '../ui';
 import {
   cancelRun,
   getConfig,
@@ -128,6 +130,15 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
   const [orKey, setOrKey] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
+
+  /** Os dois pickers (fan-out e síntese) leem o mesmo catálogo. */
+  const modelGroups = useMemo<ModelPickerGroup[]>(
+    () => [
+      { label: 'cliproxy / Claude', options: models.cliproxy },
+      { label: 'OpenRouter', options: models.openrouter },
+    ],
+    [models],
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -363,70 +374,28 @@ export function ResearchView({ onBack }: ResearchViewProps): JSX.Element {
       {configOpen && (
         <div className="research-config">
           <div className="research-config__row">
-            <label className="research-config__field">
+            {/* Busca em vez de `<select>`: o catálogo do OpenRouter vem inteiro
+                (~400 modelos) desde que o teto de 80 saiu do backend. O id vai e
+                volta VERBATIM — nada de reprefixar. */}
+            <div className="research-config__field">
               <span className="research-config__label">Modelo de fan-out</span>
-              <select
-                className="research-config__select"
+              <ModelPicker
+                label="Modelo de fan-out"
                 value={fanoutModel}
-                onChange={(e) => setFanoutModel(e.target.value)}
-              >
-                {models.cliproxy.length > 0 && (
-                  <optgroup label="cliproxy / Claude">
-                    {models.cliproxy.map((m) => (
-                      <option key={`f-${m.id}`} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {models.openrouter.length > 0 && (
-                  <optgroup label="OpenRouter">
-                    {models.openrouter.map((m) => (
-                      <option key={`f-${m.id}`} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {/* Always offer the current value so it stays selectable. */}
-                {fanoutModel &&
-                  ![...models.cliproxy, ...models.openrouter].some((m) => m.id === fanoutModel) && (
-                    <option value={fanoutModel}>{fanoutModel}</option>
-                  )}
-              </select>
-            </label>
+                groups={modelGroups}
+                onChange={setFanoutModel}
+              />
+            </div>
 
-            <label className="research-config__field">
+            <div className="research-config__field">
               <span className="research-config__label">Modelo de sintese</span>
-              <select
-                className="research-config__select"
+              <ModelPicker
+                label="Modelo de sintese"
                 value={synthModel}
-                onChange={(e) => setSynthModel(e.target.value)}
-              >
-                {models.cliproxy.length > 0 && (
-                  <optgroup label="cliproxy / Claude">
-                    {models.cliproxy.map((m) => (
-                      <option key={`s-${m.id}`} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {models.openrouter.length > 0 && (
-                  <optgroup label="OpenRouter">
-                    {models.openrouter.map((m) => (
-                      <option key={`s-${m.id}`} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {synthModel &&
-                  ![...models.cliproxy, ...models.openrouter].some((m) => m.id === synthModel) && (
-                    <option value={synthModel}>{synthModel}</option>
-                  )}
-              </select>
-            </label>
+                groups={modelGroups}
+                onChange={setSynthModel}
+              />
+            </div>
           </div>
 
           <label className="research-config__field">

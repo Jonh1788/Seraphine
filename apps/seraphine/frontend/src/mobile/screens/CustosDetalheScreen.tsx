@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeftIcon, SparkleIcon } from '../../icons/Icons';
 import {
+  cacheHitRate,
   fetchTelemetrySummary,
   listFlatBackends,
   readPower,
@@ -132,6 +133,10 @@ interface Linha {
   nome: string;
   custo: number;
   chamadas: number;
+  /** Fração da entrada lida do cache de prompt. `null` = não dá para dizer:
+   *  backend que não reporta (cliproxy) ou período sem entrada. Distinto de 0,
+   *  que é "o cache não pegou nada" — e esse é um diagnóstico de verdade. */
+  cache?: number | null;
 }
 
 const numero = (x: unknown): number | null =>
@@ -154,7 +159,19 @@ function lerLinhas(bruto: unknown, chave: 'feature' | 'model'): { linhas: Linha[
       descartadas++;
       continue;
     }
-    linhas.push({ nome, custo, chamadas });
+    /* O cache é OPCIONAL e não entra no descarte: ele é informação extra sobre
+       uma linha válida. Uma linha de gasto legítima não pode sumir da tela de
+       dinheiro porque o backend não mandou um contador de cache. */
+    const entrada = numero(r.input_tokens);
+    const cache =
+      entrada !== null
+        ? cacheHitRate({
+            input_tokens: entrada,
+            cache_read_tokens: numero(r.cache_read_tokens) ?? 0,
+            cache_write_tokens: numero(r.cache_write_tokens) ?? 0,
+          })
+        : null;
+    linhas.push({ nome, custo, chamadas, cache });
   }
   return { linhas, descartadas };
 }
@@ -410,6 +427,14 @@ export function CustosDetalheScreen({ onBack, onOpen }: ScreenProps) {
                         <span className={`ms-custosdet-linha__custo${marcaZero ? ' ms-custosdet-linha__custo--flat' : ''}`}>
                           {fmtCusto(l.custo)}
                         </span>
+                        {/* Cache por modelo: ele é por prefixo de prompt, então
+                            um modelo pode estar acertando enquanto outro nunca
+                            aquece. Omitido quando não há dado — nunca zerado. */}
+                        {l.cache !== null && l.cache !== undefined && (
+                          <span className="ms-custosdet-linha__cache">
+                            cache {Math.round(l.cache * 100)}%
+                          </span>
+                        )}
                         <span className="ms-custosdet-linha__chamadas">{fmtCount(l.chamadas)}×</span>
                       </span>
                     </div>

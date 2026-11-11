@@ -4,7 +4,11 @@ import { listEvents } from '../google/api';
 import type { CalendarEvent } from '../google/types';
 import type { FinanceEntry, SeraphineTask } from '../finance/types';
 import { API_BASE } from '../api';
-import { fetchAggregate as apiFetchAggregate, fetchTasksByRange } from './api';
+import {
+  fetchAggregate as apiFetchAggregate,
+  fetchFinanceEntriesByRange,
+  fetchTasksByRange,
+} from './api';
 import type { AggregateDay as DayAggregate } from './types';
 import {
   WEEKDAY_LABELS,
@@ -32,7 +36,7 @@ interface CalendarViewProps {
 type ViewMode = 'month' | 'week' | 'day' | 'heatmap';
 type FilterKey = 'agenda' | 'financas' | 'outros' | 'tarefas' | 'lembretes';
 
-interface CalendarItem {
+export interface CalendarItem {
   key: string;          // unique render key
   category: FilterKey;  // which filter drives visibility
   start: Date;
@@ -46,7 +50,7 @@ interface CalendarItem {
   recurring?: boolean;  // true for expanded recurring rule occurrences
 }
 
-interface RecurringRule {
+export interface RecurringRule {
   id: string;
   title: string;
   description: string | null;
@@ -54,6 +58,7 @@ interface RecurringRule {
   weekday: number | null;   // 0=Mon..6=Sun
   day_of_month: number | null;
   time: string | null;      // HH:MM
+  end_date: string | null;  // YYYY-MM-DD, inclusive; null = forever
   active: boolean;
 }
 
@@ -184,11 +189,16 @@ function entryToItem(entry: FinanceEntry): CalendarItem {
   };
 }
 
-/** Expand a recurring rule into CalendarItems for every matching day in [start, end]. */
-function expandRecurring(rule: RecurringRule, rangeStart: Date, rangeEnd: Date): CalendarItem[] {
+/** Expand a recurring rule into CalendarItems for every matching day in [start, end].
+ *
+ *  Exported for tests: this is where "durante 20 dias" either holds or silently
+ *  becomes forever, and the only way to see it in the app is to reinstall. */
+export function expandRecurring(rule: RecurringRule, rangeStart: Date, rangeEnd: Date): CalendarItem[] {
   const items: CalendarItem[] = [];
   const d = new Date(rangeStart);
   while (d <= rangeEnd) {
+    // Inclusive end date — a time-boxed rule must stop painting the grid.
+    if (rule.end_date && toIsoDate(d) > rule.end_date) break;
     let match = false;
     if (rule.frequency === 'daily') {
       match = true;
@@ -1237,37 +1247,17 @@ export function CalendarView({ onNavigateToTask }: CalendarViewProps): JSX.Eleme
       return;
     }
     try {
-      // The /finance/entries endpoint filters by month+year; to cover a
-      // multi-month range we request each month that intersects the view.
-      const months = new Set<string>();
-      const cursor = new Date(rangeStart);
-      cursor.setDate(1);
-      while (cursor <= rangeEnd) {
-        months.add(`${cursor.getFullYear()}-${cursor.getMonth() + 1}`);
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
-      const results = await Promise.all(
-        Array.from(months).map(async (ym) => {
-          const [y, m] = ym.split('-').map(Number);
-          const res = await fetch(
-            `${API_BASE}/finance/entries?year=${y}&month=${m}&limit=500`,
-          );
-          if (!res.ok) return [] as FinanceEntry[];
-          const data = await res.json();
-          return Array.isArray(data.entries) ? (data.entries as FinanceEntry[]) : [];
-        }),
+      // Pela DATA DA COMPRA, que é por onde `entryToItem` posiciona cada
+      // lançamento na grade. `month`/`year` respondem outra pergunta — o mês
+      // DE CAIXA, em que o dinheiro sai — e buscar por um enquanto se desenha
+      // pelo outro fazia a compra de 15/07 numa fatura que vence em 10/08
+      // nunca ser buscada para a semana de 13–19/07: ela sumia do dia em que
+      // aconteceu. A visão de mês escapava por acidente (a grade puxa três
+      // meses) até a fatura ser paga em setembro. O calendário é sobre quando
+      // a compra aconteceu; as duas pontas concordam nisso agora.
+      setFinanceEntries(
+        await fetchFinanceEntriesByRange(toIsoDate(rangeStart), toIsoDate(rangeEnd)),
       );
-      // Merge + dedupe by id.
-      const seen = new Set<number>();
-      const merged: FinanceEntry[] = [];
-      for (const list of results) {
-        for (const e of list) {
-          if (seen.has(e.id)) continue;
-          seen.add(e.id);
-          merged.push(e);
-        }
-      }
-      setFinanceEntries(merged);
     } catch {
       setFinanceEntries([]);
     }

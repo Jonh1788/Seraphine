@@ -85,13 +85,29 @@ DEFAULT_SYSTEM_PROMPT = (
     "access to tools' or 'I can't search the web' — that is FALSE. You DO have "
     "web_search, web_fetch, route_planner, play_music, file tools, MCP tools, etc.\n\n"
     "TOOL USE RULES:\n"
-    "1. ALWAYS say a short sentence to the user BEFORE calling a tool, like "
+    "1. Say ONE short sentence to the user BEFORE calling a tool, like "
     "'Vou buscar isso pra você!' or 'Deixa eu pesquisar...'. This gives immediate "
-    "feedback.\n"
+    "feedback. ONE — not one per tool call, and never a second one restating "
+    "the same plan.\n"
     "2. After saying that, IMMEDIATELY call the appropriate tool. Don't promise "
     "to search and then stop — actually call the tool.\n"
-    "3. After a tool returns, summarize the result naturally in your own words.\n"
-    "4. After play_music, ALWAYS call learn_music_taste to record the preference.\n\n"
+    "3. After a tool returns, summarize the RESULT naturally in your own words. "
+    "Say what happened, not what you were about to do. If your pre-tool "
+    "sentence already covered it, keep the summary to a few words or skip it.\n"
+    "4. NEVER restate the same intention twice in one turn. If a tool call "
+    "fails and you retry it, retry SILENTLY — do not re-announce the plan. "
+    "A turn that says 'vou configurar X', then 'vou configurar X agora', then "
+    "'pronto, configurei X' is broken; the user reads all three.\n"
+    "5. After play_music, ALWAYS call learn_music_taste to record the preference.\n\n"
+    "RECURRING TASKS:\n"
+    "Recurring rules live in their own store — list_reminders does NOT show "
+    "them. To change one ('muda o de 21 pra 19', 'para com esse lembrete'), "
+    "call list_recurring_tasks to get the rule_id, then update_recurring_task "
+    "or delete_recurring_task. NEVER create a second rule to 'replace' an "
+    "existing one — that leaves the user with duplicates firing twice. When "
+    "the user bounds the habit in time ('por 20 dias', 'essa semana'), compute "
+    "the actual end_date and pass it; writing the limit in the description "
+    "does nothing.\n\n"
     "Available tools include: web_search (DuckDuckGo), web_fetch (read a URL), "
     "route_planner (driving directions), play_music (YouTube Music), filesystem, "
     "shell, Supertasks MCP, request_skill (for missing capabilities).\n\n"
@@ -393,34 +409,52 @@ async def _proxy_tool_via_client(
             ok=False,
             error="proxy broker not configured",
         )
-    ws = broker.any_client(app_state)
-    if ws is None:
+    candidatos = broker.clients_for(app_state, tool_name)
+    if not candidatos:
         return ToolResult(
             ok=False,
             error=(
-                f"tool '{tool_name}' needs a Mac client but no Tauri "
-                "WebSocket is connected"
+                f"tool '{tool_name}' precisa do app da Seraphine aberto em "
+                "algum aparelho, e nenhum está conectado"
             ),
         )
 
-    request_id = broker.new_request_id()
-    fut = broker.register(request_id)
-    try:
-        await ws.send_json({
-            "type": "tool_proxy_request",
-            "request_id": request_id,
-            "tool": tool_name,
-            "args": tool_args,
-        })
-    except Exception as e:
-        broker.cancel(request_id, f"send failed: {e}")
-        return ToolResult(ok=False, error=f"send failed: {e}")
+    # Tenta o próximo SÓ quando o anterior não respondeu — nunca depois de uma
+    # resposta, mesmo de erro.
+    #
+    # A distinção é o que separa "tentar de novo" de "fazer duas vezes":
+    # `lan_request` carrega POSTs que não são idempotentes (`/api/play` põe
+    # faixa na fila). Se o cliente respondeu qualquer coisa, ele EXECUTOU o
+    # pedido, e repetir num segundo aparelho enfileiraria a música duas vezes.
+    # Silêncio, não: aparelho fora de casa ou com o app em segundo plano nem
+    # chegou a mandar nada para a LAN, e aí o próximo candidato é a única
+    # chance do comando.
+    ultimo: ToolResult | None = None
+    for ws in candidatos:
+        request_id = broker.new_request_id()
+        fut = broker.register(request_id)
+        try:
+            await ws.send_json({
+                "type": "tool_proxy_request",
+                "request_id": request_id,
+                "tool": tool_name,
+                "args": tool_args,
+            })
+        except Exception as e:
+            broker.cancel(request_id, f"send failed: {e}")
+            ultimo = ToolResult(ok=False, error=f"send failed: {e}")
+            continue  # nada saiu daqui: o próximo pode tentar
 
-    try:
-        return await asyncio.wait_for(fut, timeout=_PROXY_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
-        broker.cancel(request_id, "client did not respond in time")
-        return ToolResult(ok=False, error="client did not respond in time")
+        try:
+            return await asyncio.wait_for(fut, timeout=_PROXY_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            broker.cancel(request_id, "client did not respond in time")
+            ultimo = ToolResult(
+                ok=False, error="o aparelho conectado não respondeu a tempo"
+            )
+            continue
+
+    return ultimo or ToolResult(ok=False, error="nenhum cliente atendeu")
 
 
 class TurnCancelled(Exception):
@@ -1535,7 +1569,10 @@ class ConversationEngine:
         cliproxy default so the chat can never break on a misconfiguration.
         """
         try:
-            from seraphine.deepsearch.providers import normalize_model_spec
+            from seraphine.deepsearch.providers import (
+                normalize_effort,
+                normalize_model_spec,
+            )
 
             # Lê o kv cru (não passa pelo service), então normaliza aqui também:
             # é ESTE caminho que monta a chamada, e um prefixo duplicado gravado
@@ -1554,7 +1591,17 @@ class ConversationEngine:
                 return (self.llm, None)
             from seraphine.deepsearch.providers import OpenRouterChatClient
 
-            return (OpenRouterChatClient(key, telemetry=self._telemetry_sink), model_id)
+            # Esforço de raciocínio: outro kv, lido no MESMO ponto que o modelo
+            # porque é a mesma decisão — este é o único lugar que monta o
+            # cliente do OpenRouter para o chat. Vazio/ausente/inválido vira
+            # `None` no adaptador, que então não manda `reasoning` nenhum.
+            effort = normalize_effort(await self.store.get_kv("chat_reasoning_effort"))
+            return (
+                OpenRouterChatClient(
+                    key, telemetry=self._telemetry_sink, effort=effort
+                ),
+                model_id,
+            )
         except Exception as e:  # noqa: BLE001 — chat must never break on this
             logger.warning("chat-model resolution failed, using cliproxy: %s", e)
             return (self.llm, None)
@@ -1571,7 +1618,7 @@ class ConversationEngine:
         )
 
         smart = settings.anthropic_smart_model
-        if not smart:
+        if not smart or settings.llm_backend == "codex":
             return None  # routing disabled — adapter default
         local = settings.llm_backend in ("openai", "ollama")
         # Learning knob: a promoted policy may tune the prompt-length threshold

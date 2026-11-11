@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { API_BASE } from '../api';
 import { Orb } from './Orb';
-import { greeting, monthExpenses } from './hoje';
+import { greeting, monthSummaryUrl } from './hoje';
 import { useFetchJson } from './useFetchJson';
 import { listHabits } from '../habits/api';
 import type { HabitWithStatus } from '../habits/types';
@@ -216,10 +216,16 @@ function HabitosBlock({ onOpen }: { onOpen: Open }) {
 }
 
 function OrcamentoBlock({ onOpen }: { onOpen: Open }) {
-  const { data, error, loading } = useFetchJson<{ entries?: { amount: number; kind?: string; type?: string; date?: string; ts?: string }[] }>(
-    `${API_BASE}/finance/entries?status=confirmed&limit=100`,
+  // `/finance/summary` e não `/finance/entries` somados aqui: é a mesma fonte
+  // do hero da tela de Finanças, e o gasto do mês tem de ser UM número no app
+  // inteiro. Somar por prefixo da data da compra dava outro: a compra no
+  // cartão pesa no mês em que a fatura vence ou é paga, não no da compra.
+  const { data, error, loading } = useFetchJson<{ expenses?: number }>(
+    monthSummaryUrl(API_BASE, new Date()),
   );
-  const total = monthExpenses(data?.entries ?? [], new Date());
+  const total = typeof data?.expenses === 'number' && Number.isFinite(data.expenses)
+    ? Math.abs(data.expenses)
+    : 0;
   return (
     <section className="mshell-card mhoje-orcamento" onClick={() => onOpen({ key: 'financas', title: 'Finanças' })}>
       <p className="mshell-eyebrow">Gasto do mês</p>

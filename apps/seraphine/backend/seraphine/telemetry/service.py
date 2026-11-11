@@ -23,7 +23,9 @@ class TelemetryService:
 
     async def record(self, *, backend: str, model: str, feature: str = "chat",
                      input_tokens: int = 0, output_tokens: int = 0,
-                     cost_usd: float | None = None) -> None:
+                     cost_usd: float | None = None,
+                     cache_read_tokens: int = 0,
+                     cache_write_tokens: int = 0) -> None:
         """Persist one LLM call's usage + cost. Never raises into the caller
         (telemetry must not break a chat turn).
 
@@ -36,6 +38,12 @@ class TelemetryService:
 
         Quando o provedor não reporta (cliproxy, ou uma resposta sem o campo),
         cai na tabela como antes.
+
+        ``cache_read_tokens``/``cache_write_tokens`` são os contadores de cache
+        de prompt do OpenRouter. Ficam FORA do cálculo de custo: quando o
+        provedor reporta `cost`, o desconto do cache já está embutido nele; e a
+        tabela estimada de `pricing.py` não sabe nada de cache. Eles existem
+        para responder "o cache acertou?", que o custo sozinho não responde.
         """
         try:
             cost = (
@@ -45,14 +53,16 @@ class TelemetryService:
             )
             row = (str(uuid.uuid4()), datetime.now(timezone.utc).isoformat(),
                    backend or "?", model or "?", feature or "chat",
-                   int(input_tokens or 0), int(output_tokens or 0), float(cost))
+                   int(input_tokens or 0), int(output_tokens or 0), float(cost),
+                   int(cache_read_tokens or 0), int(cache_write_tokens or 0))
 
             def _work() -> None:
                 with self.store._connect() as conn:
                     conn.execute(
                         "INSERT INTO llm_usage (id, ts, backend, model, feature,"
-                        " input_tokens, output_tokens, cost_usd)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", row,
+                        " input_tokens, output_tokens, cost_usd,"
+                        " cache_read_tokens, cache_write_tokens)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row,
                     )
             await asyncio.to_thread(_work)
         except Exception:
@@ -92,12 +102,16 @@ class TelemetryService:
             with self.store._connect() as conn:
                 tot = conn.execute(
                     "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),"
-                    " COALESCE(SUM(cost_usd),0), COUNT(*) FROM llm_usage WHERE ts >= ?",
+                    " COALESCE(SUM(cost_usd),0), COUNT(*),"
+                    " COALESCE(SUM(cache_read_tokens),0),"
+                    " COALESCE(SUM(cache_write_tokens),0) FROM llm_usage WHERE ts >= ?",
                     (since,),
                 ).fetchone()
                 by_model = conn.execute(
                     "SELECT model, COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),"
-                    " COALESCE(SUM(cost_usd),0), COUNT(*) FROM llm_usage WHERE ts >= ?"
+                    " COALESCE(SUM(cost_usd),0), COUNT(*),"
+                    " COALESCE(SUM(cache_read_tokens),0),"
+                    " COALESCE(SUM(cache_write_tokens),0) FROM llm_usage WHERE ts >= ?"
                     " GROUP BY model ORDER BY SUM(cost_usd) DESC", (since,),
                 ).fetchall()
                 by_feature = conn.execute(
@@ -121,9 +135,12 @@ class TelemetryService:
                 # um orçamento, não uma barra vazia.
                 "budget": budget,
                 "total": {"input_tokens": tot[0], "output_tokens": tot[1],
-                          "cost_usd": round(tot[2], 6), "calls": tot[3]},
+                          "cost_usd": round(tot[2], 6), "calls": tot[3],
+                          "cache_read_tokens": tot[4], "cache_write_tokens": tot[5]},
                 "by_model": [{"model": r[0], "input_tokens": r[1], "output_tokens": r[2],
-                              "cost_usd": round(r[3], 6), "calls": r[4]} for r in by_model],
+                              "cost_usd": round(r[3], 6), "calls": r[4],
+                              "cache_read_tokens": r[5], "cache_write_tokens": r[6]}
+                             for r in by_model],
                 "by_feature": [{"feature": r[0], "cost_usd": round(r[1], 6), "calls": r[2]} for r in by_feature],
                 "by_backend": [{"backend": r[0], "cost_usd": round(r[1], 6), "calls": r[2]} for r in by_backend],
             }

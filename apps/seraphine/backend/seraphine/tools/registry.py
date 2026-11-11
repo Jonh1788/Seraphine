@@ -260,6 +260,7 @@ def build_default_registry(
             FinancialDashboardTool,
             ImportFinancialPdfTool,
             ListFinancialEntriesTool,
+            MarkInvoicePaidTool,
         )
 
         reg.register(FinancialDashboardTool(finance_service))
@@ -267,15 +268,24 @@ def build_default_registry(
         reg.register(BulkAddFinancialEntriesTool(finance_service))
         reg.register(ListFinancialEntriesTool(finance_service))
         reg.register(ImportFinancialPdfTool(finance_service, llm=llm))
+        reg.register(MarkInvoicePaidTool(finance_service))
     if task_service is not None:
         from seraphine.tools.tasks import CreateTaskTool, UpdateTaskTool
 
         reg.register(CreateTaskTool(task_service, scheduler=reminder_scheduler, work_service=work_service))
         reg.register(UpdateTaskTool(task_service, scheduler=reminder_scheduler))
     if recurring_service is not None:
-        from seraphine.tools.recurring import CreateRecurringTaskTool
+        from seraphine.tools.recurring import (
+            CreateRecurringTaskTool,
+            DeleteRecurringTaskTool,
+            ListRecurringTasksTool,
+            UpdateRecurringTaskTool,
+        )
 
         reg.register(CreateRecurringTaskTool(recurring_service))
+        reg.register(ListRecurringTasksTool(recurring_service))
+        reg.register(UpdateRecurringTaskTool(recurring_service))
+        reg.register(DeleteRecurringTaskTool(recurring_service))
     if habit_service is not None:
         from seraphine.tools.habits import CreateHabitTool, ToggleHabitTool
 

@@ -1235,6 +1235,15 @@ async def conversation_ws(ws: WebSocket) -> None:
                 # target Tauri-specific clients first.
                 try:
                     ws._is_tauri = bool(payload.get("is_tauri"))  # type: ignore[attr-defined]
+                    # Quais tools este cliente sabe atender. O broker escolhe
+                    # por aqui: sem a lista ele mandava para um cliente
+                    # qualquer, e um pedido que só o desktop atende podia cair
+                    # no iPhone. Cliente antigo não manda o campo — vira lista
+                    # vazia, que o broker lê como "não sei, tente mesmo assim".
+                    tools = payload.get("tools")
+                    ws._proxy_tools = (  # type: ignore[attr-defined]
+                        [str(t) for t in tools] if isinstance(tools, list) else []
+                    )
                 except Exception:
                     pass
             elif mtype == "mcp_approval_response":

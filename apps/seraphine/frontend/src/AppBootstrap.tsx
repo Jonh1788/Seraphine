@@ -20,6 +20,7 @@ import { useRealtimeStore } from './stores/realtimeStore';
 import { useNotificationStore } from './stores/notificationStore';
 import { useClipboardShortcut } from './clipboard';
 import { useWakeWord } from './realtime/useWakeWord';
+import { useRecurringNotifications } from './notifications/useRecurringNotifications';
 import { contextualStore } from './contextual/store';
 
 interface BadgingNavigator {
@@ -65,6 +66,14 @@ export function AppBootstrap(): null {
   const tsAudioEndRef = useRef<number>(0);
   const chunkOffRef = useRef<(() => void) | null>(null);
   const metricsRef = useRef<LatencyMetrics>({});
+
+  // ─── Notificações locais das regras recorrentes (iOS) ──────────────────
+  // Mora aqui, e não no `MobileShell`, porque o `MobileShell` não é montado
+  // por ninguém: o `App` renderiza `PhoneShell` ou `AppLayout`, e o
+  // `AppBootstrap` é o único componente presente em todo form factor e vivo
+  // pelo app inteiro. Fora do iOS o hook não faz nada (o comando nativo não
+  // existe) — e sem ele no iOS uma regra vencida tocaria para sempre.
+  useRecurringNotifications();
 
   // ─── WebSocket + message handler ────────────────────────────────────────
   useEffect(() => {
@@ -524,14 +533,19 @@ export function AppBootstrap(): null {
   // ─── Tauri quick-capture listener ──────────────────────────────────────
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => {
-        listen('quick-capture', () => {
+    let cancelled = false;
+    import('@tauri-apps/api/core')
+      .then(async ({ isTauri }) => {
+        if (!isTauri() || cancelled) return;
+        const { listen } = await import('@tauri-apps/api/event');
+        const stop = await listen('quick-capture', () => {
           setQuickCaptureOpen(true);
-        }).then((fn) => { unlisten = fn; });
+        });
+        if (cancelled) stop();
+        else unlisten = stop;
       })
       .catch(() => { /* not Tauri */ });
-    return () => { unlisten?.(); };
+    return () => { cancelled = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
