@@ -74,6 +74,13 @@ services/whatsapp-bridge/.wwebjs_auth/
 services/claude-stream-proxy/
 services/cli-proxy-src/
 services/cli-proxy/cli-proxy-api
+services/cli-proxy/cli-proxy-api.exe
+# CLIProxyAPI local config (holds api-keys) and OAuth credential files
+# (claude-<email>.json, codex-<email>.json, ...) — never commit.
+# Copy config.example.yaml to config.yaml locally.
+services/cli-proxy/config.yaml
+services/cli-proxy/*.json
+services/cli-proxy/auths/
 
 # VRM backups
 *.vrm.bak
