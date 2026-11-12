@@ -29,6 +29,7 @@ describe('App', () => {
         </ConfirmProvider>
       </ThemeProvider>,
     );
-    expect(screen.getByText('Seraphine')).toBeTruthy();
+    // The brand shows in the topbar, the sidebar and the chat identity card.
+    expect(screen.getAllByText('Seraphine').length).toBeGreaterThan(0);
   });
 });

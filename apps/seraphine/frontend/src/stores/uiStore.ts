@@ -27,7 +27,8 @@ export type ActiveView =
   | 'wiki'
   | 'maestro'
   | 'telemetry'
-  | 'learning';
+  | 'learning'
+  | 'agents';
 
 interface UiState {
   activeView: ActiveView;

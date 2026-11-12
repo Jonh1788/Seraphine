@@ -22,6 +22,7 @@ import { useClipboardShortcut } from './clipboard';
 import { useWakeWord } from './realtime/useWakeWord';
 import { useRecurringNotifications } from './notifications/useRecurringNotifications';
 import { contextualStore } from './contextual/store';
+import { useAgentsStore } from './agents/store';
 
 interface BadgingNavigator {
   setAppBadge?: (n: number) => Promise<void>;
@@ -823,6 +824,9 @@ export function AppBootstrap(): null {
       };
       if (viewActions[action]) {
         setActiveView(viewActions[action]);
+      } else if (action === 'agents-home' || action === 'agents-roster') {
+        useAgentsStore.getState().navigate({ screen: action === 'agents-home' ? 'home' : 'roster' });
+        setActiveView('agents');
       } else if (action === 'new-task') {
         setQuickNewTaskOpen(true);
         setQuickTaskTitle('');

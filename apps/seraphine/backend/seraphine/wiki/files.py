@@ -22,14 +22,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def wiki_root() -> Path:
+def wiki_root_path() -> Path:
+    """Where the wiki lives, without creating anything (``wiki_root`` creates it)."""
     override = os.environ.get("SERAPHINE_WIKI_DATA_DIR")
     if override:
-        root = Path(override)
-    else:
-        data = os.environ.get("SERAPHINE_DATA_DIR")
-        base = Path(data) if data else Path(settings.sqlite_path).parent
-        root = base / "wiki"
+        return Path(override)
+    data = os.environ.get("SERAPHINE_DATA_DIR")
+    base = Path(data) if data else Path(settings.sqlite_path).parent
+    return base / "wiki"
+
+
+def wiki_root() -> Path:
+    root = wiki_root_path()
     (root / "raw" / "research").mkdir(parents=True, exist_ok=True)
     (root / "raw" / "attachments").mkdir(parents=True, exist_ok=True)
     (root / "raw" / "chat").mkdir(parents=True, exist_ok=True)

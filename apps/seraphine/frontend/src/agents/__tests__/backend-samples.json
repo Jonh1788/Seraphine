@@ -1,0 +1,1961 @@
+{
+  "_about": "REAL backend responses, produced in-process by routes.py + service.py with the fake engine (see the contract in types.ts). Regenerate when the backend shapes change.",
+  "POST /bootstrap": {
+    "token": "<redacted>"
+  },
+  "POST /projects": {
+    "project": {
+      "id": "loja",
+      "name": "Loja",
+      "path": "C:\\Projetos\\loja",
+      "description": "loja online",
+      "archived": false,
+      "created_at": "2026-11-11T17:33:42.060309+00:00"
+    }
+  },
+  "GET /projects": {
+    "projects": [
+      {
+        "id": "loja",
+        "name": "Loja",
+        "path": "C:\\Projetos\\loja",
+        "description": "loja online",
+        "archived": false,
+        "created_at": "2026-11-11T17:33:42.060309+00:00"
+      }
+    ]
+  },
+  "PATCH /projects/{id}": {
+    "project": {
+      "id": "loja",
+      "name": "Loja",
+      "path": "C:\\Projetos\\loja",
+      "description": "loja nova",
+      "archived": false,
+      "created_at": "2026-11-11T17:33:42.060309+00:00"
+    }
+  },
+  "GET /engines": {
+    "engines": [
+      {
+        "name": "claude_code",
+        "available": true,
+        "reason": "ok",
+        "can_act": true
+      },
+      {
+        "name": "codex",
+        "available": false,
+        "reason": "codex não encontrado",
+        "can_act": true
+      }
+    ]
+  },
+  "POST /defs": {
+    "def": {
+      "id": "forja",
+      "name": "Forja",
+      "role": "código",
+      "instructions": "Cuide do código.",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "fallback_engine": null,
+      "fallback_provider": null,
+      "fallback_model": null,
+      "color": "#7c8cff",
+      "perm_edit": "free",
+      "perm_commands": "ask",
+      "daily_budget_usd": 2.0,
+      "enabled": true,
+      "created_at": "2026-11-11T17:33:42.066617+00:00",
+      "updated_at": "2026-11-11T17:33:42.066617+00:00",
+      "project_ids": [
+        "loja"
+      ]
+    }
+  },
+  "GET /defs": {
+    "defs": [
+      {
+        "id": "forja",
+        "name": "Forja",
+        "role": "código",
+        "instructions": "Cuide do código.",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "fallback_engine": null,
+        "fallback_provider": null,
+        "fallback_model": null,
+        "color": "#7c8cff",
+        "perm_edit": "free",
+        "perm_commands": "ask",
+        "daily_budget_usd": 2.0,
+        "enabled": true,
+        "created_at": "2026-11-11T17:33:42.066617+00:00",
+        "updated_at": "2026-11-11T17:33:42.066617+00:00",
+        "project_ids": [
+          "loja"
+        ]
+      }
+    ]
+  },
+  "GET /defs/{id}": {
+    "def": {
+      "id": "forja",
+      "name": "Forja",
+      "role": "código",
+      "instructions": "Cuide do código.",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "fallback_engine": null,
+      "fallback_provider": null,
+      "fallback_model": null,
+      "color": "#7c8cff",
+      "perm_edit": "free",
+      "perm_commands": "ask",
+      "daily_budget_usd": 2.0,
+      "enabled": true,
+      "created_at": "2026-11-11T17:33:42.066617+00:00",
+      "updated_at": "2026-11-11T17:33:42.066617+00:00",
+      "project_ids": [
+        "loja"
+      ]
+    }
+  },
+  "PATCH /defs/{id}": {
+    "def": {
+      "id": "forja",
+      "name": "Forja",
+      "role": "código",
+      "instructions": "Cuide do código.",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "fallback_engine": null,
+      "fallback_provider": null,
+      "fallback_model": null,
+      "color": "#f2a65a",
+      "perm_edit": "free",
+      "perm_commands": "ask",
+      "daily_budget_usd": 2.0,
+      "enabled": true,
+      "created_at": "2026-11-11T17:33:42.066617+00:00",
+      "updated_at": "2026-11-11T17:33:42.081185+00:00",
+      "project_ids": [
+        "loja"
+      ]
+    }
+  },
+  "POST /tasks": {
+    "task": {
+      "id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+      "project_id": "loja",
+      "number": 1,
+      "title": "Corrigir cupom",
+      "description": "",
+      "status": "todo",
+      "assignee_agent_id": "forja",
+      "priority": "medium",
+      "due_at": null,
+      "acceptance": [
+        {
+          "text": "Reproduzir a falha",
+          "done": false
+        }
+      ],
+      "created_by": "user",
+      "created_at": "2026-11-11T17:33:42.083740+00:00",
+      "updated_at": "2026-11-11T17:33:42.083740+00:00"
+    }
+  },
+  "GET /tasks": {
+    "tasks": [
+      {
+        "id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "project_id": "loja",
+        "number": 1,
+        "title": "Corrigir cupom",
+        "description": "",
+        "status": "todo",
+        "assignee_agent_id": "forja",
+        "priority": "medium",
+        "due_at": null,
+        "acceptance": [
+          {
+            "text": "Reproduzir a falha",
+            "done": false
+          }
+        ],
+        "created_by": "user",
+        "created_at": "2026-11-11T17:33:42.083740+00:00",
+        "updated_at": "2026-11-11T17:33:42.083740+00:00"
+      }
+    ]
+  },
+  "GET /tasks/{id}": {
+    "task": {
+      "id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+      "project_id": "loja",
+      "number": 1,
+      "title": "Corrigir cupom",
+      "description": "",
+      "status": "todo",
+      "assignee_agent_id": "forja",
+      "priority": "medium",
+      "due_at": null,
+      "acceptance": [
+        {
+          "text": "Reproduzir a falha",
+          "done": false
+        }
+      ],
+      "created_by": "user",
+      "created_at": "2026-11-11T17:33:42.083740+00:00",
+      "updated_at": "2026-11-11T17:33:42.083740+00:00"
+    }
+  },
+  "PATCH /tasks/{id}": {
+    "task": {
+      "id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+      "project_id": "loja",
+      "number": 1,
+      "title": "Corrigir cupom",
+      "description": "",
+      "status": "todo",
+      "assignee_agent_id": "forja",
+      "priority": "high",
+      "due_at": null,
+      "acceptance": [
+        {
+          "text": "Reproduzir a falha",
+          "done": true
+        }
+      ],
+      "created_by": "user",
+      "created_at": "2026-11-11T17:33:42.083740+00:00",
+      "updated_at": "2026-11-11T17:33:42.098215+00:00"
+    }
+  },
+  "POST /tasks/{id}/run": {
+    "run": {
+      "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+      "goal": "Execute a tarefa #1: Corrigir cupom",
+      "status": "queued",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "session_ref": null,
+      "requested_by": "user",
+      "result_summary": null,
+      "error": null,
+      "exit_code": null,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0.0,
+      "approvals_used": 0,
+      "created_at": "2026-11-11T17:33:42.100335+00:00",
+      "started_at": null,
+      "finished_at": null
+    }
+  },
+  "GET /overview": {
+    "pending_approvals": [
+      {
+        "id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "title": "Fazer deploy",
+        "command": "Set-Content -Path x.txt -Value hello",
+        "reason": "deploy passa por você",
+        "status": "pending",
+        "output": null,
+        "created_at": "2026-11-11T17:33:42.124398+00:00",
+        "decided_at": null,
+        "risk_level": "medium",
+        "risk_reasons": [
+          "Publica uma alteração no ar."
+        ],
+        "command_digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf",
+        "expires_at": "2026-11-12T17:33:42.124398+00:00",
+        "decided_by": null,
+        "decision_note": null
+      }
+    ],
+    "active_runs": [
+      {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "waiting_approval",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": null
+      }
+    ],
+    "spend_today": [
+      {
+        "agent_id": "forja",
+        "name": "Forja",
+        "spent_usd": 0.5,
+        "daily_budget_usd": 2.0
+      }
+    ]
+  },
+  "GET /approvals": {
+    "approvals": [
+      {
+        "id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "title": "Fazer deploy",
+        "command": "Set-Content -Path x.txt -Value hello",
+        "reason": "deploy passa por você",
+        "status": "pending",
+        "output": null,
+        "created_at": "2026-11-11T17:33:42.124398+00:00",
+        "decided_at": null,
+        "risk_level": "medium",
+        "risk_reasons": [
+          "Publica uma alteração no ar."
+        ],
+        "command_digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf",
+        "expires_at": "2026-11-12T17:33:42.124398+00:00",
+        "decided_by": null,
+        "decision_note": null
+      }
+    ]
+  },
+  "GET /runs/{id}": {
+    "run": {
+      "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+      "goal": "Execute a tarefa #1: Corrigir cupom",
+      "status": "waiting_approval",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "session_ref": "sess-1",
+      "requested_by": "user",
+      "result_summary": null,
+      "error": null,
+      "exit_code": 0,
+      "tokens_in": 10,
+      "tokens_out": 20,
+      "cost_usd": 0.5,
+      "approvals_used": 1,
+      "created_at": "2026-11-11T17:33:42.100335+00:00",
+      "started_at": "2026-11-11T17:33:42.110710+00:00",
+      "finished_at": null
+    }
+  },
+  "GET /runs/{id}/events": {
+    "events": [
+      {
+        "id": 1,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.101331+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "queued"
+        }
+      },
+      {
+        "id": 2,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.110710+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "running"
+        }
+      },
+      {
+        "id": 3,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "reasoning",
+          "text": "Li os erros do checkout"
+        }
+      },
+      {
+        "id": 4,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "file_change",
+          "changes": [
+            {
+              "path": "src/cart.py",
+              "kind": "update"
+            }
+          ]
+        }
+      },
+      {
+        "id": 5,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "tool_use",
+          "tool": "Read",
+          "target": "src/cart.py"
+        }
+      },
+      {
+        "id": 6,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "web_search",
+          "query": "arredondamento cupom"
+        }
+      },
+      {
+        "id": 7,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.115805+00:00",
+        "kind": "command",
+        "payload": {
+          "command": "pytest -q",
+          "exit_code": 0,
+          "output": "3 passed",
+          "by": "agent"
+        }
+      },
+      {
+        "id": 8,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.115805+00:00",
+        "kind": "message",
+        "payload": {
+          "text": "Preciso rodar o deploy.\n\n```approval-request\n{\"title\": \"Fazer deploy\", \"command\": \"Set-Content -Path x.txt -Value hello\", \"reason\": \"deploy passa por voc\\u00ea\"}\n```"
+        }
+      },
+      {
+        "id": 9,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.124398+00:00",
+        "kind": "approval_request",
+        "payload": {
+          "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+          "title": "Fazer deploy",
+          "command": "Set-Content -Path x.txt -Value hello",
+          "reason": "deploy passa por você",
+          "risk_level": "medium",
+          "risk_reasons": [
+            "Publica uma alteração no ar."
+          ],
+          "expires_at": "2026-11-12T17:33:42.124398+00:00",
+          "digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf"
+        }
+      },
+      {
+        "id": 10,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.124398+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "waiting_approval"
+        }
+      }
+    ]
+  },
+  "POST /approvals/{id}/decide": {
+    "approval": {
+      "id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "title": "Fazer deploy",
+      "command": "Set-Content -Path x.txt -Value hello",
+      "reason": "deploy passa por você",
+      "status": "approved",
+      "output": null,
+      "created_at": "2026-11-11T17:33:42.124398+00:00",
+      "decided_at": "2026-11-11T17:33:42.156966+00:00",
+      "risk_level": "medium",
+      "risk_reasons": [
+        "Publica uma alteração no ar."
+      ],
+      "command_digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf",
+      "expires_at": "2026-11-12T17:33:42.124398+00:00",
+      "decided_by": "owner",
+      "decision_note": null
+    }
+  },
+  "GET /runs/{id}/events (after approval)": {
+    "events": [
+      {
+        "id": 1,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.101331+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "queued"
+        }
+      },
+      {
+        "id": 2,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.110710+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "running"
+        }
+      },
+      {
+        "id": 3,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "reasoning",
+          "text": "Li os erros do checkout"
+        }
+      },
+      {
+        "id": 4,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "file_change",
+          "changes": [
+            {
+              "path": "src/cart.py",
+              "kind": "update"
+            }
+          ]
+        }
+      },
+      {
+        "id": 5,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "tool_use",
+          "tool": "Read",
+          "target": "src/cart.py"
+        }
+      },
+      {
+        "id": 6,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.114797+00:00",
+        "kind": "step",
+        "payload": {
+          "type": "web_search",
+          "query": "arredondamento cupom"
+        }
+      },
+      {
+        "id": 7,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.115805+00:00",
+        "kind": "command",
+        "payload": {
+          "command": "pytest -q",
+          "exit_code": 0,
+          "output": "3 passed",
+          "by": "agent"
+        }
+      },
+      {
+        "id": 8,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.115805+00:00",
+        "kind": "message",
+        "payload": {
+          "text": "Preciso rodar o deploy.\n\n```approval-request\n{\"title\": \"Fazer deploy\", \"command\": \"Set-Content -Path x.txt -Value hello\", \"reason\": \"deploy passa por voc\\u00ea\"}\n```"
+        }
+      },
+      {
+        "id": 9,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.124398+00:00",
+        "kind": "approval_request",
+        "payload": {
+          "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+          "title": "Fazer deploy",
+          "command": "Set-Content -Path x.txt -Value hello",
+          "reason": "deploy passa por você",
+          "risk_level": "medium",
+          "risk_reasons": [
+            "Publica uma alteração no ar."
+          ],
+          "expires_at": "2026-11-12T17:33:42.124398+00:00",
+          "digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf"
+        }
+      },
+      {
+        "id": 10,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.124398+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "waiting_approval"
+        }
+      },
+      {
+        "id": 11,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.156966+00:00",
+        "kind": "approval_result",
+        "payload": {
+          "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+          "decision": "approved",
+          "title": "Fazer deploy",
+          "decided_by": "owner",
+          "note": null
+        }
+      },
+      {
+        "id": 12,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.156966+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "queued",
+          "reason": "approval_decided"
+        }
+      },
+      {
+        "id": 13,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.167476+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "running"
+        }
+      },
+      {
+        "id": 14,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.439683+00:00",
+        "kind": "command",
+        "payload": {
+          "command": "Set-Content -Path x.txt -Value hello",
+          "exit_code": 0,
+          "output": "",
+          "by": "harness",
+          "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+          "timed_out": false
+        }
+      },
+      {
+        "id": 15,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.439683+00:00",
+        "kind": "message",
+        "payload": {
+          "text": "Deploy feito."
+        }
+      },
+      {
+        "id": 16,
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "ts": "2026-11-11T17:33:42.440683+00:00",
+        "kind": "status",
+        "payload": {
+          "status": "done"
+        }
+      }
+    ]
+  },
+  "GET /runs": {
+    "runs": [
+      {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "done",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": "Deploy feito.",
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": "2026-11-11T17:33:42.440683+00:00"
+      }
+    ]
+  },
+  "GET /runs/{id}/stream": [
+    {
+      "type": "event",
+      "id": 1,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.101331+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued"
+      }
+    },
+    {
+      "type": "event",
+      "id": 2,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.110710+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "event",
+      "id": 3,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "reasoning",
+        "text": "Li os erros do checkout"
+      }
+    },
+    {
+      "type": "event",
+      "id": 4,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "file_change",
+        "changes": [
+          {
+            "path": "src/cart.py",
+            "kind": "update"
+          }
+        ]
+      }
+    },
+    {
+      "type": "event",
+      "id": 5,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "tool_use",
+        "tool": "Read",
+        "target": "src/cart.py"
+      }
+    },
+    {
+      "type": "event",
+      "id": 6,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "web_search",
+        "query": "arredondamento cupom"
+      }
+    },
+    {
+      "type": "event",
+      "id": 7,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.115805+00:00",
+      "kind": "command",
+      "payload": {
+        "command": "pytest -q",
+        "exit_code": 0,
+        "output": "3 passed",
+        "by": "agent"
+      }
+    },
+    {
+      "type": "event",
+      "id": 8,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.115805+00:00",
+      "kind": "message",
+      "payload": {
+        "text": "Preciso rodar o deploy.\n\n```approval-request\n{\"title\": \"Fazer deploy\", \"command\": \"Set-Content -Path x.txt -Value hello\", \"reason\": \"deploy passa por voc\\u00ea\"}\n```"
+      }
+    },
+    {
+      "type": "event",
+      "id": 9,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.124398+00:00",
+      "kind": "approval_request",
+      "payload": {
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "title": "Fazer deploy",
+        "command": "Set-Content -Path x.txt -Value hello",
+        "reason": "deploy passa por você",
+        "risk_level": "medium",
+        "risk_reasons": [
+          "Publica uma alteração no ar."
+        ],
+        "expires_at": "2026-11-12T17:33:42.124398+00:00",
+        "digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf"
+      }
+    },
+    {
+      "type": "event",
+      "id": 10,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.124398+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "waiting_approval"
+      }
+    },
+    {
+      "type": "event",
+      "id": 11,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.156966+00:00",
+      "kind": "approval_result",
+      "payload": {
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "decision": "approved",
+        "title": "Fazer deploy",
+        "decided_by": "owner",
+        "note": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 12,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.156966+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued",
+        "reason": "approval_decided"
+      }
+    },
+    {
+      "type": "event",
+      "id": 13,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.167476+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "event",
+      "id": 14,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.439683+00:00",
+      "kind": "command",
+      "payload": {
+        "command": "Set-Content -Path x.txt -Value hello",
+        "exit_code": 0,
+        "output": "",
+        "by": "harness",
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "timed_out": false
+      }
+    },
+    {
+      "type": "event",
+      "id": 15,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.439683+00:00",
+      "kind": "message",
+      "payload": {
+        "text": "Deploy feito."
+      }
+    },
+    {
+      "type": "event",
+      "id": 16,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.440683+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "done"
+      }
+    },
+    {
+      "type": "end",
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "status": "done"
+    }
+  ],
+  "GET /projects/{id}/messages": {
+    "messages": [
+      {
+        "id": "e5f39280-3719-4008-a941-7d89b76bdada",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Preciso rodar o deploy.\n\nPreciso da sua aprovação: Fazer deploy",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.124398+00:00"
+      },
+      {
+        "id": "78ac9c68-b047-469c-b0fe-9421a951491e",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Deploy feito.",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.440683+00:00"
+      }
+    ]
+  },
+  "GET /tasks/{id}/messages": {
+    "messages": [
+      {
+        "id": "e5f39280-3719-4008-a941-7d89b76bdada",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Preciso rodar o deploy.\n\nPreciso da sua aprovação: Fazer deploy",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.124398+00:00"
+      },
+      {
+        "id": "78ac9c68-b047-469c-b0fe-9421a951491e",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Deploy feito.",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.440683+00:00"
+      }
+    ]
+  },
+  "POST /runs": {
+    "run": {
+      "id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "task_id": null,
+      "goal": "Rodar a suíte",
+      "status": "queued",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "session_ref": null,
+      "requested_by": "user",
+      "result_summary": null,
+      "error": null,
+      "exit_code": null,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0.0,
+      "approvals_used": 0,
+      "created_at": "2026-11-11T17:33:42.488551+00:00",
+      "started_at": null,
+      "finished_at": null
+    }
+  },
+  "POST /runs/{id}/cancel": {
+    "run": {
+      "id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "task_id": null,
+      "goal": "Rodar a suíte",
+      "status": "cancelled",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "session_ref": "fake-session-3",
+      "requested_by": "user",
+      "result_summary": null,
+      "error": null,
+      "exit_code": null,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0.0,
+      "approvals_used": 0,
+      "created_at": "2026-11-11T17:33:42.488551+00:00",
+      "started_at": "2026-11-11T17:33:42.490555+00:00",
+      "finished_at": "2026-11-11T17:33:42.809695+00:00"
+    }
+  },
+  "POST /projects/{id}/messages": {
+    "message": {
+      "id": "0667c45a-56bb-47a2-b9b5-a75e274a80a3",
+      "project_id": "loja",
+      "task_id": null,
+      "author": "user",
+      "body": "oi",
+      "run_id": null,
+      "created_at": "2026-11-11T17:33:42.811758+00:00"
+    },
+    "agent_id": "forja",
+    "run": {
+      "id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+      "agent_id": "forja",
+      "project_id": "loja",
+      "task_id": null,
+      "goal": "oi",
+      "status": "queued",
+      "engine": "claude_code",
+      "provider": "anthropic",
+      "model": null,
+      "reasoning_effort": null,
+      "session_ref": null,
+      "requested_by": "user",
+      "result_summary": null,
+      "error": null,
+      "exit_code": null,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0.0,
+      "approvals_used": 0,
+      "created_at": "2026-11-11T17:33:42.813761+00:00",
+      "started_at": null,
+      "finished_at": null
+    },
+    "error": null,
+    "detail": null
+  },
+  "POST /projects/{id}/messages (agent_not_available)": {
+    "message": {
+      "id": "c7bdbf55-39ce-45da-bb49-fa760a26df5f",
+      "project_id": "loja",
+      "task_id": null,
+      "author": "user",
+      "body": "oi",
+      "run_id": null,
+      "created_at": "2026-11-11T17:33:42.868393+00:00"
+    },
+    "agent_id": null,
+    "run": null,
+    "error": "agent_not_available",
+    "detail": "O agente não existe, está desativado ou não tem acesso ao projeto."
+  },
+  "GET /projects/{id}/messages?after": {
+    "messages": [
+      {
+        "id": "78ac9c68-b047-469c-b0fe-9421a951491e",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Deploy feito.",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.440683+00:00"
+      },
+      {
+        "id": "0667c45a-56bb-47a2-b9b5-a75e274a80a3",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "user",
+        "body": "oi",
+        "run_id": null,
+        "created_at": "2026-11-11T17:33:42.811758+00:00"
+      },
+      {
+        "id": "2a48b2f2-b0b6-4cd9-84fc-c678af1c755f",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "forja",
+        "body": "Olá!",
+        "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+        "created_at": "2026-11-11T17:33:42.836002+00:00"
+      },
+      {
+        "id": "c7bdbf55-39ce-45da-bb49-fa760a26df5f",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "user",
+        "body": "oi",
+        "run_id": null,
+        "created_at": "2026-11-11T17:33:42.868393+00:00"
+      }
+    ]
+  },
+  "DELETE /defs/{id}": {
+    "ok": true
+  },
+  "DELETE /projects/{id}": {
+    "project": {
+      "id": "loja",
+      "name": "Loja",
+      "path": "C:\\Projetos\\loja",
+      "description": "loja nova",
+      "archived": true,
+      "created_at": "2026-11-11T17:33:42.060309+00:00"
+    }
+  },
+  "error 404": {
+    "status": 404,
+    "body": {
+      "detail": "agente não encontrado"
+    }
+  },
+  "error 422 harness": {
+    "status": 422,
+    "body": {
+      "detail": "o caminho do projeto precisa ser absoluto"
+    }
+  },
+  "error 422 validation": {
+    "status": 422,
+    "body": {
+      "detail": [
+        {
+          "type": "string_too_short",
+          "loc": [
+            "body",
+            "name"
+          ],
+          "msg": "String should have at least 1 character"
+        },
+        {
+          "type": "missing",
+          "loc": [
+            "body",
+            "path"
+          ],
+          "msg": "Field required"
+        }
+      ]
+    }
+  },
+  "GET /bootstrap": {
+    "status": 405,
+    "body": {
+      "detail": "Method Not Allowed"
+    }
+  },
+  "GET /stream (lines captured while the above ran)": [
+    {
+      "type": "event",
+      "id": 1,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.101331+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "queued",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": null,
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 2,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.110710+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "running",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 3,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "reasoning",
+        "text": "Li os erros do checkout"
+      }
+    },
+    {
+      "type": "event",
+      "id": 4,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "file_change",
+        "changes": [
+          {
+            "path": "src/cart.py",
+            "kind": "update"
+          }
+        ]
+      }
+    },
+    {
+      "type": "event",
+      "id": 5,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "tool_use",
+        "tool": "Read",
+        "target": "src/cart.py"
+      }
+    },
+    {
+      "type": "event",
+      "id": 6,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.114797+00:00",
+      "kind": "step",
+      "payload": {
+        "type": "web_search",
+        "query": "arredondamento cupom"
+      }
+    },
+    {
+      "type": "event",
+      "id": 7,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.115805+00:00",
+      "kind": "command",
+      "payload": {
+        "command": "pytest -q",
+        "exit_code": 0,
+        "output": "3 passed",
+        "by": "agent"
+      }
+    },
+    {
+      "type": "event",
+      "id": 8,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.115805+00:00",
+      "kind": "message",
+      "payload": {
+        "text": "Preciso rodar o deploy.\n\n```approval-request\n{\"title\": \"Fazer deploy\", \"command\": \"Set-Content -Path x.txt -Value hello\", \"reason\": \"deploy passa por voc\\u00ea\"}\n```"
+      }
+    },
+    {
+      "type": "event",
+      "id": 9,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.124398+00:00",
+      "kind": "approval_request",
+      "payload": {
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "title": "Fazer deploy",
+        "command": "Set-Content -Path x.txt -Value hello",
+        "reason": "deploy passa por você",
+        "risk_level": "medium",
+        "risk_reasons": [
+          "Publica uma alteração no ar."
+        ],
+        "expires_at": "2026-11-12T17:33:42.124398+00:00",
+        "digest": "6a62800132233e51e4cf93d940072cfd105e93265b89920790c8f590103c77bf"
+      }
+    },
+    {
+      "type": "message",
+      "message": {
+        "id": "e5f39280-3719-4008-a941-7d89b76bdada",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Preciso rodar o deploy.\n\nPreciso da sua aprovação: Fazer deploy",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.124398+00:00"
+      }
+    },
+    {
+      "type": "event",
+      "id": 10,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.124398+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "waiting_approval"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "waiting_approval",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 11,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.156966+00:00",
+      "kind": "approval_result",
+      "payload": {
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "decision": "approved",
+        "title": "Fazer deploy",
+        "decided_by": "owner",
+        "note": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 12,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.156966+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued",
+        "reason": "approval_decided"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "queued",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 13,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.167476+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "running",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "heartbeat",
+      "ts": "2026-11-11T17:33:42.360284+00:00"
+    },
+    {
+      "type": "event",
+      "id": 14,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.439683+00:00",
+      "kind": "command",
+      "payload": {
+        "command": "Set-Content -Path x.txt -Value hello",
+        "exit_code": 0,
+        "output": "",
+        "by": "harness",
+        "approval_id": "d44c0880-b027-4dae-a206-41ef110b4b26",
+        "timed_out": false
+      }
+    },
+    {
+      "type": "event",
+      "id": 15,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.439683+00:00",
+      "kind": "message",
+      "payload": {
+        "text": "Deploy feito."
+      }
+    },
+    {
+      "type": "message",
+      "message": {
+        "id": "78ac9c68-b047-469c-b0fe-9421a951491e",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "author": "forja",
+        "body": "Deploy feito.",
+        "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "created_at": "2026-11-11T17:33:42.440683+00:00"
+      }
+    },
+    {
+      "type": "event",
+      "id": 16,
+      "run_id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+      "ts": "2026-11-11T17:33:42.440683+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "done"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "ee107f84-a85b-4184-ad77-166a59a5f691",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": "e673f7ba-e6a4-4a97-b0f0-651a43dd2b53",
+        "goal": "Execute a tarefa #1: Corrigir cupom",
+        "status": "done",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "sess-1",
+        "requested_by": "user",
+        "result_summary": "Deploy feito.",
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 10,
+        "tokens_out": 20,
+        "cost_usd": 0.5,
+        "approvals_used": 1,
+        "created_at": "2026-11-11T17:33:42.100335+00:00",
+        "started_at": "2026-11-11T17:33:42.110710+00:00",
+        "finished_at": "2026-11-11T17:33:42.440683+00:00"
+      }
+    },
+    {
+      "type": "event",
+      "id": 17,
+      "run_id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+      "ts": "2026-11-11T17:33:42.489555+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "Rodar a suíte",
+        "status": "queued",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.488551+00:00",
+        "started_at": null,
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 18,
+      "run_id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+      "ts": "2026-11-11T17:33:42.490555+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "Rodar a suíte",
+        "status": "running",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.488551+00:00",
+        "started_at": "2026-11-11T17:33:42.490555+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "heartbeat",
+      "ts": "2026-11-11T17:33:42.693538+00:00"
+    },
+    {
+      "type": "event",
+      "id": 19,
+      "run_id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+      "ts": "2026-11-11T17:33:42.809695+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "cancelled"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "943412ef-c15b-4937-a8a9-a6b9c6b43d7c",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "Rodar a suíte",
+        "status": "cancelled",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "fake-session-3",
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.488551+00:00",
+        "started_at": "2026-11-11T17:33:42.490555+00:00",
+        "finished_at": "2026-11-11T17:33:42.809695+00:00"
+      }
+    },
+    {
+      "type": "message",
+      "message": {
+        "id": "0667c45a-56bb-47a2-b9b5-a75e274a80a3",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "user",
+        "body": "oi",
+        "run_id": null,
+        "created_at": "2026-11-11T17:33:42.811758+00:00"
+      }
+    },
+    {
+      "type": "event",
+      "id": 20,
+      "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+      "ts": "2026-11-11T17:33:42.814759+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "queued"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "oi",
+        "status": "queued",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.813761+00:00",
+        "started_at": null,
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 21,
+      "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+      "ts": "2026-11-11T17:33:42.815759+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "running"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "oi",
+        "status": "running",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": null,
+        "requested_by": "user",
+        "result_summary": null,
+        "error": null,
+        "exit_code": null,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.813761+00:00",
+        "started_at": "2026-11-11T17:33:42.814759+00:00",
+        "finished_at": null
+      }
+    },
+    {
+      "type": "event",
+      "id": 22,
+      "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+      "ts": "2026-11-11T17:33:42.826244+00:00",
+      "kind": "message",
+      "payload": {
+        "text": "Olá!"
+      }
+    },
+    {
+      "type": "message",
+      "message": {
+        "id": "2a48b2f2-b0b6-4cd9-84fc-c678af1c755f",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "forja",
+        "body": "Olá!",
+        "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+        "created_at": "2026-11-11T17:33:42.836002+00:00"
+      }
+    },
+    {
+      "type": "event",
+      "id": 23,
+      "run_id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+      "ts": "2026-11-11T17:33:42.842507+00:00",
+      "kind": "status",
+      "payload": {
+        "status": "done"
+      }
+    },
+    {
+      "type": "run_update",
+      "run": {
+        "id": "16ddd660-b0dc-47a0-a236-0385d64c88f5",
+        "agent_id": "forja",
+        "project_id": "loja",
+        "task_id": null,
+        "goal": "oi",
+        "status": "done",
+        "engine": "claude_code",
+        "provider": "anthropic",
+        "model": null,
+        "reasoning_effort": null,
+        "session_ref": "fake-session-4",
+        "requested_by": "user",
+        "result_summary": "Olá!",
+        "error": null,
+        "exit_code": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "approvals_used": 0,
+        "created_at": "2026-11-11T17:33:42.813761+00:00",
+        "started_at": "2026-11-11T17:33:42.814759+00:00",
+        "finished_at": "2026-11-11T17:33:42.842507+00:00"
+      }
+    },
+    {
+      "type": "message",
+      "message": {
+        "id": "c7bdbf55-39ce-45da-bb49-fa760a26df5f",
+        "project_id": "loja",
+        "task_id": null,
+        "author": "user",
+        "body": "oi",
+        "run_id": null,
+        "created_at": "2026-11-11T17:33:42.868393+00:00"
+      }
+    },
+    {
+      "type": "heartbeat",
+      "ts": "2026-11-11T17:33:43.062367+00:00"
+    },
+    {
+      "type": "heartbeat",
+      "ts": "2026-11-11T17:33:43.263249+00:00"
+    }
+  ],
+  "GET /providers": {
+    "providers": [
+      {
+        "id": "openai",
+        "label": "OpenAI (login do Codex)",
+        "kind": "plan",
+        "runtimes": [
+          "codex"
+        ],
+        "configured": true,
+        "reason": "",
+        "default_model": null,
+        "notes": "Usa o plano/login do Codex CLI neste computador. Modelo em branco = padrão do Codex."
+      },
+      {
+        "id": "anthropic",
+        "label": "Anthropic (login do Claude Code)",
+        "kind": "plan",
+        "runtimes": [
+          "claude_code"
+        ],
+        "configured": false,
+        "reason": "Claude Code não está conectado (rode `claude auth login`)",
+        "default_model": null,
+        "notes": "Usa o plano/login do Claude Code neste computador. Modelo em branco = padrão do Claude Code."
+      },
+      {
+        "id": "ollama",
+        "label": "Ollama (local)",
+        "kind": "local",
+        "runtimes": [
+          "chat",
+          "codex"
+        ],
+        "configured": false,
+        "reason": "o servidor local (Ollama (local)) não está respondendo",
+        "default_model": null,
+        "notes": "Modelo local. No Codex usa --oss --local-provider ollama (não verificado de ponta a ponta); o Codex usa o endereço padrão do Ollama."
+      },
+      {
+        "id": "lmstudio",
+        "label": "LM Studio (local)",
+        "kind": "local",
+        "runtimes": [
+          "chat",
+          "codex"
+        ],
+        "configured": false,
+        "reason": "o servidor local (LM Studio (local)) não está respondendo",
+        "default_model": null,
+        "notes": "Modelo local. No Codex usa --oss --local-provider lmstudio (não verificado de ponta a ponta)."
+      },
+      {
+        "id": "openrouter",
+        "label": "OpenRouter",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": true,
+        "reason": "",
+        "default_model": null,
+        "notes": "Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      },
+      {
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": false,
+        "reason": "falta a chave DEEPSEEK_API_KEY no .env do backend",
+        "default_model": "deepseek-chat",
+        "notes": "Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      },
+      {
+        "id": "moonshot",
+        "label": "Kimi (Moonshot)",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": false,
+        "reason": "falta a chave MOONSHOT_API_KEY no .env do backend",
+        "default_model": null,
+        "notes": "Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      },
+      {
+        "id": "xai",
+        "label": "xAI (Grok)",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": false,
+        "reason": "falta a chave XAI_API_KEY no .env do backend",
+        "default_model": null,
+        "notes": "Usa o endpoint legado /chat/completions da xAI. Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      },
+      {
+        "id": "gemini",
+        "label": "Google Gemini",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": false,
+        "reason": "falta a chave GEMINI_API_KEY no .env do backend",
+        "default_model": null,
+        "notes": "Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      },
+      {
+        "id": "groq",
+        "label": "Groq",
+        "kind": "api_key",
+        "runtimes": [
+          "chat"
+        ],
+        "configured": false,
+        "reason": "falta a chave GROQ_API_KEY no .env do backend",
+        "default_model": null,
+        "notes": "Só conversa (runtime \"chat\"): o Codex exige API Responses nos provedores customizados."
+      }
+    ]
+  }
+}

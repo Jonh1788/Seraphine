@@ -1,6 +1,7 @@
 // Seraphine Service Worker — app shell caching, data caching, background sync
 
-const CACHE_NAME = 'seraphine-v3';
+// v4: purges agent-harness responses that v3 cached by mistake (see the skip list in the fetch handler).
+const CACHE_NAME = 'seraphine-v4';
 const DATA_CACHE = 'seraphine-data-v3';
 
 // App shell files to cache on install
@@ -346,6 +347,11 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/health') ||
     url.pathname.startsWith('/push') ||
     url.pathname.startsWith('/tasks') ||
+    // Agent harness: live, authenticated data. Falling through to the
+    // stale-while-revalidate branch below answered every read with the
+    // PREVIOUS response (a decided approval came back as pending) and
+    // stored the request, token header included, in Cache Storage.
+    url.pathname.startsWith('/agents') ||
     url.pathname.startsWith('/avatars/')
   ) {
     return;

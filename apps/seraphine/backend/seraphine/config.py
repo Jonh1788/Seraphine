@@ -219,6 +219,136 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_public_key: str = ""
 
+    # ------------------------------------------------------------------
+    # Agent harness (agents/) — OFF by default. When disabled every
+    # /agents route answers 404 and no service/tool is registered.
+    # ------------------------------------------------------------------
+    agents_enabled: bool = False
+    # Browser origins allowed to call /agents (and to read the bootstrap
+    # token). CORS is "*" for the rest of the app, so this list is the only
+    # thing stopping an arbitrary web page from talking to the harness.
+    agents_allowed_origins: Annotated[list[str], NoDecode] = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "tauri://localhost",
+        "http://tauri.localhost",
+    ]
+    agents_max_concurrent: int = 3
+    agents_command_timeout_s: int = 600
+    # Seconds an approval request stays approvable before the harness expires it.
+    agents_approval_ttl_s: int = 86400
+    # Shutdown: seconds running turns get to finish before the engines are killed
+    # (a run cut off stays "running" and the next boot decides what to do).
+    agents_shutdown_drain_s: int = 20
+    # Automatic resumes of one run after restarts, and the age (seconds since it
+    # started) beyond which a run is no longer resumed on its own.
+    agents_recovery_max: int = 2
+    agents_recovery_max_age_s: int = 21600
+    # Parked runs (provider outage, plan limit, expired login): seconds after the
+    # first parking before the run gives up; seconds between plan-limit checks when
+    # the engine gave no reset time; and the longest wait for a reported reset time.
+    agents_park_max_s: int = 86400
+    agents_park_plan_poll_s: int = 1800
+    agents_park_plan_max_s: int = 691200
+    # Messages in the middle of the work: seconds of silence a run created by a
+    # message waits before starting (0 = no wait), how many times a new message
+    # restarts that wait, and the pending messages one run's inbox holds.
+    agents_quiet_window_s: float = 2.5
+    agents_quiet_window_max: int = 4
+    agents_inbox_max: int = 20
+    # Conversation continuity: a new message to an agent resumes its last session in that
+    # conversation when the run ended less than ``agents_session_reuse_s`` ago and its last turn
+    # used fewer than ``agents_session_reuse_max_tokens`` input tokens; otherwise the agent gets
+    # the last ``agents_history_messages`` messages (at most ``agents_history_max_chars`` characters).
+    agents_session_reuse_s: int = 3600
+    agents_session_reuse_max_tokens: int = 150000
+    agents_history_messages: int = 30
+    agents_history_max_chars: int = 12000
+    # Run limits: actions per run (a warning two before it, then the run fails
+    # ``step_limit``); seconds without any engine event, and seconds one engine turn may
+    # last, before the harness ends the turn (``engine_silent`` / ``turn_timeout``).
+    agents_run_max_actions: int = 200
+    agents_engine_silence_s: int = 900
+    agents_turn_max_s: int = 10800
+    # Codex on native Windows only enforces a writable sandbox when its Windows
+    # sandbox level is configured; ``--ignore-user-config`` drops the owner's
+    # ``[windows] sandbox`` so the harness passes it explicitly.
+    # Allowed: "unelevated" | "elevated".
+    agents_codex_windows_sandbox: str = "unelevated"
+    # Optional explicit path of the Claude Code CLI (``claude`` / ``claude.exe``).
+    # Empty: PATH, then the copy bundled with the Claude desktop app (Windows).
+    agents_claude_path: str = ""
+    # LM Studio server used by agents (the Ollama one is ``ollama_base_url``).
+    agents_lmstudio_base_url: str = "http://localhost:1234"
+    # JSON list of extra OpenAI-compatible providers, e.g.
+    # [{"id":"meu","label":"Meu","kind":"api_key","base_url":"https://x/v1",
+    #   "env_key":"MEU_API_KEY","default_model":"m"}]. API keys are NEVER put
+    # here: only the NAME of the environment variable that holds the key.
+    agents_extra_providers: str = ""
+    # Seraphine tools for agents (3b). The MCP bridge of an engine turn calls the gateway at this
+    # address with the turn token, so it must be where THIS backend listens and must be a loopback
+    # address (the token never leaves the machine). 8000 is the port ``bootstrap.py`` and the
+    # README start uvicorn on; change it when you serve the backend on another port.
+    agents_bridge_base_url: str = "http://127.0.0.1:8000"
+    agents_bridge_call_timeout_s: int = 30
+    # Seconds the bridge has to say "hello" after the engine starts a turn offered tools.
+    agents_bridge_hello_timeout_s: int = 10
+    agents_bridge_result_max_chars: int = 50000
+    # Writes and asking the owner (3c). Seconds the owner may undo an agent's write; seconds a run
+    # waits for the owner's answer to a question before it gives up; limit of the real turn the
+    # bridge test runs.
+    agents_undo_window_s: int = 300
+    agents_owner_answer_max_s: int = 86400
+    agents_bridge_test_timeout_s: int = 60
+    # First steps and ready-made teams (6a). Folder under which every agent gets its own
+    # "home" folder (empty: ``<user folder>/Seraphine/agentes``, resolved when used); seconds the
+    # assistant's brain has to propose a team; most agents one team creation accepts.
+    agents_home_dir: str = ""
+    agents_guide_timeout_s: float = 90.0
+    agents_team_max: int = 6
+    # Routines (6b). Seconds between looks at the clock; how old (seconds) a missed time may be and
+    # still run once on return (older ones are recorded as missed); consecutive failures that pause
+    # a routine; shortest interval (minutes) between two times; most enabled routines per agent.
+    agents_routine_tick_s: float = 30.0
+    agents_routine_catchup_s: int = 43200
+    agents_routine_fail_pause: int = 5
+    agents_routine_min_interval_min: int = 15
+    agents_routine_max_active: int = 20
+    # Conversation with the guide (6c): seconds a proposal card stays valid; earlier messages given to the
+    # brain; characters of one agent's instructions given to the brain.
+    agents_proposal_ttl_s: int = 86400
+    agents_guide_history: int = 12
+    agents_guide_instructions_chars: int = 6000
+    # Undo of a freshly created team (6c part 2): seconds the owner has to undo it.
+    agents_team_undo_s: int = 86400
+
+    @field_validator("agents_codex_windows_sandbox", mode="before")
+    @classmethod
+    def _check_codex_windows_sandbox(cls, v):  # type: ignore[no-untyped-def]
+        value = str(v or "").strip().lower()
+        if value not in ("unelevated", "elevated"):
+            raise ValueError("agents_codex_windows_sandbox must be 'unelevated' or 'elevated'")
+        return value
+
+    @field_validator("agents_bridge_base_url", mode="before")
+    @classmethod
+    def _check_bridge_base_url(cls, v):  # type: ignore[no-untyped-def]
+        from urllib.parse import urlsplit
+
+        value = str(v or "").strip().rstrip("/")
+        host = (urlsplit(value).hostname or "").lower()
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("agents_bridge_base_url must be a loopback address (127.0.0.1, localhost or ::1)")
+        return value
+
+    @field_validator("agents_allowed_origins", mode="before")
+    @classmethod
+    def _split_agents_origins(cls, v):  # type: ignore[no-untyped-def]
+        """Accept comma-separated origins from .env (same shape as CORS)."""
+        if isinstance(v, str):
+            return [p.strip() for p in v.split(",") if p.strip()]
+        return v
+
     @field_validator("google_scopes", mode="before")
     @classmethod
     def _split_google_scopes(cls, v):  # type: ignore[no-untyped-def]

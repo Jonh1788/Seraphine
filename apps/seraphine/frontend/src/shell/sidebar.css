@@ -1,0 +1,496 @@
+/* New sidebar shell (replaces the 64px nav rail on desktop/tablet).
+ * CSS order note: App is imported before styles.css in main.tsx, so the grid
+ * overrides below use `.app .layout` (higher specificity) instead of relying
+ * on source order. */
+
+.app {
+  --shell-sidebar-w: 248px;
+}
+
+@media (min-width: 901px) {
+  .app .layout {
+    grid-template-columns: var(--shell-sidebar-w) 288px 1fr;
+  }
+  .app .layout.layout--maestro {
+    grid-template-columns: var(--shell-sidebar-w) 1fr;
+  }
+}
+
+/* Laptop tier (901-1200): the avatar column is parked off-screen. */
+@media (max-width: 1200px) and (min-width: 901px) {
+  .app .layout,
+  .app .layout.layout--maestro {
+    grid-template-columns: var(--shell-sidebar-w) 1fr;
+  }
+}
+
+/* Tablet shell keeps its avatar column in flow. */
+@media (min-width: 901px) {
+  html[data-shell="tablet"] .app {
+    --shell-sidebar-w: 232px;
+  }
+  html[data-shell="tablet"] .app .layout {
+    grid-template-columns: var(--shell-sidebar-w) 240px 1fr;
+  }
+  html[data-shell="tablet"] .app .layout.layout--maestro {
+    grid-template-columns: var(--shell-sidebar-w) 1fr;
+  }
+}
+
+/* Avatar column on non-chat views (`.sidebar--hidden`, set by AppLayout when
+ * activeView !== 'chat'): collapse it at every breakpoint.
+ * styles.css only parks it off-screen inside the <=900px query (and the
+ * tablet-shell rule even forces it back into flow with !important), while the
+ * grid overrides above keep a track for it, so it stayed visible. Here it is
+ * pulled out of the grid flow but kept mounted (VRM WebGL context survives);
+ * visibility:hidden removes it from focus order and the a11y tree. The grid
+ * then drops its track. Specificity (0,4,0) beats the tablet rules (0,2,1/0,3,1). */
+.app .layout > .sidebar.sidebar--hidden {
+  position: absolute !important;
+  left: -99999px !important;
+  top: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  width: 320px !important;
+  height: 240px !important;
+}
+.app .layout.layout:has(> .sidebar--hidden) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+@media (min-width: 901px) {
+  .app .layout.layout:has(> .sidebar--hidden) {
+    grid-template-columns: var(--shell-sidebar-w) minmax(0, 1fr);
+  }
+}
+
+/* The sidebar carries the brand now; the topbar keeps only the controls. */
+@media (min-width: 901px) {
+  .app .topbar__brand {
+    display: none;
+  }
+  .app .topbar {
+    justify-content: flex-end;
+  }
+}
+
+/* Below 901px the drawer replaces the sidebar, like it replaced the old rail. */
+@media (max-width: 900px) {
+  .shell-sidebar {
+    display: none !important;
+  }
+}
+
+.shell-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 15;
+  padding: 16px 12px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  background: var(--nav);
+  border-right: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  /* lets the hint hide itself when the column is narrow (tablet 232px) */
+  container-type: inline-size;
+  container-name: shell;
+}
+
+.shell-sidebar button {
+  font: inherit;
+  color: inherit;
+}
+.shell-sidebar :where(button):focus-visible {
+  outline: 2px solid var(--accent-hi);
+  outline-offset: 2px;
+}
+/* Navigation is used dozens of times a day: no enter/exit or height motion anywhere in the
+ * sidebar. Only the press (transform) and ~120ms colour changes on hover. */
+.shell-sidebar :is(.shell-brand, .shell-goto, .shell-group__head, .shell-item) {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-hover) ease,
+    border-color var(--dur-hover) ease,
+    color var(--dur-hover) ease;
+}
+.shell-sidebar :is(.shell-brand, .shell-goto, .shell-group__head, .shell-item):active {
+  transform: scale(0.98);
+}
+
+/* ---------- brand ---------- */
+
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+}
+.shell-brand__logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: none;
+  border: 1px solid rgba(154, 147, 255, 0.28);
+}
+.shell-brand__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.shell-brand__name {
+  font-weight: 700;
+  font-size: 15px;
+}
+.shell-brand__sub {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.shell-brand__name,
+.shell-brand__sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- "Ir para…" ---------- */
+
+.shell-goto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #2a2a35;
+  background: #1a1a22;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-align: left;
+}
+.shell-goto__text {
+  flex: 1;
+  min-width: 0;
+}
+.shell-kbd {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid #2a2a35;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+
+/* ---------- scroll area ---------- */
+
+.shell-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+}
+
+.shell-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.shell-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #8b8b9b;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: left;
+  cursor: pointer;
+}
+.shell-group__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.shell-group__head > svg {
+  flex: none;
+}
+.shell-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.shell-eyebrow {
+  color: #8b8b9b;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 0 12px 4px;
+}
+.shell-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 12px 8px;
+}
+
+/* ---------- items ---------- */
+
+.shell-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #d6d6e0;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+}
+.shell-item.is-active {
+  background: #23232e;
+  color: #ffffff;
+  font-weight: 600;
+}
+.shell-item--nested {
+  min-height: 40px;
+  padding-left: 24px;
+}
+.shell-item--bordered {
+  border: 1px solid var(--border-strong);
+}
+.shell-item--muted {
+  color: var(--text-dim);
+}
+.shell-item--project {
+  min-height: 40px;
+}
+.shell-item--agent {
+  min-height: 44px;
+}
+.shell-item--settings {
+  flex: none;
+  margin-top: 0;
+}
+.shell-item__icon {
+  display: inline-flex;
+  flex: none;
+}
+.shell-item__icon svg {
+  width: 18px;
+  height: 18px;
+}
+.shell-item__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-item__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  /* the hint is the part that gives way, never the label */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shell-item--row .shell-item__label {
+  flex: none;
+  max-width: 100%;
+}
+.shell-item--row .shell-item__hint {
+  flex: 1 1 0;
+  text-align: right;
+}
+/* Sidebar content box < ~216px (sidebar narrower than ~240px): drop the hint. */
+@container shell (max-width: 215px) {
+  .shell-item__hint {
+    display: none;
+  }
+}
+.shell-hash {
+  flex: none;
+  font-family: var(--font-mono);
+  color: #8b8b9b;
+  width: 18px;
+  text-align: center;
+}
+.shell-item.is-active .shell-hash {
+  color: var(--accent);
+}
+/* AgentTile styles live in agents.css scoped under .agents-space, which does
+ * not wrap the sidebar, so the tile had no size and the flex row squeezed it. */
+.shell-sidebar .a-tile {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+/* the Seraphine's own entry (phase 6c): her brand mark where the agents have a tile */
+.shell-guide__mark {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+.shell-agent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  line-height: 1.25;
+  min-width: 0;
+}
+.shell-agent__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-agent small {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-agent small.is-busy {
+  color: var(--ag-ok, #6fdcaa);
+}
+.shell-agent small.is-waiting {
+  color: var(--ag-amber, #f0b45a);
+}
+
+/* ---------- badges ---------- */
+
+.shell-badge {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.shell-amber {
+  flex: none;
+}
+.shell-amber .shell-badge {
+  background: var(--ag-amber, #f0b45a);
+  color: var(--ag-amber-ink, #1c1404);
+}
+.shell-dot,
+.shell-group__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ag-amber, #f0b45a);
+  flex: none;
+}
+.shell-group__dot,
+.shell-item--nested .shell-dot {
+  background: var(--danger);
+}
+
+/* Hover only for real pointers: touch fires it on tap and leaves rows lit. */
+@media (hover: hover) and (pointer: fine) {
+  .shell-goto:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .shell-group__head:hover {
+    color: var(--text);
+  }
+  .shell-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .shell-item.is-active:hover {
+    background: #23232e;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* colour changes stay, the press movement goes */
+  .shell-sidebar :is(.shell-brand, .shell-goto, .shell-group__head, .shell-item):active {
+    transform: none;
+  }
+}
+
+/* Phase 6a: "Sem motor" next to an agent whose engine is not ready (icon plus words, never colour alone). */
+.shell-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.shell-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* neutral count (informational, not a pending item): the routines that are on */
+.shell-count {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}

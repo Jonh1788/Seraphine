@@ -108,6 +108,7 @@ def build_default_registry(
     planning_service: Any = None,
     tts: Any = None,
     llm: Any = None,
+    agent_harness: Any = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(ReadFileTool(allowed_roots))
@@ -325,6 +326,18 @@ def build_default_registry(
         reg.register(CreateWorkProjectTool(work_service))
         reg.register(ListWorkProjectsTool(work_service))
         reg.register(LinkWorkProjectTool(work_service))
+    if agent_harness is not None:
+        from seraphine.tools.agents import (
+            AgentsCreateTaskTool,
+            AgentsDelegateTool,
+            AgentsListTool,
+            AgentsRunStatusTool,
+        )
+
+        reg.register(AgentsListTool(agent_harness))
+        reg.register(AgentsDelegateTool(agent_harness))
+        reg.register(AgentsRunStatusTool(agent_harness))
+        reg.register(AgentsCreateTaskTool(agent_harness))
     if goal_service is not None:
         from seraphine.tools.goals import (
             CreateGoalTool,

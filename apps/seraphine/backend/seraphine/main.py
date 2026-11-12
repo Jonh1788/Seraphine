@@ -76,6 +76,9 @@ from seraphine.notifications.service import NotificationService
 from seraphine.deepsearch import schema as deepsearch_schema
 from seraphine.deepsearch.routes import router as deepsearch_router
 from seraphine.deepsearch.service import DeepSearchService
+from seraphine.agents import schema as agents_schema
+from seraphine.agents.routes import router as agents_router
+from seraphine.agents.service import AgentHarnessService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("seraphine")
@@ -639,6 +642,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             logger.warning("Recurring service failed (non-critical): %s", e)
 
+    # ------------------------------------------------------------------
+    # Agent harness — OFF by default (SERAPHINE_AGENTS_ENABLED). Built before
+    # the tool registry because the agents_* tools need the service.
+    # ------------------------------------------------------------------
+    agent_harness = None
+    if settings.agents_enabled:
+        try:
+            store.register_migrator("seraphine_agents", agents_schema.migrate)
+            await store.ensure_schema()  # idempotent
+            from seraphine.agents.catalog import Services as AgentToolServices
+            from seraphine.wiki import files as wiki_files
+
+            # The gateway reads the same notes service, memory manager and wiki folder the
+            # assistant uses; notes and reminders are also written, but only through the gateway's receipts.
+            agent_harness = AgentHarnessService(
+                store, settings,
+                tool_services=AgentToolServices(
+                    notes=note_service, memory=memory, wiki=wiki_files, reminders=reminder_scheduler),
+                llm_getter=lambda: llm)
+            await agent_harness.start()
+            logger.info("Agent harness wired")
+        except Exception as e:
+            logger.warning("Agent harness failed (non-critical): %s", e)
+            agent_harness = None
+
     tools = build_default_registry(
         allowed_roots=list(settings.allowed_tool_roots),
         skills_dir=settings.skills_dir,
@@ -663,6 +691,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         journal_service=journal_service,
         planning_service=planning_service,
         llm=llm,
+        agent_harness=agent_harness,
     )
     # ------------------------------------------------------------------
     # Music / focus auto-play — SDD 017-A. Non-critical: reads memory
@@ -939,6 +968,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.contextual_service = contextual_service
     app.state.notification_service = notification_service
     app.state.deepsearch_service = deepsearch_service
+    app.state.agent_harness = agent_harness
     app.state.insight_engine = insight_engine
     app.state.push_service = push_service
     app.state.telemetry_service = telemetry_service
@@ -1350,6 +1380,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 pass
         if mcp_event_listener is not None:
             await mcp_event_listener.stop()
+        if agent_harness is not None:
+            try:
+                await agent_harness.stop()
+            except Exception:
+                logger.exception("agent harness stop failed")
         if reminder_scheduler is not None:
             await reminder_scheduler.stop()
         await llm.aclose()
@@ -1444,6 +1479,8 @@ def create_app() -> FastAPI:
     app.include_router(contextual_router)
     app.include_router(notifications_router)
     app.include_router(deepsearch_router)
+    # Agent harness: always mounted; every route 404s while it is disabled.
+    app.include_router(agents_router)
 
     from seraphine.calendar_agg.routes import router as calendar_agg_router
     app.include_router(calendar_agg_router)

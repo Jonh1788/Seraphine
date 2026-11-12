@@ -57,6 +57,15 @@
   --view-enter-duration: 250ms;
   --view-enter-easing: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* Motion tokens: strong curves + the short durations UI motion lives in.
+     Press feedback 100-160ms, hover/colour ~120ms, enter 160-200ms, exit shorter than enter. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 140ms;
+  --dur-hover: 120ms;
+  --dur-enter: 200ms;
+  --dur-exit: 140ms;
+
   /* Fonte */
   --font-sans: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;

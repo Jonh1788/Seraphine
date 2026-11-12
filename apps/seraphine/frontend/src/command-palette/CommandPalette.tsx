@@ -20,6 +20,7 @@ import {
   FlagIcon,
 } from '../icons/Icons';
 import { contextualStore, type ContextualState } from '../contextual/store';
+import { BotIcon } from '../agents/icons';
 
 interface Command {
   id: string;
@@ -48,6 +49,8 @@ const COMMANDS: Command[] = [
   { id: 'inbox', label: 'Abrir Inbox', keywords: ['pendencias', 'fila', 'urgente'], shortcut: '', icon: <InboxIcon size={18} /> },
   { id: 'routines', label: 'Abrir Rotinas', keywords: ['briefing', 'foco', 'revisao'], shortcut: '', icon: <TargetIcon size={18} /> },
   { id: 'system', label: 'Abrir Sistema', keywords: ['status', 'diagnostico', 'configuracao'], shortcut: '', icon: <SettingsIcon size={18} /> },
+  { id: 'agents-home', label: 'Agentes: Início', keywords: ['agentes', 'projetos', 'aprovacoes', 'aprovações', 'harness', 'inicio'], shortcut: '', icon: <BotIcon size={18} /> },
+  { id: 'agents-roster', label: 'Agentes: Agentes', keywords: ['agentes', 'criar agente', 'equipe', 'harness'], shortcut: '', icon: <BotIcon size={18} /> },
   { id: 'new-task', label: 'Nova Tarefa', keywords: ['criar', 'adicionar', 'todo'], shortcut: 'Cmd+N', icon: <PlusIcon size={18} /> },
   { id: 'focus-chat', label: 'Perguntar a Seraphine', keywords: ['falar', 'digitar'], shortcut: '', icon: <ChatIcon size={18} /> },
 ];
