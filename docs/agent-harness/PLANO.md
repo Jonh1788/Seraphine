@@ -979,7 +979,14 @@ Limites conhecidos desta parte:
 
 ## 6. Pendências fora das fases
 
-- **Commit:** todo o trabalho está só na pasta, sem commit (o dono decide quando).
+- **Commit:** feito em 12/11/2026, a pedido do dono: `1154ea7` no ramo
+  `feat/agent-harness` (197 arquivos; base, fases 1 e 3, continuidade, 6a,
+  6b e 6c, documentos e contratos). **Não foi enviado ao GitHub** (push só
+  quando o dono pedir). Ficou fora do commit, de propósito: `skills-lock.json`
+  (não é do harness). O que vier depois (por exemplo a atualização da
+  comparação da parte 2 da 6c e esta nota) vai num commit seguinte. O autor
+  do commit aparece como "unknown" porque o git deste PC não tem nome
+  configurado, como no commit anterior.
 - **Token exposto no histórico do git:** o dono precisa revogá-lo (a remoção
   dos arquivos foi feita em outro branch, PR 2 de `Jonh1788/Seraphine`).
 - **Instalação real: consertada em 12/11/2026, a pedido do dono.** O projeto
